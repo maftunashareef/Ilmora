@@ -49,6 +49,18 @@ If a licensed clip is set as the furniture video URL in *Super Admin → Theme �
 
 Course, teacher and video imagery is generated (deterministic abstract covers) — no stock photos are bundled. Admins and teachers can set image URLs or upload local previews.
 
+## Deploy (public link)
+
+The source lives in the private repository `maftunashareef/Ilmora`. The compiled site is published to GitHub Pages from the public repository `maftunashareef/ilmora-demo`:
+
+```bash
+npm run deploy
+```
+
+This type-checks, builds with `--mode pages` (base path `/ilmora-demo/`), adds the SPA `404.html` fallback, and force-pushes `dist/` to that repository. Live URL: https://maftunashareef.github.io/ilmora-demo/
+
+Root-relative media URLs in the demo data are resolved through `src/lib/url.ts` so they work under the sub-path; the router uses the same base.
+
 ## Privacy & security notes
 
 - Demo students are stored with a display name and district only. The center-inquiry form is never persisted.

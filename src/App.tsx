@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { NotFound } from './components/AccessGate'
 import { PublicShell } from './components/layout/PublicShell'
 import { RevealManager, ThemeApplier, Toasts } from './components/System'
+import { routerBasename } from './lib/url'
 import { AdminAnnouncements } from './pages/admin/AdminAnnouncements'
 import { AdminCenters } from './pages/admin/AdminCenters'
 import { AdminContent } from './pages/admin/AdminContent'
@@ -44,7 +45,7 @@ import { TeacherLayout } from './pages/teacher/TeacherLayout'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename}>
       <ThemeApplier />
       <RevealManager />
       <Routes>

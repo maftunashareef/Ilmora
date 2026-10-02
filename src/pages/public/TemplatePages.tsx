@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
 import { formatSom } from '../../lib/format'
+import { withBase } from '../../lib/url'
 import { useStore, type PageKey } from '../../store/useStore'
 import type { Section } from '../../types'
 import { CourseCard, PriceTag, ScheduleChips } from '../../components/course/CourseCard'
@@ -53,7 +54,7 @@ function Hero() {
   const nCats = useStore((s) => s.categories.length)
   return (
     <section className="relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-charcoal text-ivory">
-      <BackgroundVideo src={media.heroVideoUrl} poster={media.heroPosterUrl} pauseLabel={t('home.pauseVideo')} playLabel={t('home.playVideo')} note={t('home.heroVideoNote')} />
+      <BackgroundVideo src={withBase(media.heroVideoUrl)} poster={withBase(media.heroPosterUrl)} pauseLabel={t('home.pauseVideo')} playLabel={t('home.playVideo')} note={t('home.heroVideoNote')} />
       {/* Shades for legibility + soft hand-off into the ivory page */}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-charcoal/85 via-charcoal/45 to-charcoal/10" aria-hidden="true" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-charcoal/60 to-transparent" aria-hidden="true" />
@@ -293,7 +294,7 @@ function FurnitureStory({ s }: { s: Section }) {
     )
   }
   const stages = (bazis?.curriculum ?? []).slice(0, 6).map(tr)
-  return <ScrollVideo src={media.furnitureVideoUrl} poster={media.furniturePosterUrl} stages={stages}><div className="reveal reveal-left">{copy}</div></ScrollVideo>
+  return <ScrollVideo src={withBase(media.furnitureVideoUrl)} poster={withBase(media.furniturePosterUrl)} stages={stages}><div className="reveal reveal-left">{copy}</div></ScrollVideo>
 }
 
 // ─── Teachers: horizontal snap track ─────────────────────────────────────────
