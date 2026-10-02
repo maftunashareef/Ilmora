@@ -1,0 +1,23 @@
+import { DashboardShell, type DashNavItem } from '../../components/layout/DashboardShell'
+import { useT } from '../../i18n/useT'
+import { useCurrentStudent } from '../../store/selectors'
+import { useStore } from '../../store/useStore'
+
+export function StudentLayout() {
+  const { t } = useT()
+  const student = useCurrentStudent()
+  const modules = useStore((s) => s.site.dashboards.student)
+  const savedOn = useStore((s) => s.site.features.savedItems)
+  const all: DashNavItem[] = [
+    { id: 'overview', to: '/student', end: true, label: t('dash.overview'), icon: 'grid' },
+    { id: 'subscription', to: '/student/subscription', label: t('student.subscription'), icon: 'package' },
+    { id: 'courses', to: '/student/courses', label: t('student.courses'), icon: 'book' },
+    { id: 'timetable', to: '/student/timetable', label: t('student.timetable'), icon: 'calendar' },
+    { id: 'videos', to: '/student/videos', label: t('student.videos'), icon: 'video' },
+    { id: 'resources', to: '/student/resources', label: t('student.resources'), icon: 'file' },
+    { id: 'saved', to: '/student/saved', label: t('student.saved'), icon: 'bookmark' },
+    { id: 'profile', to: '/student/profile', label: t('student.profile'), icon: 'user' },
+  ]
+  const items = all.filter((it) => (modules.find((m) => m.id === it.id)?.enabled ?? true) && (it.id !== 'saved' || savedOn))
+  return <DashboardShell role="student" title={t('dash.studentSpace')} subtitle={student?.profile.displayName} items={items} />
+}
