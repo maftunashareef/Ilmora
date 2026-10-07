@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { ScheduleChips } from '../../components/course/CourseCard'
 import { Badge, Button, Card, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
+import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { formatDate, formatSom } from '../../lib/format'
 import { lessonsPerWeek, resolveGroups, weeklyHours } from '../../lib/schedule'
@@ -30,6 +31,8 @@ export function StudentSubscription() {
             <div><dt className="text-xs text-charcoal/50">{t('student.sub.renews')}</dt><dd className="mt-0.5 font-medium text-charcoal">{formatDate(sub.renewsAt, lang)}</dd></div>
             <div><dt className="text-xs text-charcoal/50">{t('student.sub.usage')}</dt><dd className="mt-0.5 font-medium text-charcoal">{groups.length} / {pkg.maxCourses}</dd></div>
             <div><dt className="text-xs text-charcoal/50">{t('common.week')}</dt><dd className="mt-0.5 font-medium text-charcoal">{lessonsPerWeek(groups)} {t('student.lessonsPerWeek')} · {weeklyHours(groups)} h</dd></div>
+            <div><dt className="text-xs text-charcoal/50">{t('payment.method')}</dt><dd className="mt-0.5 font-medium text-charcoal">{sub.payment ? t(`payment.${sub.payment.method}` as TKey) : '—'}<span className="ml-1 text-xs font-normal text-charcoal/45">· {t('payment.simulated')}</span></dd></div>
+            <div><dt className="text-xs text-charcoal/50">{t('grant.label')}</dt><dd className="mt-0.5 font-medium text-charcoal">{sub.funding?.meyosGrant ? <>{t('grant.meyos')} <Badge tone="champagne">{t('grant.selected')}</Badge></> : t('grant.notSelected')}</dd></div>
           </dl>
           <div className="mt-6 flex items-end justify-between border-t border-charcoal/10 pt-5"><span className="text-sm text-charcoal/60">{t('builder.monthlyTotal')}</span><span className="font-display text-3xl text-charcoal">{formatSom(total, lang)}</span></div>
           <p className="mt-2 text-[11px] text-charcoal/45">{t('builder.transparent')}</p>

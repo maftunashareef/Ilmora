@@ -5,7 +5,7 @@ import { useStore } from '../../store/useStore'
 import type { Features } from '../../types'
 
 const FEATURES: (keyof Features)[] = ['teacherChannels', 'savedItems', 'centerInquiry', 'scrollVideo', 'threeD', 'announcements', 'faq', 'publicSearch']
-const STUDENT_MODULES: Record<string, TKey> = { overview: 'dash.overview', subscription: 'student.subscription', courses: 'student.courses', timetable: 'student.timetable', videos: 'student.videos', resources: 'student.resources', saved: 'student.saved', profile: 'student.profile' }
+const STUDENT_MODULES: Record<string, TKey> = { overview: 'dash.overview', subscription: 'student.subscription', courses: 'student.courses', timetable: 'student.timetable', videos: 'student.videos', resources: 'student.resources', attendance: 'student.attendance', saved: 'student.saved', profile: 'student.profile' }
 const TEACHER_MODULES: Record<string, TKey> = { overview: 'dash.overview', subjects: 'studio.subjects', videos: 'studio.videos', playlists: 'studio.playlists', resources: 'studio.resources', groups: 'studio.groups', channel: 'studio.channel', visibility: 'studio.visibility' }
 
 export function AdminFeatures() {

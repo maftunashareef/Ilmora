@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { GroupsEditor } from '../../components/course/CourseForm'
+import { Link } from 'react-router-dom'
+import { GroupsEditor, groupsCapacityError } from '../../components/course/CourseForm'
 import { ScheduleChips } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { Badge, Button, Card, Eyebrow, Icon, Modal, Notice, PageTitle } from '../../components/ui'
@@ -37,9 +38,10 @@ export function StudioGroups() {
                   const clash = conflicts.some((k) => k.a.id === g.id || k.b.id === g.id)
                   return (
                     <li key={g.id} className="rounded-control border border-charcoal/10 bg-ivory/50 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-medium text-charcoal">{g.name}</span><span className="flex gap-1">{clash && <Badge tone="danger">{t('builder.conflict')}</Badge>}<Badge tone="muted">{g.enrolled}/{g.seats} · {t('common.room')} {g.room}</Badge></span></div>
+                      <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-medium text-charcoal">{g.name}</span><span className="flex gap-1">{clash && <Badge tone="danger">{t('builder.conflict')}</Badge>}<Badge tone={r.length >= g.capacity ? 'warn' : 'muted'}>{t('capacity.students', { n: r.length, max: g.capacity })} · {t('common.room')} {g.room}</Badge></span></div>
                       <div className="mt-1.5"><ScheduleChips group={g} /></div>
                       <div className="mt-2 text-[11px] text-charcoal/55"><span className="font-medium text-charcoal/70">{t('studio.groups.roster')}:</span> {r.length ? r.map((s) => s.profile.displayName).join(', ') : '—'}</div>
+                      <Link to={`/teacher/groups/${g.id}`} className="arrow-nudge mt-2 inline-flex items-center gap-1 text-xs font-medium text-forest">{t('group.open')} <Icon name="arrowRight" className="h-3.5 w-3.5" /></Link>
                     </li>
                   )
                 })}
@@ -53,7 +55,7 @@ export function StudioGroups() {
           <Timetable groups={groups} courses={courses} conflicts={conflicts} />
         </section>
       </div>
-      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing ? tr(editing.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (editing) { upsertCourse({ ...editing, groups: draftGroups, updatedAt: new Date().toISOString() }); setEditing(null); notify(t('common.saved')) } }}>{t('common.save')}</Button></>}>
+      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing ? tr(editing.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (!editing) return; const bad = groupsCapacityError(draftGroups, students); if (bad) { notify(bad.check.reason === 'not-integer' ? t('capacity.invalid') : t('capacity.belowEnrolled', { n: bad.check.enrolled }), 'warn'); return } upsertCourse({ ...editing, groups: draftGroups, updatedAt: new Date().toISOString() }); setEditing(null); notify(t('common.saved')) }}>{t('common.save')}</Button></>}>
         {editing && <GroupsEditor groups={draftGroups} onChange={setDraftGroups} courseId={editing.id} locked={locked} />}
       </Modal>
     </div>

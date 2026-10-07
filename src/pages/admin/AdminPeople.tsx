@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Avatar, Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, Modal, Notice, PageTitle, Select, Toggle } from '../../components/ui'
 import { emptyL, useT } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
+import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import type { Student, Teacher } from '../../types'
 
 export function AdminPeople() {
@@ -14,7 +15,7 @@ export function AdminPeople() {
   const groups = s.courses.flatMap((c) => c.groups.map((g) => ({ ...g, course: tr(c.title) })))
 
   const newTeacher = (): Teacher => ({ id: uid('t'), name: '', title: emptyL(), bio: emptyL(), expertise: [], centerId: s.centers[0]?.id ?? '', avatarSeed: Math.floor(Math.random() * 60), bannerTone: '#163C35', tagline: emptyL(), channelActive: false })
-  const newStudent = (): Student => ({ id: uid('s'), profile: { displayName: '', district: '', preferredLang: 'uz', reminders: true }, subscription: { packageId: null, groupIds: [], status: 'none' }, savedCourseIds: [], savedTeacherIds: [], builder: { packageId: null, groupIds: [] } })
+  const newStudent = (): Student => ({ id: uid('s'), profile: { displayName: '', district: '', preferredLang: 'uz', reminders: true }, subscription: { packageId: null, groupIds: [], status: 'none' }, savedCourseIds: [], savedTeacherIds: [], builder: { packageId: null, groupIds: [], meyosGrant: false } })
   const actAs = (role: 'teacher' | 'student', id: string) => { if (role === 'teacher') s.setCurrentTeacher(id); else s.setCurrentStudent(id); s.setRole(role); nav(role === 'teacher' ? '/teacher' : '/student') }
 
   return (
@@ -92,9 +93,13 @@ export function AdminPeople() {
                 <div className="mt-3">
                   <div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('common.groups')}</div>
                   <div className="grid max-h-48 gap-1 overflow-y-auto pr-1 sm:grid-cols-2">
-                    {groups.map((g) => (
-                      <label key={g.id} className="flex items-center gap-2 rounded-control border border-charcoal/10 bg-paper px-2.5 py-1.5 text-xs"><input type="checkbox" className="accent-forest" checked={student.subscription.groupIds.includes(g.id)} onChange={() => setStudent({ ...student, subscription: { ...student.subscription, groupIds: student.subscription.groupIds.includes(g.id) ? student.subscription.groupIds.filter((x) => x !== g.id) : [...student.subscription.groupIds, g.id] } })} /><span className="truncate">{g.course} · {g.name}</span></label>
-                    ))}
+                    {groups.map((g) => {
+                      const inGroup = student.subscription.groupIds.includes(g.id)
+                      const full = !inGroup && isGroupFull(g, s.students, student.id)
+                      return (
+                      <label key={g.id} className={`flex items-center gap-2 rounded-control border border-charcoal/10 bg-paper px-2.5 py-1.5 text-xs ${full ? 'opacity-50' : ''}`} title={full ? t('capacity.full') : undefined}><input type="checkbox" className="accent-forest" disabled={full} checked={inGroup} onChange={() => setStudent({ ...student, subscription: { ...student.subscription, groupIds: inGroup ? student.subscription.groupIds.filter((x) => x !== g.id) : [...student.subscription.groupIds, g.id] } })} /><span className="truncate">{g.course} · {g.name}</span><span className="ml-auto shrink-0 text-charcoal/45">{enrolledCount(s.students, g.id, student.id)}/{g.capacity}</span></label>
+                      )
+                    })}
                   </div>
                 </div>
               )}

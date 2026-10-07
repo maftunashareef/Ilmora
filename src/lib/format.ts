@@ -21,10 +21,16 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr']
+const UZ_MONTHS_SHORT = ['yan', 'fev', 'mar', 'apr', 'may', 'iyn', 'iyl', 'avg', 'sen', 'okt', 'noy', 'dek']
+const UZ_DAYS_SHORT = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan']
+
 export function formatDate(iso: string | undefined, lang: Lang): string {
   if (!iso) return '—'
-  const d = new Date(iso)
-  const locale = lang === 'ru' ? 'ru-RU' : lang === 'uz' ? 'uz-Latn-UZ' : 'en-GB'
+  const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso)
+  // Browsers rarely ship Uzbek Latin month names, so format Uzbek dates by hand.
+  if (lang === 'uz') return `${d.getDate()}-${UZ_MONTHS[d.getMonth()]} ${d.getFullYear()}`
+  const locale = lang === 'ru' ? 'ru-RU' : 'en-GB'
   try {
     return d.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })
   } catch {
@@ -40,3 +46,25 @@ export const initials = (name: string) =>
     .join('')
 
 export const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n))
+
+const localeOf = (lang: Lang) => (lang === 'ru' ? 'ru-RU' : lang === 'uz' ? 'uz-Latn-UZ' : 'en-GB')
+
+/** "Du, 7-okt" style short date for session lists. */
+export function formatDayMonth(iso: string, lang: Lang, withWeekday = true): string {
+  const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso)
+  if (lang === 'uz') return `${withWeekday ? `${UZ_DAYS_SHORT[d.getDay()]}, ` : ''}${d.getDate()}-${UZ_MONTHS_SHORT[d.getMonth()]}`
+  try {
+    return d.toLocaleDateString(localeOf(lang), { weekday: withWeekday ? 'short' : undefined, day: 'numeric', month: 'short' })
+  } catch {
+    return d.toLocaleDateString('en-GB', { weekday: withWeekday ? 'short' : undefined, day: 'numeric', month: 'short' })
+  }
+}
+
+export function formatTime(iso: string, lang: Lang): string {
+  const d = new Date(iso)
+  try {
+    return d.toLocaleTimeString(localeOf(lang), { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  }
+}

@@ -1,6 +1,7 @@
 import type {
-  Category, Center, Course, DemoState, L, Playlist, Resource, SiteConfig, Student, Subject, Teacher, Video,
+  AttendanceRecord, Category, Center, Course, DemoState, L, LessonSession, Playlist, Resource, SiteConfig, Student, Subject, Teacher, Video,
 } from '../types'
+import { generateSessions } from '../lib/sessions'
 
 const l = (uz: string, ru: string, en: string): L => ({ uz, ru, en })
 const NOW = '2026-09-20T09:00:00.000Z'
@@ -63,8 +64,8 @@ export const subjects: Subject[] = [
 ]
 
 // ─── Courses ─────────────────────────────────────────────────────────────────
-const g = (courseId: string, suffix: string, name: string, days: number[], start: string, end: string, room: string, seats: number, enrolled: number) => ({
-  id: `g-${courseId.replace('c-', '')}-${suffix}`, courseId, name, days, start, end, room, seats, enrolled,
+const g = (courseId: string, suffix: string, name: string, days: number[], start: string, end: string, room: string, capacity: number) => ({
+  id: `g-${courseId.replace('c-', '')}-${suffix}`, courseId, name, days, start, end, room, capacity,
 })
 
 export const courses: Course[] = [
@@ -74,7 +75,7 @@ export const courses: Course[] = [
     description: l('B1 darajasidagi umumiy ingliz tili kursi: kichik guruhlar, haftada uch marta, amaliy muloqotga urg‘u.', 'Курс общего английского уровня B1: небольшие группы, три раза в неделю, упор на практику общения.', 'General English at B1: small groups, three times a week, with emphasis on practical communication.'),
     curriculum: [l('Kundalik muloqot', 'Повседневное общение', 'Everyday conversation'), l('Grammatika: zamonlar', 'Грамматика: времена', 'Grammar: tenses'), l('Tinglash strategiyalari', 'Стратегии аудирования', 'Listening strategies'), l('Lug‘at boyitish', 'Расширение словаря', 'Vocabulary building'), l('Yozma ifoda', 'Письменная речь', 'Writing basics')],
     level: 'intermediate', durationMonths: 4, price: 650000, coverSeed: 11,
-    groups: [g('c-general-english', 'a', 'B1 — Evening', [0, 2, 4], '18:00', '19:30', '204', 12, 9), g('c-general-english', 'b', 'B1 — Morning', [1, 3], '10:00', '12:00', '201', 10, 4)],
+    groups: [g('c-general-english', 'a', 'B1 — Evening', [0, 2, 4], '18:00', '19:30', '204', 12), g('c-general-english', 'b', 'B1 — Morning', [1, 3], '10:00', '12:00', '201', 10)],
   },
   {
     id: 'c-ielts', ...pub(true), title: l('IELTS intensiv', 'IELTS интенсив', 'IELTS Intensive'), categoryId: 'cat-english', centerId: 'ce-oltin', teacherId: 't-dilnoza', subjectId: 'sub-eng',
@@ -82,7 +83,7 @@ export const courses: Course[] = [
     description: l('IELTS 6.5+ maqsad qilganlar uchun intensiv dastur. Har hafta bitta to‘liq mock test va yozma ishlar tahlili.', 'Интенсивная программа для тех, кто нацелен на IELTS 6.5+. Каждую неделю полный пробный тест и разбор письменных работ.', 'An intensive program for candidates targeting IELTS 6.5+. One full mock test each week and writing analysis.'),
     curriculum: [l('Listening taktikalari', 'Тактики Listening', 'Listening tactics'), l('Reading: skimming va scanning', 'Reading: skimming и scanning', 'Reading: skimming and scanning'), l('Writing Task 1 va 2', 'Writing Task 1 и 2', 'Writing Task 1 and 2'), l('Speaking: 3 qism', 'Speaking: 3 части', 'Speaking: 3 parts'), l('Haftalik mock test', 'Еженедельный пробный тест', 'Weekly mock test')],
     level: 'advanced', durationMonths: 3, price: 900000, coverSeed: 12,
-    groups: [g('c-ielts', 'a', 'IELTS — Evening', [1, 3], '18:30', '20:30', '205', 10, 8)],
+    groups: [g('c-ielts', 'a', 'IELTS — Evening', [1, 3], '18:30', '20:30', '205', 10)],
   },
   {
     id: 'c-algebra', ...pub(false), title: l('Algebra va funksiyalar', 'Алгебра и функции', 'Algebra & Functions'), categoryId: 'cat-math', centerId: 'ce-tafakkur', teacherId: 't-jamshid', subjectId: 'sub-math',
@@ -90,7 +91,7 @@ export const courses: Course[] = [
     description: l('9–11-sinf o‘quvchilari uchun algebra kursi. Har dars — nazariya, misollar va uy vazifasi tahlili.', 'Курс алгебры для 9–11 классов. Каждое занятие — теория, примеры и разбор домашнего задания.', 'Algebra course for grades 9–11. Each lesson combines theory, worked examples and homework review.'),
     curriculum: [l('Ko‘phadlar', 'Многочлены', 'Polynomials'), l('Tenglamalar va tengsizliklar', 'Уравнения и неравенства', 'Equations and inequalities'), l('Funksiyalar va grafiklar', 'Функции и графики', 'Functions and graphs'), l('Logarifmlar', 'Логарифмы', 'Logarithms'), l('Trigonometriya asoslari', 'Основы тригонометрии', 'Trigonometry basics')],
     level: 'intermediate', durationMonths: 5, price: 550000, coverSeed: 13,
-    groups: [g('c-algebra', 'a', 'Algebra — Evening', [0, 2], '17:00', '18:30', '12', 14, 11)],
+    groups: [g('c-algebra', 'a', 'Algebra — Evening', [0, 2], '17:00', '18:30', '12', 14)],
   },
   {
     id: 'c-olympiad-math', ...pub(false), title: l('Olimpiada matematikasi', 'Олимпиадная математика', 'Olympiad Mathematics'), categoryId: 'cat-math', centerId: 'ce-tafakkur', teacherId: 't-jamshid', subjectId: 'sub-math',
@@ -98,7 +99,7 @@ export const courses: Course[] = [
     description: l('Shanba kunlari uch soatlik chuqurlashtirilgan mashg‘ulot. Kombinatorika, sonlar nazariyasi va geometriya.', 'Трёхчасовые углублённые занятия по субботам. Комбинаторика, теория чисел и геометрия.', 'Three-hour deep-dive sessions on Saturdays. Combinatorics, number theory and geometry.'),
     curriculum: [l('Kombinatorika', 'Комбинаторика', 'Combinatorics'), l('Sonlar nazariyasi', 'Теория чисел', 'Number theory'), l('Geometriya isbotlari', 'Геометрические доказательства', 'Geometry proofs'), l('Invariantlar', 'Инварианты', 'Invariants')],
     level: 'advanced', durationMonths: 6, price: 700000, coverSeed: 14,
-    groups: [g('c-olympiad-math', 'a', 'Olympiad — Saturday', [5], '10:00', '13:00', '14', 12, 7)],
+    groups: [g('c-olympiad-math', 'a', 'Olympiad — Saturday', [5], '10:00', '13:00', '14', 12)],
   },
   {
     id: 'c-frontend', ...pub(true), title: l('Frontend dasturlash', 'Frontend-разработка', 'Frontend Development'), categoryId: 'cat-it', centerId: 'ce-chilonzor', teacherId: 't-aziza', subjectId: 'sub-web',
@@ -106,7 +107,7 @@ export const courses: Course[] = [
     description: l('Noldan boshlab frontend: semantik HTML, zamonaviy CSS, JavaScript asoslari va React komponentlari. Kurs oxirida shaxsiy loyiha.', 'Frontend с нуля: семантический HTML, современный CSS, основы JavaScript и компоненты React. В конце — личный проект.', 'Frontend from scratch: semantic HTML, modern CSS, JavaScript fundamentals and React components. Ends with a personal project.'),
     curriculum: [l('HTML va kirish imkoniyati', 'HTML и доступность', 'HTML and accessibility'), l('CSS layout: Flexbox, Grid', 'CSS-раскладка: Flexbox, Grid', 'CSS layout: Flexbox, Grid'), l('JavaScript asoslari', 'Основы JavaScript', 'JavaScript fundamentals'), l('DOM va hodisalar', 'DOM и события', 'DOM and events'), l('React komponentlari', 'Компоненты React', 'React components'), l('Portfolio loyihasi', 'Проект для портфолио', 'Portfolio project')],
     level: 'beginner', durationMonths: 6, price: 950000, coverSeed: 15,
-    groups: [g('c-frontend', 'a', 'Frontend — Evening', [1, 3], '19:00', '21:00', 'Lab 2', 12, 10), g('c-frontend', 'b', 'Frontend — Weekend', [5, 6], '11:00', '13:00', 'Lab 1', 12, 5)],
+    groups: [g('c-frontend', 'a', 'Frontend — Evening', [1, 3], '19:00', '21:00', 'Lab 2', 12), g('c-frontend', 'b', 'Frontend — Weekend', [5, 6], '11:00', '13:00', 'Lab 1', 12)],
   },
   {
     id: 'c-python', ...pub(false), title: l('Python va ma’lumotlar tahlili', 'Python и анализ данных', 'Python & Data Analysis'), categoryId: 'cat-it', centerId: 'ce-chilonzor', teacherId: 't-nilufar', subjectId: 'sub-python',
@@ -114,7 +115,7 @@ export const courses: Course[] = [
     description: l('Amaliy Python: sintaksis, ma’lumot tuzilmalari, fayllar bilan ishlash, pandas va grafiklar.', 'Практический Python: синтаксис, структуры данных, работа с файлами, pandas и графики.', 'Practical Python: syntax, data structures, file handling, pandas and charts.'),
     curriculum: [l('Sintaksis va turlar', 'Синтаксис и типы', 'Syntax and types'), l('Funksiyalar va modullar', 'Функции и модули', 'Functions and modules'), l('pandas bilan tahlil', 'Анализ с pandas', 'Analysis with pandas'), l('Vizualizatsiya', 'Визуализация', 'Visualization')],
     level: 'beginner', durationMonths: 4, price: 850000, coverSeed: 16,
-    groups: [g('c-python', 'a', 'Python — Evening', [0, 2], '19:00', '20:30', 'Lab 3', 12, 6)],
+    groups: [g('c-python', 'a', 'Python — Evening', [0, 2], '19:00', '20:30', 'Lab 3', 12)],
   },
   {
     id: 'c-physics', ...pub(false), title: l('Fizika asoslari', 'Основы физики', 'Physics Foundations'), categoryId: 'cat-sciences', centerId: 'ce-nova', teacherId: 't-sardor', subjectId: 'sub-physics',
@@ -122,7 +123,7 @@ export const courses: Course[] = [
     description: l('Fizikani tushunish uchun kurs: har mavzuda demonstratsiya tajribasi va masala yechish.', 'Курс для понимания физики: в каждой теме демонстрационный опыт и решение задач.', 'A course for understanding physics: every topic includes a demonstration and problem solving.'),
     curriculum: [l('Kinematika', 'Кинематика', 'Kinematics'), l('Dinamika', 'Динамика', 'Dynamics'), l('Energiya', 'Энергия', 'Energy'), l('Elektr zanjirlari', 'Электрические цепи', 'Electric circuits')],
     level: 'beginner', durationMonths: 4, price: 500000, coverSeed: 17,
-    groups: [g('c-physics', 'a', 'Physics — Evening', [1, 3], '17:00', '18:30', '7', 14, 9)],
+    groups: [g('c-physics', 'a', 'Physics — Evening', [1, 3], '17:00', '18:30', '7', 14)],
   },
   {
     id: 'c-chemistry', ...pub(false), title: l('Kimyo laboratoriya amaliyoti', 'Лабораторная практика по химии', 'Chemistry Lab Practice'), categoryId: 'cat-sciences', centerId: 'ce-nova', teacherId: 't-sardor', subjectId: 'sub-chem',
@@ -130,7 +131,7 @@ export const courses: Course[] = [
     description: l('Shanba kunlari laboratoriyada amaliy mashg‘ulotlar: eritmalar, titrlash, organik sintez asoslari.', 'Практические занятия в лаборатории по субботам: растворы, титрование, основы органического синтеза.', 'Saturday lab sessions: solutions, titration, basics of organic synthesis.'),
     curriculum: [l('Laboratoriya xavfsizligi', 'Безопасность в лаборатории', 'Lab safety'), l('Eritmalar va konsentratsiya', 'Растворы и концентрация', 'Solutions and concentration'), l('Titrlash', 'Титрование', 'Titration'), l('Organik sintez asoslari', 'Основы органического синтеза', 'Organic synthesis basics')],
     level: 'intermediate', durationMonths: 3, price: 520000, coverSeed: 18,
-    groups: [g('c-chemistry', 'a', 'Chem Lab — Saturday', [5], '14:00', '16:00', 'Lab A', 10, 6)],
+    groups: [g('c-chemistry', 'a', 'Chem Lab — Saturday', [5], '14:00', '16:00', 'Lab A', 10)],
   },
   {
     id: 'c-german', ...pub(false), title: l('Nemis tili A1', 'Немецкий язык A1', 'German A1'), categoryId: 'cat-languages', centerId: 'ce-oltin', teacherId: 't-kamola', subjectId: 'sub-german',
@@ -138,7 +139,7 @@ export const courses: Course[] = [
     description: l('Boshlang‘ich nemis tili kursi. Haftada uch marta, muloqot va tinglashga alohida e’tibor.', 'Курс немецкого для начинающих. Три раза в неделю, особое внимание общению и аудированию.', 'Beginner German course. Three times a week with emphasis on conversation and listening.'),
     curriculum: [l('Alifbo va talaffuz', 'Алфавит и произношение', 'Alphabet and pronunciation'), l('Tanishuv va kundalik iboralar', 'Знакомство и повседневные фразы', 'Introductions and everyday phrases'), l('Artikllar va kelishiklar', 'Артикли и падежи', 'Articles and cases'), l('Hozirgi zamon', 'Настоящее время', 'Present tense')],
     level: 'beginner', durationMonths: 4, price: 600000, coverSeed: 19,
-    groups: [g('c-german', 'a', 'German — Evening', [0, 2, 4], '18:00', '19:30', '103', 12, 7), g('c-german', 'b', 'German — Morning', [1, 3], '09:00', '10:30', '103', 10, 3)],
+    groups: [g('c-german', 'a', 'German — Evening', [0, 2, 4], '18:00', '19:30', '103', 12), g('c-german', 'b', 'German — Morning', [1, 3], '09:00', '10:30', '103', 10)],
   },
   {
     id: 'c-korean', ...pub(false), title: l('Koreys tili boshlang‘ich', 'Корейский для начинающих', 'Korean for Beginners'), categoryId: 'cat-languages', centerId: 'ce-oltin', teacherId: 't-kamola', subjectId: 'sub-korean',
@@ -146,7 +147,7 @@ export const courses: Course[] = [
     description: l('Koreys yozuvi va boshlang‘ich muloqot. Kurs TOPIK I darajasiga tayyorgarlik uchun asos yaratadi.', 'Корейская письменность и начальное общение. Курс закладывает основу для TOPIK I.', 'Korean script and beginner conversation. Lays the foundation for TOPIK I.'),
     curriculum: [l('Hangul', 'Хангыль', 'Hangul'), l('Salomlashuv va hurmat darajalari', 'Приветствия и уровни вежливости', 'Greetings and politeness levels'), l('Sonlar va vaqt', 'Числа и время', 'Numbers and time'), l('Asosiy fe’llar', 'Основные глаголы', 'Core verbs')],
     level: 'beginner', durationMonths: 4, price: 620000, coverSeed: 20,
-    groups: [g('c-korean', 'a', 'Korean — Evening', [1, 3], '18:00', '19:30', '104', 12, 8)],
+    groups: [g('c-korean', 'a', 'Korean — Evening', [1, 3], '18:00', '19:30', '104', 12)],
   },
   {
     id: 'c-dtm', ...pub(false), title: l('DTM ga tayyorgarlik', 'Подготовка к ДТМ', 'University Entrance Prep (DTM)'), categoryId: 'cat-university', centerId: 'ce-tafakkur', teacherId: 't-rustam', subjectId: 'sub-uni',
@@ -154,7 +155,7 @@ export const courses: Course[] = [
     description: l('Universitetga kirish testiga tizimli tayyorgarlik. Dam olish kunlari ertalab, har oy nazorat testi.', 'Системная подготовка к вступительному тесту. Утро по выходным, контрольный тест каждый месяц.', 'Systematic preparation for the university entrance test. Weekend mornings, monthly progress test.'),
     curriculum: [l('Ona tili va adabiyot', 'Родной язык и литература', 'Native language and literature'), l('Matematika', 'Математика', 'Mathematics'), l('O‘zbekiston tarixi', 'История Узбекистана', 'History of Uzbekistan'), l('Test strategiyasi', 'Стратегия теста', 'Test strategy')],
     level: 'intermediate', durationMonths: 8, price: 750000, coverSeed: 21,
-    groups: [g('c-dtm', 'a', 'DTM — Weekend', [5, 6], '09:00', '12:00', '21', 16, 14)],
+    groups: [g('c-dtm', 'a', 'DTM — Weekend', [5, 6], '09:00', '12:00', '21', 16)],
   },
   {
     id: 'c-sat', ...pub(false), title: l('SAT: Math va Reading', 'SAT: Math и Reading', 'SAT Math & Reading'), categoryId: 'cat-university', centerId: 'ce-tafakkur', teacherId: 't-rustam', subjectId: 'sub-uni',
@@ -162,15 +163,15 @@ export const courses: Course[] = [
     description: l('Digital SAT formatida mashg‘ulotlar: matematika modullari, o‘qish va yozish, vaqtni boshqarish.', 'Занятия в формате Digital SAT: модули математики, чтение и письмо, управление временем.', 'Sessions in the Digital SAT format: math modules, reading and writing, time management.'),
     curriculum: [l('Algebra va muammolar', 'Алгебра и задачи', 'Algebra and problem solving'), l('Reading: dalil topish', 'Reading: поиск доказательств', 'Reading: evidence'), l('Writing: standart ingliz tili', 'Writing: стандартный английский', 'Writing: standard English'), l('Vaqt strategiyasi', 'Стратегия времени', 'Timing strategy')],
     level: 'advanced', durationMonths: 4, price: 880000, coverSeed: 22,
-    groups: [g('c-sat', 'a', 'SAT — Afternoon', [1, 3], '16:00', '18:00', '22', 12, 6)],
+    groups: [g('c-sat', 'a', 'SAT — Afternoon', [1, 3], '16:00', '18:00', '22', 12)],
   },
   {
     id: 'c-bazis', ...pub(true), title: l('Bazis', 'Bazis', 'Bazis'), categoryId: 'cat-furniture', centerId: 'ce-ustoz', teacherId: 't-bekzod', subjectId: 'sub-furniture',
     summary: l('Mebel eskizidan tayyor buyumgacha: o‘lchov, material, furnitura, 3D va yig‘ish.', 'От эскиза мебели до готового изделия: замеры, материалы, фурнитура, 3D и сборка.', 'From furniture sketch to finished piece: measurements, materials, fittings, 3D and assembly.'),
     description: l('Bazis — mebelsozlik bo‘yicha amaliy kurs. Talabalar o‘z loyihasini eskizdan boshlab, o‘lchov va material tanlovi orqali yig‘ilgan buyumgacha olib boradi. Ustaxonada xavfsizlik — birinchi darsdan.', 'Bazis — практический курс мебельного дела. Студенты ведут собственный проект от эскиза через замеры и выбор материалов до собранного изделия. Безопасность в мастерской — с первого занятия.', 'Bazis is a hands-on furniture making course. Students take their own project from sketch through measurements and material selection to an assembled piece. Workshop safety from lesson one.'),
     curriculum: [l('Mebel eskizlari', 'Эскизы мебели', 'Furniture sketches'), l('O‘lchovlar va chizmalar', 'Замеры и чертежи', 'Measurements and drawings'), l('Materiallar: yog‘och, MDF, laminat', 'Материалы: дерево, МДФ, ламинат', 'Materials: wood, MDF, laminate'), l('Furnitura va birikmalar', 'Фурнитура и соединения', 'Fittings and joints'), l('Boshlang‘ich 3D modellashtirish', 'Базовое 3D-моделирование', 'Basic 3D modeling'), l('Yig‘ish va pardozlash', 'Сборка и отделка', 'Assembly and finishing'), l('Ustaxona xavfsizligi', 'Безопасность в мастерской', 'Workshop safety')],
-    level: 'beginner', durationMonths: 5, price: 1200000, coverSeed: 23,
-    groups: [g('c-bazis', 'a', 'Bazis — Saturday Studio', [5], '10:00', '14:00', 'Workshop 1', 8, 6), g('c-bazis', 'b', 'Bazis — Wednesday Evening', [2], '18:00', '20:00', 'Workshop 1', 8, 3)],
+    level: 'beginner', durationMonths: 5, price: 1200000, coverSeed: 23, meyosGrant: true,
+    groups: [g('c-bazis', 'a', 'Bazis — Saturday Studio', [5], '10:00', '14:00', 'Workshop 1', 8), g('c-bazis', 'b', 'Bazis — Wednesday Evening', [2], '18:00', '20:00', 'Workshop 1', 8)],
   },
   {
     id: 'c-restoration', ...pub(false), title: l('Mebelni tiklash asoslari', 'Основы реставрации мебели', 'Furniture Restoration Basics'), categoryId: 'cat-furniture', centerId: 'ce-ustoz', teacherId: 't-bekzod', subjectId: 'sub-furniture',
@@ -178,7 +179,7 @@ export const courses: Course[] = [
     description: l('Yakshanba kunlari ustaxonada: sirt tahlili, yog‘och ta’miri, lak va moy bilan pardozlash.', 'По воскресеньям в мастерской: анализ поверхности, ремонт дерева, отделка лаком и маслом.', 'Sundays in the workshop: surface assessment, wood repair, finishing with lacquer and oil.'),
     curriculum: [l('Sirt tahlili', 'Анализ поверхности', 'Surface assessment'), l('Yog‘och ta’miri', 'Ремонт дерева', 'Wood repair'), l('Pardozlash: lak va moy', 'Отделка: лак и масло', 'Finishing: lacquer and oil'), l('Furnitura almashtirish', 'Замена фурнитуры', 'Replacing fittings')],
     level: 'beginner', durationMonths: 3, price: 800000, coverSeed: 24,
-    groups: [g('c-restoration', 'a', 'Restoration — Sunday', [6], '10:00', '13:00', 'Workshop 2', 8, 4)],
+    groups: [g('c-restoration', 'a', 'Restoration — Sunday', [6], '10:00', '13:00', 'Workshop 2', 8)],
   },
   {
     id: 'c-interior', ...pub(true), title: l('Interyer dizayni asoslari', 'Основы дизайна интерьера', 'Interior Design Fundamentals'), categoryId: 'cat-design', centerId: 'ce-mezon', teacherId: 't-malika', subjectId: 'sub-interior',
@@ -186,7 +187,7 @@ export const courses: Course[] = [
     description: l('Interyer dizaynining amaliy asoslari: brif, rejalashtirish, rang palitrasi, materiallar va yorug‘lik. Kurs yakunida konsept-loyiha.', 'Практические основы дизайна интерьера: бриф, планировка, цветовая палитра, материалы и свет. В финале — концепт-проект.', 'Practical fundamentals of interior design: brief, planning, color palette, materials and lighting. Ends with a concept project.'),
     curriculum: [l('Brif va foydalanuvchi ehtiyojlari', 'Бриф и потребности пользователя', 'Brief and user needs'), l('Rejalashtirish va ergonomika', 'Планировка и эргономика', 'Planning and ergonomics'), l('Rang va materiallar', 'Цвет и материалы', 'Color and materials'), l('Yorug‘lik dizayni', 'Световой дизайн', 'Lighting design'), l('Konsept taqdimoti', 'Презентация концепта', 'Concept presentation')],
     level: 'beginner', durationMonths: 4, price: 1000000, coverSeed: 25,
-    groups: [g('c-interior', 'a', 'Interior — Evening', [0, 2], '18:30', '20:30', 'Studio A', 10, 8)],
+    groups: [g('c-interior', 'a', 'Interior — Evening', [0, 2], '18:30', '20:30', 'Studio A', 10)],
   },
   {
     id: 'c-3d-interior', ...pub(false), title: l('3D interyer vizualizatsiyasi', '3D-визуализация интерьера', '3D Interior Visualization'), categoryId: 'cat-design', centerId: 'ce-mezon', teacherId: 't-malika', subjectId: 'sub-interior',
@@ -194,7 +195,7 @@ export const courses: Course[] = [
     description: l('Interyer vizualizatsiyasi bo‘yicha amaliy kurs: xona modeli, mebel joylashuvi, materiallar, kamera va render sozlamalari.', 'Практический курс визуализации интерьера: модель комнаты, расстановка мебели, материалы, камера и настройки рендера.', 'A practical interior visualization course: room model, furniture placement, materials, camera and render settings.'),
     curriculum: [l('Xona modelini qurish', 'Построение модели комнаты', 'Building the room model'), l('Mebel va aksessuarlar', 'Мебель и аксессуары', 'Furniture and accessories'), l('Materiallar va teksturalar', 'Материалы и текстуры', 'Materials and textures'), l('Yorug‘lik va kamera', 'Свет и камера', 'Lighting and camera'), l('Render va post-ishlov', 'Рендер и постобработка', 'Rendering and post-processing')],
     level: 'intermediate', durationMonths: 4, price: 1100000, coverSeed: 26,
-    groups: [g('c-3d-interior', 'a', '3D Viz — Evening', [1, 3], '18:30', '20:30', 'Studio B', 10, 5)],
+    groups: [g('c-3d-interior', 'a', '3D Viz — Evening', [1, 3], '18:30', '20:30', 'Studio B', 10)],
   },
 ]
 
@@ -236,25 +237,35 @@ export const resources: Resource[] = [
 ]
 
 // ─── Students (no personal data: display names + district only) ──────────────
+// Enrollment is derived from these subscriptions, so rosters and capacity counts always match.
+type SubSpec = { pkg: 'pkg-duo' | 'pkg-trio'; groups: string[]; started: string; renews: string; grant?: boolean }
+const demoStudent = (id: string, displayName: string, district: string, preferredLang: 'uz' | 'ru' | 'en', sub?: SubSpec): Student => ({
+  id,
+  profile: { displayName, district, preferredLang, reminders: true },
+  subscription: sub
+    ? { packageId: sub.pkg, groupIds: sub.groups, status: 'active', startedAt: sub.started, renewsAt: sub.renews, payment: { method: 'card', simulated: true, confirmedAt: `${sub.started}T09:00:00.000Z` }, funding: { meyosGrant: !!sub.grant, courseIds: sub.grant ? ['c-bazis'] : [] } }
+    : { packageId: null, groupIds: [], status: 'none' },
+  savedCourseIds: [],
+  savedTeacherIds: [],
+  builder: { packageId: sub?.pkg ?? null, groupIds: sub ? [...sub.groups] : [], meyosGrant: !!sub?.grant },
+})
+
 export const students: Student[] = [
-  {
-    id: 's-aziz', profile: { displayName: 'Aziz (demo)', district: 'Yunusobod', preferredLang: 'uz', reminders: true },
-    subscription: { packageId: 'pkg-trio', groupIds: ['g-bazis-a', 'g-general-english-a', 'g-frontend-a'], status: 'active', startedAt: '2026-09-01', renewsAt: '2026-10-01' },
-    savedCourseIds: ['c-interior'], savedTeacherIds: ['t-malika'],
-    builder: { packageId: 'pkg-trio', groupIds: ['g-bazis-a', 'g-general-english-a', 'g-frontend-a'] },
-  },
-  {
-    id: 's-madina', profile: { displayName: 'Madina (demo)', district: 'Chilonzor', preferredLang: 'ru', reminders: false },
-    subscription: { packageId: 'pkg-duo', groupIds: ['g-ielts-a', 'g-sat-a'], status: 'active', startedAt: '2026-09-10', renewsAt: '2026-10-10' },
-    savedCourseIds: [], savedTeacherIds: [],
-    builder: { packageId: 'pkg-duo', groupIds: ['g-ielts-a', 'g-sat-a'] },
-  },
-  {
-    id: 's-new', profile: { displayName: 'Yangi talaba (demo)', district: 'Sergeli', preferredLang: 'en', reminders: true },
-    subscription: { packageId: null, groupIds: [], status: 'none' },
-    savedCourseIds: ['c-bazis'], savedTeacherIds: [],
-    builder: { packageId: null, groupIds: [] },
-  },
+  { ...demoStudent('s-aziz', 'Aziz (demo)', 'Yunusobod', 'uz', { pkg: 'pkg-trio', groups: ['g-bazis-a', 'g-general-english-a', 'g-frontend-a'], started: '2026-09-01', renews: '2026-10-01', grant: true }), savedCourseIds: ['c-interior'], savedTeacherIds: ['t-malika'] },
+  demoStudent('s-madina', 'Madina (demo)', 'Chilonzor', 'ru', { pkg: 'pkg-duo', groups: ['g-ielts-a', 'g-sat-a'], started: '2026-09-10', renews: '2026-10-10' }),
+  { ...demoStudent('s-new', 'Yangi talaba (demo)', 'Sergeli', 'en'), savedCourseIds: ['c-bazis'] },
+  demoStudent('s-jasur', 'Jasur (demo)', 'Mirzo Ulug‘bek', 'uz', { pkg: 'pkg-trio', groups: ['g-bazis-a', 'g-physics-a', 'g-interior-a'], started: '2026-09-03', renews: '2026-10-03' }),
+  demoStudent('s-nigora', 'Nigora (demo)', 'Yakkasaroy', 'uz', { pkg: 'pkg-duo', groups: ['g-bazis-a', 'g-german-b'], started: '2026-09-05', renews: '2026-10-05', grant: true }),
+  demoStudent('s-bobur', 'Bobur (demo)', 'Sergeli', 'ru', { pkg: 'pkg-duo', groups: ['g-bazis-a', 'g-python-a'], started: '2026-09-08', renews: '2026-10-08' }),
+  demoStudent('s-sevara', 'Sevara (demo)', 'Shayxontohur', 'uz', { pkg: 'pkg-trio', groups: ['g-bazis-a', 'g-sat-a', 'g-chemistry-a'], started: '2026-09-12', renews: '2026-10-12' }),
+  demoStudent('s-otabek', 'Otabek (demo)', 'Chilonzor', 'uz', { pkg: 'pkg-duo', groups: ['g-bazis-b', 'g-ielts-a'], started: '2026-09-14', renews: '2026-10-14' }),
+  demoStudent('s-gulnoza', 'Gulnoza (demo)', 'Yunusobod', 'ru', { pkg: 'pkg-duo', groups: ['g-bazis-b', 'g-dtm-a'], started: '2026-09-15', renews: '2026-10-15', grant: true }),
+  demoStudent('s-sherzod', 'Sherzod (demo)', 'Mirzo Ulug‘bek', 'uz', { pkg: 'pkg-trio', groups: ['g-frontend-a', 'g-algebra-a', 'g-restoration-a'], started: '2026-09-02', renews: '2026-10-02' }),
+  demoStudent('s-zilola', 'Zilola (demo)', 'Yakkasaroy', 'en', { pkg: 'pkg-duo', groups: ['g-general-english-a', 'g-olympiad-math-a'], started: '2026-09-06', renews: '2026-10-06' }),
+  demoStudent('s-dilshod', 'Dilshod (demo)', 'Shayxontohur', 'uz', { pkg: 'pkg-duo', groups: ['g-general-english-b', 'g-3d-interior-a'], started: '2026-09-09', renews: '2026-10-09' }),
+  demoStudent('s-kamila', 'Kamila (demo)', 'Chilonzor', 'ru', { pkg: 'pkg-duo', groups: ['g-korean-a', 'g-interior-a'], started: '2026-09-11', renews: '2026-10-11' }),
+  demoStudent('s-umid', 'Umid (demo)', 'Sergeli', 'uz', { pkg: 'pkg-trio', groups: ['g-frontend-b', 'g-python-a', 'g-ielts-a'], started: '2026-09-13', renews: '2026-10-13' }),
+  demoStudent('s-laylo', 'Laylo (demo)', 'Yunusobod', 'uz', { pkg: 'pkg-duo', groups: ['g-german-a', 'g-physics-a'], started: '2026-09-16', renews: '2026-10-16' }),
 ]
 
 // ─── Site configuration (template-driven) ────────────────────────────────────
@@ -343,10 +354,12 @@ export const site: SiteConfig = {
   ],
   media: { heroVideoUrl: '/media/ilmora-commercial.mp4', heroPosterUrl: '', furnitureVideoUrl: '', furniturePosterUrl: '' },
   courseCard: { showCenter: true, showTeacher: true, showLevel: true, showSchedule: true, showCategory: true, priceStyle: 'emphasis' },
+  // Card is the only method offered for now; the others stay defined so they can be switched on later.
+  payments: { methods: [{ id: 'card', enabled: true }, { id: 'payme', enabled: false }, { id: 'click', enabled: false }, { id: 'cash', enabled: false }] },
   dashboards: {
     student: [
       { id: 'overview', enabled: true }, { id: 'subscription', enabled: true }, { id: 'courses', enabled: true }, { id: 'timetable', enabled: true },
-      { id: 'videos', enabled: true }, { id: 'resources', enabled: true }, { id: 'saved', enabled: true }, { id: 'profile', enabled: true },
+      { id: 'videos', enabled: true }, { id: 'resources', enabled: true }, { id: 'attendance', enabled: true }, { id: 'saved', enabled: true }, { id: 'profile', enabled: true },
     ],
     teacher: [
       { id: 'overview', enabled: true }, { id: 'subjects', enabled: true }, { id: 'videos', enabled: true }, { id: 'playlists', enabled: true },
@@ -355,7 +368,34 @@ export const site: SiteConfig = {
   },
 }
 
+/** Deterministic pseudo-random in [0, 1) from a string, so sample attendance is stable between resets. */
+const hash01 = (key: string) => {
+  let h = 2166136261
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619) }
+  return ((h >>> 0) % 1000) / 1000
+}
+
+/** Lesson sessions for every group: two weeks back, three weeks ahead. Past sessions get sample QR check-ins (~80%). */
+function seedSessions(now = new Date()): { sessions: LessonSession[]; attendance: AttendanceRecord[] } {
+  const from = new Date(now)
+  from.setDate(from.getDate() - 14)
+  const sessions = courses.flatMap((c) => c.groups.flatMap((g) => generateSessions(g, from, 35, now)))
+  const attendance: AttendanceRecord[] = []
+  for (const ses of sessions) {
+    if (ses.status !== 'completed') continue
+    for (const st of students) {
+      if (st.subscription.status !== 'active' || !st.subscription.groupIds.includes(ses.groupId)) continue
+      if (hash01(`${ses.id}:${st.id}`) > 0.8) continue
+      const at = new Date(`${ses.date}T${ses.start}:00`)
+      at.setMinutes(at.getMinutes() + Math.floor(hash01(`${st.id}:${ses.id}`) * 12))
+      attendance.push({ id: `att-${ses.id}-${st.id}`, sessionId: ses.id, studentId: st.id, checkedInAt: at.toISOString(), method: 'qr' })
+    }
+  }
+  return { sessions, attendance }
+}
+
 export function createSeed(): DemoState {
   // Deep clone so runtime mutations never touch the module constants
-  return JSON.parse(JSON.stringify({ site, centers, categories, teachers, subjects, courses, videos, playlists, resources, students })) as DemoState
+  const base = JSON.parse(JSON.stringify({ site, centers, categories, teachers, subjects, courses, videos, playlists, resources, students })) as Omit<DemoState, 'sessions' | 'attendance'>
+  return { ...base, ...seedSessions() }
 }

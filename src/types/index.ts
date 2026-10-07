@@ -65,8 +65,8 @@ export interface Group {
   start: string // "18:00"
   end: string // "19:30"
   room: string
-  seats: number
-  enrolled: number
+  /** Maximum number of enrolled students (teacher-defined, positive integer). Enrollment is derived from student subscriptions. */
+  capacity: number
 }
 
 export type Level = 'beginner' | 'intermediate' | 'advanced'
@@ -89,6 +89,8 @@ export interface Course extends Publishable {
   imageUrl?: string
   imageUpload?: UploadMeta
   groups: Group[]
+  /** Course may be funded through the Meyos grant (a funding selection shown at enrollment, not a payment method) */
+  meyosGrant?: boolean
 }
 
 export type VideoSource =
@@ -154,12 +156,28 @@ export interface StudentProfile {
   reminders: boolean
 }
 
+export type PaymentMethodId = 'card' | 'payme' | 'click' | 'cash'
+
+export interface PaymentMethod {
+  id: PaymentMethodId
+  enabled: boolean
+}
+
+export interface PaymentConfig {
+  /** Only enabled methods are offered at checkout; extra methods can be switched on later without code changes to the flow */
+  methods: PaymentMethod[]
+}
+
 export interface Subscription {
   packageId: string | null
   groupIds: string[]
   status: 'none' | 'active'
   startedAt?: string
   renewsAt?: string
+  /** Simulated payment record — the demo never collects or stores card numbers or CVVs */
+  payment?: { method: PaymentMethodId; simulated: true; confirmedAt: string }
+  /** Separate grant-funding selection, not a payment method; never changes the amount due or marks anything as paid */
+  funding?: { meyosGrant: boolean; courseIds: string[] }
 }
 
 export interface Student {
@@ -169,7 +187,34 @@ export interface Student {
   savedCourseIds: string[]
   savedTeacherIds: string[]
   /** Draft selections in the package builder (before activation) */
-  builder: { packageId: string | null; groupIds: string[] }
+  builder: { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
+}
+
+export type SessionStatus = 'scheduled' | 'completed' | 'cancelled'
+
+/** One scheduled occurrence of a group lesson. Each session has its own attendance token/QR. */
+export interface LessonSession {
+  id: string
+  groupId: string
+  courseId: string
+  /** ISO date, e.g. 2026-10-07 */
+  date: string
+  start: string
+  end: string
+  status: SessionStatus
+  attendanceOpen: boolean
+  /** Per-session token embedded in the attendance link. Demo only — not a secure secret without a backend. */
+  token: string
+  openedAt?: string
+  closedAt?: string
+}
+
+export interface AttendanceRecord {
+  id: string
+  sessionId: string
+  studentId: string
+  checkedInAt: string
+  method: 'qr' | 'manual'
 }
 
 export interface Package {
@@ -321,6 +366,7 @@ export interface SiteConfig {
     furniturePosterUrl: string
   }
   courseCard: CourseCardTemplate
+  payments: PaymentConfig
   dashboards: {
     student: DashboardModule[]
     teacher: DashboardModule[]
@@ -338,6 +384,8 @@ export interface DemoState {
   playlists: Playlist[]
   resources: Resource[]
   students: Student[]
+  sessions: LessonSession[]
+  attendance: AttendanceRecord[]
 }
 
 export interface Viewer {

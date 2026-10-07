@@ -5,6 +5,7 @@ import { Timetable } from '../../components/Timetable'
 import { ArtCover, Badge, Button, Card, cx, Eyebrow, Icon, Input, Modal, Notice, PageTitle, Select } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
+import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import { formatSom } from '../../lib/format'
 import { findConflicts, overlaps, resolveGroups, weeklyHours } from '../../lib/schedule'
 import { useCurrentStudent } from '../../store/selectors'
@@ -21,6 +22,7 @@ export function BuilderPage() {
   const categories = useStore((s) => s.categories)
   const centers = useStore((s) => s.centers)
   const teachers = useStore((s) => s.teachers)
+  const students = useStore((s) => s.students)
   const setBuilderPackage = useStore((s) => s.setBuilderPackage)
   const addBuilderGroup = useStore((s) => s.addBuilderGroup)
   const removeBuilderCourse = useStore((s) => s.removeBuilderCourse)
@@ -48,7 +50,7 @@ export function BuilderPage() {
     const r = addBuilderGroup(student.id, groupId)
     if (r.ok) { notify(t('courses.inPlan')); setPicker(null); return }
     const conflictName = r.conflictWith ? tr(courses.find((c) => c.id === r.conflictWith)?.title) : ''
-    const msg = { 'no-package': t('builder.pickPackageFirst'), limit: t('builder.limitReached'), duplicate: t('builder.duplicate'), conflict: `${t('builder.conflict')} — ${conflictName}. ${t('builder.conflictHint')}`, disabled: t('builder.packageDisabled') }[r.reason]
+    const msg = { 'no-package': t('builder.pickPackageFirst'), limit: t('builder.limitReached'), duplicate: t('builder.duplicate'), conflict: `${t('builder.conflict')} — ${conflictName}. ${t('builder.conflictHint')}`, disabled: t('builder.packageDisabled'), full: `${t('capacity.full')} — ${t('capacity.fullHint')}` }[r.reason]
     notify(msg, 'warn')
   }
   const onAddCourse = (c: Course) => {
@@ -100,6 +102,7 @@ export function BuilderPage() {
               const g = selectedGroups.find((x) => x.courseId === c.id)
               const clashes = !selected && c.groups.every((cg) => selectedGroups.some((sg) => overlaps(cg, sg)))
               const limit = !!pkg && !selected && selectedGroups.length >= pkg.maxCourses
+              const allFull = !selected && c.groups.every((cg) => isGroupFull(cg, students, student?.id))
               const center = centers.find((x) => x.id === c.centerId)
               return (
                 <li key={c.id} className={cx('card flex items-center gap-4 p-3 transition', selected && 'border-forest/50 bg-sage/30')}>
@@ -109,6 +112,7 @@ export function BuilderPage() {
                       <Link to={`/courses/${c.id}`} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</Link>
                       <Badge tone="muted">{tr(categories.find((x) => x.id === c.categoryId)?.name)}</Badge>
                       {clashes && <Badge tone="danger"><Icon name="warn" className="h-3 w-3" />{t('builder.conflict')}</Badge>}
+                      {allFull && <Badge tone="warn">{t('capacity.full')}</Badge>}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-charcoal/55">
                       <span>{center?.name}</span>
@@ -126,7 +130,7 @@ export function BuilderPage() {
                       <Button size="sm" variant="secondary" onClick={() => student && removeBuilderCourse(student.id, c.id)}><Icon name="x" className="h-3.5 w-3.5" />{t('common.remove')}</Button>
                     </div>
                   ) : (
-                    <Button size="sm" disabled={!pkg || limit} title={limit ? t('builder.limitReached') : undefined} onClick={() => onAddCourse(c)}><Icon name="plus" className="h-3.5 w-3.5" />{t('common.add')}</Button>
+                    <Button size="sm" disabled={!pkg || limit || allFull} title={limit ? t('builder.limitReached') : allFull ? t('capacity.fullHint') : undefined} onClick={() => onAddCourse(c)}><Icon name="plus" className="h-3.5 w-3.5" />{t('common.add')}</Button>
                   )}
                 </li>
               )
@@ -197,16 +201,16 @@ export function BuilderPage() {
             {picker.groups.map((g) => {
               const clash = selectedGroups.filter((sg) => sg.courseId !== picker.id).find((sg) => overlaps(g, sg))
               const current = student?.builder.groupIds.includes(g.id)
-              const full = g.enrolled >= g.seats
+              const full = isGroupFull(g, students, student?.id)
               return (
                 <li key={g.id}>
                   <button type="button" disabled={!!clash || full} onClick={() => tryAdd(g.id)} className={cx('card flex w-full items-center justify-between gap-3 p-4 text-left transition disabled:opacity-50', current ? 'border-forest bg-sage/40' : 'hover:border-forest/40')}>
                     <div>
                       <div className="text-sm font-medium text-charcoal">{g.name}</div>
                       <div className="mt-1"><ScheduleChips group={g} /></div>
-                      <div className="mt-1 text-[11px] text-charcoal/50">{t('common.room')} {g.room} · {Math.max(0, g.seats - g.enrolled)} {t('common.seatsLeft')}</div>
+                      <div className="mt-1 text-[11px] text-charcoal/50">{t('common.room')} {g.room} · {t('capacity.students', { n: enrolledCount(students, g.id, student?.id), max: g.capacity })}</div>
                       {clash && <div className="mt-1 text-[11px] text-red-700">{t('builder.conflict')}: {tr(courses.find((c) => c.id === clash.courseId)?.title)}</div>}
-                      {full && <div className="mt-1 text-[11px] text-amber-800">{t('courses.full')}</div>}
+                      {full && <div className="mt-1 text-[11px] text-amber-800">{t('capacity.full')} — {t('capacity.fullHint')}</div>}
                     </div>
                     {current ? <Icon name="check" className="h-5 w-5 text-forest" /> : <Icon name="plus" className="h-5 w-5 text-charcoal/40" />}
                   </button>

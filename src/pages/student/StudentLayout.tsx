@@ -15,6 +15,7 @@ export function StudentLayout() {
     { id: 'timetable', to: '/student/timetable', label: t('student.timetable'), icon: 'calendar' },
     { id: 'videos', to: '/student/videos', label: t('student.videos'), icon: 'video' },
     { id: 'resources', to: '/student/resources', label: t('student.resources'), icon: 'file' },
+    { id: 'attendance', to: '/student/attendance', label: t('student.attendance'), icon: 'check' },
     { id: 'saved', to: '/student/saved', label: t('student.saved'), icon: 'bookmark' },
     { id: 'profile', to: '/student/profile', label: t('student.profile'), icon: 'user' },
   ]

@@ -5,6 +5,7 @@ import { PriceTag, ScheduleChips } from '../../components/course/CourseCard'
 import { ArtCover, Avatar, Badge, Button, Card, cx, Eyebrow, Icon, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
+import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import { formatDuration } from '../../lib/format'
 import { useCurrentStudent, useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
@@ -21,6 +22,7 @@ export function CourseDetailPage() {
   const videos = useStore((s) => s.videos.filter((v) => v.courseId === id))
   const resources = useStore((s) => s.resources.filter((r) => r.courseId === id))
   const student = useCurrentStudent()
+  const students = useStore((s) => s.students)
   const addBuilderGroup = useStore((s) => s.addBuilderGroup)
   const toggleSaved = useStore((s) => s.toggleSavedCourse)
   const notify = useStore((s) => s.notify)
@@ -46,6 +48,7 @@ export function CourseDetailPage() {
     else if (r.reason === 'duplicate') notify(t('builder.duplicate'), 'warn')
     else if (r.reason === 'conflict') notify(`${t('builder.conflict')}: ${t('builder.conflictHint')}`, 'warn')
     else if (r.reason === 'disabled') notify(t('builder.packageDisabled'), 'warn')
+    else if (r.reason === 'full') notify(`${t('capacity.full')} — ${t('capacity.fullHint')}`, 'warn')
     else notify(t('builder.pickPackageFirst'), 'warn')
   }
 
@@ -156,19 +159,19 @@ export function CourseDetailPage() {
               <ul className="space-y-2">
                 {course.groups.map((g) => {
                   const chosen = inPlan === g.id
-                  const full = g.enrolled >= g.seats
+                  const full = isGroupFull(g, students, student?.id)
                   return (
                     <li key={g.id} className={cx('rounded-control border p-3', chosen ? 'border-forest bg-sage/50' : 'border-charcoal/10')}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-medium text-charcoal">{g.name}</span>
-                        <span className="text-[11px] text-charcoal/50">{Math.max(0, g.seats - g.enrolled)} {t('common.seatsLeft')}</span>
+                        <span className={cx('text-[11px]', full ? 'text-amber-800' : 'text-charcoal/50')}>{t('capacity.students', { n: enrolledCount(students, g.id), max: g.capacity })}</span>
                       </div>
                       <div className="mt-1.5 flex items-center justify-between gap-2">
                         <ScheduleChips group={g} />
                         <span className="text-[11px] text-charcoal/45">{t('common.room')} {g.room}</span>
                       </div>
                       <Button size="sm" variant={chosen ? 'secondary' : 'primary'} className="mt-3 w-full" disabled={full && !chosen} onClick={() => (chosen ? nav('/builder') : add(g.id))}>
-                        {chosen ? <><Icon name="check" className="h-3.5 w-3.5" />{t('courses.inPlan')}</> : full ? t('courses.full') : t('courses.addToPlan')}
+                        {chosen ? <><Icon name="check" className="h-3.5 w-3.5" />{t('courses.inPlan')}</> : full ? t('capacity.full') : t('courses.addToPlan')}
                       </Button>
                     </li>
                   )

@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore'
 export function translate(lang: Lang, key: TKey, vars?: Record<string, string | number>): string {
   const entry = dict[key] as L | undefined
   let s = entry ? entry[lang] || entry.en : key
-  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v))
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v))
   return s
 }
 

@@ -24,6 +24,9 @@ import { PreviewPage } from './pages/public/Preview'
 import { TeacherChannelPage } from './pages/public/TeacherChannel'
 import { TeachersPage } from './pages/public/Teachers'
 import { TemplatePage } from './pages/public/TemplatePages'
+import { AttendPage } from './pages/public/Attend'
+import { StudentAttendance } from './pages/student/StudentAttendance'
+import { StudioGroupDetail } from './pages/teacher/StudioGroupDetail'
 import { StudentCourses } from './pages/student/StudentCourses'
 import { StudentLayout } from './pages/student/StudentLayout'
 import { StudentOverview } from './pages/student/StudentOverview'
@@ -63,6 +66,7 @@ export default function App() {
           <Route path="how-it-works" element={<TemplatePage page="howItWorks" />} />
           <Route path="centers" element={<TemplatePage page="centers" />} />
           <Route path="faq" element={<FaqPage />} />
+          <Route path="attend/:sessionId" element={<AttendPage />} />
           <Route path="*" element={<NotFound />} />
         </Route>
         <Route path="admin" element={<AdminLayout />}>
@@ -86,6 +90,7 @@ export default function App() {
           <Route path="playlists" element={<StudioPlaylists />} />
           <Route path="resources" element={<StudioResources />} />
           <Route path="groups" element={<StudioGroups />} />
+          <Route path="groups/:groupId" element={<StudioGroupDetail />} />
           <Route path="channel" element={<StudioChannel />} />
           <Route path="visibility" element={<StudioVisibility />} />
           <Route path="*" element={<Navigate to="/teacher" replace />} />
@@ -97,6 +102,7 @@ export default function App() {
           <Route path="timetable" element={<StudentTimetable />} />
           <Route path="videos" element={<StudentVideos />} />
           <Route path="resources" element={<StudentResources />} />
+          <Route path="attendance" element={<StudentAttendance />} />
           <Route path="saved" element={<StudentSaved />} />
           <Route path="profile" element={<StudentProfile />} />
           <Route path="*" element={<Navigate to="/student" replace />} />

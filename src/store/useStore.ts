@@ -3,10 +3,12 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import { createSeed } from '../data/seed'
 import type {
-  Category, Center, Course, DemoState, Lang, Playlist, Publishable, Resource, Role, Section, SectionType,
+  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Playlist, Publishable, Resource, Role, Section, SectionType,
   SiteConfig, Student, StudentProfile, Subject, Teacher, Video,
 } from '../types'
 import { emptyL } from '../i18n/useT'
+import { enrolledCount, migratedCapacity } from '../lib/enrollment'
+import { generateSessions, mergeSessions } from '../lib/sessions'
 
 export type PageKey = keyof SiteConfig['pages']
 export type ContentKind = 'course' | 'video' | 'playlist' | 'resource'
@@ -15,7 +17,9 @@ export interface Toast { id: number; text: string; tone?: 'ok' | 'warn' }
 
 export type BuilderResult =
   | { ok: true }
-  | { ok: false; reason: 'no-package' | 'limit' | 'duplicate' | 'conflict' | 'disabled'; conflictWith?: string }
+  | { ok: false; reason: 'no-package' | 'limit' | 'duplicate' | 'conflict' | 'disabled' | 'full'; conflictWith?: string }
+
+export type ActivateResult = { ok: true } | { ok: false; reason: 'incomplete' | 'full'; groupId?: string }
 
 interface Actions {
   // UI
@@ -58,14 +62,21 @@ interface Actions {
 
   // Student
   setBuilderPackage: (studentId: string, packageId: string | null) => void
+  setBuilderGrant: (studentId: string, meyosGrant: boolean) => void
   addBuilderGroup: (studentId: string, groupId: string) => BuilderResult
   removeBuilderCourse: (studentId: string, courseId: string) => void
-  activateSubscription: (studentId: string) => boolean
+  activateSubscription: (studentId: string) => ActivateResult
   renewSubscription: (studentId: string) => void
   cancelSubscription: (studentId: string) => void
   toggleSavedCourse: (studentId: string, courseId: string) => void
   toggleSavedTeacher: (studentId: string, teacherId: string) => void
   updateProfile: (studentId: string, patch: Partial<StudentProfile>) => void
+
+  // Lessons & attendance
+  generateGroupSessions: (groupId: string, days?: number) => number
+  setSessionAttendance: (sessionId: string, open: boolean) => void
+  setSessionStatus: (sessionId: string, status: LessonSession['status']) => void
+  recordCheckIn: (record: AttendanceRecord) => void
 
   resetDemo: () => void
 }
@@ -86,6 +97,53 @@ export const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}${Ma
 let toastSeq = 1
 
 const seed = createSeed()
+
+const STORE_VERSION = 7
+const freshState = () => ({ ...createSeed(), lang: 'uz' as Lang, role: 'visitor' as Role, currentTeacherId: 't-bekzod', currentStudentId: 's-aziz' })
+
+/**
+ * v6 → v7: groups gain `capacity` (replacing seats/enrolled), subscriptions gain
+ * payment/funding records, lesson sessions + attendance are introduced, and the
+ * card-only payment configuration + student attendance module are added.
+ * Fallback capacity = previous `seats` (or 12), never below the current enrollment.
+ */
+function migrateV6toV7(persisted: Record<string, unknown>): Record<string, unknown> {
+  const fresh = createSeed()
+  const state = persisted as Partial<DemoState> & Record<string, unknown>
+  const students: Student[] = (state.students ?? []).map((st) => ({
+    ...st,
+    subscription: {
+      ...st.subscription,
+      payment: st.subscription.payment ?? (st.subscription.status === 'active' ? { method: 'card', simulated: true, confirmedAt: st.subscription.startedAt ?? new Date().toISOString() } : undefined),
+      funding: st.subscription.funding ?? { meyosGrant: false, courseIds: [] },
+    },
+    builder: { packageId: st.builder?.packageId ?? null, groupIds: st.builder?.groupIds ?? [], meyosGrant: st.builder?.meyosGrant ?? false },
+  }))
+  const courses: Course[] = (state.courses ?? []).map((c) => ({
+    ...c,
+    meyosGrant: c.meyosGrant ?? (c.id === 'c-bazis' ? true : undefined),
+    groups: (c.groups ?? []).map((g) => {
+      const legacy = g as unknown as { seats?: unknown; enrolled?: unknown; capacity?: unknown }
+      const { seats: _s, enrolled: _e, ...rest } = legacy as Record<string, unknown>
+      void _s; void _e
+      const capacity = Number.isInteger(legacy.capacity) && Number(legacy.capacity) > 0 ? Number(legacy.capacity) : migratedCapacity(legacy.seats, enrolledCount(students, g.id))
+      return { ...(rest as unknown as Omit<typeof g, 'capacity'>), capacity }
+    }),
+  }))
+  const now = new Date()
+  const from = new Date(now); from.setDate(from.getDate() - 14)
+  const sessions: LessonSession[] = courses.flatMap((c) => c.groups.flatMap((g) => generateSessions(g, from, 35, now)))
+  const site = state.site as SiteConfig
+  const studentModules = site.dashboards.student.some((m) => m.id === 'attendance') ? site.dashboards.student : [...site.dashboards.student, { id: 'attendance', enabled: true }]
+  return {
+    ...state,
+    students,
+    courses,
+    sessions: (state.sessions as LessonSession[] | undefined) ?? sessions,
+    attendance: (state.attendance as AttendanceRecord[] | undefined) ?? [],
+    site: { ...site, payments: site.payments ?? fresh.site.payments, dashboards: { ...site.dashboards, student: studentModules } },
+  }
+}
 
 const useBoundStore = create<StoreState>()(
   persist(
@@ -130,8 +188,15 @@ const useBoundStore = create<StoreState>()(
         set((s) => ({ site: { ...s.site, pages: { ...s.site.pages, [page]: createSeed().site.pages[page] } } })),
       restoreThemeDefaults: () => set((s) => ({ site: { ...s.site, theme: createSeed().site.theme } })),
 
-      upsertCourse: (c) => set((s) => ({ courses: upsert(s.courses, c) })),
-      removeCourse: (id) => set((s) => ({ courses: s.courses.filter((x) => x.id !== id) })),
+      upsertCourse: (c) =>
+        set((s) => {
+          // Keep lesson sessions in step with the course's groups (new groups get upcoming sessions).
+          const now = new Date()
+          const from = new Date(now); from.setDate(from.getDate() - 14)
+          const generated = c.groups.flatMap((g) => generateSessions(g, from, 35, now))
+          return { courses: upsert(s.courses, c), sessions: mergeSessions(s.sessions, generated) }
+        }),
+      removeCourse: (id) => set((s) => ({ courses: s.courses.filter((x) => x.id !== id), sessions: s.sessions.filter((x) => x.courseId !== id) })),
       upsertVideo: (v) => set((s) => ({ videos: upsert(s.videos, v) })),
       removeVideo: (id) =>
         set((s) => ({ videos: s.videos.filter((x) => x.id !== id), playlists: s.playlists.map((p) => ({ ...p, videoIds: p.videoIds.filter((v) => v !== id) })) })),
@@ -157,7 +222,7 @@ const useBoundStore = create<StoreState>()(
         return true
       },
       upsertStudent: (st) => set((s) => ({ students: upsert(s.students, st) })),
-      removeStudent: (id) => set((s) => ({ students: s.students.filter((x) => x.id !== id) })),
+      removeStudent: (id) => set((s) => ({ students: s.students.filter((x) => x.id !== id), attendance: s.attendance.filter((a) => a.studentId !== id) })),
       setPublishable: (kind, id, patch) =>
         set((s) => {
           const stamp = { ...patch, updatedAt: new Date().toISOString() }
@@ -175,10 +240,12 @@ const useBoundStore = create<StoreState>()(
             students: s.students.map((st) => {
               if (st.id !== studentId) return st
               const groupIds = pkg ? st.builder.groupIds.slice(0, pkg.maxCourses) : st.builder.groupIds
-              return { ...st, builder: { packageId, groupIds } }
+              return { ...st, builder: { ...st.builder, packageId, groupIds } }
             }),
           }
         }),
+      setBuilderGrant: (studentId, meyosGrant) =>
+        set((s) => ({ students: s.students.map((st) => (st.id === studentId ? { ...st, builder: { ...st.builder, meyosGrant } } : st)) })),
       addBuilderGroup: (studentId, groupId) => {
         const s = get()
         const st = s.students.find((x) => x.id === studentId)
@@ -189,6 +256,8 @@ const useBoundStore = create<StoreState>()(
         const allGroups = s.courses.flatMap((c) => c.groups)
         const target = allGroups.find((g) => g.id === groupId)
         if (!target) return { ok: false, reason: 'no-package' }
+        // Shared capacity rule: the student's own current seat (if re-selecting) does not count against them.
+        if (enrolledCount(s.students, groupId, studentId) >= target.capacity) return { ok: false, reason: 'full' }
         const current = st.builder.groupIds.map((id) => allGroups.find((g) => g.id === id)).filter(Boolean) as typeof allGroups
         const sameCourse = current.find((g) => g.courseId === target.courseId)
         // Switching group within the same course is allowed (replace)
@@ -216,18 +285,40 @@ const useBoundStore = create<StoreState>()(
         const s = get()
         const st = s.students.find((x) => x.id === studentId)
         const pkg = s.site.packages.find((p) => p.id === st?.builder.packageId)
-        if (!st || !pkg || st.builder.groupIds.length !== pkg.maxCourses) return false
+        if (!st || !pkg || st.builder.groupIds.length !== pkg.maxCourses) return { ok: false, reason: 'incomplete' }
+        const allGroups = s.courses.flatMap((c) => c.groups)
+        // Capacity is enforced again at activation: seats may have been taken since the builder step.
+        for (const gid of st.builder.groupIds) {
+          const g = allGroups.find((x) => x.id === gid)
+          if (!g) return { ok: false, reason: 'incomplete' }
+          if (enrolledCount(s.students, gid, studentId) >= g.capacity) return { ok: false, reason: 'full', groupId: gid }
+        }
+        const grantCourses = st.builder.meyosGrant
+          ? st.builder.groupIds.map((gid) => allGroups.find((g) => g.id === gid)?.courseId).filter((cid): cid is string => !!cid && !!s.courses.find((c) => c.id === cid)?.meyosGrant)
+          : []
+        const method = s.site.payments.methods.find((m) => m.enabled)?.id ?? 'card'
         const today = new Date()
         const renew = new Date(today)
         renew.setMonth(renew.getMonth() + 1)
         set((state) => ({
           students: state.students.map((x) =>
             x.id === studentId
-              ? { ...x, subscription: { packageId: pkg.id, groupIds: [...st.builder.groupIds], status: 'active', startedAt: today.toISOString().slice(0, 10), renewsAt: renew.toISOString().slice(0, 10) } }
+              ? {
+                  ...x,
+                  subscription: {
+                    packageId: pkg.id,
+                    groupIds: [...st.builder.groupIds],
+                    status: 'active',
+                    startedAt: today.toISOString().slice(0, 10),
+                    renewsAt: renew.toISOString().slice(0, 10),
+                    payment: { method, simulated: true, confirmedAt: today.toISOString() },
+                    funding: { meyosGrant: st.builder.meyosGrant && grantCourses.length > 0, courseIds: grantCourses },
+                  },
+                }
               : x,
           ),
         }))
-        return true
+        return { ok: true }
       },
       renewSubscription: (studentId) =>
         set((s) => ({
@@ -261,14 +352,34 @@ const useBoundStore = create<StoreState>()(
       updateProfile: (studentId, patch) =>
         set((s) => ({ students: s.students.map((x) => (x.id === studentId ? { ...x, profile: { ...x.profile, ...patch } } : x)) })),
 
+      generateGroupSessions: (groupId, days = 28) => {
+        const s = get()
+        const group = s.courses.flatMap((c) => c.groups).find((g) => g.id === groupId)
+        if (!group) return 0
+        const generated = generateSessions(group, new Date(), days)
+        const merged = mergeSessions(s.sessions, generated)
+        const added = merged.length - s.sessions.length
+        if (added > 0) set({ sessions: merged })
+        return added
+      },
+      setSessionAttendance: (sessionId, open) =>
+        set((s) => ({
+          sessions: s.sessions.map((x) =>
+            x.id === sessionId ? { ...x, attendanceOpen: open, ...(open ? { openedAt: new Date().toISOString() } : { closedAt: new Date().toISOString() }) } : x,
+          ),
+        })),
+      setSessionStatus: (sessionId, status) =>
+        set((s) => ({ sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, status, attendanceOpen: status === 'cancelled' ? false : x.attendanceOpen } : x)) })),
+      recordCheckIn: (record) =>
+        set((s) => (s.attendance.some((r) => r.sessionId === record.sessionId && r.studentId === record.studentId) ? {} : { attendance: [...s.attendance, record] })),
+
       resetDemo: () => {
-        const fresh = createSeed()
-        set({ ...fresh, role: 'visitor', currentTeacherId: 't-bekzod', currentStudentId: 's-aziz' })
+        set(freshState())
       },
     }),
     {
       name: 'ilmora-demo-v1',
-      version: 6,
+      version: STORE_VERSION,
       // Object URLs from local uploads are transient — never persisted.
       storage: createJSONStorage(() => localStorage, { replacer: (key, value) => (key === 'previewUrl' ? undefined : value) }),
       partialize: (s) => {
@@ -277,8 +388,10 @@ const useBoundStore = create<StoreState>()(
         return rest as StoreState
       },
       migrate: (persisted, version) => {
-        if (version !== 6) return { ...createSeed(), lang: 'uz', role: 'visitor', currentTeacherId: 't-bekzod', currentStudentId: 's-aziz' } as unknown as StoreState
-        return persisted as StoreState
+        if (version === STORE_VERSION) return persisted as StoreState
+        // v6 (first public release) migrates in place; anything older predates the demo and is reset to the seed.
+        if (version === 6) return migrateV6toV7(persisted as Record<string, unknown>) as unknown as StoreState
+        return freshState() as unknown as StoreState
       },
     },
   ),
