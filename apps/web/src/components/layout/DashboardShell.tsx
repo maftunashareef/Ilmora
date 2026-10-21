@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useLocation } from '@/lib/router'
 import { useT } from '../../i18n/useT'
@@ -30,9 +31,8 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
     <div className="flex min-h-screen bg-ivory">
       <a href="#dash-main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-control focus:bg-forest focus:px-4 focus:py-2 focus:text-ivory">Skip to content</a>
       <aside className="hidden w-[264px] shrink-0 flex-col border-r border-charcoal/10 bg-paper/70 px-4 py-6 lg:flex">
-        <Link to="/" className="mb-8 flex items-center gap-2.5 px-2" aria-label={site.brand.name}>
-          <span className="flex h-8 w-8 items-center justify-center rounded-[7px] bg-forest text-champagne"><span className="font-display text-lg leading-none">I</span></span>
-          <span className="font-display text-[20px] tracking-[0.12em] text-charcoal">{site.brand.name}</span>
+        <Link to="/" className="mb-8 flex items-center px-2" aria-label={site.brand.name}>
+          <Image src="/brand/ilmora-logo-header.png" alt={site.brand.name} width={925} height={432} sizes="104px" className="h-12 w-auto rounded-[8px] ring-1 ring-charcoal/10" />
         </Link>
         <div className="mb-4 px-2">
           <div className="eyebrow">{title}</div>

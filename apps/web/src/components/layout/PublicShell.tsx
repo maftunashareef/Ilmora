@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from '@/lib/router'
 import { useT } from '../../i18n/useT'
@@ -46,9 +47,16 @@ export function PublicShell() {
         )}
       >
         <div className="container-x flex h-[68px] items-center justify-between gap-6">
-          <Link to="/" className="flex items-center gap-2.5" aria-label={site.brand.name}>
-            <span className={cx('flex h-8 w-8 items-center justify-center rounded-[7px] transition-colors duration-500', overlay ? 'bg-ivory/15 text-champagne ring-1 ring-ivory/30' : 'bg-forest text-champagne')}><span className="font-display text-lg leading-none">I</span></span>
-            <span className={cx('font-display text-[22px] tracking-[0.12em] transition-colors duration-500', overlay ? 'text-ivory' : 'text-charcoal')}>{site.brand.name}</span>
+          <Link to="/" className="flex items-center" aria-label={site.brand.name}>
+            <Image
+              src="/brand/ilmora-logo-header.png"
+              alt={site.brand.name}
+              width={925}
+              height={432}
+              priority
+              sizes="(min-width: 640px) 112px, 96px"
+              className={cx('h-11 w-auto rounded-[8px] transition-[box-shadow,opacity] duration-500 sm:h-[52px]', overlay ? 'shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)] ring-1 ring-ivory/35' : 'ring-1 ring-charcoal/10')}
+            />
           </Link>
           <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
             {nav.map((n) => (
