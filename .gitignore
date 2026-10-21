@@ -51,3 +51,6 @@ Thumbs.db
 infra/data
 infra/backups/*.dump
 infra/backups/*.sql.gz
+
+# Vercel CLI project link (per machine)
+.vercel

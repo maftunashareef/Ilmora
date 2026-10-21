@@ -22,7 +22,8 @@ export const EnvSchema = z.object({
   APP_ROLE: z.enum(['api', 'worker', 'all']).default('all'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
 
-  PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
+  /** Public API origin for links and provider callbacks. Render injects RENDER_EXTERNAL_URL, so it needs no manual value there. */
+  PUBLIC_API_URL: z.string().url().default(process.env.RENDER_EXTERNAL_URL ?? 'http://localhost:4000'),
   PUBLIC_WEB_URL: z.string().url().default('http://localhost:3000'),
   /** Comma-separated exact origins allowed by CORS (scheme + host + port). No wildcards in production. */
   CORS_ORIGINS: csv,
