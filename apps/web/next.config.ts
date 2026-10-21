@@ -4,7 +4,10 @@ import path from 'node:path'
 
 const withBundleAnalyzer = bundleAnalyzer({ enabled: process.env.ANALYZE === 'true' })
 
+/** '' or '/' means the browser reaches the API through this host (rewrites below); the CSP then needs no extra origin. */
+const SAME_ORIGIN_API = process.env.NEXT_PUBLIC_API_URL === '' || process.env.NEXT_PUBLIC_API_URL === '/'
 const apiOrigin = (() => {
+  if (SAME_ORIGIN_API) return ''
   try {
     return new URL(process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000').origin
   } catch {
@@ -39,7 +42,7 @@ const securityHeaders = [
       `img-src 'self' data: blob: ${remotePatterns.map((p) => `${p.protocol}://${p.hostname}${p.port ? `:${p.port}` : ''}`).join(' ')}`.trim(),
       "font-src 'self' data:",
       "media-src 'self' blob:",
-      `connect-src 'self' ${apiOrigin}`,
+      `connect-src 'self' ${apiOrigin}`.trim(),
       "worker-src 'self' blob:",
       "frame-ancestors 'none'",
       "base-uri 'self'",
@@ -49,13 +52,20 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  // Vercel builds its own output; the standalone bundle is for the Docker image.
+  output: process.env.VERCEL ? undefined : 'standalone',
   outputFileTracingRoot: path.join(import.meta.dirname, '../../'),
   reactStrictMode: true,
   poweredByHeader: false,
   images: { remotePatterns, formats: ['image/avif', 'image/webp'] },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }]
+  },
+  /** Same-origin API mode (NEXT_PUBLIC_API_URL='/'): proxy the browser's API calls to API_INTERNAL_URL. */
+  async rewrites() {
+    const target = process.env.API_INTERNAL_URL?.replace(/\/$/, '')
+    if (!SAME_ORIGIN_API || !target) return []
+    return [{ source: '/v1/:path*', destination: `${target}/v1/:path*` }]
   },
 }
 

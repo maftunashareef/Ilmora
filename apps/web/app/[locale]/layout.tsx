@@ -17,6 +17,8 @@ export const viewport: Viewport = { themeColor: '#163C35', width: 'device-width'
 
 /** Rendered per request (site + catalog come from the API with a 60 s data cache); nothing is prerendered at build time. */
 export const dynamic = 'force-dynamic'
+// A sleeping free-tier API can take up to a minute to answer its first request; do not cut the render short before that.
+export const maxDuration = 60
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params

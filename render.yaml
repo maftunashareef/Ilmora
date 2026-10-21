@@ -1,0 +1,67 @@
+# Render Blueprint — API + worker in one free web service, plus Redis (Key Value) for queues, throttling and live events.
+# PostgreSQL lives on Neon (free tier): paste its connection string into DATABASE_URL when applying the blueprint.
+# After the first successful deploy set SEED_ON_DEPLOY=false so later deploys never overwrite catalog edits.
+services:
+  - type: web
+    name: ilmora-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --no-audit --no-fund && npm run build:shared && npm run build:api && npm run db:migrate && if [ "$SEED_ON_DEPLOY" = "true" ]; then npm run db:seed; fi
+    startCommand: node apps/api/dist/main.js
+    healthCheckPath: /health/ready
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_ROLE
+        value: all
+      # Browser traffic arrives through the Vercel proxy and Render's load balancer (two hops).
+      - key: TRUST_PROXY
+        value: "2"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: REDIS_MODE
+        value: redis
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ilmora-redis
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: OTP_JOB_ENCRYPTION_KEY
+        generateValue: true
+      # No SMS contract yet: messages are logged by the service, never sent.
+      - key: SMS_PROVIDER
+        value: console
+      - key: SMS_ALLOW_CONSOLE_IN_PRODUCTION
+        value: "true"
+      - key: OTP_DEV_ECHO
+        value: "false"
+      - key: DEFAULT_TENANT_SLUG
+        value: ilmora
+      - key: SCHEDULE_TIMEZONE
+        value: Asia/Tashkent
+      - key: LOG_LEVEL
+        value: info
+      - key: SEED_DEMO
+        value: "true"
+      - key: SEED_ON_DEPLOY
+        value: "true"
+      # Filled in the Render dashboard when the blueprint is applied.
+      - key: DATABASE_URL
+        sync: false
+      - key: PUBLIC_API_URL
+        sync: false
+      - key: PUBLIC_WEB_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+  - type: keyvalue
+    name: ilmora-redis
+    plan: free
+    region: frankfurt
+    # BullMQ requires that Redis never evicts keys.
+    maxmemoryPolicy: noeviction
+    ipAllowList: []

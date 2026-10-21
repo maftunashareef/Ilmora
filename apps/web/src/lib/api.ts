@@ -9,10 +9,12 @@ export class ApiError extends Error {
   }
 }
 
-export const PUBLIC_API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '')
+const RAW_PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'
+/** Empty string = same origin: the web host proxies `/v1` to the API (next.config.ts rewrites), so the refresh cookie stays first-party. */
+export const PUBLIC_API_URL = RAW_PUBLIC_API_URL === '/' || RAW_PUBLIC_API_URL === '' ? '' : RAW_PUBLIC_API_URL.replace(/\/$/, '')
 const PREFIX = '/v1'
 
-export const apiBase = (): string => (typeof window === 'undefined' ? (process.env.API_INTERNAL_URL ?? PUBLIC_API_URL).replace(/\/$/, '') : PUBLIC_API_URL)
+export const apiBase = (): string => (typeof window === 'undefined' ? (process.env.API_INTERNAL_URL ?? (PUBLIC_API_URL || 'http://localhost:4000')).replace(/\/$/, '') : PUBLIC_API_URL)
 
 let accessToken: string | null = null
 const tokenListeners = new Set<(t: string | null) => void>()

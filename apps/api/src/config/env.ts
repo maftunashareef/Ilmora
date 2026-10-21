@@ -60,6 +60,8 @@ export const EnvSchema = z.object({
   OTP_DEV_ECHO: bool(false),
 
   SMS_PROVIDER: z.enum(['console', 'eskiz', 'http']).default('console'),
+  /** Demo/staging only: lets the console provider run in production when no SMS contract exists yet (messages are logged, not sent). */
+  SMS_ALLOW_CONSOLE_IN_PRODUCTION: bool(false),
   SMS_SENDER: z.string().default('ILMORA'),
   ESKIZ_BASE_URL: z.string().url().default('https://notify.eskiz.uz/api'),
   ESKIZ_EMAIL: z.string().optional(),
@@ -125,7 +127,7 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     if (env.CORS_ORIGINS.length === 0) throw new Error('CORS_ORIGINS must list the web origin(s) in production')
     if (env.CORS_ORIGINS.some((o) => o.includes('*'))) throw new Error('CORS_ORIGINS may not contain wildcards in production')
     if (!env.COOKIE_SECURE) throw new Error('COOKIE_SECURE must be true in production')
-    if (env.SMS_PROVIDER === 'console') throw new Error('SMS_PROVIDER=console is not allowed in production')
+    if (env.SMS_PROVIDER === 'console' && !env.SMS_ALLOW_CONSOLE_IN_PRODUCTION) throw new Error('SMS_PROVIDER=console is not allowed in production unless SMS_ALLOW_CONSOLE_IN_PRODUCTION=true (demo/staging without an SMS contract)')
     if (env.REDIS_MODE !== 'redis') throw new Error('REDIS_MODE=off is a development convenience and is not allowed in production')
   }
   return env
