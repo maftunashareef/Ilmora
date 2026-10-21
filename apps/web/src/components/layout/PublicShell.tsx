@@ -49,8 +49,8 @@ export function PublicShell() {
         <div className="container-x flex h-[68px] items-center justify-between gap-6">
           <Link to="/" className="relative flex h-11 items-center sm:h-[52px]" aria-label={site.brand.name}>
             {/* Transparent logo: green/gold strokes on the light header, ivory/gold strokes over the dark hero (cross-faded, no card). */}
-            <Image src="/brand/ilmora-logo-header.png" alt={site.brand.name} width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-0' : 'opacity-100')} />
-            <Image src="/brand/ilmora-logo-header-light.png" alt="" aria-hidden width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('absolute inset-y-0 left-0 h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-100' : 'opacity-0')} />
+            <Image src="/brand/ilmora-logo-mark.png" alt={site.brand.name} width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-0' : 'opacity-100')} />
+            <Image src="/brand/ilmora-logo-mark-light.png" alt="" aria-hidden width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('absolute inset-y-0 left-0 h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-100' : 'opacity-0')} />
           </Link>
           <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
             {nav.map((n) => (
