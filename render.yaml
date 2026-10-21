@@ -10,7 +10,8 @@ services:
     runtime: node
     plan: free
     region: frankfurt
-    buildCommand: npm ci --no-audit --no-fund && npm run build:shared && npm run build:api
+    # --include=dev: NODE_ENV=production would otherwise skip the build tools (tsup, nest, prisma, tsx) and the start script needs prisma/tsx too.
+    buildCommand: npm ci --include=dev --no-audit --no-fund && npm run build:shared && npm run build:api
     startCommand: bash infra/render-start.sh
     healthCheckPath: /health/ready
     autoDeploy: true
