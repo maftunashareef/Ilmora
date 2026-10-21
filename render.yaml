@@ -60,8 +60,9 @@ services:
         value: info
       - key: SEED_DEMO
         value: "true"
+      # The first deploy of a new environment runs with "true"; it is "false" since the live demo was seeded on 2026-10-21.
       - key: SEED_ON_DEPLOY
-        value: "true"
+        value: "false"
   - type: keyvalue
     name: ilmora-redis
     plan: free
