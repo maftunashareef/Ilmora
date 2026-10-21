@@ -24,6 +24,7 @@ export function proxy(req: NextRequest) {
   return NextResponse.redirect(url, 307)
 }
 
+// `v1` is the same-origin API proxy (next.config.ts rewrites); it must never receive a locale prefix.
 export const config = {
-  matcher: ['/((?!api|_next|brand|media|favicon.ico|robots.txt|sitemap.xml|manifest.webmanifest|.*\\.[a-zA-Z0-9]+$).*)'],
+  matcher: ['/((?!api|v1|_next|brand|media|favicon.ico|robots.txt|sitemap.xml|manifest.webmanifest|.*\\.[a-zA-Z0-9]+$).*)'],
 }
