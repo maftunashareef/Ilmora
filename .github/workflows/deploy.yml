@@ -1,0 +1,132 @@
+name: Deploy
+
+# main → images tagged with the commit SHA (immutable) → staging deploy automatically.
+# Production deploys the SAME digests but waits for the "production" environment approval.
+# Required repository secrets/variables (per environment): DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PATH,
+# PUBLIC_API_URL, PUBLIC_WEB_URL. The server holds infra/.env.prod; the workflow only updates image digests in it.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_API: ghcr.io/${{ github.repository_owner }}/ilmora-api
+  IMAGE_WEB: ghcr.io/${{ github.repository_owner }}/ilmora-web
+
+jobs:
+  build-push:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      api_digest: ${{ steps.api.outputs.digest }}
+      migrator_digest: ${{ steps.migrator.outputs.digest }}
+      web_digest: ${{ steps.web.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: API image
+        id: api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: api
+          push: true
+          tags: ${{ env.IMAGE_API }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Migrator image
+        id: migrator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: migrator
+          push: true
+          tags: ${{ env.IMAGE_API }}-migrator:${{ github.sha }}
+          cache-from: type=gha
+      - name: Web image
+        id: web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          target: web
+          push: true
+          tags: ${{ env.IMAGE_WEB }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ vars.PUBLIC_WEB_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: build-push
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ vars.PUBLIC_WEB_URL }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Roll out (migrate → app containers → smoke)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -eu
+            cd "${{ secrets.DEPLOY_PATH }}"
+            git fetch --depth=1 origin ${{ github.sha }} && git checkout -q ${{ github.sha }}
+            sed -i "s#^API_IMAGE=.*#API_IMAGE=${{ env.IMAGE_API }}@${{ needs.build-push.outputs.api_digest }}#" infra/.env.prod
+            sed -i "s#^API_IMAGE_MIGRATOR=.*#API_IMAGE_MIGRATOR=${{ env.IMAGE_API }}-migrator@${{ needs.build-push.outputs.migrator_digest }}#" infra/.env.prod
+            sed -i "s#^WEB_IMAGE=.*#WEB_IMAGE=${{ env.IMAGE_WEB }}@${{ needs.build-push.outputs.web_digest }}#" infra/.env.prod
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            sh infra/scripts/deploy.sh
+
+  deploy-production:
+    name: Deploy to production (approval required)
+    needs: [build-push, deploy-staging]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_WEB_URL }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Roll out the staged digests
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -eu
+            cd "${{ secrets.DEPLOY_PATH }}"
+            cp infra/.env.prod infra/.env.prod.previous
+            git fetch --depth=1 origin ${{ github.sha }} && git checkout -q ${{ github.sha }}
+            sed -i "s#^API_IMAGE=.*#API_IMAGE=${{ env.IMAGE_API }}@${{ needs.build-push.outputs.api_digest }}#" infra/.env.prod
+            sed -i "s#^API_IMAGE_MIGRATOR=.*#API_IMAGE_MIGRATOR=${{ env.IMAGE_API }}-migrator@${{ needs.build-push.outputs.migrator_digest }}#" infra/.env.prod
+            sed -i "s#^WEB_IMAGE=.*#WEB_IMAGE=${{ env.IMAGE_WEB }}@${{ needs.build-push.outputs.web_digest }}#" infra/.env.prod
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            sh infra/scripts/deploy.sh

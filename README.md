@@ -1,95 +1,78 @@
-# ILMORA — demo prototype
+# ILMORA
 
-A luxurious, responsive education-platform prototype for Tashkent. ILMORA gathers regular courses from different education centers into one monthly subscription (Duo = 2 courses, Trio = 3 courses).
+One monthly subscription across education centers in Tashkent: students pick a Duo (2 courses) or Trio (3 courses) package, join specific groups without schedule conflicts, pay once, and check in to every lesson with a per-session QR code. Three workspaces: Super Admin (site template, catalog, people, finance), Teacher Studio (courses, groups, content, attendance) and the Student workspace.
 
-**Everything here is sample data.** Centers, teachers, courses, prices, schedules, students and materials are fictional. There is no backend, no payment and no real authentication.
+> The repository started as a React/Vite prototype with all state in `localStorage`. It is now a production architecture: **Next.js 16** web app, **NestJS 12** API, **Prisma 7 / PostgreSQL**, **Redis + BullMQ**, Payme and Click adapters, Docker/nginx deployment and GitHub Actions CI/CD. The sample catalog (fictional centers, teachers, courses) is kept as seed data.
 
-## Run
+## Repository layout
+
+```
+apps/web        Next.js app (App Router, locale routes /uz /ru /en, SEO, dashboards)
+apps/api        NestJS API + worker (Prisma schema, migrations, seed, tests)
+packages/shared Domain types, pure rules (access, schedule, capacity, sessions, check-in), UZ/RU/EN dictionary, sample data
+infra/          docker-compose.prod.yml, nginx, redis.conf, backup/restore/deploy scripts
+docs/           deployment runbook, payment protocol references, legal notes
+.github/        CI (typecheck, lint, tests with Postgres/Redis services, builds, migration drift check) and deploy workflows
+```
+
+## Local development
+
+Requirements: Node 24, PostgreSQL 16+ (any host), optionally Redis 7. Windows and macOS/Linux both work.
 
 ```bash
 npm install
-npm run dev
+npm run build:shared                       # builds @ilmora/shared (dist used by both apps)
+cp apps/api/.env.example apps/api/.env     # set DATABASE_URL; for a laptop without Redis set REDIS_MODE=off
+npm run db:migrate                         # prisma migrate deploy
+npm run db:seed                            # tenant, site template, packages, catalog (+ demo users outside production)
+npm run dev                                # shared (watch) + api :4000 + web :3000
 ```
 
-Open http://localhost:5173. `npm run build` produces a static bundle in `dist/`.
+Web: http://localhost:3000 (redirects to `/uz`). API: http://localhost:4000/v1, health at `/health/ready`.
 
-Stack: React 19 + TypeScript + Vite + Tailwind v4 + zustand (persisted to `localStorage`) + react-three-fiber.
+Sign-in is login + password. Registration offers two roles only, Student and Teacher; a new Teacher gets an empty public profile (no center until an admin assigns one) and lands in the Teacher Studio, a Student lands in the Student workspace. The phone + one-time-code endpoints remain in the API (`/v1/auth/otp/*`) for phone verification but the login screen no longer uses them.
 
-## Exploring the demo
+**Super Admin** is held by exactly one *owner* account per tenant and is never offered at registration, never granted through the API, and never assigned to "the first user". Designate it once on the server (the password is typed into a hidden prompt, not passed as an argument):
 
-Use the **Demo role** switcher in the header (Visitor / Student / Teacher / Super Admin). No login is needed. Each role has its own workspace:
+```bash
+npm run owner:setup -- --login <your-login>          # local / staging checkout
+docker compose -f infra/docker-compose.prod.yml exec api node dist/cli/owner-setup.js --login <your-login>   # production container
+```
 
-| Role | Workspace | What it controls |
-| --- | --- | --- |
-| Super Admin | `/admin` | Page sections & order, theme (colors, fonts, radius), brand copy, navigation, features, course templates, content status/featured, people, centers & categories, packages, permissions, announcements & FAQ |
-| Teacher | `/teacher` | Subjects & courses, video lessons, playlists, guides & resources, groups & schedule, channel customization, content visibility & access |
-| Student | `/student` | Overview & upcoming lessons, subscription, courses & groups, weekly timetable, accessible videos, guides & downloads, saved items, profile |
+The command first lists every account that carries privileged roles, refuses to replace a configured owner without `--replace`, and only strips roles from other accounts when `--demote-others` is passed. Admin claims are derived from the owner designation at every sign-in and refresh, so a roles column alone can never grant them.
 
-“Reset demo” (inside the role switcher) restores all defaults.
+Demo accounts created by the seed (non-production only): students `aziz`, `jasur`, … (ids `s-*`), teachers `dilnoza`, `bekzod`, … (ids `t-*`). They get a password only when `SEED_DEMO_PASSWORD` is set for the seed run; there is no default password.
+
+`REDIS_MODE=off` is a development convenience: rate limits become per-process, SMS is delivered inline, no background jobs or cross-replica live updates. It is refused in production.
+
+## Tests and checks
+
+```bash
+npm run typecheck     # all workspaces
+npm run lint          # oxlint
+npm test              # shared unit tests + API tests (database-backed suites need TEST_DATABASE_URL)
+```
+
+API test suites (`apps/api/test`) cover: Payme create/perform/cancel with concurrent `PerformTransaction` calls settling exactly once, Click prepare/complete idempotency, capacity races on the last seat, tenant isolation of the Prisma extension, refresh-token rotation with reuse detection, attendance tokens/enrollment/open-window/idempotency rules, concurrent QR scans, and exclusive daily job runs.
 
 ## Key behaviours
 
-- **Three languages** — Uzbek Latin (default), Russian, English. UI strings live in `src/i18n/translations.ts`; all content is stored as `{ uz, ru, en }` objects. Switching language never resets selections.
-- **Package builder** (`/builder`) — enforces the package limit, blocks duplicate courses and detects schedule conflicts between groups. The monthly total is the sum of selected course prices in so‘m.
-- **Subscription preview & activation** (`/preview`) — activation is simulated; the student workspace is generated from the selections.
-- **Public / Private workflow** — every course, video, playlist and resource carries `status` (draft / published / archived), `visibility` (public / private) and an `audience` (students and groups). Publishing requires an explicit visibility choice. Drafts stay internal. Private items show an access-denied state when opened directly by someone not in the audience. Rules live in `src/lib/access.ts` so a server can reuse them.
-- **Admin templates propagate** — section toggles/order, theme, brand copy, nav, packages, permissions and card templates are read from one shared `site` config in the store.
-- **Teacher editing boundaries** — Super Admin permissions lock price, schedule, channel and direct publishing in Teacher Studio; without direct publishing, teachers submit for review and admins approve in *Content & featured*.
-- **Uploads** — local `URL.createObjectURL` previews with honest metadata. Files are never sent anywhere; previews are lost on reload (the UI says so).
-- **Hero film** — the home hero is a full-viewport, muted, looping background video (`public/media/ilmora-commercial.mp4`, supplied) under a transparent header that turns ivory on scroll. It pauses offscreen, has a visible pause/play control, drifts with a subtle parallax, and falls back to a poster or brand gradient when the file is missing or reduced motion is on. The URL is editable in *Super Admin → Theme & typography → Media sources*.
-- **Motion system** (novator.com.uz-inspired) — scroll reveals with staggered delays (`.reveal`, `.reveal-stagger`, left/right/scale/blur variants, driven by `RevealManager`), word-by-word headline entrance, count-up stats, a partner/category marquee ticker (pauses on hover), horizontal snap track for teachers, page transitions on route change, image zoom and arrow nudges on hover, floating decorative rings. Everything is disabled under `prefers-reduced-motion`.
-- **3D** — Bazis furniture-assembly preview scene, lazy-loaded, paused offscreen, static SVG fallback without WebGL or when reduced motion is on.
-- **Scroll video** — the furniture section is a sticky, scroll-scrubbed video. Scrolling down advances, up reverses, stopping holds the frame; native scrolling is preserved.
+* **Tenant isolation** — every tenant-scoped Prisma query is filtered by the request's tenant through a client extension (fails closed without a context); provider callbacks resolve the tenant from the payment they reference.
+* **Authentication** — phone + OTP (argon2-hashed, attempt-limited, per-phone window), 15-minute JWT access tokens, rotating refresh sessions stored as hashes in an HTTP-only `SameSite=Lax` cookie scoped to `/v1/auth`; reuse of a rotated token revokes the family; CSRF defence through the `X-Requested-With` header + Origin allow-list.
+* **Enrollment** — the builder enforces package limits, duplicates, schedule conflicts and capacity client-side for immediate feedback; the API re-validates and, at checkout, holds seats (`PENDING` enrollments) inside a row-locked transaction, so the last seat cannot be sold twice. Holds expire with the payment (24 h).
+* **Payments** — Payme JSON-RPC and Click SHOP API adapters implement the official protocols (`docs/payments/`), settle through one row-locked path that activates the subscription, posts a balanced ledger journal and writes an outbox event for the receipt. Repeated/concurrent callbacks are idempotent. Reconciliation (finance admin) shows provider vs. payment vs. ledger state and can query Click independently; Payme has no pull endpoint (it calls our `GetStatement`).
+* **Lessons & attendance** — sessions are materialised daily (00:30 Asia/Tashkent, idempotent, never marks anyone present). Teachers open attendance → a per-session token (hashed at rest, rotated on each QR view, void on close) is encoded in the QR URL `/attend/<sessionId>?t=…`. The student's phone opens ILMORA, signs in if needed, and the page performs an authenticated `POST /v1/attendance/check-in`; duplicates return the original record. Teachers see check-ins live (SSE over Redis pub/sub) and can correct records with a mandatory reason; everything is audited. Scanning proves the account, not physical presence.
+* **Content access** — courses, videos, playlists and resources carry status/visibility/audience; the server enforces the same rule the UI shows.
+* **Localisation & SEO** — `/uz`, `/ru`, `/en` routes with hreflang alternates, canonical URLs, Open Graph, sitemap, robots (private areas disallowed), JSON-LD (Course, Person, Organization — factual data only). Private dashboards are `noindex`.
 
-## Furniture section: scroll-driven 3D story
+## Deployment
 
-The Bazis section is a bounded sticky "scroll film". By default it shows a scroll-scrubbed 3D sequence (`FurnitureAssembly`): a blueprint wireframe of a chair draws in, dimension lines appear, cut boards and material swatches land on the bench, dowels line up, the boards lift into a 3D model, and the finished chair is varnished under a warm light. Scrolling down advances, scrolling up reverses, stopping holds the frame; a six-stage indicator follows the course curriculum. Without WebGL or with reduced motion it falls back to a 2D line illustration.
+See `docs/deployment.md` (single Tashkent VPS with Docker Compose, nginx, Let's Encrypt, backups, rollback, availability statement) and `infra/.env.prod.example` for every variable. Images are built by CI from `apps/api/Dockerfile` and `apps/web/Dockerfile`.
 
-If a licensed clip is set as the furniture video URL in *Super Admin → Theme → Media sources* (or dropped in as `public/media/furniture-scroll.mp4` and configured), the section scrubs that video instead.
+## Legal and data-residency notes
 
-Course, teacher and video imagery is generated (deterministic abstract covers) — no stock photos are bundled. Admins and teachers can set image URLs or upload local previews.
+`docs/compliance/uz-personal-data-localization.md` summarises the Uzbek personal-data rules that affect hosting (as read on lex.uz on 2026-10-18) and lists the questions a lawyer must confirm. The document is not legal advice and the repository makes no compliance claim.
 
-## Enrollment, capacity, lesson sessions and QR attendance
+## Brand assets
 
-- **Payment (card only)** — the subscription preview offers the payment methods enabled in `site.payments.methods` (seed: only `card`; `payme`, `click`, `cash` are defined but disabled so they can be switched on later). Payment stays simulated: no card number, expiry or CVV is ever requested or stored. The method is saved on the subscription as `payment: { method, simulated: true, confirmedAt }`.
-- **Meyos grant** — when the selection contains a grant-eligible course (`course.meyosGrant`, seed: Bazis), the preview shows the option labelled exactly “Meyos granti orqali” beside the payment information. It is a separate grant-funding selection, not a payment method: it is stored with the enrollment (`funding.meyosGrant`, `funding.courseIds`) and shown in the subscription summary, but it does not change the amount due or mark anything as paid. No eligibility rules, approvals or discounts are invented. Admins toggle eligibility per course in the course form.
-- **Capacity** — `group.capacity` is teacher-defined (positive integer). Enrollment is derived from active subscriptions (`src/lib/enrollment.ts`), so the roster and the “12 / 20 students” counts always agree. The builder, course page, activation step and admin student editor all refuse a full group; a seat frees automatically when a student cancels. Reducing capacity below the current enrollment is rejected with an explanation, and a group with enrolled students cannot be deleted. Persisted groups from the first release are migrated with fallback capacity = previous `seats` (or 12), never below current enrollment.
-- **Group details** (Teacher Studio → Groups → Details) — course, teacher, schedule, enrolled/capacity, the roster table (display name, district, package, start date, attendance), and the group's lesson sessions (upcoming / previous). Teachers only see their own groups.
-- **Lesson sessions** — every scheduled occurrence is a `LessonSession` with a stable id (`ses-<group>-<date>`), date/time, status (scheduled / completed / cancelled), `attendanceOpen` and its own token. Sessions are generated from the group's weekly schedule (two weeks back, three ahead in the seed; “Generate the next 4 weeks” adds more without duplicating). Each session shows its own QR code (`qrcode` library) encoding `/attend/<sessionId>?t=<token>`, base-path aware for GitHub Pages.
-- **QR check-in** — opening the link runs `localAttendanceService.checkIn` (`src/services/attendance.ts`): it validates the session and token, requires an established identity, checks group enrollment, requires attendance to be open, and records one timestamped check-in per student and session. Repeated scans return the original record unchanged. States: success, already recorded, closed, invalid link, not enrolled. Teachers open/close attendance and see who checked in; students see their own attendance under Student workspace → Attendance.
-- **Honest demo limitation** — without a backend, identity is the demo student active in *this* browser (the check-in page asks you to pick it), and separate devices do not share localStorage, so a phone scan cannot reach the teacher's browser. The service boundary is where server-side identity, token validation, enrollment checks and shared persistence would plug in.
-
-Unit tests (`npm test`, vitest) cover the capacity rules, session generation and the check-in validation/idempotency.
-
-## Deploy (public link)
-
-The source lives in the private repository `maftunashareef/Ilmora`. The compiled site is published to GitHub Pages from the public repository `maftunashareef/ilmora-demo`:
-
-```bash
-npm run deploy
-```
-
-This type-checks, builds with `--mode pages` (base path `/ilmora-demo/`), adds the SPA `404.html` fallback, and force-pushes `dist/` to that repository. Live URL: https://maftunashareef.github.io/ilmora-demo/
-
-Root-relative media URLs in the demo data are resolved through `src/lib/url.ts` so they work under the sub-path; the router uses the same base.
-
-## Privacy & security notes
-
-- Demo students are stored with a display name and district only. The center-inquiry form is never persisted.
-- Demo roles and visibility checks illustrate the workflow; they are not protection for confidential files. Production needs server-side authorization.
-
-## Structure
-
-```
-src/
-  types/            domain types
-  data/seed.ts      sample content + default site configuration
-  store/            zustand store (persisted), selectors, viewer/access helpers
-  lib/              access rules, schedule maths, formatting, theme applier
-  i18n/             UZ / RU / EN dictionary + hooks
-  components/       UI kit, layouts, course cards, visibility control, uploads, 3D, scroll video
-  pages/public      home & template pages, courses, teachers/channels, content, builder, preview, FAQ
-  pages/admin       Super Admin workspace
-  pages/teacher     Teacher Studio
-  pages/student     Student workspace
-```
+`apps/web/public/brand/` holds the official logo (`ilmora-logo.png`, untouched), a trimmed variant, the Open Graph image (the logo on its own cream background) and icons cropped from the monogram. None of them were redrawn.

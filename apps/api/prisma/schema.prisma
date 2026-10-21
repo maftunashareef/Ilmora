@@ -1,0 +1,961 @@
+// ILMORA production schema (PostgreSQL, Prisma 7).
+//
+// Conventions
+// - Every business row carries `tenantId`; services always scope queries by it (see TenantScope in src/infra/prisma).
+// - Soft-deletable entities carry `deletedAt`; the Prisma extension excludes them from normal queries.
+// - Money: integer amounts in the smallest unit (tiyin) + explicit ISO currency. Never floats.
+// - Timestamps are stored in UTC (timestamptz); local scheduling uses Asia/Tashkent in application code.
+// - Financial and attendance history is append-only: corrections and reversals create new rows, they never rewrite settled ones.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  PLATFORM_ADMIN
+  FINANCE_ADMIN
+  CENTER_ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum Lang {
+  uz
+  ru
+  en
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum Level {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum SubscriptionStatus {
+  DRAFT
+  PENDING_PAYMENT
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum EnrollmentStatus {
+  /// Seat held while the first payment is pending (counts against capacity until the payment expires)
+  PENDING
+  ACTIVE
+  CANCELLED
+  COMPLETED
+}
+
+enum SessionStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  EXCUSED
+}
+
+enum AttendanceMethod {
+  QR
+  MANUAL
+}
+
+enum PaymentProvider {
+  PAYME
+  CLICK
+  MANUAL
+}
+
+enum PaymentState {
+  PENDING
+  PAID
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
+enum TransactionState {
+  CREATED
+  PERFORMED
+  CANCELLED
+  FAILED
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerAccountType {
+  PROVIDER_CLEARING
+  SUBSCRIPTION_REVENUE
+  CENTER_PAYABLE
+  STUDENT_CREDIT
+  REFUNDS
+  ADJUSTMENTS
+}
+
+enum JournalKind {
+  PAYMENT_SETTLED
+  PAYMENT_CANCELLED
+  PAYMENT_REFUNDED
+  MANUAL_ADJUSTMENT
+  REVERSAL
+}
+
+enum OtpPurpose {
+  LOGIN
+  PHONE_CHANGE
+}
+
+enum VideoSourceKind {
+  LINK
+  UPLOAD
+}
+
+enum ResourceKind {
+  PDF
+  DOC
+  SHEET
+  LINK
+  OTHER
+}
+
+enum JobRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum SmsStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+// ───────────────────────────── Tenancy & identity ─────────────────────────────
+
+model Tenant {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  name        String
+  defaultLang Lang      @default(uz)
+  /** Public web origin used in links (attendance URLs, receipts), e.g. https://ilmora.uz */
+  webOrigin   String
+  /** The one account that holds Super Admin. Set only by the owner-setup command; unique, so a user owns at most one tenant. */
+  ownerUserId String?   @unique
+  owner       User?     @relation("TenantOwner", fields: [ownerUserId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  siteConfig      SiteConfig?
+  users           User[]
+  centers         Center[]
+  categories      Category[]
+  teachers        TeacherProfile[]
+  subjects        Subject[]
+  courses         Course[]
+  groups          Group[]
+  videos          Video[]
+  playlists       Playlist[]
+  resources       Resource[]
+  packages        Package[]
+  subscriptions   Subscription[]
+  enrollments     Enrollment[]
+  sessions        LessonSession[]
+  attendance      AttendanceRecord[]
+  payments        Payment[]
+  transactions    PaymentTransaction[]
+  journals        LedgerJournal[]
+  ledgerEntries   LedgerEntry[]
+  outbox          OutboxEvent[]
+  auditEvents     AuditEvent[]
+  otpCodes        OtpCode[]
+  refreshSessions RefreshSession[]
+  smsMessages     SmsMessage[]
+  receipts        Receipt[]
+  inquiries       CenterInquiry[]
+  savedItems      SavedItem[]
+  callbackLogs    ProviderCallbackLog[]
+}
+
+/// Template-driven site configuration (sections, theme, nav, features, permissions, media…) edited by Super Admin.
+/// Stored as validated JSON (zod schema in src/modules/site); packages live in their own table for referential integrity.
+model SiteConfig {
+  tenantId    String   @id
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  data        Json
+  version     Int      @default(1)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+model User {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+  /** Normalized E.164 phone (+998XXXXXXXXX), optional; unique per tenant when present. */
+  phoneE164       String?
+  phoneVerifiedAt DateTime?
+  /** Sign-in name chosen at registration (normalized to lower case); unique per tenant. */
+  login           String?
+  /** argon2id hash. Null for accounts that have only ever signed in with a one-time code. */
+  passwordHash    String?
+  displayName     String
+  district        String?
+  preferredLang   Lang      @default(uz)
+  reminders       Boolean   @default(true)
+  roles           Role[]    @default([STUDENT])
+  /** Center-scoped admins/teachers belong to one center; platform roles leave it null. */
+  centerId        String?
+  center          Center?   @relation(fields: [centerId], references: [id])
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  teacherProfile  TeacherProfile?
+  subscriptions   Subscription[]
+  enrollments     Enrollment[]
+  attendance      AttendanceRecord[]  @relation("AttendanceStudent")
+  recordedAttend  AttendanceRecord[]  @relation("AttendanceRecordedBy")
+  payments        Payment[]
+  refreshSessions RefreshSession[]
+  savedItems      SavedItem[]
+  auditEvents     AuditEvent[]
+  ownedTenant     Tenant?   @relation("TenantOwner")
+
+  @@unique([tenantId, phoneE164])
+  @@unique([tenantId, login])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, centerId])
+}
+
+model RefreshSession {
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /** All rotations of one login share a family; reuse of a rotated token revokes the whole family. */
+  familyId     String
+  /** SHA-256 of the opaque refresh token; the raw token exists only in the HTTP-only cookie. */
+  tokenHash    String    @unique
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  rotatedAt    DateTime?
+  revokedAt    DateTime?
+  revokedReason String?
+  replacedById String?
+  ip           String?
+  userAgent    String?
+
+  @@index([userId, familyId])
+  @@index([tenantId, expiresAt])
+}
+
+model OtpCode {
+  id         String     @id @default(cuid())
+  tenantId   String
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  phoneE164  String
+  purpose    OtpPurpose @default(LOGIN)
+  /** argon2 hash of the 6-digit code; the plain code is only ever sent by SMS. */
+  codeHash   String
+  attempts   Int        @default(0)
+  maxAttempts Int       @default(5)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime   @default(now())
+  ip         String?
+
+  @@index([tenantId, phoneE164, createdAt])
+  @@index([expiresAt])
+}
+
+// ───────────────────────────── Catalog ─────────────────────────────
+
+model Center {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  slug        String
+  name        String
+  district    Json
+  description Json
+  tone        String    @default("#163C35")
+  address     String?
+  phoneE164   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  staff    User[]
+  teachers TeacherProfile[]
+  courses  Course[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, deletedAt])
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  slug      String
+  name      Json
+  glyph     String    @default("")
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  courses Course[]
+
+  @@unique([tenantId, slug])
+}
+
+model TeacherProfile {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  /** The login account behind the public profile (null until the teacher is invited). */
+  userId        String?   @unique
+  user          User?     @relation(fields: [userId], references: [id])
+  slug          String
+  name          String
+  title         Json
+  bio           Json
+  expertise     String[]  @default([])
+  /** Null for self-registered teachers until an admin assigns a center. */
+  centerId      String?
+  center        Center?   @relation(fields: [centerId], references: [id])
+  avatarSeed    Int       @default(1)
+  bannerTone    String    @default("#163C35")
+  avatarUrl     String?
+  bannerUrl     String?
+  tagline       Json
+  channelActive Boolean   @default(true)
+  featuredType  String?
+  featuredId    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  subjects  Subject[]
+  courses   Course[]
+  videos    Video[]
+  playlists Playlist[]
+  resources Resource[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, centerId])
+}
+
+model Subject {
+  id          String         @id @default(cuid())
+  tenantId    String
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+  teacherId   String
+  teacher     TeacherProfile @relation(fields: [teacherId], references: [id])
+  name        Json
+  description Json
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  courses Course[]
+
+  @@index([tenantId, teacherId])
+}
+
+model Course {
+  id               String         @id @default(cuid())
+  tenantId         String
+  tenant           Tenant         @relation(fields: [tenantId], references: [id])
+  slug             String
+  title            Json
+  categoryId       String
+  category         Category       @relation(fields: [categoryId], references: [id])
+  centerId         String
+  center           Center         @relation(fields: [centerId], references: [id])
+  teacherId        String
+  teacher          TeacherProfile @relation(fields: [teacherId], references: [id])
+  subjectId        String?
+  subject          Subject?       @relation(fields: [subjectId], references: [id])
+  summary          Json
+  description      Json
+  curriculum       Json
+  level            Level          @default(BEGINNER)
+  durationMonths   Int            @default(3)
+  /** Monthly price in tiyin (1 so‘m = 100 tiyin). */
+  priceMinor       BigInt
+  currency         String         @default("UZS")
+  coverSeed        Int            @default(1)
+  imageUrl         String?
+  meyosGrant       Boolean        @default(false)
+  status           ContentStatus  @default(DRAFT)
+  visibility       Visibility     @default(PUBLIC)
+  audienceStudentIds String[]     @default([])
+  audienceGroupIds   String[]     @default([])
+  featured         Boolean        @default(false)
+  reviewRequested  Boolean        @default(false)
+  publishedAt      DateTime?
+  createdById      String?
+  updatedById      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+
+  groups      Group[]
+  enrollments Enrollment[]
+  sessions    LessonSession[]
+  videos      Video[]
+  resources   Resource[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, status, visibility, deletedAt])
+  @@index([tenantId, centerId])
+  @@index([tenantId, teacherId])
+  @@index([tenantId, categoryId])
+}
+
+model Group {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  courseId  String
+  course    Course    @relation(fields: [courseId], references: [id])
+  name      String
+  /** Weekdays the group meets: 0 = Monday … 6 = Sunday */
+  days      Int[]
+  /** Local wall-clock times in the group's timezone, "HH:MM" */
+  startTime String
+  endTime   String
+  room      String    @default("")
+  /** Teacher-defined maximum of ACTIVE enrollments; enforced inside a row-locked transaction. */
+  capacity  Int
+  timezone  String    @default("Asia/Tashkent")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  enrollments Enrollment[]
+  sessions    LessonSession[]
+
+  @@index([tenantId, courseId])
+}
+
+model Package {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  code        String
+  name        Json
+  description Json
+  perks       Json
+  maxCourses  Int
+  enabled     Boolean  @default(true)
+  highlight   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@unique([tenantId, code])
+}
+
+// ───────────────────────────── Teacher content ─────────────────────────────
+
+model Video {
+  id                 String          @id @default(cuid())
+  tenantId           String
+  tenant             Tenant          @relation(fields: [tenantId], references: [id])
+  teacherId          String
+  teacher            TeacherProfile  @relation(fields: [teacherId], references: [id])
+  courseId           String?
+  course             Course?         @relation(fields: [courseId], references: [id])
+  title              Json
+  description        Json
+  sourceKind         VideoSourceKind @default(LINK)
+  sourceUrl          String?
+  storageKey         String?
+  durationSec        Int             @default(0)
+  thumbnailUrl       String?
+  coverSeed          Int             @default(1)
+  status             ContentStatus   @default(DRAFT)
+  visibility         Visibility      @default(PUBLIC)
+  audienceStudentIds String[]        @default([])
+  audienceGroupIds   String[]        @default([])
+  featured           Boolean         @default(false)
+  reviewRequested    Boolean         @default(false)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  deletedAt          DateTime?
+
+  playlistItems PlaylistItem[]
+
+  @@index([tenantId, teacherId, status])
+  @@index([tenantId, courseId])
+}
+
+model Playlist {
+  id                 String         @id @default(cuid())
+  tenantId           String
+  tenant             Tenant         @relation(fields: [tenantId], references: [id])
+  teacherId          String
+  teacher            TeacherProfile @relation(fields: [teacherId], references: [id])
+  title              Json
+  description        Json
+  coverSeed          Int            @default(1)
+  status             ContentStatus  @default(DRAFT)
+  visibility         Visibility     @default(PUBLIC)
+  audienceStudentIds String[]       @default([])
+  audienceGroupIds   String[]       @default([])
+  featured           Boolean        @default(false)
+  reviewRequested    Boolean        @default(false)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  deletedAt          DateTime?
+
+  items PlaylistItem[]
+
+  @@index([tenantId, teacherId, status])
+}
+
+model PlaylistItem {
+  playlistId String
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  videoId    String
+  video      Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  position   Int
+
+  @@id([playlistId, videoId])
+  @@index([playlistId, position])
+}
+
+model Resource {
+  id                 String         @id @default(cuid())
+  tenantId           String
+  tenant             Tenant         @relation(fields: [tenantId], references: [id])
+  teacherId          String
+  teacher            TeacherProfile @relation(fields: [teacherId], references: [id])
+  courseId           String?
+  course             Course?        @relation(fields: [courseId], references: [id])
+  title              Json
+  description        Json
+  kind               ResourceKind   @default(OTHER)
+  fileName           String?
+  fileSize           Int?
+  fileMime           String?
+  storageKey         String?
+  url                String?
+  pages              Int?
+  status             ContentStatus  @default(DRAFT)
+  visibility         Visibility     @default(PUBLIC)
+  audienceStudentIds String[]       @default([])
+  audienceGroupIds   String[]       @default([])
+  featured           Boolean        @default(false)
+  reviewRequested    Boolean        @default(false)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  deletedAt          DateTime?
+
+  @@index([tenantId, teacherId, status])
+  @@index([tenantId, courseId])
+}
+
+model SavedItem {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /** "course" | "teacher" */
+  kind      String
+  itemId    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, kind, itemId])
+}
+
+// ───────────────────────────── Subscriptions & enrollment ─────────────────────────────
+
+model Subscription {
+  id             String             @id @default(cuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  studentId      String
+  student        User               @relation(fields: [studentId], references: [id])
+  packageId      String?
+  package        Package?           @relation(fields: [packageId], references: [id])
+  status         SubscriptionStatus @default(DRAFT)
+  /** Draft selection (builder) before activation; enrollments are created on activation. */
+  draftGroupIds  String[]           @default([])
+  meyosGrant     Boolean            @default(false)
+  grantCourseIds String[]           @default([])
+  /** Monthly total = sum of the selected courses' prices, snapshotted at activation. */
+  amountMinor    BigInt             @default(0)
+  currency       String             @default("UZS")
+  startedAt      DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  enrollments Enrollment[]
+  payments    Payment[]
+
+  @@index([tenantId, studentId, status])
+  @@index([tenantId, status, currentPeriodEnd])
+}
+
+model Enrollment {
+  id             String           @id @default(cuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  subscriptionId String
+  subscription   Subscription     @relation(fields: [subscriptionId], references: [id])
+  studentId      String
+  student        User             @relation(fields: [studentId], references: [id])
+  groupId        String
+  group          Group            @relation(fields: [groupId], references: [id])
+  courseId       String
+  course         Course           @relation(fields: [courseId], references: [id])
+  status         EnrollmentStatus @default(ACTIVE)
+  enrolledAt     DateTime         @default(now())
+  cancelledAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([subscriptionId, groupId])
+  @@index([tenantId, groupId, status])
+  @@index([tenantId, studentId, status])
+}
+
+// ───────────────────────────── Lessons & attendance ─────────────────────────────
+
+model LessonSession {
+  id                       String        @id @default(cuid())
+  tenantId                 String
+  tenant                   Tenant        @relation(fields: [tenantId], references: [id])
+  groupId                  String
+  group                    Group         @relation(fields: [groupId], references: [id])
+  courseId                 String
+  course                   Course        @relation(fields: [courseId], references: [id])
+  /** Calendar date of the lesson in the group's timezone (YYYY-MM-DD, stored as DATE). */
+  date                     DateTime      @db.Date
+  startsAt                 DateTime
+  endsAt                   DateTime
+  status                   SessionStatus @default(SCHEDULED)
+  attendanceOpen           Boolean       @default(false)
+  attendanceOpenedAt       DateTime?
+  attendanceClosedAt       DateTime?
+  /** SHA-256 of the current attendance token; rotated on every open; null while closed. */
+  attendanceTokenHash      String?
+  attendanceTokenExpiresAt DateTime?
+  tokenVersion             Int           @default(0)
+  generatedBy              String?
+  cancelledAt              DateTime?
+  cancelledById            String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  attendance AttendanceRecord[]
+
+  @@unique([groupId, date])
+  @@index([tenantId, date])
+  @@index([tenantId, groupId, startsAt])
+  @@index([tenantId, status, startsAt])
+}
+
+model AttendanceRecord {
+  id             String           @id @default(cuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  sessionId      String
+  session        LessonSession    @relation(fields: [sessionId], references: [id])
+  studentId      String
+  student        User             @relation("AttendanceStudent", fields: [studentId], references: [id])
+  status         AttendanceStatus @default(PRESENT)
+  method         AttendanceMethod @default(QR)
+  /** First successful check-in instant; never overwritten by repeated scans. */
+  checkedInAt    DateTime
+  recordedById   String
+  recordedBy     User             @relation("AttendanceRecordedBy", fields: [recordedById], references: [id])
+  /** Required for MANUAL records and corrections. */
+  reason         String?
+  correctedAt    DateTime?
+  correctedById  String?
+  tokenVersion   Int?
+  ip             String?
+  userAgent      String?
+  version        Int              @default(1)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([sessionId, studentId])
+  @@index([tenantId, studentId, checkedInAt])
+  @@index([tenantId, sessionId])
+}
+
+// ───────────────────────────── Payments & ledger ─────────────────────────────
+
+/// What is being paid: one subscription period. Providers attach transactions to it.
+model Payment {
+  id             String          @id @default(cuid())
+  tenantId       String
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  studentId      String
+  student        User            @relation(fields: [studentId], references: [id])
+  subscriptionId String
+  subscription   Subscription    @relation(fields: [subscriptionId], references: [id])
+  periodStart    DateTime
+  periodEnd      DateTime
+  amountMinor    BigInt
+  currency       String          @default("UZS")
+  state          PaymentState    @default(PENDING)
+  provider       PaymentProvider?
+  paidAt         DateTime?
+  cancelledAt    DateTime?
+  refundedAt     DateTime?
+  expiresAt      DateTime
+  createdById    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  transactions PaymentTransaction[]
+  receipt      Receipt?
+
+  @@index([tenantId, studentId, state])
+  @@index([tenantId, state, createdAt])
+  @@index([tenantId, subscriptionId])
+}
+
+model PaymentTransaction {
+  id                    String           @id @default(cuid())
+  /** Numeric id exposed to providers that require integers (Click merchant_prepare_id / merchant_confirm_id, Payme `transaction`). */
+  seq                   Int              @unique @default(autoincrement())
+  /** True when the callback was authenticated with the provider's sandbox/test key. */
+  sandbox               Boolean          @default(false)
+  tenantId              String
+  tenant                Tenant           @relation(fields: [tenantId], references: [id])
+  paymentId             String
+  payment               Payment          @relation(fields: [paymentId], references: [id])
+  provider              PaymentProvider
+  /** Provider's own transaction id (Payme `id`, Click `click_trans_id`). Unique per provider. */
+  providerTransactionId String
+  /** Provider-side timestamp for the creation (Payme `time`, Click `sign_time`). */
+  providerTime          BigInt?
+  providerState         Int?
+  state                 TransactionState @default(CREATED)
+  amountMinor           BigInt
+  currency              String           @default("UZS")
+  createdAt             DateTime         @default(now())
+  performedAt           DateTime?
+  cancelledAt           DateTime?
+  cancelReason          Int?
+  /** Click prepare step id returned to Click; null for Payme. */
+  merchantPrepareId     String?
+  updatedAt             DateTime         @updatedAt
+
+  @@unique([provider, providerTransactionId])
+  @@index([tenantId, paymentId])
+  @@index([tenantId, provider, createdAt])
+  @@index([tenantId, state])
+}
+
+/// Every inbound provider callback, redacted, for replay analysis and reconciliation.
+model ProviderCallbackLog {
+  id                    String          @id @default(cuid())
+  tenantId              String?
+  tenant                Tenant?         @relation(fields: [tenantId], references: [id])
+  provider              PaymentProvider
+  method                String
+  providerTransactionId String?
+  paymentId             String?
+  payload               Json
+  responseCode          Int?
+  outcome               String?
+  ip                    String?
+  receivedAt            DateTime        @default(now())
+  processedAt           DateTime?
+  durationMs            Int?
+
+  @@index([provider, receivedAt])
+  @@index([providerTransactionId])
+}
+
+model LedgerJournal {
+  id            String       @id @default(cuid())
+  tenantId      String
+  tenant        Tenant       @relation(fields: [tenantId], references: [id])
+  kind          JournalKind
+  referenceType String
+  referenceId   String
+  description   String
+  /** A reversal journal points at the journal it reverses; settled journals are never edited. */
+  reversalOfId  String?      @unique
+  reversalOf    LedgerJournal? @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversedBy    LedgerJournal? @relation("JournalReversal")
+  createdById   String?
+  reason        String?
+  createdAt     DateTime     @default(now())
+
+  entries LedgerEntry[]
+
+  @@unique([tenantId, kind, referenceType, referenceId])
+  @@index([tenantId, createdAt])
+}
+
+model LedgerEntry {
+  id          String            @id @default(cuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  journalId   String
+  journal     LedgerJournal     @relation(fields: [journalId], references: [id])
+  account     String
+  accountType LedgerAccountType
+  direction   LedgerDirection
+  amountMinor BigInt
+  currency    String            @default("UZS")
+  createdAt   DateTime          @default(now())
+
+  @@index([tenantId, account, createdAt])
+  @@index([journalId])
+}
+
+model Receipt {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  paymentId   String   @unique
+  payment     Payment  @relation(fields: [paymentId], references: [id])
+  number      String
+  issuedAt    DateTime @default(now())
+  deliveredAt DateTime?
+  channel     String?
+
+  @@unique([tenantId, number])
+}
+
+/// Transactional outbox: durable notification/side-effect intents written in the same DB transaction as the state change.
+model OutboxEvent {
+  id          String    @id @default(cuid())
+  tenantId    String?
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id])
+  type        String
+  dedupeKey   String?   @unique
+  payload     Json
+  availableAt DateTime  @default(now())
+  attempts    Int       @default(0)
+  lastError   String?
+  lockedAt    DateTime?
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([processedAt, availableAt])
+}
+
+// ───────────────────────────── Audit, jobs, messaging ─────────────────────────────
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  actorRoles Role[]   @default([])
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  reason     String?
+  ip         String?
+  userAgent  String?
+  requestId  String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, entityType, entityId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, actorId, createdAt])
+}
+
+/// Idempotency marker for scheduled jobs: one row per (queue, jobKey); a second worker finds the row and skips.
+model JobRun {
+  id         String       @id @default(cuid())
+  queue      String
+  jobKey     String
+  status     JobRunStatus @default(RUNNING)
+  workerId   String?
+  startedAt  DateTime     @default(now())
+  finishedAt DateTime?
+  result     Json?
+  error      String?
+
+  @@unique([queue, jobKey])
+  @@index([queue, startedAt])
+}
+
+model SmsMessage {
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  phoneE164         String
+  templateKey       String
+  lang              Lang      @default(uz)
+  status            SmsStatus @default(QUEUED)
+  providerMessageId String?
+  attempts          Int       @default(0)
+  error             String?
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+
+  @@index([tenantId, createdAt])
+  @@index([status, createdAt])
+}
+
+model CenterInquiry {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  centerName  String
+  contactName String
+  phoneE164   String
+  message     String
+  consentAt   DateTime
+  handledAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId, createdAt])
+}

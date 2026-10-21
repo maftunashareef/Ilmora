@@ -1,38 +1,42 @@
 {
-  "name": "ilmora",
+  "name": "ilmora-platform",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "oxlint",
-    "preview": "vite preview",
-    "deploy": "node scripts/deploy.mjs",
-    "test": "vitest run"
+  "version": "1.0.0",
+  "description": "ILMORA education platform: Next.js web app, NestJS API, shared domain package",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12"
   },
-  "dependencies": {
-    "@react-three/drei": "^10.7.9",
-    "@react-three/fiber": "^9.8.1",
-    "qrcode": "^1.5.4",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.4",
-    "three": "^0.186.1",
-    "zustand": "^5.0.15"
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web",
+    "build:shared": "npm run build -w packages/shared",
+    "build:api": "npm run build -w apps/api",
+    "build:web": "npm run build -w apps/web",
+    "dev": "npm run build:shared && concurrently -k -n shared,api,web -c cyan,green,magenta \"npm:dev -w packages/shared\" \"npm:dev -w apps/api\" \"npm:dev -w apps/web\"",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:migrate": "npm run prisma:migrate:deploy -w apps/api",
+    "owner:setup": "npm run owner:setup -w apps/api --",
+    "db:seed": "npm run prisma:seed -w apps/api"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^24.13.3",
-    "@types/qrcode": "^1.5.6",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7",
-    "@types/three": "^0.186.0",
-    "@vitejs/plugin-react": "^6.1.1",
-    "oxlint": "^1.81.0",
-    "tailwindcss": "^4.3.3",
-    "typescript": "~6.0.2",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.3"
+    "concurrently": "^9.2.1",
+    "typescript": "~6.0.2"
+  },
+  "allowScripts": {
+    "@swc/core@1.16.18": true,
+    "argon2@0.45.1": true,
+    "prisma@7.10.1": true,
+    "msgpackr-extract@3.0.4": true,
+    "@prisma/engines@7.10.1": true,
+    "esbuild@0.27.7": true,
+    "esbuild@0.28.2": true
   }
 }

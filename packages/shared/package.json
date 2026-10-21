@@ -1,0 +1,31 @@
+{
+  "name": "@ilmora/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ILMORA domain types, pure business rules (access, schedule, capacity, sessions, check-in) and the UZ/RU/EN dictionary shared by the web app and the API",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "~6.0.2",
+    "vitest": "^5.0.3"
+  }
+}

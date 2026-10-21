@@ -1,0 +1,99 @@
+'use client'
+import { useEffect } from 'react'
+import { applyTheme } from '../lib/theme'
+import { useStore } from '../store/useStore'
+import { cx, Icon } from './ui'
+
+/** Applies Super Admin theme + language to the document. */
+export function ThemeApplier() {
+  const theme = useStore((s) => s.site.theme)
+  const lang = useStore((s) => s.lang)
+  useEffect(() => applyTheme(theme), [theme])
+  useEffect(() => { document.documentElement.lang = lang }, [lang])
+  return null
+}
+
+/**
+ * Scroll-reveal manager (progressive enhancement, novator-style).
+ * Adds `reveal-on` to <html> so `.reveal` elements start hidden, then flips
+ * `is-visible` as they enter the viewport. New nodes (route changes, filters)
+ * are picked up through a MutationObserver. Honours prefers-reduced-motion.
+ */
+export function RevealManager() {
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const html = document.documentElement
+    html.classList.add('reveal-on')
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add('is-visible')
+            io.unobserve(e.target)
+          }
+        }
+      },
+      { rootMargin: '0px 0px -6% 0px', threshold: 0.06 },
+    )
+    const observe = (root: ParentNode) => root.querySelectorAll('.reveal:not(.is-visible)').forEach((el) => io.observe(el))
+    observe(document)
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (m.type === 'attributes') {
+          const el = m.target as Element
+          if (el.classList.contains('reveal') && !el.classList.contains('is-visible')) io.observe(el)
+          continue
+        }
+        m.addedNodes.forEach((n) => {
+          if (!(n instanceof Element)) return
+          if (n.classList.contains('reveal') && !n.classList.contains('is-visible')) io.observe(n)
+          observe(n)
+        })
+      }
+    })
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
+    // Fallback for fast flicks/jumps: anything at or above the fold that the observer never
+    // caught intersecting (it skipped straight past) is revealed on the next scroll frame.
+    let raf = 0
+    const sweep = () => {
+      raf = 0
+      const limit = window.innerHeight * 0.94
+      document.querySelectorAll('.reveal:not(.is-visible)').forEach((el) => {
+        if (el.getBoundingClientRect().top < limit) el.classList.add('is-visible')
+      })
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(sweep) }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => {
+      io.disconnect()
+      mo.disconnect()
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+      cancelAnimationFrame(raf)
+      html.classList.remove('reveal-on')
+    }
+  }, [])
+  return null
+}
+
+export function Toasts() {
+  const toasts = useStore((s) => s.toasts)
+  const dismiss = useStore((s) => s.dismissToast)
+  if (!toasts.length) return null
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-5 z-[90] flex flex-col items-center gap-2 px-4" role="status" aria-live="polite">
+      {toasts.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => dismiss(t.id)}
+          className={cx('pointer-events-auto animate-rise inline-flex max-w-md items-center gap-2 rounded-full px-4 py-2.5 text-sm shadow-lift', t.tone === 'warn' ? 'bg-amber-100 text-amber-900' : 'bg-forest text-ivory')}
+        >
+          <Icon name={t.tone === 'warn' ? 'warn' : 'check'} className="h-4 w-4" />
+          {t.text}
+        </button>
+      ))}
+    </div>
+  )
+}

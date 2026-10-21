@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.github
+docs
+infra/data
+infra/backups
+apps/web/public/media/*.mp4
+apps/api/src/generated
+*.log

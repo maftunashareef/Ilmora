@@ -1,0 +1,52 @@
+import { Body, Controller, Get, Post, Put } from '@nestjs/common'
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator'
+import { CurrentActor, CurrentTenantId } from '../../common/decorators'
+import type { RequestActor } from '../../infra/tenancy/tenant-context'
+import { PaymentsService } from '../payments/payments.service'
+import { SubscriptionService } from './subscription.service'
+
+class DraftDto {
+  @IsOptional() @IsString() @Length(1, 80) packageId!: string | null
+  @IsArray() @ArrayMaxSize(6) @IsString({ each: true }) groupIds!: string[]
+  @IsBoolean() meyosGrant!: boolean
+}
+class CheckoutDto {
+  @IsIn(['PAYME', 'CLICK']) provider!: 'PAYME' | 'CLICK'
+  @IsOptional() @IsIn(['uz', 'ru', 'en']) lang?: 'uz' | 'ru' | 'en'
+}
+class CancelDto {
+  @IsOptional() @IsString() @Length(0, 300) reason?: string
+}
+
+@Controller('student/subscription')
+export class EnrollmentController {
+  constructor(private readonly subscriptions: SubscriptionService, private readonly payments: PaymentsService) {}
+
+  @Get()
+  overview(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor) {
+    return this.subscriptions.overview(tenantId, actor.id)
+  }
+
+  @Put('draft')
+  draft(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Body() dto: DraftDto) {
+    return this.subscriptions.saveDraft(tenantId, actor.id, { packageId: dto.packageId ?? null, groupIds: dto.groupIds, meyosGrant: dto.meyosGrant })
+  }
+
+  /** Creates the pending payment (with seat holds) and returns the provider checkout URL. */
+  @Post('checkout')
+  async checkout(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Body() dto: CheckoutDto) {
+    const { payment } = await this.subscriptions.checkout(tenantId, actor.id, dto.provider)
+    return this.payments.checkoutLink(payment, dto.provider, dto.lang ?? 'uz')
+  }
+
+  @Post('renew')
+  async renew(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Body() dto: CheckoutDto) {
+    const { payment } = await this.subscriptions.renew(tenantId, actor.id, dto.provider)
+    return this.payments.checkoutLink(payment, dto.provider, dto.lang ?? 'uz')
+  }
+
+  @Post('cancel')
+  cancel(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Body() dto: CancelDto) {
+    return this.subscriptions.cancel(tenantId, actor.id, dto.reason)
+  }
+}
