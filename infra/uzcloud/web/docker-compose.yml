@@ -1,0 +1,90 @@
+# ILMORA — machine "ilmora-web" (UzCloud). The only machine that receives traffic from the internet.
+#
+#   docker compose --env-file .env up -d          (run from infra/uzcloud/web; see infra/uzcloud/README.md)
+#
+# Caddy terminates HTTPS for both domains: the site goes to `web`, the admin domain goes to the admin machine
+# over the private network. The API listens on the private address too, so the admin panel can render through it.
+# PostgreSQL and Redis live on ilmora-admin.
+
+name: ilmora-web
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      ADMIN_PRIVATE_IP: ${ADMIN_PRIVATE_IP}
+      ADMIN_ALLOW_IPS: ${ADMIN_ALLOW_IPS}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    logging: *logging
+
+  api:
+    image: ${API_IMAGE}
+    restart: unless-stopped
+    env_file: [../api.env]
+    environment:
+      NODE_ENV: production
+      APP_ROLE: api
+      TRUST_PROXY: "1"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${ADMIN_PRIVATE_IP}:5432/${POSTGRES_DB}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@${ADMIN_PRIVATE_IP}:6379/0
+    # Private address only: the admin panel's server-side calls come from ilmora-admin. Never 0.0.0.0.
+    ports:
+      - "${WEB_PRIVATE_IP}:4000:4000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/ready || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "1.5", memory: 1g }
+    logging: *logging
+
+  web:
+    image: ${WEB_IMAGE}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      APP_SURFACE: public
+      ADMIN_ORIGIN: https://${ADMIN_DOMAIN}
+      API_INTERNAL_URL: http://api:4000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "1.5", memory: 1g }
+    logging: *logging
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,155 @@
+# ILMORA — machine "ilmora-admin" (UzCloud). Private network only: no public IP, outbound through the network's IP.
+#
+#   docker compose --env-file .env up -d          (run from infra/uzcloud/admin; see infra/uzcloud/README.md)
+#
+# Holds the data (PostgreSQL, Redis), the background worker, the admin panel and the nightly backups to S3.
+# Ports are published on the private address only, so ilmora-web can reach them and the internet cannot.
+
+name: ilmora-admin
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-app-env: &app-env
+  NODE_ENV: production
+  TRUST_PROXY: "1"
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    command: ["postgres", "-c", "max_connections=100", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB", "-c", "log_min_duration_statement=500"]
+    ports:
+      - "${ADMIN_PRIVATE_IP}:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "1.5", memory: 1536m }
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - "${ADMIN_PRIVATE_IP}:6379:6379"
+    volumes:
+      - ../../redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 384m }
+    logging: *logging
+
+  # One-shot: applies pending migrations before the new release starts (deploy.sh runs it explicitly).
+  migrate:
+    image: ${API_IMAGE_MIGRATOR}
+    env_file: [../api.env]
+    environment: *app-env
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    profiles: ["migrate"]
+    logging: *logging
+
+  worker:
+    image: ${API_IMAGE}
+    restart: unless-stopped
+    env_file: [../api.env]
+    environment:
+      <<: *app-env
+      APP_ROLE: worker
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f dist/worker.js > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 512m }
+    logging: *logging
+
+  # The same web image as the site, answering only the admin workspace. Caddy on ilmora-web proxies to it.
+  admin:
+    image: ${WEB_IMAGE}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      APP_SURFACE: admin
+      API_INTERNAL_URL: http://${WEB_PRIVATE_IP}:4000
+    ports:
+      - "${ADMIN_PRIVATE_IP}:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 768m }
+    logging: *logging
+
+  # Nightly encrypted pg_dump to UzCloud Object Storage (Cold bucket). See backup.sh.
+  backup:
+    build:
+      context: .
+      dockerfile: backup.Dockerfile
+    image: ilmora-backup:local
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      S3_ENDPOINT: ${BACKUP_S3_ENDPOINT}
+      S3_BUCKET: ${BACKUP_S3_BUCKET}
+      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-90}
+      BACKUP_AT_UTC: ${BACKUP_AT_UTC:-22:40}
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+    volumes:
+      - ./backup.sh:/usr/local/bin/backup.sh:ro
+    entrypoint: ["/usr/local/bin/backup.sh", "--schedule"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+volumes:
+  pgdata:
+  redisdata:
