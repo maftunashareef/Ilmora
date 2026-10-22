@@ -1,3 +1,4 @@
+import { countLabel, NOUNS } from '@ilmora/shared'
 import { useState } from 'react'
 import { Link } from '@/lib/router'
 import { Avatar, Badge, EmptyState, Icon, Input, Notice, PageTitle } from '../../components/ui'
@@ -6,7 +7,7 @@ import { isPublicListed } from '../../lib/access'
 import { useStore } from '../../store/useStore'
 
 export function TeachersPage() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const enabled = useStore((s) => s.site.features.teacherChannels)
   const teachers = useStore((s) => s.teachers)
   const centers = useStore((s) => s.centers)
@@ -42,7 +43,7 @@ export function TeachersPage() {
                   <div className="mt-3 flex flex-wrap gap-1">{te.expertise.slice(0, 3).map((e) => <Badge key={e} tone="muted">{e}</Badge>)}</div>
                   <div className="mt-4 flex items-center justify-between border-t border-charcoal/10 pt-3 text-[11px] text-charcoal/50">
                     <span className="truncate">{center?.name}</span>
-                    <span className="shrink-0">{nCourses} {t('common.courses').toLowerCase()} · {nVideos} {t('common.videos').toLowerCase()}</span>
+                    <span className="shrink-0">{countLabel(lang, nCourses, NOUNS.course)} · {countLabel(lang, nVideos, NOUNS.video)}</span>
                   </div>
                 </div>
               </Wrapper>

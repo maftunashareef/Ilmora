@@ -48,7 +48,8 @@ async function main() {
   await prisma.tenant.upsert({ where: { id: TENANT_ID }, update: { slug: TENANT_SLUG, webOrigin: WEB_ORIGIN }, create: { id: TENANT_ID, slug: TENANT_SLUG, name: 'ILMORA', webOrigin: WEB_ORIGIN } })
 
   const { packages, ...siteData } = site
-  await prisma.siteConfig.upsert({ where: { tenantId: TENANT_ID }, update: {}, create: { tenantId: TENANT_ID, data: json(siteData) } })
+  // Demo mode re-applies the sample site template (texts, sections); production never overwrites the admin's site config.
+  await prisma.siteConfig.upsert({ where: { tenantId: TENANT_ID }, update: SEED_DEMO ? { data: json(siteData) } : {}, create: { tenantId: TENANT_ID, data: json(siteData) } })
   for (const [i, p] of packages.entries()) {
     await prisma.package.upsert({
       where: { id: p.id },

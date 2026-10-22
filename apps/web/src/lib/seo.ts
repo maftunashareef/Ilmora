@@ -85,5 +85,7 @@ const STATIC_TITLES: Record<string, L> = {
   '/how-it-works': { uz: 'Qanday ishlaydi', ru: 'Как это работает', en: 'How it works' },
   '/centers': { uz: 'Markazlar uchun', ru: 'Для центров', en: 'For centers' },
   '/faq': { uz: 'Savol-javob', ru: 'FAQ', en: 'FAQ' },
+  '/oferta': { uz: 'Ommaviy oferta', ru: 'Публичная оферта', en: 'Public offer' },
+  '/privacy': { uz: 'Shaxsiy ma’lumotlar va maxfiylik', ru: 'Персональные данные и конфиденциальность', en: 'Personal data and privacy' },
 }
 export const staticTitle = (lang: Lang, path: string) => pick(lang, STATIC_TITLES[path]) || 'ILMORA'

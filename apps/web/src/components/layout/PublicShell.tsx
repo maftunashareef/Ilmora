@@ -1,3 +1,4 @@
+import { OPERATOR } from '@ilmora/shared'
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from '@/lib/router'
@@ -97,7 +98,7 @@ export function PublicShell() {
         <Outlet />
       </main>
       <footer className="border-t border-charcoal/10 bg-sage/50">
-        <div className="container-x grid gap-10 py-14 md:grid-cols-[1.4fr_1fr_1fr]">
+        <div className="container-x grid gap-10 py-14 md:grid-cols-2 lg:grid-cols-[1.3fr_0.8fr_1fr_1fr]">
           <div className="reveal">
             <div className="font-display text-2xl tracking-[0.12em] text-charcoal">{site.brand.name}</div>
             <p className="mt-3 max-w-md text-[13px] leading-relaxed text-charcoal/60">{tr(site.brand.footerNote)}</p>
@@ -109,12 +110,30 @@ export function PublicShell() {
             </ul>
           </div>
           <div className="reveal">
-            <div className="eyebrow mb-3">{t('common.demo')}</div>
+            <div className="eyebrow mb-3">{t('footer.contacts')}</div>
             <ul className="space-y-2 text-sm text-charcoal/70">
-              <li><Link to="/admin" className="hover:text-forest">{t('role.admin')}</Link></li>
-              <li><Link to="/teacher" className="hover:text-forest">{t('dash.teacherStudio')}</Link></li>
-              <li><Link to="/student" className="hover:text-forest">{t('dash.studentSpace')}</Link></li>
+              <li><a href={`tel:${OPERATOR.phone.replace(/\s/g, '')}`} className="hover:text-forest">{OPERATOR.phone}</a></li>
+              <li><a href={`mailto:${OPERATOR.email}`} className="hover:text-forest">{OPERATOR.email}</a></li>
+              <li className="text-charcoal/60">{tr(OPERATOR.address)}</li>
+              <li className="text-[12px] text-charcoal/50">{t('footer.operator')}: {tr(OPERATOR.legalName)} · {t('footer.inn')} {OPERATOR.inn}</li>
             </ul>
+          </div>
+          <div className="reveal">
+            <div className="eyebrow mb-3">{t('footer.legal')}</div>
+            <ul className="space-y-2 text-sm text-charcoal/70">
+              <li><Link to="/oferta" className="hover:text-forest">{t('legal.offer')}</Link></li>
+              <li><Link to="/privacy" className="hover:text-forest">{t('legal.privacy')}</Link></li>
+            </ul>
+            {role !== 'visitor' && (
+              <>
+                <div className="eyebrow mb-3 mt-6">{t('footer.workspaces')}</div>
+                <ul className="space-y-2 text-sm text-charcoal/70">
+                  {role === 'admin' && <li><Link to="/admin" className="hover:text-forest">{t('role.admin')}</Link></li>}
+                  {(role === 'admin' || role === 'teacher') && <li><Link to="/teacher" className="hover:text-forest">{t('dash.teacherStudio')}</Link></li>}
+                  <li><Link to="/student" className="hover:text-forest">{t('dash.studentSpace')}</Link></li>
+                </ul>
+              </>
+            )}
             <p className="mt-4 text-[11px] leading-relaxed text-charcoal/45">{t('access.securityNote')}</p>
           </div>
         </div>

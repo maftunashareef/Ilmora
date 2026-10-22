@@ -16,4 +16,9 @@ if [ -n "${OWNER_LOGIN:-}" ] && [ -n "${OWNER_PASSWORD:-}" ]; then
   printf '%s' "${OWNER_PASSWORD}" | node apps/api/dist/cli/owner-setup.js --login "${OWNER_LOGIN}" --password-stdin --replace
 fi
 
+# One-off removal of test accounts (CLEANUP_LOGINS=a,b); idempotent, see cli/cleanup-accounts.ts.
+if [ -n "${CLEANUP_LOGINS:-}" ]; then
+  node apps/api/dist/cli/cleanup-accounts.js
+fi
+
 exec node apps/api/dist/main.js

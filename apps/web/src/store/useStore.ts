@@ -28,9 +28,14 @@ export interface AuthUser {
   roles: ('PLATFORM_ADMIN' | 'FINANCE_ADMIN' | 'CENTER_ADMIN' | 'TEACHER' | 'STUDENT')[]
   centerId: string | null
   teacherProfileId: string | null
+  offerAcceptedAt: string | null
+  offerVersion: string | null
+  consentAt: string | null
+  marketing: boolean
 }
 
-export interface RegisterInput { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string }
+export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad: true; marketing?: boolean }
+export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string
@@ -60,6 +65,7 @@ interface Actions {
   bootstrap: () => Promise<void>
   register: (input: RegisterInput) => Promise<AuthUser>
   login: (login: string, password: string) => Promise<AuthUser>
+  giveConsent: (input: ConsentInput) => Promise<AuthUser>
   logout: () => Promise<void>
   ensureWorkspace: () => Promise<void>
   loadGroupDetail: (groupId: string) => Promise<void>
@@ -327,7 +333,9 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       bootstrap: async () => {
         if (get().auth.status !== 'idle') return
         set({ auth: { status: 'loading', user: null } })
-        const ok = session.token ? true : await refreshSession()
+        // Only call /auth/refresh when the API left its session flag cookie; anonymous visitors cause no 401 noise.
+        const hasSession = typeof document !== 'undefined' && /(?:^|;\s*)ilmora_session=1(?:;|$)/.test(document.cookie)
+        const ok = session.token ? true : hasSession ? await refreshSession() : false
         if (!ok) { applyAuth(null); return }
         try {
           const user = await api<AuthUser>('/auth/me')
@@ -340,6 +348,11 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       register: (input) => api<{ accessToken: string; user: AuthUser }>('/auth/register', { method: 'POST', body: { ...input, lang: get().lang }, credentials: true, auth: false }).then(openSession),
       login: (login, password) => api<{ accessToken: string; user: AuthUser }>('/auth/login', { method: 'POST', body: { login, password }, credentials: true, auth: false }).then(openSession),
+      giveConsent: async (input) => {
+        const user = await api<AuthUser>('/auth/consent', { method: 'POST', body: input })
+        set((s) => ({ auth: { ...s.auth, user } }))
+        return user
+      },
       logout: async () => {
         await api('/auth/logout', { method: 'POST', credentials: true }).catch(() => undefined)
         session.set(null)

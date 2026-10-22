@@ -25,3 +25,22 @@ export function pick(lang: Lang, l: L | undefined | null): string {
 
 export const emptyL = (): L => ({ uz: '', ru: '', en: '' })
 export const sameL = (s: string): L => ({ uz: s, ru: s, en: s })
+
+/** Noun forms for counts: Uzbek says "{n} ta {noun}", Russian needs three forms, English two. */
+export interface CountNoun { uz: string; ru: readonly [string, string, string]; en: readonly [string, string] }
+export const NOUNS = {
+  course: { uz: 'kurs', ru: ['курс', 'курса', 'курсов'], en: ['course', 'courses'] },
+  video: { uz: 'video dars', ru: ['видеоурок', 'видеоурока', 'видеоуроков'], en: ['video lesson', 'video lessons'] },
+  group: { uz: 'guruh', ru: ['группа', 'группы', 'групп'], en: ['group', 'groups'] },
+  lesson: { uz: 'dars', ru: ['урок', 'урока', 'уроков'], en: ['lesson', 'lessons'] },
+} as const satisfies Record<string, CountNoun>
+export function countLabel(lang: Lang, n: number, noun: CountNoun): string {
+  if (lang === 'uz') return `${n} ta ${noun.uz}`
+  if (lang === 'ru') {
+    const m10 = n % 10
+    const m100 = n % 100
+    const form = m10 === 1 && m100 !== 11 ? 0 : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 1 : 2
+    return `${n} ${noun.ru[form]}`
+  }
+  return `${n} ${n === 1 ? noun.en[0] : noun.en[1]}`
+}

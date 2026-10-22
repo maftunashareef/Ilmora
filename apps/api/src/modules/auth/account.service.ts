@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { formatUzPhone } from '@ilmora/shared'
+import { OFFER_VERSION, formatUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
@@ -21,6 +21,11 @@ export interface PublicUser {
   roles: Role[]
   centerId: string | null
   teacherProfileId: string | null
+  /** Offer acceptance and personal-data consent; null until the account confirms the current edition. */
+  offerAcceptedAt: string | null
+  offerVersion: string | null
+  consentAt: string | null
+  marketing: boolean
 }
 
 export interface LoginResult {
@@ -42,6 +47,10 @@ export type UserRow = {
   roles: Role[]
   centerId: string | null
   isActive: boolean
+  offerAcceptedAt: Date | null
+  offerVersion: string | null
+  consentAt: Date | null
+  marketingAt: Date | null
   teacherProfile: { id: string } | null
 }
 
@@ -76,7 +85,8 @@ export class AccountService {
     return login
   }
 
-  async register(tenantId: string, input: { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; lang?: 'uz' | 'ru' | 'en' }, meta: SessionMeta): Promise<LoginResult> {
+  /** The controller has already validated the offer/consent marks (RegisterDto); the timestamps and edition are recorded here. */
+  async register(tenantId: string, input: { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; lang?: 'uz' | 'ru' | 'en'; marketing?: boolean }, meta: SessionMeta): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
     if (!roles) throw AppError.invalid('invalid_role', 'Choose Student or Teacher')
     const login = this.normalizeLogin(input.login)
@@ -90,7 +100,7 @@ export class AccountService {
     try {
       user = await this.prisma.client.$transaction(async (tx) => {
         const created = await tx.user.create({
-          data: { tenantId, login, passwordHash, displayName, preferredLang: input.lang ?? 'uz', roles, lastLoginAt: now },
+          data: { tenantId, login, passwordHash, displayName, preferredLang: input.lang ?? 'uz', roles, lastLoginAt: now, offerAcceptedAt: now, offerVersion: OFFER_VERSION, consentAt: now, consentAbroad: true, marketingAt: input.marketing ? now : null },
           include: USER_INCLUDE,
         })
         if (input.role === 'TEACHER') {
@@ -128,6 +138,18 @@ export class AccountService {
     return this.openSession(updated, meta)
   }
 
+  /** Records acceptance of the current offer edition and personal-data consent for an existing account. */
+  async giveConsent(userId: string, input: { marketing?: boolean }): Promise<PublicUser> {
+    const now = new Date()
+    const user = await this.prisma.client.user.update({
+      where: { id: userId },
+      data: { offerAcceptedAt: now, offerVersion: OFFER_VERSION, consentAt: now, consentAbroad: true, marketingAt: input.marketing ? now : null },
+      include: USER_INCLUDE,
+    })
+    await this.audit.record({ action: 'auth.consent', entityType: 'User', entityId: user.id, after: { offerVersion: OFFER_VERSION, marketing: !!input.marketing } })
+    return this.toPublic(user, await this.effectiveRoles(user))
+  }
+
   /**
    * Roles that go into the access token. PLATFORM_ADMIN (+ FINANCE_ADMIN) is present exactly when the user is the
    * tenant's owner, regardless of what the roles column says; every other role is taken from the column.
@@ -159,6 +181,10 @@ export class AccountService {
       roles,
       centerId: user.centerId,
       teacherProfileId: user.teacherProfile?.id ?? null,
+      offerAcceptedAt: user.offerAcceptedAt?.toISOString() ?? null,
+      offerVersion: user.offerVersion,
+      consentAt: user.consentAt?.toISOString() ?? null,
+      marketing: !!user.marketingAt,
     }
   }
 

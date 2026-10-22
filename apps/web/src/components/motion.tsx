@@ -34,9 +34,8 @@ export function SplitWords({ text, className, baseDelay = 0.1, step = 0.06 }: { 
   const words = text.split(/\s+/).filter(Boolean)
   return (
     <span className={cx('word-rise', className)}>
-      <span className="sr-only">{text}</span>
       {words.map((w, i) => (
-        <span key={i} className="w" aria-hidden="true">
+        <span key={i} className="w">
           <span style={{ '--d': `${baseDelay + i * step}s` } as CSSProperties}>{w}</span>
           {i < words.length - 1 ? ' ' : ''}
         </span>
@@ -161,7 +160,7 @@ export function BackgroundVideo({ src, poster, pauseLabel, playLabel, note }: { 
       )}
       {state === 'ready' && !reduced && (
         <div className="pointer-events-auto absolute bottom-6 right-5 z-10 flex items-center gap-3 sm:right-8 lg:right-12">
-          {note && <span className="hidden text-[11px] text-ivory/60 sm:inline">{note}</span>}
+          {note && <span className="sr-only">{note}</span>}
           <button type="button" onClick={() => setPaused((p) => !p)} aria-label={paused ? playLabel : pauseLabel} aria-pressed={paused} className="flex h-10 w-10 items-center justify-center rounded-full border border-ivory/30 bg-charcoal/40 text-ivory backdrop-blur transition hover:bg-charcoal/60">
             {paused ? <Icon name="play" className="h-4 w-4" /> : <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>}
           </button>

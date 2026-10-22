@@ -80,15 +80,6 @@ export function ScrollVideo({ src, poster, heightVh = 280, stages = [], children
   const showScene = !showVideo && videoState === 'error' && !reduced && webgl === true
   const stageIndex = stages.length ? Math.min(stages.length - 1, Math.floor(progress * stages.length)) : -1
 
-  const status = reduced
-    ? { icon: 'info', text: t('home.reducedMotion') }
-    : showVideo
-      ? { icon: 'down', text: t('home.scrollHint') }
-      : showScene
-        ? { icon: 'down', text: t('home.sceneHint') }
-        : src && videoState === 'error'
-          ? { icon: 'warn', text: t('home.videoMissing') }
-          : { icon: 'info', text: t('home.webglFallback') }
 
   return (
     <section ref={wrapRef} className="relative" style={{ height: `${reduced ? 100 : heightVh}vh` }} aria-label="Bazis">
@@ -138,13 +129,9 @@ export function ScrollVideo({ src, poster, heightVh = 280, stages = [], children
               })}
             </ol>
           )}
-          <div className="absolute inset-x-5 bottom-6 flex flex-wrap items-center justify-between gap-3 text-[11px] text-ivory/60 sm:inset-x-8 lg:inset-x-12">
-            <span className="inline-flex items-center gap-2">
-              <span className="relative h-px w-28 bg-ivory/25"><span className="absolute inset-y-0 left-0 bg-champagne" style={{ width: `${progress * 100}%` }} /></span>
-              {t('home.frame')} {Math.round(progress * 100)}%
-              {stageIndex >= 0 && <span className="ml-2 hidden text-ivory/45 sm:inline">· {t('home.stage')} {stageIndex + 1}/{stages.length}</span>}
-            </span>
-            <span className="inline-flex items-center gap-1.5"><Icon name={status.icon} className="h-3 w-3" />{status.text}</span>
+          {/* Decorative progress line only; technical labels (frame, stage, playback status) are not shown to visitors. */}
+          <div className="pointer-events-none absolute inset-x-5 bottom-6 sm:inset-x-8 lg:inset-x-12" aria-hidden="true">
+            <span className="relative block h-px w-28 bg-ivory/25"><span className="absolute inset-y-0 left-0 bg-champagne" style={{ width: `${progress * 100}%` }} /></span>
           </div>
         </div>
       </div>

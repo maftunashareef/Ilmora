@@ -27,10 +27,11 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
   const name = site?.brand.name ?? 'ILMORA'
   return {
     metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
-    title: { default: `${name} — ${pick(lang, site?.brand.heroHeadline) || 'Bitta abonement'}`, template: `%s · ${name}` },
     icons: { icon: [{ url: '/brand/icon-32.png', sizes: '32x32' }, { url: '/brand/icon-192.png', sizes: '192x192' }], apple: '/brand/icon-180.png', shortcut: '/brand/favicon.ico' },
     manifest: '/manifest.webmanifest',
     ...pageMetadata({ locale: lang, path: '/', title: `${name} — ${pick(lang, site?.brand.heroHeadline)}`, description: pick(lang, site?.brand.heroTagline) || 'ILMORA' }),
+    // Last so the spread above cannot replace it: child pages become "Kurslar — ILMORA".
+    title: { default: `${name} — ${pick(lang, site?.brand.heroHeadline) || 'Bitta abonement'}`, template: `%s — ${name}` },
   }
 }
 

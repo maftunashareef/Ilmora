@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@/lib/router'
+import { normalizeUzPhone } from '@ilmora/shared'
+import { api, isApiError } from '../../lib/api'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
 import { formatSom } from '../../lib/format'
@@ -83,8 +85,8 @@ function Hero() {
           </dl>
         </div>
       </div>
-      <div className="pointer-events-none absolute bottom-6 left-5 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-ivory/55 sm:left-8 lg:left-12">
-        <span className="scroll-cue"><Icon name="down" className="h-3.5 w-3.5" /></span>{t('home.scrollDown')}
+      <div className="pointer-events-none absolute bottom-6 left-5 flex items-center text-ivory/55 sm:left-8 lg:left-12" aria-hidden="true">
+        <span className="scroll-cue"><Icon name="down" className="h-3.5 w-3.5" /></span>
       </div>
     </section>
   )
@@ -134,8 +136,7 @@ function Packages({ s }: { s: Section }) {
                   </ul>
                   <div className="mt-8 flex items-end justify-between gap-4 border-t border-charcoal/10 pt-6">
                     <div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-charcoal/45">{t('home.subscribeFrom')}</div>
-                      <div className="font-display text-2xl text-charcoal">{formatSom(from, lang)}<span className="ml-1 text-xs text-charcoal/50">{t('common.perMonth')}</span></div>
+                      <div className="font-display text-2xl text-charcoal">{t('home.priceFrom', { price: formatSom(from, lang) })}<span className="ml-1 text-xs text-charcoal/50">{t('common.perMonth')}</span></div>
                     </div>
                     <LinkButton to={`/builder?package=${p.id}`} variant={p.highlight ? 'primary' : 'secondary'}>{t('common.select')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
                   </div>
@@ -303,7 +304,7 @@ function FurnitureStory({ s }: { s: Section }) {
 function TeachersSection({ s }: { s: Section }) {
   const { t, tr } = useT()
   const enabled = useStore((st) => st.site.features.teacherChannels)
-  const teachers = useStore((st) => st.teachers.filter((x) => x.channelActive)).slice(0, Math.max(s.count ?? 4, 4) + 4)
+  const teachers = useStore((st) => st.teachers.filter((x) => x.channelActive))
   const centers = useStore((st) => st.centers)
   if (!enabled) return null
   return (
@@ -448,14 +449,28 @@ function RichText({ s }: { s: Section }) {
   )
 }
 
-// ─── Inquiry form — deliberately not persisted (no PII in demo storage) ──────
+// ─── Inquiry form — sent to POST /public/inquiries (stored with the consent timestamp) ──────
 function InquiryForm({ s }: { s: Section }) {
   const { t, tr } = useT()
   const enabled = useStore((st) => st.site.features.centerInquiry)
   const [sent, setSent] = useState(false)
-  const [form, setForm] = useState({ center: '', district: '', contact: '', courses: '', message: '' })
+  const [form, setForm] = useState({ center: '', district: '', contact: '', phone: '', telegram: '', courses: '', message: '' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   if (!enabled) return <section className="container-x pb-24"><Notice tone="warn">{t('centers.formDisabled')}</Notice></section>
-  const valid = form.center.trim() && form.contact.trim()
+  const valid = form.center.trim() && form.contact.trim() && normalizeUzPhone(form.phone).ok
+  const submit = async () => {
+    const phone = normalizeUzPhone(form.phone)
+    if (!valid || !phone.ok) return
+    setBusy(true); setError(null)
+    const details = [form.district && `${t('centers.form.district')}: ${form.district.trim()}`, form.telegram && `Telegram: ${form.telegram.trim()}`, form.courses && `${t('centers.form.courses')}: ${form.courses.trim()}`, form.message.trim()].filter(Boolean).join('\n')
+    try {
+      await api('/public/inquiries', { method: 'POST', body: { centerName: form.center.trim(), contactName: form.contact.trim(), phone: phone.e164, message: details, consent: true }, auth: false })
+      setSent(true)
+    } catch (err) {
+      setError(isApiError(err) && err.status !== 500 ? err.message : t('centers.form.error'))
+    } finally { setBusy(false) }
+  }
   return (
     <section className="container-x pb-24">
       <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
@@ -470,18 +485,21 @@ function InquiryForm({ s }: { s: Section }) {
               <div className="py-6 text-center">
                 <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-sage text-forest"><Icon name="check" className="h-6 w-6" /></div>
                 <p className="text-charcoal/75">{t('centers.form.success')}</p>
-                <Button variant="secondary" className="mt-6" onClick={() => { setSent(false); setForm({ center: '', district: '', contact: '', courses: '', message: '' }) }}>{t('centers.form.another')}</Button>
+                <Button variant="secondary" className="mt-6" onClick={() => { setSent(false); setForm({ center: '', district: '', contact: '', phone: '', telegram: '', courses: '', message: '' }) }}>{t('centers.form.another')}</Button>
               </div>
             ) : (
-              <form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (valid) setSent(true) }}>
+              <form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void submit() }}>
                 <Field label={t('centers.form.center')} required><Input required value={form.center} onChange={(e) => setForm({ ...form, center: e.target.value })} /></Field>
                 <Field label={t('centers.form.district')}><Input value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} /></Field>
-                <Field label={t('centers.form.contact')} required><Input required value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></Field>
+                <Field label={t('centers.form.contact')} required><Input required autoComplete="name" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></Field>
+                <Field label={t('centers.form.phone')} required><Input required inputMode="tel" autoComplete="tel" placeholder="+998 90 123 45 67" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+                <Field label={t('centers.form.telegram')}><Input placeholder="@username" value={form.telegram} onChange={(e) => setForm({ ...form, telegram: e.target.value })} /></Field>
                 <Field label={t('centers.form.courses')}><Input value={form.courses} onChange={(e) => setForm({ ...form, courses: e.target.value })} /></Field>
                 <Field label={t('centers.form.message')} className="sm:col-span-2"><Textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} /></Field>
+                {error && <div className="sm:col-span-2" role="alert"><Notice tone="warn">{error}</Notice></div>}
                 <div className="sm:col-span-2 flex items-center justify-between gap-4">
                   <span className="text-xs text-charcoal/45">{t('centers.form.privacy')}</span>
-                  <Button type="submit" disabled={!valid}>{t('centers.form.submit')}</Button>
+                  <Button type="submit" disabled={!valid || busy}>{busy ? <Icon name="refresh" className="h-4 w-4 animate-spin" /> : null}{t('centers.form.submit')}</Button>
                 </div>
               </form>
             )}

@@ -4,6 +4,7 @@ import { useT } from '@/i18n/useT'
 import { useLocation, useNavigate } from '@/lib/router'
 import { useStore } from '@/store/useStore'
 import type { Role } from '@/types'
+import { ConsentGate, needsConsent } from './ConsentGate'
 import { Card, Icon, LinkButton } from './ui'
 
 /**
@@ -15,6 +16,7 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
   const status = useStore((s) => s.auth.status)
   const current = useStore((s) => s.role)
   const roles = useStore((s) => s.auth.user?.roles ?? [])
+  const user = useStore((s) => s.auth.user)
   const ensureWorkspace = useStore((s) => s.ensureWorkspace)
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -47,5 +49,7 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
       </div>
     )
   }
+  // Every account confirms the current offer edition and personal-data consent before using a workspace.
+  if (needsConsent(user)) return <ConsentGate />
   return <>{children}</>
 }

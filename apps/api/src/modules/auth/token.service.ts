@@ -22,6 +22,8 @@ export interface AccessClaims {
 export interface SessionMeta { ip?: string; userAgent?: string }
 
 export const REFRESH_COOKIE = 'ilmora_refresh'
+/** Non-HttpOnly companion of the refresh cookie: value \"1\" while a session exists. */
+export const SESSION_FLAG = 'ilmora_session'
 
 /** Access JWTs (short-lived) and refresh sessions (opaque values stored as SHA-256 hashes, rotated on every use). */
 @Injectable()
@@ -104,6 +106,11 @@ export class TokenService {
   }
 
   /** HTTP-only cookie scoped to the auth routes only, so it is never sent with ordinary API calls. */
+  /** Readable-by-script flag that a refresh cookie exists, so the web app only calls /auth/refresh when it can succeed. */
+  flagCookieOptions(expiresAt?: Date): CookieOptions {
+    return { httpOnly: false, secure: this.env.COOKIE_SECURE, sameSite: 'lax', path: '/', domain: this.env.COOKIE_DOMAIN, expires: expiresAt ?? new Date(0) }
+  }
+
   cookieOptions(expiresAt?: Date): CookieOptions {
     return {
       httpOnly: true,

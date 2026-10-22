@@ -60,9 +60,12 @@ services:
         value: info
       - key: SEED_DEMO
         value: "true"
-      # The first deploy of a new environment runs with "true"; it is "false" since the live demo was seeded on 2026-10-21.
+      # Demo catalog texts are re-applied on deploy while the owner is not editing the catalog yet; set "false" once admin edits begin.
       - key: SEED_ON_DEPLOY
-        value: "false"
+        value: "true"
+      # Test accounts created during the launch checks; removed once, harmless afterwards.
+      - key: CLEANUP_LOGINS
+        value: cloud.teacher6966,live.student.one
   - type: keyvalue
     name: ilmora-redis
     plan: free

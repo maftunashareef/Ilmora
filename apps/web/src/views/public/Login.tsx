@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { ConsentFields, consentComplete, EMPTY_CONSENT, type ConsentState } from '../../components/ConsentGate'
 import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
@@ -40,6 +41,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [show, setShow] = useState(false)
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT)
+  const [consentInvalid, setConsentInvalid] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<'role' | 'login' | 'password' | 'confirm', string>>>({})
@@ -50,7 +53,7 @@ export function LoginPage() {
     nav(safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles), { replace: true })
   }, [auth.status, auth.user, nav, safeNext])
 
-  const switchMode = (m: Mode) => { setMode(m); setError(null); setFieldErrors({}) }
+  const switchMode = (m: Mode) => { setMode(m); setError(null); setFieldErrors({}); setConsentInvalid(false) }
 
   const describe = (err: unknown): string => {
     if (!isApiError(err)) return String(err)
@@ -74,9 +77,10 @@ export function LoginPage() {
       if (!role) next.role = t('auth.err.role')
       if (password.length < 8) next.password = t('auth.err.password')
       else if (password !== confirm) next.confirm = t('auth.err.mismatch')
+      setConsentInvalid(!consentComplete(consent))
     } else if (!password) next.password = t('auth.err.password')
     setFieldErrors(next)
-    return Object.keys(next).length === 0
+    return Object.keys(next).length === 0 && (mode !== 'register' || consentComplete(consent))
   }
 
   const submit = async () => {
@@ -86,7 +90,7 @@ export function LoginPage() {
     try {
       const normalized = loginName.trim().toLowerCase()
       if (mode === 'register' && role) {
-        const user = await register({ role, login: normalized, password, displayName: name.trim() || undefined })
+        const user = await register({ role, login: normalized, password, displayName: name.trim() || undefined, acceptOffer: true, consentPersonalData: true, consentAbroad: true, marketing: consent.marketing })
         notify(t('auth.registered', { name: user.displayName }))
       } else {
         const user = await login(normalized, password)
@@ -156,6 +160,8 @@ export function LoginPage() {
                 {fieldErrors.confirm && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.confirm}</p>}
               </Field>
             )}
+
+            {mode === 'register' && <ConsentFields value={consent} onChange={setConsent} invalid={consentInvalid} />}
 
             {error && <div role="alert"><Notice tone="warn">{error}</Notice></div>}
 

@@ -3,14 +3,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 const LOCALES = ['uz', 'ru', 'en'] as const
 type Locale = (typeof LOCALES)[number]
 
+/** Uzbek first: the language switcher sets NEXT_LOCALE; browser language is deliberately ignored. */
 function preferred(req: NextRequest): Locale {
   const cookie = req.cookies.get('NEXT_LOCALE')?.value
   if (cookie && (LOCALES as readonly string[]).includes(cookie)) return cookie as Locale
-  const header = req.headers.get('accept-language') ?? ''
-  for (const part of header.split(',')) {
-    const tag = part.trim().slice(0, 2).toLowerCase()
-    if ((LOCALES as readonly string[]).includes(tag)) return tag as Locale
-  }
   return 'uz'
 }
 

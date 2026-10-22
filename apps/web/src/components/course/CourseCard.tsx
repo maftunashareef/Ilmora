@@ -1,3 +1,4 @@
+import { countLabel, NOUNS } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
@@ -31,7 +32,7 @@ export function ScheduleChips({ group, compact }: { group: Group; compact?: bool
 }
 
 export function CourseCard({ course, showInternal, compact }: { course: Course; showInternal?: boolean; compact?: boolean }) {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const tpl = useStore((s) => s.site.courseCard)
   const teacher = useStore((s) => s.teachers.find((x) => x.id === course.teacherId))
   const center = useStore((s) => s.centers.find((x) => x.id === course.centerId))
@@ -56,7 +57,7 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
         <div className="mt-3 space-y-1 text-xs text-charcoal/60">
           {tpl.showTeacher && teacher && <div>{teacher.name}</div>}
           {tpl.showCenter && center && <div className="flex items-center gap-1.5"><Icon name="building" className="h-3 w-3" />{center.name} · {tr(center.district)}</div>}
-          {tpl.showSchedule && g && <div><ScheduleChips group={g} compact />{course.groups.length > 1 && <span className="ml-1 text-charcoal/40">+{course.groups.length - 1}</span>}</div>}
+          {tpl.showSchedule && g && <div><ScheduleChips group={g} compact />{course.groups.length > 1 && <span className="ml-1 text-charcoal/40">+{countLabel(lang, course.groups.length - 1, NOUNS.group)}</span>}</div>}
         </div>
         <div className="mt-auto flex items-end justify-between gap-3 pt-4">
           <PriceTag price={course.price} emphasis={tpl.priceStyle === 'emphasis'} />

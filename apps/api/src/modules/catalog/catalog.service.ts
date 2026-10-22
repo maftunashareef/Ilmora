@@ -16,7 +16,8 @@ export class CatalogService {
     const [centers, categories, teachers, subjects, courses, seats] = await Promise.all([
       this.prisma.client.center.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
       this.prisma.client.category.findMany({ where: { tenantId }, orderBy: { sortOrder: 'asc' } }),
-      this.prisma.client.teacherProfile.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
+      // Self-registered teachers stay out of the public catalog until an admin assigns them to a center.
+      this.prisma.client.teacherProfile.findMany({ where: { tenantId, centerId: { not: null } }, orderBy: { name: 'asc' } }),
       this.prisma.client.subject.findMany({ where: { tenantId } }),
       this.prisma.client.course.findMany({ where: { tenantId, status: 'PUBLISHED', visibility: 'PUBLIC' }, include: { groups: { where: { deletedAt: null } } }, orderBy: { createdAt: 'asc' } }),
       this.seatCounts(tenantId),
@@ -44,7 +45,7 @@ export class CatalogService {
   }
 
   async teacherContent(tenantId: string, teacherKey: string, actor?: RequestActor) {
-    const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, OR: [{ slug: teacherKey }, { id: teacherKey }] } })
+    const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, centerId: { not: null }, OR: [{ slug: teacherKey }, { id: teacherKey }] } })
     if (!teacher) throw AppError.notFound('Teacher')
     const groupIds = await this.actorGroupIds(actor)
     const [videos, playlists, resources, courses, seats] = await Promise.all([

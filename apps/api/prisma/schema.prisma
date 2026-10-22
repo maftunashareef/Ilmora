@@ -237,6 +237,12 @@ model User {
   center          Center?   @relation(fields: [centerId], references: [id])
   isActive        Boolean   @default(true)
   lastLoginAt     DateTime?
+  /** Acceptance of the public offer (edition in offerVersion) and personal-data consent; see shared/legal. */
+  offerAcceptedAt DateTime?
+  offerVersion    String?
+  consentAt       DateTime?
+  consentAbroad   Boolean   @default(false)
+  marketingAt     DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?

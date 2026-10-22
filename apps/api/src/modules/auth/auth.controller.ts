@@ -6,9 +6,9 @@ import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AccountService } from './account.service'
-import { PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
+import { ConsentDto, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
 import { AuthService, type LoginResult } from './auth.service'
-import { REFRESH_COOKIE, TokenService } from './token.service'
+import { REFRESH_COOKIE, SESSION_FLAG, TokenService } from './token.service'
 
 @Controller('auth')
 export class AuthController {
@@ -60,6 +60,7 @@ export class AuthController {
       return this.respond(res, result)
     } catch (err) {
       res.clearCookie(REFRESH_COOKIE, this.tokens.cookieOptions())
+      res.clearCookie(SESSION_FLAG, this.tokens.flagCookieOptions())
       throw err
     }
   }
@@ -70,12 +71,19 @@ export class AuthController {
     this.assertSameSite(req, requestedWith)
     await this.auth.logout((req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE])
     res.clearCookie(REFRESH_COOKIE, this.tokens.cookieOptions())
+    res.clearCookie(SESSION_FLAG, this.tokens.flagCookieOptions())
     return { ok: true }
   }
 
   @Get('me')
   me(@CurrentActor() actor: RequestActor) {
     return this.auth.me(actor.id)
+  }
+
+  /** Accept the current offer edition and give personal-data consent (existing accounts). */
+  @Post('consent')
+  consent(@CurrentActor() actor: RequestActor, @Body() dto: ConsentDto) {
+    return this.accounts.giveConsent(actor.id, { marketing: dto.marketing })
   }
 
   @Patch('me')
@@ -85,6 +93,7 @@ export class AuthController {
 
   private respond(res: Response, result: LoginResult) {
     res.cookie(REFRESH_COOKIE, result.refresh.raw, this.tokens.cookieOptions(result.refresh.expiresAt))
+    res.cookie(SESSION_FLAG, '1', this.tokens.flagCookieOptions(result.refresh.expiresAt))
     return { accessToken: result.accessToken, expiresInSeconds: result.expiresInSeconds, user: result.user }
   }
 
