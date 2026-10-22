@@ -40,7 +40,7 @@ function Blocks({ blocks }: { blocks: LegalBlock[] }) {
 export function OfferPage() {
   const { t, lang } = useT()
   const own = OFFER_TEXT[lang]
-  const blocks = own ?? OFFER_TEXT.ru ?? []
+  const blocks = own ?? OFFER_TEXT.uz ?? []
   return (
     <div className="container-x py-12 lg:py-16">
       <div className="mx-auto max-w-3xl">
@@ -61,12 +61,12 @@ export function OfferPage() {
 /** Personal data: a factual summary of what the platform processes, then section 9 and appendix 1 of the offer. */
 export function PrivacyPage() {
   const { t, lang } = useT()
-  const all = OFFER_TEXT.ru ?? []
-  const idx = (prefix: string) => all.findIndex((b) => b.t === 'h2' && b.text.startsWith(prefix))
-  const s9 = idx('9.')
-  const s10 = idx('10.')
-  const a1 = idx('Приложение 1')
-  const a2 = idx('Приложение 2')
+  const all = OFFER_TEXT[lang] ?? OFFER_TEXT.uz ?? []
+  const idx = (re: RegExp) => all.findIndex((b) => b.t === 'h2' && re.test(b.text))
+  const s9 = idx(/^9\./)
+  const s10 = idx(/^10\./)
+  const a1 = idx(/^(Приложение 1|1-ilova)/)
+  const a2 = idx(/^(Приложение 2|2-ilova)/)
   const blocks = [...(s9 >= 0 ? all.slice(s9, s10 > s9 ? s10 : undefined) : []), ...(a1 >= 0 ? all.slice(a1, a2 > a1 ? a2 : undefined) : [])]
   return (
     <div className="container-x py-12 lg:py-16">
