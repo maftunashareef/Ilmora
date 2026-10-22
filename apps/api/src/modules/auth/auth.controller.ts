@@ -83,7 +83,8 @@ export class AuthController {
   /** Accept the current offer edition and give personal-data consent (existing accounts). */
   @Post('consent')
   consent(@CurrentActor() actor: RequestActor, @Body() dto: ConsentDto) {
-    return this.accounts.giveConsent(actor.id, { marketing: dto.marketing })
+    void dto
+    return this.accounts.giveConsent(actor.id)
   }
 
   @Patch('me')

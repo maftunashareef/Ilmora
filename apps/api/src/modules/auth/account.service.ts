@@ -86,7 +86,7 @@ export class AccountService {
   }
 
   /** The controller has already validated the offer/consent marks (RegisterDto); the timestamps and edition are recorded here. */
-  async register(tenantId: string, input: { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; lang?: 'uz' | 'ru' | 'en'; marketing?: boolean }, meta: SessionMeta): Promise<LoginResult> {
+  async register(tenantId: string, input: { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; lang?: 'uz' | 'ru' | 'en' }, meta: SessionMeta): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
     if (!roles) throw AppError.invalid('invalid_role', 'Choose Student or Teacher')
     const login = this.normalizeLogin(input.login)
@@ -100,7 +100,7 @@ export class AccountService {
     try {
       user = await this.prisma.client.$transaction(async (tx) => {
         const created = await tx.user.create({
-          data: { tenantId, login, passwordHash, displayName, preferredLang: input.lang ?? 'uz', roles, lastLoginAt: now, offerAcceptedAt: now, offerVersion: OFFER_VERSION, consentAt: now, consentAbroad: true, marketingAt: input.marketing ? now : null },
+          data: { tenantId, login, passwordHash, displayName, preferredLang: input.lang ?? 'uz', roles, lastLoginAt: now, offerAcceptedAt: now, offerVersion: OFFER_VERSION, consentAt: now },
           include: USER_INCLUDE,
         })
         if (input.role === 'TEACHER') {
@@ -139,14 +139,14 @@ export class AccountService {
   }
 
   /** Records acceptance of the current offer edition and personal-data consent for an existing account. */
-  async giveConsent(userId: string, input: { marketing?: boolean }): Promise<PublicUser> {
+  async giveConsent(userId: string): Promise<PublicUser> {
     const now = new Date()
     const user = await this.prisma.client.user.update({
       where: { id: userId },
-      data: { offerAcceptedAt: now, offerVersion: OFFER_VERSION, consentAt: now, consentAbroad: true, marketingAt: input.marketing ? now : null },
+      data: { offerAcceptedAt: now, offerVersion: OFFER_VERSION, consentAt: now },
       include: USER_INCLUDE,
     })
-    await this.audit.record({ action: 'auth.consent', entityType: 'User', entityId: user.id, after: { offerVersion: OFFER_VERSION, marketing: !!input.marketing } })
+    await this.audit.record({ action: 'auth.consent', entityType: 'User', entityId: user.id, after: { offerVersion: OFFER_VERSION } })
     return this.toPublic(user, await this.effectiveRoles(user))
   }
 

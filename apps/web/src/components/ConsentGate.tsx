@@ -10,19 +10,14 @@ import { Button, Card, Icon, Notice } from './ui'
 export interface ConsentState {
   acceptOffer: boolean
   consentPersonalData: boolean
-  consentAbroad: boolean
-  marketing: boolean
 }
-export const EMPTY_CONSENT: ConsentState = { acceptOffer: false, consentPersonalData: false, consentAbroad: false, marketing: false }
-export const consentComplete = (c: ConsentState) => c.acceptOffer && c.consentPersonalData && c.consentAbroad
+export const EMPTY_CONSENT: ConsentState = { acceptOffer: false, consentPersonalData: false }
+export const consentComplete = (c: ConsentState) => c.acceptOffer && c.consentPersonalData
 
 /** An account must have accepted the current offer edition and given personal-data consent before using a workspace. */
 export const needsConsent = (u: AuthUser | null | undefined) => !!u && (!u.offerAcceptedAt || u.offerVersion !== OFFER_VERSION || !u.consentAt)
 
-/**
- * The three required marks (offer, personal data, storage abroad) and the optional marketing mark.
- * Section 9.1 of the offer requires personal-data consent to be a separate mark from accepting the offer.
- */
+/** Two required marks: the offer and personal-data consent (section 9.1 of the offer keeps them separate). */
 export function ConsentFields({ value, onChange, invalid }: { value: ConsentState; onChange: (v: ConsentState) => void; invalid?: boolean }) {
   const { t } = useT()
   const row = (key: keyof ConsentState, label: React.ReactNode, required: boolean) => (
@@ -43,8 +38,6 @@ export function ConsentFields({ value, onChange, invalid }: { value: ConsentStat
       <legend className="sr-only">{t('auth.consent.title')}</legend>
       {row('acceptOffer', <>{t('auth.consent.offerBefore')} <Link to="/oferta" target="_blank" className="font-medium text-forest underline">{t('auth.consent.offerLink')}</Link> {t('auth.consent.offerAfter')}</>, true)}
       {row('consentPersonalData', <>{t('auth.consent.pd')} <Link to="/privacy" target="_blank" className="font-medium text-forest underline">{t('legal.privacy')}</Link></>, true)}
-      {row('consentAbroad', t('auth.consent.abroad'), true)}
-      {row('marketing', t('auth.consent.marketing'), false)}
       {invalid && !consentComplete(value) && <p className="text-xs text-red-700" role="alert">{t('auth.consent.required')}</p>}
     </fieldset>
   )
@@ -62,7 +55,7 @@ export function ConsentGate() {
     if (!consentComplete(value)) { setInvalid(true); return }
     setBusy(true); setError(null)
     try {
-      await giveConsent({ acceptOffer: true, consentPersonalData: true, consentAbroad: true, marketing: value.marketing })
+      await giveConsent({ acceptOffer: true, consentPersonalData: true })
     } catch (err) {
       setError(isApiError(err) ? err.message : String(err))
     } finally { setBusy(false) }

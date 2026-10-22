@@ -1,4 +1,4 @@
-import { Equals, IsBoolean, IsIn, IsOptional, IsString, Length, Matches } from 'class-validator'
+import { Equals, IsIn, IsOptional, IsString, Length, Matches } from 'class-validator'
 
 export class RequestOtpDto {
   @IsString()
@@ -78,14 +78,6 @@ export class RegisterDto {
 
   @Equals(true)
   consentPersonalData!: true
-
-  /** Hosting is outside Uzbekistan today (appendix 1, item 4), so this mark is required as well. */
-  @Equals(true)
-  consentAbroad!: true
-
-  @IsOptional()
-  @IsBoolean()
-  marketing?: boolean
 }
 
 /** Existing accounts (one-time-code sign-ups, demo accounts, older editions) confirm the current edition from the workspace. */
@@ -95,13 +87,6 @@ export class ConsentDto {
 
   @Equals(true)
   consentPersonalData!: true
-
-  @Equals(true)
-  consentAbroad!: true
-
-  @IsOptional()
-  @IsBoolean()
-  marketing?: boolean
 }
 
 export class PasswordLoginDto {

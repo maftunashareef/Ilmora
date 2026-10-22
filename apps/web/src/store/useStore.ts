@@ -34,7 +34,7 @@ export interface AuthUser {
   marketing: boolean
 }
 
-export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad: true; marketing?: boolean }
+export interface ConsentInput { acceptOffer: true; consentPersonalData: true }
 export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string }
 
 export interface PaymentSummary {

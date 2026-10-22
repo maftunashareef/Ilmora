@@ -90,7 +90,7 @@ export function LoginPage() {
     try {
       const normalized = loginName.trim().toLowerCase()
       if (mode === 'register' && role) {
-        const user = await register({ role, login: normalized, password, displayName: name.trim() || undefined, acceptOffer: true, consentPersonalData: true, consentAbroad: true, marketing: consent.marketing })
+        const user = await register({ role, login: normalized, password, displayName: name.trim() || undefined, acceptOffer: true, consentPersonalData: true })
         notify(t('auth.registered', { name: user.displayName }))
       } else {
         const user = await login(normalized, password)
