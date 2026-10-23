@@ -3,10 +3,12 @@
  *
  *   npx prisma db seed            (via prisma.config.ts)  or  npm run prisma:seed
  *
- * Production: creates the tenant, site template, packages and the catalog only.
+ * Production: creates the tenant, site template, packages, categories and the sample catalog only.
+ * SEED_CATALOG=false (a real launch): skips the sample catalog — centers, teachers, subjects, courses, groups, videos,
+ * playlists, resources — so admins enter the real one; tenant, site template, packages and categories are still created.
  * Demo/staging (SEED_DEMO=true, default outside production): also creates demo students, teacher logins,
  * subscriptions, lesson sessions and sample attendance so every workspace has data to show.
- * Super Admin is never seeded: designate the owner account with `npm run owner:setup -- --login <login>`.
+ * Super Admin is never seeded: designate owner accounts with `npm run owner:setup -- --login <login>` (`--add` for more).
  * SEED_DEMO_PASSWORD (optional, demo mode only): gives every demo account this password for login + password sign-in.
  */
 import { PrismaPg } from '@prisma/adapter-pg'
@@ -31,6 +33,8 @@ const TENANT_SLUG = process.env.DEFAULT_TENANT_SLUG ?? 'ilmora'
 const WEB_ORIGIN = process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000'
 const TZ = process.env.SCHEDULE_TIMEZONE ?? 'Asia/Tashkent'
 const SEED_DEMO = (process.env.SEED_DEMO ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true')) === 'true'
+/** false: no sample centers, teachers, courses, groups, videos, playlists or resources (real catalog entered by admins). */
+const SEED_CATALOG = (process.env.SEED_CATALOG ?? 'true') === 'true'
 const up = <T extends string>(v: T) => v.toUpperCase()
 const json = (v: unknown) => v as Prisma.InputJsonValue
 const slugOf = (id: string) => id.replace(/^(ce|cat|t|c|sub|v|pl|r|s|g|pkg)-/, '')
@@ -43,7 +47,8 @@ const hash01 = (key: string) => {
 }
 
 async function main() {
-  const { centers, categories, teachers, subjects, courses, videos, playlists, resources, site } = sampleData
+  if (SEED_DEMO && !SEED_CATALOG) throw new Error('SEED_DEMO=true needs the sample catalog: unset SEED_CATALOG or set it to true')
+  const { categories, site } = sampleData
 
   await prisma.tenant.upsert({ where: { id: TENANT_ID }, update: { slug: TENANT_SLUG, webOrigin: WEB_ORIGIN }, create: { id: TENANT_ID, slug: TENANT_SLUG, name: 'ILMORA', webOrigin: WEB_ORIGIN } })
 
@@ -58,11 +63,21 @@ async function main() {
     })
   }
 
-  for (const c of centers) {
-    await prisma.center.upsert({ where: { id: c.id }, update: { name: c.name, district: json(c.district), description: json(c.description), tone: c.tone }, create: { id: c.id, tenantId: TENANT_ID, slug: slugOf(c.id), name: c.name, district: json(c.district), description: json(c.description), tone: c.tone } })
-  }
   for (const [i, c] of categories.entries()) {
     await prisma.category.upsert({ where: { id: c.id }, update: { name: json(c.name), glyph: c.glyph, sortOrder: i }, create: { id: c.id, tenantId: TENANT_ID, slug: slugOf(c.id), name: json(c.name), glyph: c.glyph, sortOrder: i } })
+  }
+  if (SEED_CATALOG) await seedCatalog()
+
+  if (SEED_DEMO) await seedDemo()
+  console.log(`Seed complete (${SEED_DEMO ? 'demo' : 'production'} mode${SEED_CATALOG ? '' : ', no sample catalog'})`)
+}
+
+/** Sample centers, teachers, subjects, courses with groups, videos, playlists and resources (SEED_CATALOG=true). */
+async function seedCatalog() {
+  const { centers, teachers, subjects, courses, videos, playlists, resources } = sampleData
+
+  for (const c of centers) {
+    await prisma.center.upsert({ where: { id: c.id }, update: { name: c.name, district: json(c.district), description: json(c.description), tone: c.tone }, create: { id: c.id, tenantId: TENANT_ID, slug: slugOf(c.id), name: c.name, district: json(c.district), description: json(c.description), tone: c.tone } })
   }
   for (const t of teachers) {
     const data = { name: t.name, title: json(t.title), bio: json(t.bio), expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, bannerTone: t.bannerTone, tagline: json(t.tagline), channelActive: t.channelActive, featuredType: t.featured?.type ?? null, featuredId: t.featured?.id ?? null }
@@ -105,9 +120,6 @@ async function main() {
     }
     await prisma.resource.upsert({ where: { id: r.id }, update: data, create: { id: r.id, tenantId: TENANT_ID, ...data } })
   }
-
-  if (SEED_DEMO) await seedDemo()
-  console.log(`Seed complete (${SEED_DEMO ? 'demo' : 'production'} mode)`)
 }
 
 /** Demo accounts use reserved-looking numbers (+998 90 000 00 xx) and only ever receive console SMS. */

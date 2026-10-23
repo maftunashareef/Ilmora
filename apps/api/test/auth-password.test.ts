@@ -7,7 +7,7 @@ import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 
 const meta = { ip: '127.0.0.1', userAgent: 'vitest' }
 
-describe.skipIf(!DB_AVAILABLE)('login + password accounts and the single-owner rule', () => {
+describe.skipIf(!DB_AVAILABLE)('login + password accounts and the owner rule', () => {
   const ctx = new TestContext()
   // Three failures lock a login; Redis off keeps the counter in memory for the test process.
   const env = testEnv({ REDIS_MODE: 'off', LOGIN_MAX_FAILURES: '3', LOGIN_LOCK_SECONDS: '60' })
@@ -62,9 +62,8 @@ describe.skipIf(!DB_AVAILABLE)('login + password accounts and the single-owner r
     await expect(inT(() => accounts.loginWithPassword(t.tenantId, { login: 'locked', password: 'the right password' }, meta))).rejects.toSatisfy((e) => (e as AppError).getStatus() === 429)
   })
 
-  it('derives Super Admin from tenant ownership only, and a user can own at most one tenant', async () => {
+  it('derives Super Admin from the owner flag only, and every owner gets it', async () => {
     const t = await ctx.makeTenant('pw-d')
-    const other = await ctx.makeTenant('pw-e')
     const sys = <T>(fn: () => Promise<T>) => TenantContext.system(fn)
     // a forged roles column does not grant admin claims
     const forged = await sys(() => ctx.prisma.client.user.create({ data: { tenantId: t.tenantId, login: 'forged', displayName: 'Forged', roles: ['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'STUDENT'] } }))
@@ -72,13 +71,17 @@ describe.skipIf(!DB_AVAILABLE)('login + password accounts and the single-owner r
     const session = await TenantContext.forTenant(t.tenantId, () => accounts.openSession({ ...forged, teacherProfile: null }, meta))
     expect((await ctx.tokens.verifyAccess(session.accessToken)).roles).not.toContain('PLATFORM_ADMIN')
 
-    // the configured owner gets Super Admin even if the column lacks it
-    const owner = await sys(() => ctx.prisma.client.user.create({ data: { tenantId: t.tenantId, login: 'owner', displayName: 'Owner', roles: ['STUDENT'] } }))
-    await sys(() => ctx.prisma.client.tenant.update({ where: { id: t.tenantId }, data: { ownerUserId: owner.id } }))
-    expect(await accounts.effectiveRoles(owner)).toEqual(['STUDENT', 'PLATFORM_ADMIN', 'FINANCE_ADMIN'])
+    // owners get Super Admin even if the column lacks it — two owners, both of them
+    const first = await sys(() => ctx.prisma.client.user.create({ data: { tenantId: t.tenantId, login: 'owner', displayName: 'Owner', roles: ['STUDENT'], isOwner: true } }))
+    const second = await sys(() => ctx.prisma.client.user.create({ data: { tenantId: t.tenantId, login: 'owner2', displayName: 'Owner 2', roles: [], isOwner: true } }))
+    expect(await accounts.effectiveRoles(first)).toEqual(['STUDENT', 'PLATFORM_ADMIN', 'FINANCE_ADMIN'])
+    expect(await accounts.effectiveRoles(second)).toEqual(['PLATFORM_ADMIN', 'FINANCE_ADMIN'])
+    const ownerSession = await TenantContext.forTenant(t.tenantId, () => accounts.openSession({ ...second, teacherProfile: null }, meta))
+    expect((await ctx.tokens.verifyAccess(ownerSession.accessToken)).roles).toContain('PLATFORM_ADMIN')
     expect(await accounts.effectiveRoles(forged)).not.toContain('PLATFORM_ADMIN')
 
-    // ownership is unique per user
-    await expect(sys(() => ctx.prisma.client.tenant.update({ where: { id: other.tenantId }, data: { ownerUserId: owner.id } }))).rejects.toThrow()
+    // losing the flag loses the claims at the next refresh
+    const demoted = await sys(() => ctx.prisma.client.user.update({ where: { id: second.id }, data: { isOwner: false } }))
+    expect(await accounts.effectiveRoles(demoted)).not.toContain('PLATFORM_ADMIN')
   })
 })

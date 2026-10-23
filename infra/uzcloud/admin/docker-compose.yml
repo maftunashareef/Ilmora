@@ -1,9 +1,10 @@
 # ILMORA — machine "ilmora-admin" (UzCloud). Private network only: no public IP, outbound through the network's IP.
 #
-#   docker compose --env-file .env up -d          (run from infra/uzcloud/admin; see infra/uzcloud/README.md)
+#   sh infra/uzcloud/compose.sh admin up -d        (reads api.env + admin/.env; see infra/uzcloud/README.md)
 #
 # Holds the data (PostgreSQL, Redis), the background worker, the admin panel and the nightly backups to S3.
 # Ports are published on the private address only, so ilmora-web can reach them and the internet cannot.
+# The machine has 1 vCPU: Docker refuses a cpus limit above it, so every limit below is at most 1.
 
 name: ilmora-admin
 
@@ -40,7 +41,7 @@ services:
       retries: 10
     deploy:
       resources:
-        limits: { cpus: "1.5", memory: 1536m }
+        limits: { cpus: "1", memory: 1536m }
     logging: *logging
 
   redis:
@@ -97,7 +98,7 @@ services:
       retries: 3
     deploy:
       resources:
-        limits: { cpus: "1", memory: 512m }
+        limits: { cpus: "0.75", memory: 512m }
     logging: *logging
 
   # The same web image as the site, answering only the admin workspace. Caddy on ilmora-web proxies to it.

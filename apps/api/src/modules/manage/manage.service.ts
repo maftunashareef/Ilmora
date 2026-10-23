@@ -5,7 +5,7 @@ import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
-import { TenantContext, type RequestActor } from '../../infra/tenancy/tenant-context'
+import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
 import { SessionsService } from '../sessions/sessions.service'
@@ -436,9 +436,8 @@ export class ManageService {
   async setRoles(tenantId: string, actor: RequestActor, userId: string, input: z.infer<typeof UserRolesInput>) {
     const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId } })
     if (!user) throw AppError.notFound('User')
-    // Super Admin belongs to the configured owner only (owner-setup command) and is never granted or revoked here.
-    const tenant = await TenantContext.system(() => this.prisma.client.tenant.findUnique({ where: { id: tenantId }, select: { ownerUserId: true } }))
-    if (tenant?.ownerUserId === user.id) throw AppError.forbidden('The owner account cannot be changed here', { code: 'owner_protected' })
+    // Super Admin belongs to the owner accounts only (owner-setup command) and is never granted or revoked here.
+    if (user.isOwner) throw AppError.forbidden('The owner account cannot be changed here', { code: 'owner_protected' })
     void actor
     const updated = await this.prisma.client.user.update({ where: { id: userId }, data: { roles: input.roles, centerId: input.centerId === undefined ? user.centerId : input.centerId, isActive: input.isActive ?? user.isActive } })
     await this.audit.record({ action: 'user.roles', entityType: 'User', entityId: userId, before: { roles: user.roles, centerId: user.centerId, isActive: user.isActive }, after: { roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive }, reason: input.reason })

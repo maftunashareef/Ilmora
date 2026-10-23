@@ -1,6 +1,6 @@
 # ILMORA — machine "ilmora-web" (UzCloud). The only machine that receives traffic from the internet.
 #
-#   docker compose --env-file .env up -d          (run from infra/uzcloud/web; see infra/uzcloud/README.md)
+#   sh infra/uzcloud/compose.sh web up -d          (reads api.env + web/.env; see infra/uzcloud/README.md)
 #
 # Caddy terminates HTTPS for both domains: the site goes to `web`, the admin domain goes to the admin machine
 # over the private network. The API listens on the private address too, so the admin panel can render through it.

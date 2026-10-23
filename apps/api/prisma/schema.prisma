@@ -167,7 +167,7 @@ model Tenant {
   defaultLang Lang      @default(uz)
   /** Public web origin used in links (attendance URLs, receipts), e.g. https://ilmora.uz */
   webOrigin   String
-  /** The one account that holds Super Admin. Set only by the owner-setup command; unique, so a user owns at most one tenant. */
+  /** Deprecated: replaced by User.isOwner (several owners). Kept one release so a rollback still works; not read or written; drop later. */
   ownerUserId String?   @unique
   owner       User?     @relation("TenantOwner", fields: [ownerUserId], references: [id])
   createdAt   DateTime  @default(now())
@@ -236,6 +236,8 @@ model User {
   centerId        String?
   center          Center?   @relation(fields: [centerId], references: [id])
   isActive        Boolean   @default(true)
+  /** Super Admin (owner). Set only by the owner-setup command on the server; a tenant may have several owners. */
+  isOwner         Boolean   @default(false)
   lastLoginAt     DateTime?
   /** Acceptance of the public offer (edition in offerVersion) and personal-data consent; see shared/legal. */
   offerAcceptedAt DateTime?
