@@ -53,13 +53,13 @@ sh infra/scripts/deploy.sh
 
 It pulls images, starts `postgres`/`redis`, runs the one-shot `migrate` container (`prisma migrate deploy`, serialized by compose), then rolls `api`, `worker`, `web`, `nginx`, and finally checks `/health/ready`, the web root and the public catalog.
 
-After the first deploy, designate the Super Admin owner once (hidden password prompt; nothing sensitive on the command line):
+After the first deploy, designate the Super Admin owner (hidden password prompt; nothing sensitive on the command line); add a second owner the same way with `--add`:
 
 ```bash
 docker compose -f infra/docker-compose.prod.yml exec api node dist/cli/owner-setup.js --login <your-login>
 ```
 
-The command lists accounts with privileged roles before changing anything, refuses to replace an existing owner without `--replace`, and strips roles from other accounts only with `--demote-others`. Only the owner account receives Super Admin claims; registration offers Student and Teacher only.
+The command lists owners and accounts with privileged roles before changing anything. With owners in place it needs `--add` (another owner), `--replace` (the only owner) or `--remove` (never the last owner), and strips roles from other accounts only with `--demote-others`. Only owner accounts receive Super Admin claims; registration offers Student and Teacher only.
 
 Migrations are **backward compatible by convention**: a release may add tables/columns/indexes and backfill, but must not drop or rename what the previous release still reads; removals ship one release later. That keeps the previous containers working while the new ones start, and makes rollback a plain image switch.
 

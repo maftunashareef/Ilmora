@@ -32,14 +32,16 @@ Web: http://localhost:3000 (redirects to `/uz`). API: http://localhost:4000/v1, 
 
 Sign-in is login + password. Registration offers two roles only, Student and Teacher; a new Teacher gets an empty public profile (no center until an admin assigns one) and lands in the Teacher Studio, a Student lands in the Student workspace. The phone + one-time-code endpoints remain in the API (`/v1/auth/otp/*`) for phone verification but the login screen no longer uses them.
 
-**Super Admin** is held by exactly one *owner* account per tenant and is never offered at registration, never granted through the API, and never assigned to "the first user". Designate it once on the server (the password is typed into a hidden prompt, not passed as an argument):
+**Super Admin** is held by the tenant's *owner* accounts (one or more, `User.isOwner`) and is never offered at registration, never granted through the API, and never assigned to "the first user". Designate owners on the server (the password is typed into a hidden prompt, not passed as an argument):
 
 ```bash
 npm run owner:setup -- --login <your-login>          # local / staging checkout
 docker compose -f infra/docker-compose.prod.yml exec api node dist/cli/owner-setup.js --login <your-login>   # production container
 ```
 
-The command first lists every account that carries privileged roles, refuses to replace a configured owner without `--replace`, and only strips roles from other accounts when `--demote-others` is passed. Admin claims are derived from the owner designation at every sign-in and refresh, so a roles column alone can never grant them.
+The command first lists the owners and every account that carries privileged roles. When owners already exist it changes nothing unless told how: `--add` adds the login as another owner, `--replace` makes it the only owner (the others lose Super Admin and are signed out), `--remove` takes Super Admin away from a login (never from the last owner). Roles of non-owner accounts are stripped only with `--demote-others`. Admin claims are derived from the owner flag at every sign-in and refresh, so a roles column alone can never grant them.
+
+The UzCloud deployment (two machines) is described in `infra/uzcloud/README.md`.
 
 Demo accounts created by the seed (non-production only): students `aziz`, `jasur`, … (ids `s-*`), teachers `dilnoza`, `bekzod`, … (ids `t-*`). They get a password only when `SEED_DEMO_PASSWORD` is set for the seed run; there is no default password.
 

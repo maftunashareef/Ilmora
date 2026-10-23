@@ -1,17 +1,28 @@
-name: Deploy
+name: Release (UzCloud)
 
-# main → images tagged with the commit SHA (immutable) → staging deploy automatically.
-# Production deploys the SAME digests but waits for the "production" environment approval.
-# Required repository secrets/variables (per environment): DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PATH,
-# PUBLIC_API_URL, PUBLIC_WEB_URL. The server holds infra/.env.prod; the workflow only updates image digests in it.
+# Release to the two UzCloud machines (infra/uzcloud/README.md). Started by hand only:
+# Actions → "Release (UzCloud)" → Run workflow. Only logins listed in the RELEASE_ACTORS variable may run it.
+#
+# build: api, migrator and web images → ghcr.io, tagged with the commit SHA and deployed by digest.
+# deploy: copy infra/uzcloud + infra/redis to both machines (never .env / api.env), then ilmora-admin first
+#         (migrations, worker, admin panel, backups) and ilmora-web second (api, site, Caddy), then checks from outside.
+# "files_only" copies the infra files and stops: used once before the first release, so the .example files are on
+# the servers to fill in.
+#
+# Repository secrets: DEPLOY_SSH_KEY (private key of the ilmora-deploy pair), DEPLOY_KNOWN_HOSTS (host keys of both
+# machines), WEB_HOST (public IP), ADMIN_HOST (private IP, reached through WEB_HOST).
+# Repository variables: RELEASE_ACTORS (comma-separated GitHub logins), PUBLIC_WEB_URL, DEPLOY_PATH (default /opt/ilmora).
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      files_only:
+        description: "Only copy infra files to the servers (first install), no build and no rollout"
+        type: boolean
+        default: false
 
 concurrency:
-  group: deploy
+  group: release
   cancel-in-progress: false
 
 permissions:
@@ -22,10 +33,30 @@ env:
   REGISTRY: ghcr.io
   IMAGE_API: ghcr.io/${{ github.repository_owner }}/ilmora-api
   IMAGE_WEB: ghcr.io/${{ github.repository_owner }}/ilmora-web
+  DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/ilmora' }}
+  PUBLIC_WEB_URL: ${{ vars.PUBLIC_WEB_URL || 'https://ilmoraa.uz' }}
 
 jobs:
+  authorize:
+    name: Check who is releasing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release actors only
+        env:
+          ACTOR: ${{ github.actor }}
+          ALLOWED: ${{ vars.RELEASE_ACTORS }}
+        run: |
+          actor=$(printf '%s' "$ACTOR" | tr '[:upper:]' '[:lower:]')
+          allowed=$(printf '%s' "$ALLOWED" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          case ",$allowed," in
+            *",$actor,"*) echo "release started by $ACTOR" ;;
+            *) echo "::error::$ACTOR is not listed in the RELEASE_ACTORS repository variable"; exit 1 ;;
+          esac
+
   build-push:
     name: Build and push images
+    needs: authorize
+    if: ${{ !inputs.files_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
@@ -70,63 +101,110 @@ jobs:
           target: web
           push: true
           tags: ${{ env.IMAGE_WEB }}:${{ github.sha }}
+          # Same-origin API: the browser calls /v1 on the site's own domain and Caddy forwards it to the api.
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL }}
-            NEXT_PUBLIC_SITE_URL=${{ vars.PUBLIC_WEB_URL }}
+            NEXT_PUBLIC_API_URL=/
+            NEXT_PUBLIC_SITE_URL=${{ env.PUBLIC_WEB_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy-staging:
-    name: Deploy to staging
-    needs: build-push
+  deploy:
+    name: Roll out to UzCloud
+    needs: [authorize, build-push]
+    if: ${{ always() && needs.authorize.result == 'success' && (inputs.files_only || needs.build-push.result == 'success') }}
     runs-on: ubuntu-latest
-    environment:
-      name: staging
-      url: ${{ vars.PUBLIC_WEB_URL }}
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      FILES_ONLY: ${{ inputs.files_only }}
+      API_DIGEST: ${{ needs.build-push.outputs.api_digest }}
+      MIGRATOR_DIGEST: ${{ needs.build-push.outputs.migrator_digest }}
+      WEB_DIGEST: ${{ needs.build-push.outputs.web_digest }}
     steps:
       - uses: actions/checkout@v4
-      - name: Roll out (migrate → app containers → smoke)
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script_stop: true
-          script: |
-            set -eu
-            cd "${{ secrets.DEPLOY_PATH }}"
-            git fetch --depth=1 origin ${{ github.sha }} && git checkout -q ${{ github.sha }}
-            sed -i "s#^API_IMAGE=.*#API_IMAGE=${{ env.IMAGE_API }}@${{ needs.build-push.outputs.api_digest }}#" infra/.env.prod
-            sed -i "s#^API_IMAGE_MIGRATOR=.*#API_IMAGE_MIGRATOR=${{ env.IMAGE_API }}-migrator@${{ needs.build-push.outputs.migrator_digest }}#" infra/.env.prod
-            sed -i "s#^WEB_IMAGE=.*#WEB_IMAGE=${{ env.IMAGE_WEB }}@${{ needs.build-push.outputs.web_digest }}#" infra/.env.prod
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            sh infra/scripts/deploy.sh
 
-  deploy-production:
-    name: Deploy to production (approval required)
-    needs: [build-push, deploy-staging]
-    runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ vars.PUBLIC_WEB_URL }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - name: Roll out the staged digests
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script_stop: true
-          script: |
-            set -eu
-            cd "${{ secrets.DEPLOY_PATH }}"
-            cp infra/.env.prod infra/.env.prod.previous
-            git fetch --depth=1 origin ${{ github.sha }} && git checkout -q ${{ github.sha }}
-            sed -i "s#^API_IMAGE=.*#API_IMAGE=${{ env.IMAGE_API }}@${{ needs.build-push.outputs.api_digest }}#" infra/.env.prod
-            sed -i "s#^API_IMAGE_MIGRATOR=.*#API_IMAGE_MIGRATOR=${{ env.IMAGE_API }}-migrator@${{ needs.build-push.outputs.migrator_digest }}#" infra/.env.prod
-            sed -i "s#^WEB_IMAGE=.*#WEB_IMAGE=${{ env.IMAGE_WEB }}@${{ needs.build-push.outputs.web_digest }}#" infra/.env.prod
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            sh infra/scripts/deploy.sh
+      - name: SSH access (host keys pinned, admin through web)
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          WEB_HOST: ${{ secrets.WEB_HOST }}
+          ADMIN_HOST: ${{ secrets.ADMIN_HOST }}
+        run: |
+          for v in DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS WEB_HOST ADMIN_HOST; do
+            eval "[ -n \"\${$v}\" ]" || { echo "::error::repository secret $v is not set"; exit 1; }
+          done
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host web
+            HostName $WEB_HOST
+            User root
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          Host admin
+            HostName $ADMIN_HOST
+            User root
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ProxyJump web
+          EOF
+          ssh web true && ssh admin true && echo "both machines reachable"
+
+      - name: Copy infra files (never .env / api.env)
+        run: |
+          for host in admin web; do
+            tar -C "$GITHUB_WORKSPACE" --exclude='.env' --exclude='api.env' --exclude='.env.previous' -czf - infra/uzcloud infra/redis \
+              | ssh "$host" "mkdir -p '$DEPLOY_PATH' && tar -C '$DEPLOY_PATH' --no-same-owner -xzf -"
+            echo "$host: files in $DEPLOY_PATH/infra/uzcloud"
+          done
+          if [ "$FILES_ONLY" = "true" ]; then
+            echo "files_only: stopping here. Create .env and api.env from the .example files on both machines (infra/uzcloud/README.md)."
+          fi
+
+      - name: Roll out ilmora-admin (migrations first)
+        if: ${{ !inputs.files_only }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          API_REF="$IMAGE_API@$API_DIGEST" MIGRATOR_REF="$IMAGE_API-migrator@$MIGRATOR_DIGEST" WEB_REF="$IMAGE_WEB@$WEB_DIGEST"
+          printf '%s' "$GH_TOKEN" | ssh admin "docker login ghcr.io -u '$ACTOR' --password-stdin"
+          ssh admin sh -s <<EOF
+          set -eu
+          cd '$DEPLOY_PATH/infra/uzcloud/admin'
+          [ -f .env ] || { echo "missing admin/.env on ilmora-admin (infra/uzcloud/README.md)"; exit 1; }
+          cp .env .env.previous
+          sed -i "s#^API_IMAGE=.*#API_IMAGE=$API_REF#; s#^API_IMAGE_MIGRATOR=.*#API_IMAGE_MIGRATOR=$MIGRATOR_REF#; s#^WEB_IMAGE=.*#WEB_IMAGE=$WEB_REF#" .env
+          sh '$DEPLOY_PATH/infra/uzcloud/deploy.sh' admin
+          EOF
+          ssh admin "docker logout ghcr.io >/dev/null"
+
+      - name: Roll out ilmora-web
+        if: ${{ !inputs.files_only }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          API_REF="$IMAGE_API@$API_DIGEST" WEB_REF="$IMAGE_WEB@$WEB_DIGEST"
+          printf '%s' "$GH_TOKEN" | ssh web "docker login ghcr.io -u '$ACTOR' --password-stdin"
+          ssh web sh -s <<EOF
+          set -eu
+          cd '$DEPLOY_PATH/infra/uzcloud/web'
+          [ -f .env ] || { echo "missing web/.env on ilmora-web (infra/uzcloud/README.md)"; exit 1; }
+          cp .env .env.previous
+          sed -i "s#^API_IMAGE=.*#API_IMAGE=$API_REF#; s#^WEB_IMAGE=.*#WEB_IMAGE=$WEB_REF#" .env
+          sh '$DEPLOY_PATH/infra/uzcloud/deploy.sh' web
+          EOF
+          ssh web "docker logout ghcr.io >/dev/null"
+
+      - name: Checks from outside
+        if: ${{ !inputs.files_only }}
+        run: |
+          site="${PUBLIC_WEB_URL%/}"
+          curl -fsS "$site/health/ready" && echo
+          curl -fsS -o /dev/null -w "site %{http_code}\n" "$site/uz"
+          curl -fsS -o /dev/null -w "catalog %{http_code}\n" "$site/v1/public/catalog"
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$site/v1/admin/finance/overview")
+          [ "$code" = "404" ] && echo "admin API closed on the site domain (404)" || { echo "::error::/v1/admin answered $code on the site domain"; exit 1; }

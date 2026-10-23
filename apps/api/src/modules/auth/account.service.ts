@@ -6,7 +6,6 @@ import { ENV, type Env } from '../../config/env'
 import type { Role } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { RedisService } from '../../infra/redis/redis.service'
-import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { type SessionMeta, TokenService } from './token.service'
 
@@ -45,6 +44,7 @@ export type UserRow = {
   preferredLang: 'uz' | 'ru' | 'en'
   reminders: boolean
   roles: Role[]
+  isOwner: boolean
   centerId: string | null
   isActive: boolean
   offerAcceptedAt: Date | null
@@ -62,8 +62,9 @@ const USER_INCLUDE = { teacherProfile: { select: { id: true } } } as const
 
 /**
  * Accounts with a login + password, and the one rule every session relies on: Super Admin (PLATFORM_ADMIN)
- * is held by the tenant's configured owner account only. Roles stored on a user never grant it by themselves —
- * claims are derived here at sign-in and refresh, so a forged roles column cannot escalate.
+ * is held by the tenant's owner accounts only (User.isOwner, set on the server by the owner-setup command).
+ * Roles stored on a user never grant it by themselves — claims are derived here at sign-in and refresh, so a
+ * forged roles column cannot escalate.
  */
 @Injectable()
 export class AccountService {
@@ -151,14 +152,13 @@ export class AccountService {
   }
 
   /**
-   * Roles that go into the access token. PLATFORM_ADMIN (+ FINANCE_ADMIN) is present exactly when the user is the
-   * tenant's owner, regardless of what the roles column says; every other role is taken from the column.
+   * Roles that go into the access token. PLATFORM_ADMIN (+ FINANCE_ADMIN) is present exactly when the user is one of
+   * the tenant's owners (isOwner, set only by the owner-setup command), regardless of what the roles column says;
+   * every other role is taken from the column. Callers pass the row they just read, so the flag is current.
    */
-  async effectiveRoles(user: { id: string; tenantId: string; roles: Role[] }): Promise<Role[]> {
-    const tenant = await TenantContext.system(() => this.prisma.client.tenant.findUnique({ where: { id: user.tenantId }, select: { ownerUserId: true } }))
-    const isOwner = !!tenant?.ownerUserId && tenant.ownerUserId === user.id
+  async effectiveRoles(user: { roles: Role[]; isOwner: boolean }): Promise<Role[]> {
     const roles: Role[] = user.roles.filter((r) => r !== 'PLATFORM_ADMIN')
-    if (isOwner) for (const r of ['PLATFORM_ADMIN', 'FINANCE_ADMIN'] as Role[]) if (!roles.includes(r)) roles.push(r)
+    if (user.isOwner) for (const r of ['PLATFORM_ADMIN', 'FINANCE_ADMIN'] as Role[]) if (!roles.includes(r)) roles.push(r)
     return roles
   }
 
