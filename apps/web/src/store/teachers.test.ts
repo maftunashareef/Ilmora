@@ -148,5 +148,37 @@ describe('Teacher Directory, Logo Navigation, and Profile Tests', () => {
     expect(getTeacherAvatarUrl(null)).toBeNull()
     expect(getTeacherAvatarUrl(undefined)).toBeNull()
   })
+
+  it('restores all 8 intended active teacher profiles when catalog is populated with intended data', () => {
+    const store = createIlmoraStore(initialMock)
+    const teachers = store.getState().teachers
+    const activeTeachers = teachers.filter((t) => t.channelActive)
+
+    // Dilnoza, Jamshid, Aziza, Bekzod, Malika, Sardor, Kamola, Rustam (8 active out of 9 total)
+    expect(activeTeachers.length).toBe(8)
+    const activeIds = activeTeachers.map((t) => t.id)
+    expect(activeIds).toEqual([
+      't-dilnoza',
+      't-jamshid',
+      't-aziza',
+      't-bekzod',
+      't-malika',
+      't-sardor',
+      't-kamola',
+      't-rustam',
+    ])
+
+    // Verify all active teachers have valid center assignments
+    const centers = store.getState().centers
+    for (const te of activeTeachers) {
+      expect(te.centerId).toBeDefined()
+      const center = centers.find((c) => c.id === te.centerId)
+      expect(center).toBeDefined()
+    }
+
+    // Verify all curated portrait teachers retain their photos
+    const withPhotos = activeTeachers.filter((t) => t.avatarUrl)
+    expect(withPhotos.length).toBe(5)
+  })
 })
 

@@ -80,7 +80,7 @@ async function seedCatalog() {
     await prisma.center.upsert({ where: { id: c.id }, update: { name: c.name, district: json(c.district), description: json(c.description), tone: c.tone }, create: { id: c.id, tenantId: TENANT_ID, slug: slugOf(c.id), name: c.name, district: json(c.district), description: json(c.description), tone: c.tone } })
   }
   for (const t of teachers) {
-    const data = { name: t.name, title: json(t.title), bio: json(t.bio), expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, bannerTone: t.bannerTone, tagline: json(t.tagline), channelActive: t.channelActive, featuredType: t.featured?.type ?? null, featuredId: t.featured?.id ?? null }
+    const data = { name: t.name, title: json(t.title), bio: json(t.bio), expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, avatarUrl: t.avatarUrl ?? null, bannerTone: t.bannerTone, tagline: json(t.tagline), channelActive: t.channelActive, featuredType: t.featured?.type ?? null, featuredId: t.featured?.id ?? null }
     await prisma.teacherProfile.upsert({ where: { id: t.id }, update: data, create: { id: t.id, tenantId: TENANT_ID, slug: slugOf(t.id), ...data } })
   }
   for (const s of subjects) {

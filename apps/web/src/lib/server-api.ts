@@ -23,9 +23,23 @@ const fallbackCatalog: Catalog = {
 export const getSite = () =>
   api<SiteData>('/public/site', { auth: false, next: { revalidate: 60, tags: ['site'] } }).catch(() => fallbackSite)
 
+const mergeById = <T extends { id: string }>(live: T[] | undefined, fallback: T[]): T[] => {
+  if (!live || live.length === 0) return fallback
+  const ids = new Set(live.map((item) => item.id))
+  return [...live, ...fallback.filter((item) => !ids.has(item.id))]
+}
+
 /** Public catalog (published + public items only), cached for a minute. */
 export const getCatalog = () =>
-  api<Catalog>('/public/catalog', { auth: false, next: { revalidate: 60, tags: ['catalog'] } }).catch(() => fallbackCatalog)
+  api<Catalog>('/public/catalog', { auth: false, next: { revalidate: 60, tags: ['catalog'] } })
+    .then((catalog) => ({
+      centers: mergeById(catalog?.centers, fallbackCatalog.centers),
+      categories: mergeById(catalog?.categories, fallbackCatalog.categories),
+      teachers: mergeById(catalog?.teachers, fallbackCatalog.teachers),
+      subjects: mergeById(catalog?.subjects, fallbackCatalog.subjects),
+      courses: mergeById(catalog?.courses, fallbackCatalog.courses),
+    }))
+    .catch(() => fallbackCatalog)
 
 export const getCourse = (key: string) =>
   api<Course>(`/public/courses/${encodeURIComponent(key)}`, { auth: false, next: { revalidate: 60, tags: ['catalog'] } }).catch(
