@@ -43,11 +43,21 @@ export function StudentOverview() {
           <div className="mt-10 grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
             <section>
               <div className="mb-4 flex items-center justify-between"><Eyebrow>{t('student.overview.upcoming')}</Eyebrow><Link to="/student/timetable" className="text-xs font-medium text-forest">{t('student.timetable')} →</Link></div>
-              <ul className="space-y-2">
+              <ul className="space-y-2.5">
                 {upcoming.map((l, i) => (
-                  <li key={`${l.group.id}-${l.day}-${i}`} className="card flex items-center gap-4 p-4">
-                    <div className="w-14 shrink-0 text-center"><div className="text-[10px] uppercase tracking-wider text-charcoal/45">{l.inDays === 0 ? t('common.today') : t(`dayShort.${l.day}` as 'dayShort.0')}</div><div className="font-display text-2xl text-charcoal">{l.start}</div></div>
-                    <div className="min-w-0 flex-1"><Link to={`/courses/${l.course.id}`} className="truncate font-medium text-charcoal hover:text-forest">{tr(l.course.title)}</Link><div className="mt-0.5 text-xs text-charcoal/55">{l.group.name} · {t('common.room')} {l.group.room} · {l.start}–{l.end}</div></div>
+                  <li key={`${l.group.id}-${l.day}-${i}`} className="card group flex items-center gap-4 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lift hover:border-forest/30">
+                    <div className="w-14 shrink-0 text-center">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-charcoal/50 flex items-center justify-center gap-1">
+                        {l.inDays === 0 ? <><span className="h-1.5 w-1.5 rounded-full bg-forest animate-ping" />{t('common.today')}</> : t(`dayShort.${l.day}` as 'dayShort.0')}
+                      </div>
+                      <div className="font-display text-2xl text-charcoal group-hover:text-forest transition-colors">{l.start}</div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <Link to={`/courses/${l.course.id}`} className="truncate font-medium text-charcoal hover:text-forest block transition-colors">
+                        {tr(l.course.title)}
+                      </Link>
+                      <div className="mt-0.5 text-xs text-charcoal/60">{l.group.name} · {t('common.room')} {l.group.room} · {l.start}–{l.end}</div>
+                    </div>
                     {i === 0 && <Badge tone="champagne">{t('student.nextLesson')}</Badge>}
                   </li>
                 ))}
@@ -55,12 +65,15 @@ export function StudentOverview() {
             </section>
             <section>
               <div className="mb-4 flex items-center justify-between"><Eyebrow>{t('student.courses')}</Eyebrow><Link to="/student/courses" className="text-xs font-medium text-forest">{t('common.all')} →</Link></div>
-              <ul className="space-y-2">
+              <ul className="space-y-2.5">
                 {groups.map((g) => { const c = s.courses.find((x) => x.id === g.courseId)!; const te = s.teachers.find((x) => x.id === c.teacherId); return (
-                  <li key={g.id} className="card p-4"><Link to={`/courses/${c.id}`} className="font-medium text-charcoal hover:text-forest">{tr(c.title)}</Link><div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-charcoal/55"><span>{te?.name}</span><ScheduleChips group={g} compact /></div></li>
+                  <li key={g.id} className="card group p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lift hover:border-champagne/40">
+                    <Link to={`/courses/${c.id}`} className="font-medium text-charcoal group-hover:text-forest block transition-colors">{tr(c.title)}</Link>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-charcoal/60"><span>{te?.name}</span><ScheduleChips group={g} compact /></div>
+                  </li>
                 ) })}
               </ul>
-              <Card className="mt-4 p-4 text-xs text-charcoal/60">{t('preview.renewalNote')}</Card>
+              <Card className="mt-4 p-4 text-xs text-charcoal/60 bg-paper/60 border-dashed border-charcoal/15">{t('preview.renewalNote')}</Card>
             </section>
           </div>
         </>

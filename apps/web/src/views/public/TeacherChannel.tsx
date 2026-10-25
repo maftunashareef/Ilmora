@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from '@/lib/router'
 import { NotFound } from '../../components/AccessGate'
 import { VisibilityBadge } from '../../components/course/badges'
 import { CourseCard } from '../../components/course/CourseCard'
+import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { ArtCover, Avatar, Badge, Button, Card, EmptyState, Eyebrow, Icon, Input, Notice, Tabs } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
@@ -53,7 +54,7 @@ export function TeacherChannelPage() {
   return (
     <div className="animate-fade">
       {/* Banner */}
-      <div className="relative h-44 md:h-64" style={{ background: teacher.bannerUpload?.previewUrl ? `url(${teacher.bannerUpload.previewUrl}) center/cover` : `linear-gradient(110deg, ${teacher.bannerTone} 0%, ${teacher.bannerTone}dd 55%, #C8AD7F66 100%)` }}>
+      <div className="relative h-44 md:h-64" style={{ background: teacher.bannerUpload?.previewUrl ? `url(${teacher.bannerUpload.previewUrl}) center/cover` : teacher.bannerUrl ? `url(${teacher.bannerUrl}) center/cover` : `linear-gradient(110deg, ${teacher.bannerTone} 0%, ${teacher.bannerTone}dd 55%, #C8AD7F66 100%)` }}>
         <svg className="absolute inset-0 h-full w-full opacity-30" viewBox="0 0 800 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
           {Array.from({ length: 6 }).map((_, i) => <path key={i} d={`M -20 ${30 + i * 32} C 200 ${i * 20}, 500 ${120 + i * 10}, 820 ${20 + i * 30}`} fill="none" stroke="#F7F5F0" strokeWidth="0.7" />)}
         </svg>
@@ -62,7 +63,7 @@ export function TeacherChannelPage() {
       <div className="container-x">
         <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
-            <Avatar name={teacher.name} seed={teacher.avatarSeed} size={96} url={teacher.avatarUpload?.previewUrl} className="-mt-12 ring-4 ring-ivory" />
+            <Avatar name={teacher.name} seed={teacher.avatarSeed} size={96} url={getTeacherAvatarUrl(teacher)} alt={teacher.name} className="-mt-12 ring-4 ring-ivory" />
             <div className="pb-1">
               <h1 className="font-display text-4xl text-charcoal md:text-5xl">{teacher.name}</h1>
               <div className="mt-1 text-sm text-charcoal/65">{tr(teacher.title)}{center && <> · <span className="text-charcoal/50">{center.name}</span></>}</div>

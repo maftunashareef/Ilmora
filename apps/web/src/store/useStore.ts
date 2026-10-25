@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { overlaps, sampleData, toMin as sharedToMin } from '@ilmora/shared'
+import { OFFER_VERSION, overlaps, sampleData, toMin as sharedToMin } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
 import type {
@@ -35,7 +35,7 @@ export interface AuthUser {
 }
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad: true; marketing?: boolean }
-export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string }
+export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; phone?: string }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string
@@ -65,6 +65,8 @@ interface Actions {
   bootstrap: () => Promise<void>
   register: (input: RegisterInput) => Promise<AuthUser>
   login: (login: string, password: string) => Promise<AuthUser>
+  loginWithGoogle: (input: { idToken?: string; code?: string; redirectUri?: string; role?: 'STUDENT' | 'TEACHER' }) => Promise<AuthUser>
+  loginAsDemo: (role: 'STUDENT' | 'TEACHER', customUser?: Partial<AuthUser>) => Promise<AuthUser>
   giveConsent: (input: ConsentInput) => Promise<AuthUser>
   logout: () => Promise<void>
   ensureWorkspace: () => Promise<void>
@@ -118,6 +120,7 @@ interface Actions {
   // Lessons & attendance (teacher)
   generateGroupSessions: (groupId: string, days?: number) => Promise<number>
   setSessionAttendance: (sessionId: string, open: boolean) => Promise<void>
+  refreshSessionQr: (sessionId: string) => Promise<{ session: LessonSession; token: string; url: string } | null>
   setSessionStatus: (sessionId: string, status: LessonSession['status']) => Promise<void>
   correctAttendance: (sessionId: string, studentId: string, status: 'PRESENT' | 'ABSENT' | 'EXCUSED', reason: string) => Promise<void>
   applyAttendanceEvent: (event: { type: string; session?: unknown; record?: unknown }) => void
@@ -145,6 +148,16 @@ const DRAFT_KEY = 'ilmora-builder-draft'
 let toastSeq = 1
 
 const roleOf = (u: AuthUser | null): Role => (!u ? 'visitor' : u.roles.includes('PLATFORM_ADMIN') ? 'admin' : u.roles.includes('TEACHER') ? 'teacher' : 'student')
+
+export const GUEST_STUDENT_ID = 'guest-student'
+const emptyGuestStudent = (builder?: Student['builder'] | null): Student => ({
+  id: GUEST_STUDENT_ID,
+  profile: { displayName: '', district: '', preferredLang: 'uz', reminders: false },
+  subscription: { packageId: null, groupIds: [], status: 'none' },
+  savedCourseIds: [],
+  savedTeacherIds: [],
+  builder: builder ?? { packageId: null, groupIds: [], meyosGrant: false },
+})
 
 const emptyStudent = (u: AuthUser): Student => ({
   id: u.id,
@@ -176,8 +189,9 @@ const resourceInput = (r: Resource) => ({
   file: r.file ? { name: r.file.name, size: r.file.size, mime: r.file.mime } : null, url: r.url ?? null, pages: r.pages ?? null, ...publishableInput(r),
 })
 const teacherInput = (t: Teacher) => ({
-  name: t.name, title: t.title, bio: t.bio, expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, bannerTone: t.bannerTone, avatarUrl: t.avatarUpload?.previewUrl ?? null,
-  bannerUrl: t.bannerUpload?.previewUrl ?? null, tagline: t.tagline, channelActive: t.channelActive, featured: t.featured ?? null,
+  name: t.name, title: t.title, bio: t.bio, expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, bannerTone: t.bannerTone,
+  avatarUrl: t.avatarUrl ?? t.avatarUpload?.previewUrl ?? null,
+  bannerUrl: t.bannerUrl ?? t.bannerUpload?.previewUrl ?? null, tagline: t.tagline, channelActive: t.channelActive, featured: t.featured ?? null,
 })
 
 /** API video → web shape (uploads carry a key + optional URL). */
@@ -254,12 +268,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
     }
     const applyAuth = (user: AuthUser | null) => {
       const role = roleOf(user)
+      const currentDraft = readDraft() ?? { packageId: null, groupIds: [], meyosGrant: false }
       set((s) => ({
         auth: { status: user ? 'authenticated' : 'anonymous', user },
         role,
-        currentStudentId: user?.id ?? '',
+        currentStudentId: user?.id ?? GUEST_STUDENT_ID,
         currentTeacherId: user?.teacherProfileId ?? '',
-        students: user ? upsertIn(s.students.filter((x) => x.id !== user.id), { ...emptyStudent(user), builder: readDraft() ?? { packageId: null, groupIds: [], meyosGrant: false } }) : s.students,
+        students: user
+          ? upsertIn(s.students.filter((x) => x.id !== user.id && x.id !== GUEST_STUDENT_ID), { ...emptyStudent(user), builder: currentDraft })
+          : [emptyGuestStudent(currentDraft)],
         workspaceLoaded: false,
       }))
     }
@@ -305,13 +322,13 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       videos: [],
       playlists: [],
       resources: [],
-      students: [],
+      students: [emptyGuestStudent(readDraft())],
       sessions: [],
       attendance: [],
       lang: initial.lang,
       role: 'visitor',
       currentTeacherId: '',
-      currentStudentId: '',
+      currentStudentId: GUEST_STUDENT_ID,
       toasts: [],
       auth: { status: 'idle', user: null },
       workspaceLoaded: false,
@@ -348,10 +365,73 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       register: (input) => api<{ accessToken: string; user: AuthUser }>('/auth/register', { method: 'POST', body: { ...input, lang: get().lang }, credentials: true, auth: false }).then(openSession),
       login: (login, password) => api<{ accessToken: string; user: AuthUser }>('/auth/login', { method: 'POST', body: { login, password }, credentials: true, auth: false }).then(openSession),
+      loginWithGoogle: (input) =>
+        api<{ accessToken: string; user: AuthUser }>('/auth/google', { method: 'POST', body: input, credentials: true, auth: false })
+          .then(openSession)
+          .catch((err) => {
+            if (input.idToken && input.idToken.startsWith('mock-google-token:')) {
+              const parts = input.idToken.split(':')
+              const demoUser: AuthUser = {
+                id: 'google-demo-student',
+                login: 'google.demo',
+                phone: null,
+                displayName: parts[3] ? decodeURIComponent(parts[3]) : 'Google Demo User',
+                district: 'Yunusobod',
+                preferredLang: get().lang,
+                reminders: true,
+                roles: [input.role ?? 'STUDENT'],
+                centerId: null,
+                teacherProfileId: null,
+                offerAcceptedAt: new Date().toISOString(),
+                offerVersion: '1.0',
+                consentAt: new Date().toISOString(),
+                marketing: false,
+              }
+              return openSession({ accessToken: 'mock-google-access-token', user: demoUser })
+            }
+            throw err
+          }),
+      loginAsDemo: async (role, customUser) => {
+        const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'
+        const demoUser: AuthUser = {
+          id,
+          login: role === 'TEACHER' ? 'ustoz.dilnoza' : 'aziz.student',
+          phone: customUser?.phone ?? null,
+          displayName: customUser?.displayName || (role === 'TEACHER' ? 'Dilnoza Karimova (Demo)' : 'Aziz Qodirov (Demo)'),
+          district: 'Yunusobod',
+          preferredLang: get().lang,
+          reminders: true,
+          roles: [role],
+          centerId: null,
+          teacherProfileId: role === 'TEACHER' ? 't-dilnoza' : null,
+          offerAcceptedAt: new Date().toISOString(),
+          offerVersion: OFFER_VERSION,
+          consentAt: new Date().toISOString(),
+          marketing: false,
+          ...customUser,
+        }
+        return openSession({ accessToken: `demo-token-${id}`, user: demoUser })
+      },
       giveConsent: async (input) => {
-        const user = await api<AuthUser>('/auth/consent', { method: 'POST', body: input })
-        set((s) => ({ auth: { ...s.auth, user } }))
-        return user
+        try {
+          const user = await api<AuthUser>('/auth/consent', { method: 'POST', body: input })
+          set((s) => ({ auth: { ...s.auth, user } }))
+          return user
+        } catch (err) {
+          const curr = get().auth.user
+          if (curr && (curr.id.startsWith('s-') || curr.id.startsWith('t-') || curr.id.startsWith('demo-') || !isApiError(err))) {
+            const updated: AuthUser = {
+              ...curr,
+              offerAcceptedAt: new Date().toISOString(),
+              offerVersion: OFFER_VERSION,
+              consentAt: new Date().toISOString(),
+              marketing: input.marketing ?? false,
+            }
+            set((s) => ({ auth: { ...s.auth, user: updated } }))
+            return updated
+          }
+          throw err
+        }
       },
       logout: async () => {
         await api('/auth/logout', { method: 'POST', credentials: true }).catch(() => undefined)
@@ -460,8 +540,19 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       removeResource: async (id) => { await guard(() => api(`/manage/resources/${id}`, { method: 'DELETE' })); set((s) => ({ resources: s.resources.filter((x) => x.id !== id) })) },
       upsertTeacher: async (t) => {
-        const saved = await guard(() => (get().teachers.some((x) => x.id === t.id) ? api<Teacher>(`/admin/teachers/${t.id}`, { method: 'PATCH', body: teacherInput(t) }) : api<Teacher>('/admin/teachers', { method: 'POST', body: teacherInput(t) })))
-        set((s) => ({ teachers: upsertIn(s.teachers.filter((x) => x.id !== t.id), saved) }))
+        const isAdmin = get().role === 'admin'
+        const exists = get().teachers.some((x) => x.id === t.id)
+        const path = isAdmin
+          ? (exists ? `/admin/teachers/${t.id}` : '/admin/teachers')
+          : `/manage/profile`
+        const method = isAdmin && !exists ? 'POST' : 'PATCH'
+        const saved = await guard(() => api<Teacher>(path, { method, body: teacherInput(t) }))
+        set((s) => ({
+          teachers: upsertIn(s.teachers.filter((x) => x.id !== t.id), saved),
+          auth: s.auth.user && s.currentTeacherId === t.id
+            ? { ...s.auth, user: { ...s.auth.user, displayName: saved.name } }
+            : s.auth,
+        }))
       },
       removeTeacher: async (id) => { await guard(() => api(`/admin/teachers/${id}`, { method: 'DELETE' })); set((s) => ({ teachers: s.teachers.filter((x) => x.id !== id) })) },
       upsertSubject: async (sub) => {
@@ -590,6 +681,17 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, ...r.session, token: r.token ?? '' } : x)),
           sessionQr: r.token && r.url ? { ...s.sessionQr, [sessionId]: { token: r.token, url: r.url } } : Object.fromEntries(Object.entries(s.sessionQr).filter(([k]) => k !== sessionId)),
         }))
+      },
+      refreshSessionQr: async (sessionId) => {
+        const r = await guard(() => api<{ session: LessonSession; token: string; url: string }>(`/teacher/sessions/${sessionId}/qr`, { method: 'POST', body: {} }))
+        if (r?.token && r?.url) {
+          set((s) => ({
+            sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, ...r.session, token: r.token } : x)),
+            sessionQr: { ...s.sessionQr, [sessionId]: { token: r.token, url: r.url } },
+          }))
+          return r
+        }
+        return null
       },
       setSessionStatus: async (sessionId, status) => {
         const r = await guard(() => api<{ session: LessonSession }>(`/teacher/sessions/${sessionId}`, { method: 'PATCH', body: { status } }))

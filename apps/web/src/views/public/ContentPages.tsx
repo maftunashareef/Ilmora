@@ -2,6 +2,7 @@ import { Link, useParams, useSearchParams } from '@/lib/router'
 import { AccessDenied, NotFound } from '../../components/AccessGate'
 import { AccessBadge, StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { ArtCover, Avatar, Badge, Card, cx, Eyebrow, Icon, LinkButton, Notice } from '../../components/ui'
+import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
 import { formatBytes, formatDuration } from '../../lib/format'
@@ -83,7 +84,7 @@ export function VideoPage() {
         <Notice tone="info" className="mt-6 text-xs">{t('channel.demoVideoNote')}</Notice>
         {teacher && (
           <Link to={`/teachers/${teacher.id}`} className="mt-8 flex items-center gap-3 rounded-card border border-charcoal/10 bg-paper p-4 transition hover:shadow-soft">
-            <Avatar name={teacher.name} seed={teacher.avatarSeed} size={44} url={teacher.avatarUpload?.previewUrl} />
+            <Avatar name={teacher.name} seed={teacher.avatarSeed} size={44} url={getTeacherAvatarUrl(teacher)} />
             <div className="min-w-0 flex-1"><div className="font-medium text-charcoal">{teacher.name}</div><div className="text-xs text-charcoal/55">{tr(teacher.title)}</div></div>
             <Icon name="arrowRight" className="h-4 w-4 text-charcoal/40" />
           </Link>
@@ -146,7 +147,7 @@ export function PlaylistPage() {
           <h1 className="mt-3 font-display text-4xl text-charcoal">{tr(playlist.title)}</h1>
           <p className="mt-3 text-charcoal/65">{tr(playlist.description)}</p>
           <div className="mt-3 text-xs text-charcoal/50">{videos.length} {t('channel.lessonsCount')}</div>
-          {teacher && <Link to={`/teachers/${teacher.id}`} className="mt-5 inline-flex items-center gap-2 text-sm text-forest"><Avatar name={teacher.name} seed={teacher.avatarSeed} size={28} url={teacher.avatarUpload?.previewUrl} />{teacher.name}</Link>}
+          {teacher && <Link to={`/teachers/${teacher.id}`} className="mt-5 inline-flex items-center gap-2 text-sm text-forest"><Avatar name={teacher.name} seed={teacher.avatarSeed} size={28} url={teacher.avatarUrl || teacher.avatarUpload?.previewUrl} alt={teacher.name} />{teacher.name}</Link>}
         </div>
         <ol className="space-y-2">
           {videos.map((v, i) => (
@@ -209,7 +210,7 @@ export function ResourcePage() {
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {teacher && (
             <Link to={`/teachers/${teacher.id}`} className="card flex items-center gap-3 p-4 transition hover:shadow-soft">
-              <Avatar name={teacher.name} seed={teacher.avatarSeed} size={40} url={teacher.avatarUpload?.previewUrl} />
+              <Avatar name={teacher.name} seed={teacher.avatarSeed} size={40} url={getTeacherAvatarUrl(teacher)} />
               <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-charcoal">{teacher.name}</div><div className="truncate text-xs text-charcoal/55">{tr(teacher.title)}</div></div>
             </Link>
           )}

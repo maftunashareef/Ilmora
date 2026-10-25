@@ -95,7 +95,7 @@ export class PaymeService {
     const amount = this.amountFrom(params)
     const payment = await this.prisma.client.payment.findFirst({ where: { id: paymentId } })
     if (!payment) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
-    if (payment.state !== 'PENDING') throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
+    if (payment.state !== 'PENDING' || (payment.expiresAt && payment.expiresAt < new Date())) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
     if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
     return { allow: true }
   }
@@ -122,7 +122,7 @@ export class PaymeService {
         }
         throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
       }
-      if (payment.state !== 'PENDING') throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
+      if (payment.state !== 'PENDING' || (payment.expiresAt && payment.expiresAt < new Date())) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
       if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
       const active = await tx.paymentTransaction.findFirst({ where: { paymentId: payment.id, provider: 'PAYME', state: 'CREATED' } })
       if (active) throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
@@ -171,7 +171,8 @@ export class PaymeService {
         return { transaction: String(row.seq), cancel_time: cancelledAt.getTime(), state: -1 }
       }
       // Performed: refund path (state -2). Seats are released and the ledger is reversed.
-      await this.payments.refundPaid(tx, row.paymentId, `payme-cancel:${reason}`)
+      const refunded = await this.payments.refundPaid(tx, row.paymentId, `payme-cancel:${reason}`)
+      if (!refunded) throw new PaymeError(PAYME.CANNOT_CANCEL, M.cannotCancel)
       await tx.paymentTransaction.update({ where: { id: row.id }, data: { state: 'CANCELLED', providerState: -2, cancelReason: reason, cancelledAt } })
       return { transaction: String(row.seq), cancel_time: cancelledAt.getTime(), state: -2 }
     })

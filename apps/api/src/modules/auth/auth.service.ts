@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { formatUzPhone } from '@ilmora/shared'
+import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
@@ -40,7 +41,7 @@ export class AuthService {
       })
       await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'otp' } })
     } else {
-      if (!user.isActive) throw Object.assign(new Error('Account disabled'), { status: 403 })
+      if (!user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
       user = await this.prisma.client.user.update({
         where: { id: user.id },
         data: { phoneVerifiedAt: user.phoneVerifiedAt ?? now, lastLoginAt: now, ...(input.lang ? { preferredLang: input.lang } : {}) },
@@ -54,7 +55,7 @@ export class AuthService {
   async refresh(raw: string, meta: SessionMeta): Promise<LoginResult> {
     const rotated = await this.tokens.rotate(raw, meta)
     const user = await TenantContext.forTenant(rotated.tenantId, () => this.prisma.client.user.findUnique({ where: { id: rotated.userId }, include: USER_INCLUDE }))
-    if (!user || !user.isActive) throw Object.assign(new Error('Account disabled'), { status: 403 })
+    if (!user || !user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
     const roles = await this.accounts.effectiveRoles(user)
     const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null })
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: this.accounts.toPublic(user, roles) }
@@ -66,13 +67,86 @@ export class AuthService {
 
   async me(userId: string): Promise<PublicUser> {
     const user = await this.prisma.client.user.findUnique({ where: { id: userId }, include: USER_INCLUDE })
-    if (!user) throw Object.assign(new Error('User not found'), { status: 404 })
+    if (!user) throw AppError.notFound('User')
     return this.accounts.toPublic(user, await this.accounts.effectiveRoles(user))
   }
 
-  /** Profile fields only: roles, login and password are not reachable from here. */
-  async updateProfile(userId: string, patch: { displayName?: string; district?: string; preferredLang?: 'uz' | 'ru' | 'en'; reminders?: boolean }): Promise<PublicUser> {
-    const user = await this.prisma.client.user.update({ where: { id: userId }, data: patch, include: USER_INCLUDE })
+  async updateProfile(userId: string, input: { displayName?: string; district?: string; preferredLang?: 'uz' | 'ru' | 'en'; reminders?: boolean }): Promise<PublicUser> {
+    const data: Record<string, unknown> = {}
+    if (input.displayName !== undefined) data.displayName = input.displayName.trim()
+    if (input.district !== undefined) data.district = input.district.trim()
+    if (input.preferredLang !== undefined) data.preferredLang = input.preferredLang
+    if (input.reminders !== undefined) data.reminders = input.reminders
+    const user = await this.prisma.client.user.update({ where: { id: userId }, data, include: USER_INCLUDE })
     return this.accounts.toPublic(user, await this.accounts.effectiveRoles(user))
+  }
+
+  /**
+   * Validates Google ID token or exchanges authorization code, verifies verified email,
+   * then delegates account creation or retrieval to AccountService.
+   */
+  async authenticateGoogle(
+    tenantId: string,
+    input: { idToken?: string; code?: string; redirectUri?: string; role?: 'STUDENT' | 'TEACHER' },
+    meta: SessionMeta,
+  ): Promise<LoginResult> {
+    let googleId = ''
+    let email = ''
+    let emailVerified = false
+    let displayName = ''
+
+    if (input.idToken) {
+      if (this.env.NODE_ENV !== 'production' && input.idToken.startsWith('mock-google-token:')) {
+        const parts = input.idToken.split(':')
+        googleId = parts[1] || 'dev-google-id'
+        email = parts[2] ? decodeURIComponent(parts[2]) : 'student.demo@ilmora.uz'
+        displayName = parts[3] ? decodeURIComponent(parts[3]) : 'Google Demo User'
+        emailVerified = true
+      } else {
+        const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(input.idToken)}`)
+        if (!res.ok) {
+          throw AppError.unauthorized('Invalid Google token', 'invalid_google_token')
+        }
+        const payload = (await res.json()) as { sub?: string; email?: string; email_verified?: string | boolean; name?: string; aud?: string }
+        if (this.env.GOOGLE_CLIENT_ID && payload.aud && payload.aud !== this.env.GOOGLE_CLIENT_ID) {
+          throw AppError.unauthorized('Google client mismatch', 'google_client_mismatch')
+        }
+        googleId = payload.sub ?? ''
+        email = payload.email ?? ''
+        emailVerified = payload.email_verified === true || payload.email_verified === 'true'
+        displayName = payload.name ?? email
+      }
+    } else if (input.code) {
+      if (!this.env.GOOGLE_CLIENT_ID || !this.env.GOOGLE_CLIENT_SECRET) {
+        throw AppError.invalid('google_unconfigured', 'Google OAuth credentials not configured on server')
+      }
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: input.code,
+          client_id: this.env.GOOGLE_CLIENT_ID,
+          client_secret: this.env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: input.redirectUri || this.env.GOOGLE_CALLBACK_URL || `${this.env.PUBLIC_WEB_URL}/auth/google/callback`,
+          grant_type: 'authorization_code',
+        }),
+      })
+      if (!tokenRes.ok) {
+        throw AppError.unauthorized('Failed to exchange Google authorization code', 'invalid_google_code')
+      }
+      const tokenData = (await tokenRes.json()) as { id_token?: string }
+      if (!tokenData.id_token) {
+        throw AppError.unauthorized('Google did not return an id_token', 'invalid_google_response')
+      }
+      return this.authenticateGoogle(tenantId, { idToken: tokenData.id_token, role: input.role }, meta)
+    } else {
+      throw AppError.invalid('missing_google_credential', 'Missing Google idToken or code')
+    }
+
+    if (!googleId || !email) {
+      throw AppError.invalid('incomplete_google_profile', 'Incomplete Google profile')
+    }
+
+    return this.accounts.loginWithGoogle(tenantId, { googleId, email, emailVerified, displayName, role: input.role }, meta)
   }
 }

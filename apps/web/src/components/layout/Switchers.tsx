@@ -1,36 +1,52 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { LANGS } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { useLocation, useNavigate } from '../../lib/router'
-import { stripLocale } from '../../lib/router'
+import { stripLocale, useLocale } from '../../lib/router'
 import { useStore } from '../../store/useStore'
 import type { Role } from '../../types'
 import { Button, cx, Icon } from '../ui'
 
+export const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: string; short: 'UZ' | 'RU' | 'EN' }[] = [
+  { code: 'uz', label: 'O‘zbekcha', short: 'UZ' },
+  { code: 'ru', label: 'Русский', short: 'RU' },
+  { code: 'en', label: 'English', short: 'EN' },
+] as const
+
 /** Language lives in the URL (/uz, /ru, /en); switching re-routes to the same page in the new locale. */
 export function LangSwitcher({ compact }: { compact?: boolean }) {
+  const currentLocale = useLocale()
   const lang = useStore((s) => s.lang)
   const setLang = useStore((s) => s.setLang)
   const router = useRouter()
   const pathname = usePathname() ?? '/'
   const { t } = useT()
-  const choose = (code: (typeof LANGS)[number]['code']) => {
+
+  const activeLang = currentLocale || lang
+
+  const choose = (code: 'uz' | 'ru' | 'en') => {
     setLang(code)
     document.cookie = `NEXT_LOCALE=${code}; path=/; max-age=31536000; samesite=lax`
     const rest = stripLocale(pathname)
-    router.push(`/${code}${rest === '/' ? '' : rest}${typeof window !== 'undefined' ? window.location.search : ''}`)
+    const search = rest.includes('?') ? '' : (typeof window !== 'undefined' ? window.location.search : '')
+    const hash = rest.includes('#') ? '' : (typeof window !== 'undefined' ? window.location.hash : '')
+    router.push(`/${code}${rest === '/' ? '' : rest}${search}${hash}`)
   }
+
   return (
     <div role="group" aria-label={t('common.language')} className="inline-flex rounded-full border border-charcoal/12 bg-paper p-0.5">
-      {LANGS.map((l) => (
+      {LANGUAGE_OPTIONS.map((l) => (
         <button
           key={l.code}
           type="button"
-          aria-pressed={lang === l.code}
+          aria-pressed={activeLang === l.code}
           onClick={() => choose(l.code)}
-          className={cx('rounded-full font-medium transition', compact ? 'px-2 py-1 text-[11px]' : 'px-2.5 py-1 text-xs', lang === l.code ? 'bg-forest text-ivory' : 'text-charcoal/60 hover:text-charcoal')}
+          className={cx(
+            'rounded-full font-medium transition',
+            compact ? 'px-2 py-1 text-[11px]' : 'px-2.5 py-1 text-xs',
+            activeLang === l.code ? 'bg-forest text-ivory font-semibold' : 'text-charcoal/60 hover:text-charcoal'
+          )}
         >
           {l.short}
         </button>

@@ -13,7 +13,7 @@ export function normalizeUzPhone(input: string): PhoneParse {
   if (!input || !input.trim()) return { ok: false, reason: 'empty' }
   let digits = input.replace(/\D/g, '')
   if (digits.startsWith('00')) digits = digits.slice(2)
-  if (digits.length === 10 && digits.startsWith('0')) digits = digits.slice(1)
+  if (digits.length === 10 && (digits.startsWith('0') || digits.startsWith('8'))) digits = digits.slice(1)
   if (digits.length === 9) digits = UZ_COUNTRY_CODE + digits
   if (digits.length !== 12 || !digits.startsWith(UZ_COUNTRY_CODE)) return { ok: false, reason: 'invalid' }
   const national = digits.slice(3)

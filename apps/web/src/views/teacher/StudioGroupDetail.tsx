@@ -169,6 +169,7 @@ function SessionPanel({ session, course, group, roster }: { session: LessonSessi
   const records = useStore((s) => s.attendance.filter((r) => r.sessionId === session.id)) as Record_[]
   const qr = useStore((s) => s.sessionQr[session.id])
   const setSessionAttendance = useStore((s) => s.setSessionAttendance)
+  const refreshSessionQr = useStore((s) => s.refreshSessionQr)
   const setSessionStatus = useStore((s) => s.setSessionStatus)
   const correctAttendance = useStore((s) => s.correctAttendance)
   const notify = useStore((s) => s.notify)
@@ -181,12 +182,19 @@ function SessionPanel({ session, course, group, roster }: { session: LessonSessi
     return () => { stop(); setLive(false) }
   }, [session.id])
 
+  useEffect(() => {
+    if (session.attendanceOpen && !qr && session.status !== 'cancelled') {
+      refreshSessionQr(session.id).catch(() => undefined)
+    }
+  }, [session.id, session.attendanceOpen, qr, session.status, refreshSessionQr])
+
   const statusOf = (studentId: string) => records.find((r) => r.studentId === studentId)
   const checked = roster.filter((st) => (statusOf(st.id)?.status ?? (statusOf(st.id) ? 'present' : undefined)) === 'present')
   const missing = roster.filter((st) => !checked.some((c) => c.id === st.id))
   const url = qr?.url ?? ''
   const copy = async () => { try { await navigator.clipboard.writeText(url); notify(t('common.copied')) } catch { notify(url) } }
   const toggle = async (open: boolean) => { setBusy(true); try { await setSessionAttendance(session.id, open) } finally { setBusy(false) } }
+  const rotate = async () => { setBusy(true); try { await refreshSessionQr(session.id); notify(t('common.saved')) } finally { setBusy(false) } }
   const submitCorrection = async () => {
     if (!correcting || correcting.reason.trim().length < 3) return
     setBusy(true)
@@ -197,21 +205,35 @@ function SessionPanel({ session, course, group, roster }: { session: LessonSessi
     <div className="grid gap-6 md:grid-cols-[auto_1fr]">
       <div className="flex flex-col items-center gap-3">
         <Eyebrow>{t('session.qrTitle')}</Eyebrow>
-        <div className={cx('rounded-card border border-charcoal/10 bg-paper p-3', (!session.attendanceOpen || session.status === 'cancelled') && 'opacity-60')}>
+        <div className={cx('rounded-card border bg-paper p-4 transition-all duration-300', session.attendanceOpen && url ? 'border-champagne/60 shadow-md ring-1 ring-champagne/30' : 'border-charcoal/10 opacity-70')}>
           {session.attendanceOpen && url ? <QrCode value={url} size={240} label={t('session.link')} /> : <div className="flex h-[240px] w-[240px] items-center justify-center rounded-card bg-sage/60 text-center text-xs text-charcoal/55">{t('session.isClosed')}</div>}
         </div>
         <div className="flex flex-wrap justify-center gap-2">
           {session.status !== 'cancelled' && (session.attendanceOpen
-            ? <Button size="sm" variant="secondary" disabled={busy} onClick={() => toggle(false)}><Icon name="lock" className="h-3.5 w-3.5" />{t('session.close')}</Button>
+            ? (
+              <>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => toggle(false)}><Icon name="lock" className="h-3.5 w-3.5" />{t('session.close')}</Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={rotate} title={t('common.refresh')}><Icon name="refresh" className={cx('h-3.5 w-3.5', busy && 'animate-spin')} /></Button>
+              </>
+            )
             : <Button size="sm" disabled={busy} onClick={() => toggle(true)}><Icon name="play" className="h-3.5 w-3.5" />{t('session.open')}</Button>)}
           {url && <Button size="sm" variant="ghost" onClick={copy}><Icon name="external" className="h-3.5 w-3.5" />{t('common.copyLink')}</Button>}
         </div>
-        {url && <a href={url} target="_blank" rel="noreferrer" className="text-[11px] text-forest underline">{t('session.testScan')}</a>}
+        {url && <a href={url} target="_blank" rel="noreferrer" className="text-[11px] text-forest hover:underline font-medium">{t('session.testScan')}</a>}
       </div>
       <div className="min-w-0 space-y-4">
         <div>
           <div className="font-display text-2xl text-charcoal">{tr(course.title)} · {group.name}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-charcoal/55"><SessionStatus session={session} />{live && <Badge tone="forest">● {t('session.live')}</Badge>}<span>{formatDayMonth(session.date, lang)} · {t('common.room')} {group.room}</span></div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-charcoal/60">
+            <SessionStatus session={session} />
+            {live && (
+              <Badge tone="forest" className="shadow-xs flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                {t('session.live')}
+              </Badge>
+            )}
+            <span>{formatDayMonth(session.date, lang)} · {t('common.room')} {group.room}</span>
+          </div>
         </div>
         <p className="text-xs text-charcoal/60">{t('session.qrHint')}</p>
         <div className="grid gap-4 sm:grid-cols-2">

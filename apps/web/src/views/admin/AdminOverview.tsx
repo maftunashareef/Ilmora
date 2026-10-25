@@ -38,9 +38,9 @@ export function AdminOverview() {
           <Eyebrow className="mb-4">{t('admin.overview.quick')}</Eyebrow>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {quick.map((q) => (
-              <Link key={q.to} to={q.to} className="card group flex items-center gap-3 p-4 transition hover:-translate-y-0.5 hover:shadow-lift">
-                <span className="flex h-10 w-10 items-center justify-center rounded-control bg-sage text-forest"><Icon name={q.icon} className="h-5 w-5" /></span>
-                <span className="text-sm font-medium text-charcoal group-hover:text-forest">{q.label}</span>
+              <Link key={q.to} to={q.to} className="card group flex items-center gap-3.5 p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lift hover:border-forest/30">
+                <span className="flex h-11 w-11 items-center justify-center rounded-control bg-sage/70 text-forest transition-colors duration-300 group-hover:bg-forest group-hover:text-ivory shadow-xs"><Icon name={q.icon} className="h-5 w-5" /></span>
+                <span className="text-sm font-semibold text-charcoal group-hover:text-forest transition-colors">{q.label}</span>
               </Link>
             ))}
           </div>

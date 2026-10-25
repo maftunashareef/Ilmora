@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from '@/lib/router'
 import { Avatar, Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, Modal, Notice, PageTitle, Select, Toggle } from '../../components/ui'
+import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { emptyL, useT } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
@@ -28,7 +29,7 @@ export function AdminPeople() {
           <ul className="space-y-2">
             {s.teachers.map((te) => (
               <li key={te.id} className="card flex items-center gap-3 p-3">
-                <Avatar name={te.name || '?'} seed={te.avatarSeed} size={40} url={te.avatarUpload?.previewUrl} />
+                <Avatar name={te.name || '?'} seed={te.avatarSeed} size={40} url={getTeacherAvatarUrl(te)} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{te.name}</span>{te.channelActive ? <Badge tone="sage">{t('admin.people.channelActive')}</Badge> : <Badge tone="muted">{t('teachers.channelInactive')}</Badge>}</div>
                   <div className="truncate text-xs text-charcoal/55">{tr(te.title)} · {s.centers.find((c) => c.id === te.centerId)?.name} · {s.courses.filter((c) => c.teacherId === te.id).length} {t('common.courses').toLowerCase()}</div>

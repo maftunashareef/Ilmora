@@ -4,9 +4,11 @@ import { somToTiyin, tiyinToClickAmount, tiyinToSom } from './money.js'
 
 describe('normalizeUzPhone', () => {
   it('accepts the common Uzbek input forms and returns E.164', () => {
-    for (const input of ['+998 90 123 45 67', '998901234567', '90 123 45 67', '0901234567', '+998(90)123-45-67', '00998901234567']) {
+    for (const input of ['+998 90 123 45 67', '998901234567', '90 123 45 67', '0901234567', '8901234567', '+998(90)123-45-67', '00998901234567', '+998 90 123 45 67', '+998  90  123  45  67']) {
       expect(normalizeUzPhone(input)).toEqual({ ok: true, e164: '+998901234567', national: '901234567' })
     }
+    expect(normalizeUzPhone('+998 97 541 41 41')).toEqual({ ok: true, e164: '+998975414141', national: '975414141' })
+    expect(normalizeUzPhone('97 541 41 41')).toEqual({ ok: true, e164: '+998975414141', national: '975414141' })
   })
   it('rejects empty, foreign and malformed numbers', () => {
     expect(normalizeUzPhone('')).toEqual({ ok: false, reason: 'empty' })

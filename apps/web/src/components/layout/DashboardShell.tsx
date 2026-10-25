@@ -31,7 +31,11 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
     <div className="flex min-h-screen bg-ivory">
       <a href="#dash-main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-control focus:bg-forest focus:px-4 focus:py-2 focus:text-ivory">Skip to content</a>
       <aside className="hidden w-[264px] shrink-0 flex-col border-r border-charcoal/10 bg-paper/70 px-4 py-6 lg:flex">
-        <Link to="/" className="mb-8 flex items-center px-2" aria-label={site.brand.name}>
+        <Link
+          to="/"
+          className="mb-8 flex items-center rounded-control px-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2"
+          aria-label={`${site.brand.name} — ${t('nav.home')}`}
+        >
           <Image src="/brand/ilmora-logo-mark.png" alt={site.brand.name} width={925} height={432} sizes="104px" className="h-12 w-auto" />
         </Link>
         <div className="mb-4 px-2">

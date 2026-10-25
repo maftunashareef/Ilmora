@@ -82,6 +82,11 @@ export const ResourcePatch = ResourceInput.partial()
 export const SubjectInput = z.object({ teacherId: id.optional(), name: L, description: L }).strict()
 export const CenterInput = z.object({ name: z.string().min(1).max(120), district: L, description: L, tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), address: z.string().max(300).nullable().optional() }).strict()
 export const CategoryInput = z.object({ name: L, glyph: z.string().max(8).optional(), sortOrder: z.number().int().optional() }).strict()
+export const SafeMediaUrl = z.string().max(500).refine((val) => {
+  if (!val) return true
+  return /^(https?:\/\/|\/|avatars\/|banners\/)/i.test(val)
+}, { message: 'Must be a valid HTTP/HTTPS URL, relative path, or storage key' })
+
 export const TeacherInput = z.object({
   name: z.string().min(1).max(120),
   title: L,
@@ -90,8 +95,8 @@ export const TeacherInput = z.object({
   centerId: id,
   avatarSeed: z.number().int().optional(),
   bannerTone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  avatarUrl: z.string().max(500).nullable().optional(),
-  bannerUrl: z.string().max(500).nullable().optional(),
+  avatarUrl: SafeMediaUrl.nullable().optional(),
+  bannerUrl: SafeMediaUrl.nullable().optional(),
   tagline: L,
   channelActive: z.boolean().optional(),
   featured: z.object({ type: z.enum(['course', 'playlist']), id }).strict().nullable().optional(),
@@ -99,6 +104,11 @@ export const TeacherInput = z.object({
   phone: z.string().min(7).max(20).optional(),
 }).strict()
 export const TeacherPatch = TeacherInput.partial()
+export const AvatarUploadUrlInput = z.object({
+  fileName: z.string().min(1).max(120).regex(/^[^\\/:*?"<>|]+$/, 'Invalid file name').refine((name) => !Array.from(name).some((c) => c.charCodeAt(0) < 32), { message: 'Control characters not allowed in file name' }),
+  contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  fileSize: z.number().int().min(1).max(2 * 1024 * 1024), // max 2MB
+}).strict()
 export const PackageInput = z.object({ code: z.string().regex(/^[a-z0-9-]{2,30}$/), name: L, description: L, perks: z.array(L).max(12), maxCourses: z.number().int().min(1).max(6), enabled: z.boolean(), highlight: z.boolean(), sortOrder: z.number().int().optional() }).strict()
 export const PackagePatch = PackageInput.partial()
 export const UserRolesInput = z.object({

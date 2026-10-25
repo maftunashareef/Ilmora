@@ -4,15 +4,21 @@ import { useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 import type { Course, Group } from '../../types'
-import { ArtCover, Badge, cx, Icon } from '../ui'
-import { LevelBadge, StatusBadge, VisibilityBadge } from './badges'
+import { Avatar, cx, Icon } from '../ui'
+import { getTeacherAvatarUrl } from '../teacher/teacherImage'
+import { StatusBadge, VisibilityBadge } from './badges'
+import { getCoursePhotoUrl } from './courseImage'
 
 export function PriceTag({ price, emphasis, className }: { price: number; emphasis?: boolean; className?: string }) {
   const { t, lang } = useT()
   return (
     <span className={cx('inline-flex items-baseline gap-1', className)}>
-      <span className={cx('font-display tracking-tight text-charcoal', emphasis ? 'text-2xl' : 'text-lg')}>{formatSom(price, lang, false)}</span>
-      <span className="text-xs text-charcoal/55">{t('common.som')} {t('common.perMonth')}</span>
+      <span className={cx('font-display tracking-tight text-charcoal font-semibold', emphasis ? 'text-2xl' : 'text-xl')}>
+        {formatSom(price, lang, false)}
+      </span>
+      <span className="text-[11px] text-charcoal/55 font-medium">
+        {t('common.som')} {t('common.perMonth')}
+      </span>
     </span>
   )
 }
@@ -23,10 +29,12 @@ export function ScheduleChips({ group, compact }: { group: Group; compact?: bool
     <span className={cx('inline-flex flex-wrap items-center gap-1.5', compact ? 'text-[11px]' : 'text-xs')}>
       <span className="inline-flex gap-0.5">
         {group.days.map((d) => (
-          <span key={d} className="rounded-sm bg-sage px-1.5 py-0.5 font-medium text-forest">{t(`dayShort.${d}` as 'dayShort.0')}</span>
+          <span key={d} className="rounded-sm bg-sage/80 px-1.5 py-0.5 font-medium text-forest text-[11px]">
+            {t(`dayShort.${d}` as 'dayShort.0')}
+          </span>
         ))}
       </span>
-      <span className="text-charcoal/65">{group.start}–{group.end}</span>
+      <span className="text-charcoal/70 font-medium">{group.start}–{group.end}</span>
     </span>
   )
 }
@@ -38,34 +46,173 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
   const center = useStore((s) => s.centers.find((x) => x.id === course.centerId))
   const category = useStore((s) => s.categories.find((x) => x.id === course.categoryId))
   const g = course.groups[0]
+
   return (
-    <article className="card group flex h-full flex-col overflow-hidden transition duration-300 hover:-translate-y-0.5 hover:shadow-lift" style={{ padding: 0 }}>
-      <Link to={`/courses/${course.id}`} className="block focus-visible:outline-offset-[-3px]">
-        <ArtCover seed={course.coverSeed} imageUrl={course.imageUpload?.previewUrl || course.imageUrl} tone={center?.tone} className={cx('zoom-media w-full', compact ? 'aspect-[16/8]' : 'aspect-[16/9]')} />
+    <article
+      className={cx(
+        'card group relative flex h-full flex-col overflow-hidden rounded-card transition-all duration-400 hover:-translate-y-1.5 hover:shadow-lift border',
+        course.featured
+          ? 'border-champagne/60 hover:border-champagne bg-gradient-to-b from-paper via-paper to-champagne/[0.04] ring-1 ring-champagne/25'
+          : 'border-charcoal/10 hover:border-forest/35 bg-paper'
+      )}
+      style={{ padding: 0 }}
+    >
+      {/* Top Cover Media: Editorial photographic representation */}
+      <Link to={`/courses/${course.id}`} className="block relative overflow-hidden focus-visible:outline-offset-[-3px] bg-sage/20">
+        <div className={cx('relative overflow-hidden', compact ? 'aspect-[16/8]' : 'aspect-[16/10]')}>
+          <img
+            src={getCoursePhotoUrl(course)}
+            alt={tr(course.title)}
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04]"
+          />
+          {/* Subtle warm brand gradient overlays for badge contrast & editorial cohesion */}
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-charcoal/75 via-charcoal/20 to-charcoal/30" aria-hidden="true" />
+          <div className="pointer-events-none absolute inset-0 bg-forest/5 mix-blend-multiply" aria-hidden="true" />
+        </div>
+
+        {/* Top Badges Overlay */}
+        <div className="absolute inset-x-3 top-3 flex items-start justify-between gap-2 pointer-events-none z-10">
+          {tpl.showCategory && category ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-paper/95 px-2.5 py-0.5 text-[11px] font-semibold text-charcoal shadow-sm backdrop-blur-md border border-charcoal/10">
+              {category.glyph && <span className="text-xs">{category.glyph}</span>}
+              <span className="truncate max-w-[140px]">{tr(category.name)}</span>
+            </span>
+          ) : <span />}
+
+          <div className="flex items-center gap-1.5">
+            {course.featured && (
+              <span className="shimmer-pill rounded-full bg-champagne text-charcoal px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-sm border border-champagne/70 flex items-center gap-1">
+                <Icon name="star" className="h-3 w-3 fill-current text-charcoal/80" />
+                {t('common.featured')}
+              </span>
+            )}
+            {course.meyosGrant && (
+              <span className="rounded-full bg-emerald-700 text-ivory px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-sm">
+                Meyos
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom Cover Info Pill (Level & Duration) */}
+        <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between text-[11px] text-ivory font-medium drop-shadow-sm pointer-events-none z-10">
+          {tpl.showLevel ? (
+            <span className="bg-charcoal/75 backdrop-blur-sm px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-ivory/20 shadow-xs">
+              {t(`level.${course.level}`)}
+            </span>
+          ) : <span />}
+          {course.durationMonths > 0 && (
+            <span className="bg-charcoal/75 backdrop-blur-sm px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-ivory/20 shadow-xs flex items-center gap-1">
+              <Icon name="clock" className="h-3 w-3 text-champagne" />
+              {course.durationMonths} {tr({ uz: 'oy', ru: 'мес', en: 'mo' })}
+            </span>
+          )}
+        </div>
       </Link>
+
+      {/* Card Content Body */}
       <div className={cx('flex flex-1 flex-col', compact ? 'p-4' : 'p-5')}>
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {tpl.showCategory && category && <Badge tone="sage">{tr(category.name)}</Badge>}
-          {course.featured && <Badge tone="champagne"><Icon name="star" className="h-3 w-3" />{t('common.featured')}</Badge>}
-          {tpl.showLevel && <LevelBadge level={course.level} />}
-          {showInternal && (<><StatusBadge status={course.status} /><VisibilityBadge visibility={course.visibility} /></>)}
-        </div>
-        <h3 className={cx('font-display leading-snug text-charcoal', compact ? 'text-xl' : 'text-2xl')}>
-          <Link to={`/courses/${course.id}`} className="hover:text-forest">{tr(course.title)}</Link>
+        {showInternal && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <StatusBadge status={course.status} />
+            <VisibilityBadge visibility={course.visibility} />
+          </div>
+        )}
+
+        {/* Title */}
+        <h3 className={cx('font-display leading-snug text-charcoal group-hover:text-forest transition-colors duration-200', compact ? 'text-xl' : 'text-2xl')}>
+          <Link to={`/courses/${course.id}`} className="focus-visible:outline-none focus-visible:underline">
+            {tr(course.title)}
+          </Link>
         </h3>
-        {!compact && <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-charcoal/60">{tr(course.summary)}</p>}
-        <div className="mt-3 space-y-1 text-xs text-charcoal/60">
-          {tpl.showTeacher && teacher && <div>{teacher.name}</div>}
-          {tpl.showCenter && center && <div className="flex items-center gap-1.5"><Icon name="building" className="h-3 w-3" />{center.name} · {tr(center.district)}</div>}
-          {tpl.showSchedule && g && <div><ScheduleChips group={g} compact />{course.groups.length > 1 && <span className="ml-1 text-charcoal/40">+{countLabel(lang, course.groups.length - 1, NOUNS.group)}</span>}</div>}
+
+        {/* Summary Description */}
+        {!compact && (
+          <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-charcoal/70">
+            {tr(course.summary)}
+          </p>
+        )}
+
+        {/* Metadata section (Teacher, Center, Schedule) */}
+        <div className="mt-4 space-y-2.5 border-t border-charcoal/8 pt-3 text-xs">
+          {tpl.showTeacher && teacher && (
+            <div className="flex items-center gap-2 text-charcoal/85">
+              <Avatar name={teacher.name} seed={teacher.avatarSeed} url={getTeacherAvatarUrl(teacher)} size={22} className="shadow-2xs text-[10px] shrink-0" />
+              <span className="font-medium truncate">{teacher.name}</span>
+            </div>
+          )}
+
+          {tpl.showCenter && center && (
+            <div className="flex items-center gap-2 text-charcoal/65">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-sage/60 text-forest">
+                <Icon name="building" className="h-3 w-3" />
+              </span>
+              <span className="truncate">
+                <span className="font-medium text-charcoal/80">{center.name}</span>
+                <span className="text-charcoal/50"> · {tr(center.district)}</span>
+              </span>
+            </div>
+          )}
+
+          {tpl.showSchedule && g && (
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <ScheduleChips group={g} compact />
+              {course.groups.length > 1 && (
+                <span className="text-[11px] text-charcoal/45 font-medium whitespace-nowrap">
+                  +{countLabel(lang, course.groups.length - 1, NOUNS.group)}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-          <PriceTag price={course.price} emphasis={tpl.priceStyle === 'emphasis'} />
-          <Link to={`/courses/${course.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-forest opacity-80 transition group-hover:opacity-100">
-            {t('common.view')} <Icon name="arrowRight" className="h-3.5 w-3.5" />
+
+        {/* Footer: Price + Action Button */}
+        <div className="mt-auto flex items-end justify-between gap-3 border-t border-charcoal/8 pt-4">
+          <div>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-charcoal/40 block leading-tight">
+              {t('courses.monthlyPrice')}
+            </span>
+            <PriceTag price={course.price} emphasis={tpl.priceStyle === 'emphasis'} />
+          </div>
+          <Link
+            to={`/courses/${course.id}`}
+            className="inline-flex items-center justify-center gap-1.5 rounded-control bg-sage/70 px-3.5 py-2 text-xs font-semibold text-forest shadow-2xs transition-all duration-300 group-hover:bg-forest group-hover:text-ivory group-hover:shadow-sm shrink-0"
+          >
+            {t('common.view')}
+            <Icon name="arrowRight" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
           </Link>
         </div>
       </div>
     </article>
+  )
+}
+
+export function CourseCardSkeleton({ compact }: { compact?: boolean }) {
+  return (
+    <div className="card overflow-hidden border border-charcoal/10 bg-paper animate-pulse" aria-hidden="true" style={{ padding: 0 }}>
+      <div className={cx('w-full bg-charcoal/10', compact ? 'aspect-[16/8]' : 'aspect-[16/10]')} />
+      <div className={cx('flex flex-col', compact ? 'p-4' : 'p-5')}>
+        <div className="flex gap-2 mb-2">
+          <div className="h-4 w-16 rounded-full bg-charcoal/10" />
+          <div className="h-4 w-14 rounded-full bg-charcoal/10" />
+        </div>
+        <div className="h-6 w-3/4 rounded bg-charcoal/15 mb-2" />
+        {!compact && (
+          <div className="space-y-1.5 mb-3">
+            <div className="h-3.5 w-full rounded bg-charcoal/10" />
+            <div className="h-3.5 w-4/5 rounded bg-charcoal/10" />
+          </div>
+        )}
+        <div className="mt-2 space-y-2 border-t border-charcoal/8 pt-3">
+          <div className="h-4 w-1/2 rounded bg-charcoal/10" />
+          <div className="h-4 w-2/3 rounded bg-charcoal/10" />
+        </div>
+        <div className="mt-4 pt-3 border-t border-charcoal/8 flex items-center justify-between">
+          <div className="h-5 w-24 rounded bg-charcoal/15" />
+          <div className="h-7 w-20 rounded bg-charcoal/15" />
+        </div>
+      </div>
+    </div>
   )
 }

@@ -111,6 +111,10 @@ export const EnvSchema = z.object({
   /** Password sign-in: after this many failures for one login the login is locked for LOGIN_LOCK_SECONDS. */
   LOGIN_MAX_FAILURES: z.coerce.number().int().positive().default(10),
   LOGIN_LOCK_SECONDS: z.coerce.number().int().positive().default(900),
+  /** Google OAuth credentials (optional; enables Google Sign-In) */
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CALLBACK_URL: z.string().optional(),
 })
 
 export type Env = z.infer<typeof EnvSchema>

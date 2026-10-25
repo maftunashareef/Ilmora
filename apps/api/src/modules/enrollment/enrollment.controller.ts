@@ -1,12 +1,16 @@
 import { Body, Controller, Get, Post, Put } from '@nestjs/common'
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator'
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Length, ValidateIf } from 'class-validator'
 import { CurrentActor, CurrentTenantId } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { PaymentsService } from '../payments/payments.service'
 import { SubscriptionService } from './subscription.service'
 
 class DraftDto {
-  @IsOptional() @IsString() @Length(1, 80) packageId!: string | null
+  /** null clears the package selection; undefined is not valid for this field. */
+  @ValidateIf((o: DraftDto) => o.packageId !== null)
+  @IsString()
+  @Length(1, 80)
+  packageId!: string | null
   @IsArray() @ArrayMaxSize(6) @IsString({ each: true }) groupIds!: string[]
   @IsBoolean() meyosGrant!: boolean
 }

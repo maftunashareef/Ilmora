@@ -2,6 +2,8 @@ import { Link, useNavigate, useParams } from '@/lib/router'
 import { AccessDenied, NotFound } from '../../components/AccessGate'
 import { AccessBadge, LevelBadge, StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { PriceTag, ScheduleChips } from '../../components/course/CourseCard'
+import { getCoursePhotoUrl } from '../../components/course/courseImage'
+import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { ArtCover, Avatar, Badge, Button, Card, cx, Eyebrow, Icon, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
@@ -62,7 +64,7 @@ export function CourseDetailPage() {
       </div>
       <div className="container-x grid gap-10 py-8 lg:grid-cols-[1.2fr_0.8fr] lg:py-12">
         <div>
-          <ArtCover seed={course.coverSeed} imageUrl={course.imageUpload?.previewUrl || course.imageUrl} tone={center?.tone} className="aspect-[16/8] w-full rounded-card" label={course.id === 'c-bazis' ? 'B' : undefined} />
+          <ArtCover seed={course.coverSeed} imageUrl={course.imageUpload?.previewUrl || course.imageUrl || getCoursePhotoUrl(course)} alt={tr(course.title)} tone={center?.tone} className="aspect-[16/8] w-full rounded-card" label={course.id === 'c-bazis' ? 'B' : undefined} />
           <div className="mt-8 flex flex-wrap items-center gap-2">
             {category && <Badge tone="sage">{tr(category.name)}</Badge>}
             <LevelBadge level={course.level} />
@@ -195,7 +197,7 @@ export function CourseDetailPage() {
             )}
             {teacher && (
               <div className="mt-5 flex items-center gap-3 border-t border-charcoal/10 pt-5">
-                <Avatar name={teacher.name} seed={teacher.avatarSeed} size={44} url={teacher.avatarUpload?.previewUrl} />
+                <Avatar name={teacher.name} seed={teacher.avatarSeed} size={44} url={getTeacherAvatarUrl(teacher)} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-charcoal">{teacher.name}</div>
                   <div className="truncate text-xs text-charcoal/55">{tr(teacher.title)}</div>

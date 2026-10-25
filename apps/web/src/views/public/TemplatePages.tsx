@@ -12,6 +12,7 @@ import { CourseCard, PriceTag, ScheduleChips } from '../../components/course/Cou
 import { BackgroundVideo, CountUp, Marquee, SnapTrack, SplitWords } from '../../components/motion'
 import dynamic from 'next/dynamic'
 import { Avatar, Badge, Button, Card, cx, Eyebrow, Field, Icon, Input, LinkButton, Notice, SectionHeading, Textarea } from '../../components/ui'
+import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 
 const Scene3D = dynamic(() => import('../../components/three/Scene3D').then((m) => m.Scene3D), { ssr: false })
 const ScrollVideo = dynamic(() => import('../../components/three/ScrollVideo').then((m) => m.ScrollVideo), { ssr: false })
@@ -109,36 +110,87 @@ function MarqueeSection({ s }: { s: Section }) {
   )
 }
 
-// ─── Packages ────────────────────────────────────────────────────────────────
+// ─── Packages: Duo and Trio Subscriptions with visual composition ────────────
 function Packages({ s }: { s: Section }) {
   const { t, tr, lang } = useT()
   const packages = useStore((st) => st.site.packages)
   const courses = useStore((st) => st.courses.filter(isPublicListed))
   const cheapest = [...courses].sort((a, b) => a.price - b.price)
+
   return (
     <section className="relative overflow-hidden bg-sage/40 py-20 lg:py-28">
       <div className="float-a pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full border border-champagne/30" aria-hidden="true" />
       <div className="float-b pointer-events-none absolute -right-16 bottom-6 h-56 w-56 rounded-full border border-forest/15" aria-hidden="true" />
       <div className="container-x relative">
         <SectionHeading eyebrow={t('common.demo')} title={tr(s.title)} subtitle={tr(s.subtitle)} />
-        <div className="reveal-stagger grid gap-6 md:grid-cols-2 lg:mx-auto lg:max-w-4xl">
+        <div className="reveal-stagger grid gap-8 md:grid-cols-2 lg:mx-auto lg:max-w-4xl pt-3.5">
           {packages.filter((p) => p.enabled).map((p) => {
             const from = cheapest.slice(0, p.maxCourses).reduce((n, c) => n + c.price, 0)
+            const isTrio = p.maxCourses >= 3
             return (
               <div key={p.id} className="reveal reveal-scale">
-                <Card className={cx('relative flex h-full flex-col p-8 md:p-10 transition duration-500 hover:-translate-y-1 hover:shadow-lift', p.highlight && 'border-champagne/70 shadow-lift')}>
-                  {p.highlight && <span className="absolute right-6 top-6 eyebrow">{t('common.featured')}</span>}
-                  <div className="font-display text-5xl text-charcoal">{tr(p.name)}</div>
+                <Card className={cx(
+                  'relative flex h-full flex-col p-8 md:p-10 transition duration-500 hover:-translate-y-1.5 hover:shadow-lift',
+                  p.highlight
+                    ? 'border-champagne/80 shadow-lift ring-2 ring-champagne/50 bg-gradient-to-b from-paper via-paper to-champagne/5 glow-champagne'
+                    : 'border-charcoal/10 bg-paper hover:border-forest/30'
+                )}>
+                  {p.highlight && (
+                    <span className="shimmer-pill absolute -top-3.5 right-6 sm:right-8 z-10 inline-flex items-center gap-1 rounded-full bg-champagne text-charcoal px-3.5 py-1 text-[11px] font-bold uppercase tracking-wider shadow-sm border border-champagne/60">
+                      <Icon name="star" className="h-3 w-3 fill-current text-charcoal/80" />
+                      {t('common.featured')}
+                    </span>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="font-display text-5xl text-charcoal">{tr(p.name)}</span>
+                    <span className={cx(
+                      'rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0',
+                      isTrio ? 'bg-champagne/30 text-charcoal' : 'bg-forest/10 text-forest'
+                    )}>
+                      {p.maxCourses} {tr({ uz: 'kurs', ru: 'курса', en: 'courses' })}
+                    </span>
+                  </div>
                   <div className="mt-1 text-sm text-charcoal/60">{t('builder.simultaneous', { n: p.maxCourses })}</div>
+
+                  {/* Course Slot Architecture Preview */}
+                  <div className="mt-5 rounded-control border border-charcoal/10 bg-ivory/60 p-3.5 shadow-inner">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-charcoal/50 mb-2.5 flex items-center justify-between">
+                      <span>{tr({ uz: 'Abonement tarkibi', ru: 'Состав абонемента', en: 'Subscription composition' })}</span>
+                      <span className="text-[10px] text-forest font-medium">{tr({ uz: '✓ 0% to‘qnashuv', ru: '✓ 0% конфликтов', en: '✓ 0% conflicts' })}</span>
+                    </div>
+                    <div className="grid gap-2">
+                      {Array.from({ length: p.maxCourses }).map((_, slotIdx) => (
+                        <div key={slotIdx} className="flex items-center gap-2.5 rounded-control bg-paper px-3 py-2 text-xs text-charcoal/80 border border-charcoal/8 shadow-xs">
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-forest text-[11px] font-bold text-ivory">{slotIdx + 1}</span>
+                          <span className="font-medium truncate">
+                            {slotIdx === 0 && tr({ uz: '1-kurs: Tillar / IELTS (istalgan markaz)', ru: 'Курс 1: Языки / IELTS (любой центр)', en: 'Course 1: Languages / IELTS (any center)' })}
+                            {slotIdx === 1 && tr({ uz: '2-kurs: Kasb / Dizayn / Bazis', ru: 'Курс 2: Профессия / Дизайн / Bazis', en: 'Course 2: Career / Design / Bazis' })}
+                            {slotIdx === 2 && tr({ uz: '3-kurs: IT / Aniq fanlar / Dasturlash', ru: 'Курс 3: IT / Точные науки / Код', en: 'Course 3: IT / Exact sciences / Code' })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <p className="mt-5 text-[15px] leading-relaxed text-charcoal/70">{tr(p.description)}</p>
                   <ul className="mt-6 space-y-2.5 text-sm text-charcoal/75">
-                    {p.perks.map((perk, i) => <li key={i} className="flex gap-2.5"><Icon name="check" className="mt-0.5 h-4 w-4 shrink-0 text-forest" />{tr(perk)}</li>)}
+                    {p.perks.map((perk, i) => (
+                      <li key={i} className="flex gap-2.5">
+                        <Icon name="check" className="mt-0.5 h-4 w-4 shrink-0 text-forest" />
+                        {tr(perk)}
+                      </li>
+                    ))}
                   </ul>
                   <div className="mt-8 flex items-end justify-between gap-4 border-t border-charcoal/10 pt-6">
                     <div>
-                      <div className="font-display text-2xl text-charcoal">{t('home.priceFrom', { price: formatSom(from, lang) })}<span className="ml-1 text-xs text-charcoal/50">{t('common.perMonth')}</span></div>
+                      <div className="font-display text-2xl text-charcoal">
+                        {t('home.priceFrom', { price: formatSom(from, lang) })}
+                        <span className="ml-1 text-xs text-charcoal/50">{t('common.perMonth')}</span>
+                      </div>
                     </div>
-                    <LinkButton to={`/builder?package=${p.id}`} variant={p.highlight ? 'primary' : 'secondary'}>{t('common.select')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
+                    <LinkButton to={`/builder?package=${p.id}`} variant={p.highlight ? 'primary' : 'secondary'}>
+                      {t('common.select')} <Icon name="arrowRight" className="h-4 w-4" />
+                    </LinkButton>
                   </div>
                 </Card>
               </div>
@@ -181,10 +233,10 @@ function Categories({ s }: { s: Section }) {
           {categories.map((c) => {
             const n = courses.filter((x) => x.categoryId === c.id).length
             return (
-              <Link key={c.id} to={`/courses?cat=${c.id}`} className="reveal card group flex flex-col justify-between p-5 transition duration-500 hover:-translate-y-1 hover:shadow-lift md:min-h-[150px]">
-                <span className="font-display text-3xl text-champagne transition duration-500 group-hover:-translate-y-0.5 group-hover:text-forest">{c.glyph}</span>
+              <Link key={c.id} to={`/courses?cat=${c.id}`} className="reveal card group flex flex-col justify-between p-5 transition duration-500 hover:-translate-y-1.5 hover:shadow-lift md:min-h-[150px] border border-charcoal/10">
+                <span className="font-display text-3xl text-champagne transition duration-500 group-hover:-translate-y-1 group-hover:scale-110 group-hover:text-forest inline-block">{c.glyph}</span>
                 <span>
-                  <span className="block font-medium text-charcoal group-hover:text-forest">{tr(c.name)}</span>
+                  <span className="block font-medium text-charcoal group-hover:text-forest transition-colors">{tr(c.name)}</span>
                   <span className="block text-xs text-charcoal/50">{n} · {tr({ uz: 'kurs', ru: 'курсов', en: 'courses' })}</span>
                 </span>
               </Link>
@@ -200,15 +252,32 @@ function Categories({ s }: { s: Section }) {
 function Steps({ s }: { s: Section }) {
   const { tr } = useT()
   return (
-    <section className="py-20 lg:py-28">
+    <section className="py-20 lg:py-28 bg-paper">
       <div className="container-x">
         <SectionHeading title={tr(s.title)} subtitle={tr(s.subtitle)} align="center" />
-        <ol className="reveal-stagger grid gap-6 md:grid-cols-3">
+        <ol className="reveal-stagger mt-12 grid gap-6 md:grid-cols-3 relative">
           {(s.items ?? []).map((it, i) => (
-            <li key={it.id} className="reveal card relative p-7 transition duration-500 hover:-translate-y-1 hover:shadow-lift">
-              <span className="font-display text-5xl text-champagne/70">{String(i + 1).padStart(2, '0')}</span>
-              <h3 className="mt-4 font-display text-2xl text-charcoal">{tr(it.title)}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{tr(it.body)}</p>
+            <li
+              key={it.id}
+              className="reveal card group relative p-8 transition duration-500 hover:-translate-y-1.5 hover:shadow-lift border border-charcoal/10 hover:border-forest/30"
+            >
+              <div className="flex items-center justify-between">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sage/70 font-display text-2xl text-forest shadow-xs transition duration-300 group-hover:bg-forest group-hover:text-ivory">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-champagne">
+                  {i === 0 && tr({ uz: '1-qadam', ru: 'Шаг 1', en: 'Step 1' })}
+                  {i === 1 && tr({ uz: '2-qadam', ru: 'Шаг 2', en: 'Step 2' })}
+                  {i === 2 && tr({ uz: '3-qadam', ru: 'Шаг 3', en: 'Step 3' })}
+                </span>
+              </div>
+              <h3 className="mt-6 font-display text-2xl text-charcoal group-hover:text-forest transition-colors duration-300">{tr(it.title)}</h3>
+              <p className="mt-3 text-sm leading-relaxed text-charcoal/65">{tr(it.body)}</p>
+              {i < 2 && (
+                <div className="hidden md:block absolute -right-3 top-1/2 -translate-y-1/2 z-10 text-champagne/70 group-hover:text-forest group-hover:translate-x-1 transition-all">
+                  <Icon name="arrowRight" className="h-5 w-5" />
+                </div>
+              )}
             </li>
           ))}
         </ol>
@@ -255,7 +324,7 @@ function Studio3D({ s }: { s: Section }) {
           </ol>
           {teacher && (
             <div className="mt-6 flex items-center gap-3">
-              <Avatar name={teacher.name} seed={teacher.avatarSeed} size={40} url={teacher.avatarUpload?.previewUrl} />
+              <Avatar name={teacher.name} seed={teacher.avatarSeed} size={40} url={getTeacherAvatarUrl(teacher)} />
               <div className="text-sm"><div className="font-medium text-charcoal">{teacher.name}</div><div className="text-xs text-charcoal/55">{tr(teacher.title)}{center && <> · {center.name}, {tr(center.district)}</>}</div></div>
             </div>
           )}
@@ -314,9 +383,9 @@ function TeachersSection({ s }: { s: Section }) {
         <SnapTrack prevLabel={t('home.prev')} nextLabel={t('home.next')} className="reveal-stagger">
           {teachers.map((te) => (
             <Link key={te.id} to={`/teachers/${te.id}`} className="reveal card group w-[260px] overflow-hidden p-0 transition duration-500 hover:-translate-y-1 hover:shadow-lift sm:w-[280px]">
-              <div className="h-24 transition duration-700 group-hover:brightness-110" style={{ background: te.bannerUpload?.previewUrl ? `url(${te.bannerUpload.previewUrl}) center/cover` : `linear-gradient(120deg, ${te.bannerTone}, ${te.bannerTone}cc 60%, #C8AD7F55)` }} />
+              <div className="h-24 transition duration-700 group-hover:brightness-110" style={{ background: te.bannerUpload?.previewUrl ? `url(${te.bannerUpload.previewUrl}) center/cover` : te.bannerUrl ? `url(${te.bannerUrl}) center/cover` : `linear-gradient(120deg, ${te.bannerTone}, ${te.bannerTone}cc 60%, #C8AD7F55)` }} />
               <div className="-mt-8 px-5 pb-5">
-                <Avatar name={te.name} seed={te.avatarSeed} size={60} url={te.avatarUpload?.previewUrl} className="ring-4 ring-paper" />
+                <Avatar name={te.name} seed={te.avatarSeed} size={60} url={getTeacherAvatarUrl(te)} alt={te.name} className="ring-4 ring-paper" />
                 <div className="mt-3 font-display text-2xl text-charcoal group-hover:text-forest">{te.name}</div>
                 <div className="text-xs text-charcoal/55">{tr(te.title)}</div>
                 <div className="mt-3 text-[11px] text-charcoal/45">{centers.find((c) => c.id === te.centerId)?.name}</div>
@@ -454,23 +523,87 @@ function InquiryForm({ s }: { s: Section }) {
   const { t, tr } = useT()
   const enabled = useStore((st) => st.site.features.centerInquiry)
   const [sent, setSent] = useState(false)
-  const [form, setForm] = useState({ center: '', district: '', contact: '', phone: '', telegram: '', courses: '', message: '' })
+  const [form, setForm] = useState({
+    centerName: '',
+    district: '',
+    contactName: '',
+    phone: '',
+    telegram: '',
+    courses: '',
+    message: '',
+  })
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  if (!enabled) return <section className="container-x pb-24"><Notice tone="warn">{t('centers.formDisabled')}</Notice></section>
-  const valid = form.center.trim() && form.contact.trim() && normalizeUzPhone(form.phone).ok
-  const submit = async () => {
-    const phone = normalizeUzPhone(form.phone)
-    if (!valid || !phone.ok) return
-    setBusy(true); setError(null)
-    const details = [form.district && `${t('centers.form.district')}: ${form.district.trim()}`, form.telegram && `Telegram: ${form.telegram.trim()}`, form.courses && `${t('centers.form.courses')}: ${form.courses.trim()}`, form.message.trim()].filter(Boolean).join('\n')
-    try {
-      await api('/public/inquiries', { method: 'POST', body: { centerName: form.center.trim(), contactName: form.contact.trim(), phone: phone.e164, message: details, consent: true }, auth: false })
-      setSent(true)
-    } catch (err) {
-      setError(isApiError(err) && err.status !== 500 ? err.message : t('centers.form.error'))
-    } finally { setBusy(false) }
+
+  if (!enabled) {
+    return (
+      <section className="container-x pb-24">
+        <Notice tone="warn">{t('centers.formDisabled')}</Notice>
+      </section>
+    )
   }
+
+  const phoneParsed = normalizeUzPhone(form.phone)
+  const isCenterValid = form.centerName.trim().length >= 2
+  const isContactValid = form.contactName.trim().length >= 2
+  const isPhoneValid = phoneParsed.ok
+  const isValid = isCenterValid && isContactValid && isPhoneValid
+
+  const submit = async () => {
+    if (busy) return
+    setTouched({ centerName: true, contactName: true, phone: true })
+    if (!isValid) return
+
+    setBusy(true)
+    setError(null)
+
+    try {
+      const res = await api<{ id: string; receivedAt: string }>('/public/inquiries', {
+        method: 'POST',
+        body: {
+          centerName: form.centerName.trim(),
+          district: form.district.trim() || undefined,
+          contactName: form.contactName.trim(),
+          phone: phoneParsed.e164,
+          telegram: form.telegram.trim() || undefined,
+          courses: form.courses.trim() || undefined,
+          message: form.message.trim() || undefined,
+          consent: true,
+        },
+        auth: false,
+      })
+
+      if (res && res.id) {
+        setSent(true)
+      } else {
+        throw new Error('Server did not return a valid confirmation')
+      }
+    } catch (err) {
+      if (isApiError(err)) {
+        if (err.code === 'invalid_phone') {
+          setError(t('centers.form.invalidPhone'))
+        } else if (err.code === 'rate_limited' || err.status === 429) {
+          setError(t('centers.form.rateLimited'))
+        } else if (err.code === 'consent_required') {
+          setError(t('auth.consent.required'))
+        } else if (err.status >= 500) {
+          setError(t('centers.form.serverError'))
+        } else if (err.code === 'validation_failed' && Array.isArray(err.details) && err.details.length) {
+          setError(String(err.details[0]))
+        } else if (err.message && err.message !== 'Internal Server Error' && err.message !== 'Validation failed') {
+          setError(err.message)
+        } else {
+          setError(t('centers.form.error'))
+        }
+      } else {
+        setError(t('centers.form.error'))
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <section className="container-x pb-24">
       <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
@@ -483,23 +616,123 @@ function InquiryForm({ s }: { s: Section }) {
           <Card className="p-7 md:p-8">
             {sent ? (
               <div className="py-6 text-center">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-sage text-forest"><Icon name="check" className="h-6 w-6" /></div>
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-sage text-forest">
+                  <Icon name="check" className="h-6 w-6" />
+                </div>
                 <p className="text-charcoal/75">{t('centers.form.success')}</p>
-                <Button variant="secondary" className="mt-6" onClick={() => { setSent(false); setForm({ center: '', district: '', contact: '', phone: '', telegram: '', courses: '', message: '' }) }}>{t('centers.form.another')}</Button>
+                <Button
+                  variant="secondary"
+                  className="mt-6"
+                  onClick={() => {
+                    setSent(false)
+                    setTouched({})
+                    setError(null)
+                    setForm({
+                      centerName: '',
+                      district: '',
+                      contactName: '',
+                      phone: '',
+                      telegram: '',
+                      courses: '',
+                      message: '',
+                    })
+                  }}
+                >
+                  {t('centers.form.another')}
+                </Button>
               </div>
             ) : (
-              <form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void submit() }}>
-                <Field label={t('centers.form.center')} required><Input required value={form.center} onChange={(e) => setForm({ ...form, center: e.target.value })} /></Field>
-                <Field label={t('centers.form.district')}><Input value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} /></Field>
-                <Field label={t('centers.form.contact')} required><Input required autoComplete="name" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></Field>
-                <Field label={t('centers.form.phone')} required><Input required inputMode="tel" autoComplete="tel" placeholder="+998 90 123 45 67" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
-                <Field label={t('centers.form.telegram')}><Input placeholder="@username" value={form.telegram} onChange={(e) => setForm({ ...form, telegram: e.target.value })} /></Field>
-                <Field label={t('centers.form.courses')}><Input value={form.courses} onChange={(e) => setForm({ ...form, courses: e.target.value })} /></Field>
-                <Field label={t('centers.form.message')} className="sm:col-span-2"><Textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} /></Field>
-                {error && <div className="sm:col-span-2" role="alert"><Notice tone="warn">{error}</Notice></div>}
+              <form
+                className="grid gap-4 sm:grid-cols-2"
+                noValidate
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void submit()
+                }}
+              >
+                <Field
+                  label={t('centers.form.center')}
+                  required
+                  hint={touched.centerName && !isCenterValid ? <span className="text-garnet">{t('centers.form.required')}</span> : undefined}
+                >
+                  <Input
+                    required
+                    disabled={busy}
+                    value={form.centerName}
+                    onBlur={() => setTouched((p) => ({ ...p, centerName: true }))}
+                    onChange={(e) => setForm({ ...form, centerName: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('centers.form.district')}>
+                  <Input
+                    disabled={busy}
+                    value={form.district}
+                    onChange={(e) => setForm({ ...form, district: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('centers.form.contact')}
+                  required
+                  hint={touched.contactName && !isContactValid ? <span className="text-garnet">{t('centers.form.required')}</span> : undefined}
+                >
+                  <Input
+                    required
+                    disabled={busy}
+                    autoComplete="name"
+                    value={form.contactName}
+                    onBlur={() => setTouched((p) => ({ ...p, contactName: true }))}
+                    onChange={(e) => setForm({ ...form, contactName: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('centers.form.phone')}
+                  required
+                  hint={touched.phone && !isPhoneValid ? <span className="text-garnet">{t('centers.form.invalidPhone')}</span> : undefined}
+                >
+                  <Input
+                    required
+                    disabled={busy}
+                    inputMode="tel"
+                    autoComplete="tel"
+                    placeholder="+998 90 123 45 67"
+                    value={form.phone}
+                    onBlur={() => setTouched((p) => ({ ...p, phone: true }))}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('centers.form.telegram')}>
+                  <Input
+                    disabled={busy}
+                    placeholder="@username"
+                    value={form.telegram}
+                    onChange={(e) => setForm({ ...form, telegram: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('centers.form.courses')}>
+                  <Input
+                    disabled={busy}
+                    value={form.courses}
+                    onChange={(e) => setForm({ ...form, courses: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('centers.form.message')} className="sm:col-span-2">
+                  <Textarea
+                    disabled={busy}
+                    value={form.message}
+                    onChange={(e) => setForm({ ...form, message: e.target.value })}
+                  />
+                </Field>
+                {error && (
+                  <div className="sm:col-span-2" role="alert">
+                    <Notice tone="warn">{error}</Notice>
+                  </div>
+                )}
                 <div className="sm:col-span-2 flex items-center justify-between gap-4">
                   <span className="text-xs text-charcoal/45">{t('centers.form.privacy')}</span>
-                  <Button type="submit" disabled={!valid || busy}>{busy ? <Icon name="refresh" className="h-4 w-4 animate-spin" /> : null}{t('centers.form.submit')}</Button>
+                  <Button type="submit" disabled={busy}>
+                    {busy ? <Icon name="refresh" className="h-4 w-4 animate-spin" /> : null}
+                    {t('centers.form.submit')}
+                  </Button>
                 </div>
               </form>
             )}

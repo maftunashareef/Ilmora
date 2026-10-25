@@ -21,10 +21,14 @@ export function useLocale(): Locale {
   return seg && isLang(seg) ? seg : 'uz'
 }
 
-/** Strip the locale segment: "/uz/courses/x" → "/courses/x" */
+/** Strip the locale segment: "/uz/courses/x" → "/courses/x", "/ru?cat=1" → "/?cat=1" */
 export const stripLocale = (pathname: string): string => {
-  const m = /^\/(uz|ru|en)(\/.*)?$/.exec(pathname)
-  return m ? m[2] || '/' : pathname
+  if (!pathname) return '/'
+  const clean = pathname.replace(/^https?:\/\/[^/]+/, '')
+  const m = /^\/(?:uz|ru|en)(?:([/?#].*)|$)/.exec(clean)
+  if (!m) return clean.startsWith('/') ? clean : `/${clean}`
+  const rest = m[1] || '/'
+  return rest.startsWith('/') ? rest : `/${rest}`
 }
 
 export const localizePath = (to: string, locale: string): string => {

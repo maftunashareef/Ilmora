@@ -8,7 +8,7 @@ import { QUEUES } from '../../infra/queue/queues'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { SiteService } from '../site/site.service'
 import {
-  CategoryInput, CenterInput, CourseInput, CoursePatch, GroupInput, GroupPatch, PackageInput, PackagePatch, PlaylistInput, PlaylistPatch, ResourceInput, ResourcePatch, StudentAdminInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput, VideoPatch,
+  AvatarUploadUrlInput, CategoryInput, CenterInput, CourseInput, CoursePatch, GroupInput, GroupPatch, PackageInput, PackagePatch, PlaylistInput, PlaylistPatch, ResourceInput, ResourcePatch, StudentAdminInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput, VideoPatch,
 } from './manage.schemas'
 import { ManageService } from './manage.service'
 
@@ -30,6 +30,9 @@ export class ManageController {
   ) {}
 
   @Get('manage/mine') mine(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor) { return this.manage.mine(t, a) }
+  @Patch('manage/profile') updateProfile(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(body(TeacherPatch)) dto: z.infer<typeof TeacherPatch>) { return this.manage.updateOwnTeacherProfile(t, a, dto) }
+  @Patch('manage/teachers/:id') updateTeacherScoped(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(body(TeacherPatch)) dto: z.infer<typeof TeacherPatch>) { return this.manage.updateTeacherScoped(t, a, id, dto) }
+  @Post('manage/profile/avatar/upload-url') avatarUploadUrl(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(body(AvatarUploadUrlInput)) dto: z.infer<typeof AvatarUploadUrlInput>) { return this.manage.generateAvatarUploadUrl(t, a, dto) }
 
   // courses & groups
   @Post('manage/courses') createCourse(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(body(CourseInput)) dto: z.infer<typeof CourseInput>) { return this.manage.createCourse(t, a, dto) }
@@ -74,6 +77,8 @@ export class ManageController {
   @Roles('PLATFORM_ADMIN') @Patch('admin/users/:id') updateStudent(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(StudentAdminInput)) dto: z.infer<typeof StudentAdminInput>) { return this.manage.updateStudent(t, id, dto) }
   @Roles('PLATFORM_ADMIN') @Get('admin/review-queue') reviewQueue(@CurrentTenantId() t: string) { return this.manage.reviewQueue(t) }
   @Roles('PLATFORM_ADMIN', 'FINANCE_ADMIN') @Get('admin/audit') audit(@CurrentTenantId() t: string, @Query('entityType') entityType?: string, @Query('entityId') entityId?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.audits(t, { entityType, entityId, page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined }) }
+  @Roles('PLATFORM_ADMIN') @Get('admin/inquiries') inquiries(@CurrentTenantId() t: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.listInquiries(t, { page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined }) }
+  @Roles('PLATFORM_ADMIN') @Patch('admin/inquiries/:id/handle') handleInquiry(@CurrentTenantId() t: string, @Param('id') id: string) { return this.manage.toggleInquiryHandled(t, id) }
 
   /** Failed-job visibility: counts per queue and the most recent failures with their reasons. */
   @Roles('PLATFORM_ADMIN') @Get('admin/jobs')
