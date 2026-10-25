@@ -134,4 +134,8 @@ export class GoogleAuthDto {
   @IsOptional()
   @IsIn(['STUDENT', 'TEACHER'])
   role?: 'STUDENT' | 'TEACHER'
+
+  @IsOptional()
+  @IsIn(['uz', 'ru', 'en'])
+  lang?: 'uz' | 'ru' | 'en'
 }

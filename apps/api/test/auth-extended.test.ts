@@ -112,6 +112,87 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         ),
       ).rejects.toMatchObject({ code: 'unverified_email' })
     })
+
+    it('authenticates valid dev mock token and passes verified profile with role and lang to AccountService', async () => {
+      const result = await authService.authenticateGoogle('ilmora', {
+        idToken: 'mock-google-token:gid-12345:anvar%40example.com:Anvar%20Qodirov',
+        role: 'TEACHER',
+        lang: 'ru',
+      }, { ip: '127.0.0.1', userAgent: 'vitest' })
+
+      expect(result.accessToken).toBe('mock-access-token')
+      expect(capturedProfile).toEqual({
+        googleId: 'gid-12345',
+        email: 'anvar@example.com',
+        emailVerified: true,
+        displayName: 'Anvar Qodirov',
+        role: 'TEACHER',
+        lang: 'ru',
+      })
+    })
+
+    it('does not hijack existing password account when Google email prefix matches password user login', async () => {
+      let createdUserData: any = null
+      const mockPrisma = {
+        client: {
+          user: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: 'existing-password-user',
+              login: 'john',
+              passwordHash: '$argon2id$...',
+              roles: ['STUDENT'],
+              isActive: true,
+            }),
+            findUnique: vi.fn().mockImplementation(({ where }: any) => {
+              if (where.tenantId_login?.login === 'john') return Promise.resolve({ id: 'existing-password-user' })
+              return Promise.resolve(null)
+            }),
+            create: vi.fn().mockImplementation(({ data }: any) => {
+              createdUserData = data
+              return Promise.resolve({
+                id: 'new-google-user',
+                roles: data.roles,
+                tenantId: data.tenantId,
+                login: data.login,
+                displayName: data.displayName,
+                preferredLang: data.preferredLang,
+                centerId: null,
+                teacherProfile: null,
+              })
+            }),
+          },
+          tenant: {
+            findUnique: vi.fn().mockResolvedValue({ ownerUserId: 'other-owner' }),
+          },
+          $transaction: vi.fn(async (cb: any) => cb(mockPrisma.client)),
+        },
+      }
+
+      const mockTokens = {
+        signAccess: vi.fn().mockResolvedValue('jwt-token'),
+        issueRefresh: vi.fn().mockResolvedValue({ raw: 'refresh-token', expiresAt: new Date() }),
+      } as unknown as TokenService
+
+      const mockAudit = { record: vi.fn().mockResolvedValue(undefined) } as unknown as AuditService
+
+      const accountService = new AccountService(
+        mockPrisma as unknown as PrismaService,
+        mockTokens,
+        mockAudit,
+        {} as unknown as RedisService,
+        env,
+      )
+
+      const result = await accountService.loginWithGoogle(
+        'tenant-1',
+        { googleId: 'gid-999', email: 'john@gmail.com', emailVerified: true, displayName: 'John Doe', role: 'STUDENT', lang: 'en' },
+        {},
+      )
+
+      expect(result.user.id).toBe('new-google-user')
+      expect(createdUserData.login).toBe('john_2')
+      expect(createdUserData.preferredLang).toBe('en')
+    })
   })
 
   describe('Account Service Security & Isolation', () => {

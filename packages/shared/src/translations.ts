@@ -741,6 +741,7 @@ export const dict = {
   'auth.err.tooMany': d('Juda ko‘p urinish. Birozdan so‘ng qayta urinib ko‘ring.', 'Слишком много попыток. Попробуйте позже.', 'Too many attempts. Try again later.'),
   'auth.err.disabled': d('Bu hisob o‘chirilgan.', 'Этот аккаунт отключён.', 'This account is disabled.'),
   'auth.err.google': d('Google orqali kirishda xatolik yuz berdi. Iltimos, qayta urinib ko‘ring.', 'Ошибка авторизации через Google. Пожалуйста, попробуйте снова.', 'Google authentication failed. Please try again.'),
+  'auth.err.googleCancelled': d('Google orqali kirish bekor qilindi.', 'Вход через Google был отменён.', 'Google sign-in was cancelled.'),
   'auth.err.googleUnconfigured': d('Google OAuth tizimda sozlanmagan. Iltimos, login va parol orqali kiring.', 'Google OAuth не настроен на сервере. Пожалуйста, используйте логин и пароль.', 'Google OAuth is not configured. Please use username and password.'),
   'auth.consent.title': d('Oferta va rozilik', 'Оферта и согласие', 'Offer and consent'),
   'auth.consent.body': d('Davom etishdan oldin ommaviy oferta bilan tanishing va shaxsiy ma’lumotlaringizni qayta ishlashga rozilik bering.', 'Перед тем как продолжить, ознакомьтесь с публичной офертой и дайте согласие на обработку персональных данных.', 'Before continuing, read the public offer and give consent to the processing of your personal data.'),

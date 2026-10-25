@@ -72,4 +72,19 @@ describe('Web Auth Store tests', () => {
     expect(store.getState().auth.status).toBe('authenticated')
     expect(store.getState().role).toBe('student')
   })
+
+  it('authenticates with Google mock token preserving teacher role and language', async () => {
+    const store = createIlmoraStore(initialMock)
+    const user = await store.getState().loginWithGoogle({
+      idToken: 'mock-google-token:gid-888:sarvar%40example.uz:Sarvar%20Usmonov',
+      role: 'TEACHER',
+      lang: 'ru',
+    })
+
+    expect(user.displayName).toBe('Sarvar Usmonov')
+    expect(user.roles).toContain('TEACHER')
+    expect(user.preferredLang).toBe('ru')
+    expect(store.getState().auth.status).toBe('authenticated')
+    expect(store.getState().role).toBe('teacher')
+  })
 })

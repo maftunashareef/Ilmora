@@ -26,6 +26,8 @@ export function GoogleCallbackPage() {
   const [params] = useSearchParams()
   const loginWithGoogle = useStore((s) => s.loginWithGoogle)
   const notify = useStore((s) => s.notify)
+  const setLang = useStore((s) => s.setLang)
+  const lang = useStore((s) => s.lang)
 
   const [error, setError] = useState<string | null>(null)
   const codeExchanged = useRef(false)
@@ -33,15 +35,48 @@ export function GoogleCallbackPage() {
   const code = params.get('code')
   const oauthError = params.get('error')
   const oauthErrorDesc = params.get('error_description')
-  const rawNext = params.get('next') ?? params.get('state') ?? ''
-  const safeNext = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null
+  const rawState = params.get('state') ?? ''
+
+  let stateLang: 'uz' | 'ru' | 'en' | undefined
+  let stateRole: 'STUDENT' | 'TEACHER' | undefined
+  let stateNext: string | null = null
+
+  if (rawState) {
+    try {
+      const decoded = decodeURIComponent(rawState)
+      const parsed = JSON.parse(decoded)
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.lang && ['uz', 'ru', 'en'].includes(parsed.lang)) stateLang = parsed.lang
+        if (parsed.role && ['STUDENT', 'TEACHER'].includes(parsed.role)) stateRole = parsed.role
+        if (typeof parsed.next === 'string' && parsed.next.startsWith('/') && !parsed.next.startsWith('//')) {
+          stateNext = parsed.next
+        }
+      }
+    } catch {
+      if (rawState.startsWith('/') && !rawState.startsWith('//')) {
+        stateNext = rawState
+      }
+    }
+  }
+
+  const nextParam = params.get('next')
+  const safeNext = (nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//')) ? nextParam : stateNext
 
   useEffect(() => {
+    if (stateLang && stateLang !== lang) {
+      setLang(stateLang)
+    }
+
     if (codeExchanged.current) return
 
     if (oauthError) {
       codeExchanged.current = true
-      const msg = oauthErrorDesc || t('auth.err.google')
+      let msg = t('auth.err.google')
+      if (oauthError === 'access_denied' || oauthError === 'user_cancelled_authorize') {
+        msg = t('auth.err.googleCancelled')
+      } else if (oauthErrorDesc) {
+        msg = oauthErrorDesc
+      }
       setError(msg)
       notify(msg, 'warn')
       setTimeout(() => nav('/login', { replace: true }), 2500)
@@ -60,7 +95,15 @@ export function GoogleCallbackPage() {
     const exchange = async () => {
       try {
         const redirectUri = `${window.location.origin}/auth/google/callback`
-        const user = await loginWithGoogle({ code, redirectUri })
+        const user = await loginWithGoogle({
+          code,
+          redirectUri,
+          role: stateRole,
+          lang: stateLang || lang,
+        })
+        if (user.preferredLang && ['uz', 'ru', 'en'].includes(user.preferredLang)) {
+          setLang(user.preferredLang)
+        }
         notify(t('auth.welcome', { name: user.displayName }))
         const roles = user.roles ?? []
         nav(safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles), { replace: true })
@@ -69,6 +112,7 @@ export function GoogleCallbackPage() {
         if (isApiError(err)) {
           if (err.code === 'google_unconfigured') msg = t('auth.err.googleUnconfigured')
           else if (err.code === 'account_disabled') msg = t('auth.err.disabled')
+          else if (err.code === 'unverified_email') msg = t('auth.err.google')
           else if (err.message) msg = err.message
         }
         setError(msg)
@@ -78,7 +122,7 @@ export function GoogleCallbackPage() {
     }
 
     void exchange()
-  }, [code, oauthError, oauthErrorDesc, loginWithGoogle, nav, notify, safeNext, t])
+  }, [code, oauthError, oauthErrorDesc, loginWithGoogle, nav, notify, safeNext, stateLang, stateRole, lang, setLang, t])
 
   return (
     <div className="container-x py-14 lg:py-20">

@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
-import { OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
+import { type Lang, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
@@ -184,7 +184,7 @@ export class AccountService {
    */
   async loginWithGoogle(
     tenantId: string,
-    profile: { googleId: string; email: string; emailVerified: boolean; displayName: string; role?: 'STUDENT' | 'TEACHER' },
+    profile: { googleId: string; email: string; emailVerified: boolean; displayName: string; role?: 'STUDENT' | 'TEACHER'; lang?: Lang },
     meta: SessionMeta,
   ): Promise<LoginResult> {
     if (!profile.emailVerified) {
@@ -193,12 +193,19 @@ export class AccountService {
     const email = profile.email.toLowerCase().trim()
     const baseLogin = email.split('@')[0].replace(/[^a-z0-9._-]/g, '').slice(0, 24) || `user${profile.googleId.slice(0, 6)}`
     const loginCandidate = baseLogin.length >= 3 ? baseLogin : `${baseLogin}123`
+    const preferredLang: Lang = profile.lang && ['uz', 'ru', 'en'].includes(profile.lang) ? profile.lang : 'uz'
 
     // Look for existing user by primary username, email prefix, or Google ID pattern
     let user = await this.prisma.client.user.findFirst({
       where: { tenantId, login: { in: [loginCandidate, `g_${profile.googleId.slice(0, 16)}`, baseLogin] } },
       include: USER_INCLUDE,
     })
+
+    // Security: Do not automatically link to an existing account if it was registered with a password
+    // to prevent unauthorized account takeover via unverified username/email-prefix collision.
+    if (user && user.passwordHash) {
+      user = null
+    }
 
     if (!user) {
       const role = profile.role ?? 'STUDENT'
@@ -211,7 +218,7 @@ export class AccountService {
             tenantId,
             login,
             displayName: profile.displayName.trim() || email,
-            preferredLang: 'uz',
+            preferredLang,
             roles,
             lastLoginAt: now,
             offerAcceptedAt: now,
@@ -230,7 +237,7 @@ export class AccountService {
         }
         return created
       })
-      await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'google' } })
+      await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'google', googleId: profile.googleId, email } })
     } else {
       if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
       user = await this.prisma.client.user.update({
@@ -238,7 +245,7 @@ export class AccountService {
         data: { lastLoginAt: new Date() },
         include: USER_INCLUDE,
       })
-      await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'google' } })
+      await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'google', googleId: profile.googleId, email } })
     }
 
     return this.openSession(user, meta)

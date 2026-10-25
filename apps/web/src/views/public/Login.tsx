@@ -5,7 +5,7 @@ import { ConsentFields, consentComplete, EMPTY_CONSENT, type ConsentState } from
 import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
-import { Link, useNavigate, useSearchParams } from '../../lib/router'
+import { Link, useLocale, useNavigate, useSearchParams } from '../../lib/router'
 import { useStore, type AuthUser } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
@@ -23,11 +23,14 @@ const homeFor = (roles: Role[]) => (roles.includes('PLATFORM_ADMIN') ? '/admin' 
 
 export function LoginPage() {
   const { t } = useT()
+  const locale = useLocale()
   const nav = useNavigate()
   const [params] = useSearchParams()
   const rawNext = params.get('next') ?? ''
   const safeNext = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null
   const auth = useStore((s) => s.auth)
+  const lang = useStore((s) => s.lang)
+  const currentLang = locale || lang || 'uz'
   const login = useStore((s) => s.login)
   const register = useStore((s) => s.register)
   const loginAsDemo = useStore((s) => s.loginAsDemo)
@@ -81,6 +84,7 @@ export function LoginPage() {
       case 'account_disabled': return t('auth.err.disabled')
       case 'unverified_email': return t('auth.err.google')
       case 'invalid_google_token': return t('auth.err.google')
+      case 'google_cancelled': return t('auth.err.googleCancelled')
       case 'google_unconfigured': return t('auth.err.googleUnconfigured')
       case 'network_error':
         setNetworkOffline(true)
@@ -160,7 +164,13 @@ export function LoginPage() {
       const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
       if (googleClientId && typeof window !== 'undefined') {
         const redirectUri = `${window.location.origin}/auth/google/callback`
-        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(googleClientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid%20email%20profile&prompt=select_account`
+        const statePayload = {
+          lang: currentLang,
+          role: mode === 'register' && role ? role : undefined,
+          next: safeNext || undefined,
+        }
+        const state = encodeURIComponent(JSON.stringify(statePayload))
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(googleClientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid%20email%20profile&prompt=select_account&state=${state}&hl=${currentLang}`
         window.location.href = authUrl
         return
       }

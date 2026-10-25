@@ -87,7 +87,7 @@ export class AuthService {
    */
   async authenticateGoogle(
     tenantId: string,
-    input: { idToken?: string; code?: string; redirectUri?: string; role?: 'STUDENT' | 'TEACHER' },
+    input: { idToken?: string; code?: string; redirectUri?: string; role?: 'STUDENT' | 'TEACHER'; lang?: 'uz' | 'ru' | 'en' },
     meta: SessionMeta,
   ): Promise<LoginResult> {
     let googleId = ''
@@ -138,7 +138,7 @@ export class AuthService {
       if (!tokenData.id_token) {
         throw AppError.unauthorized('Google did not return an id_token', 'invalid_google_response')
       }
-      return this.authenticateGoogle(tenantId, { idToken: tokenData.id_token, role: input.role }, meta)
+      return this.authenticateGoogle(tenantId, { idToken: tokenData.id_token, role: input.role, lang: input.lang }, meta)
     } else {
       throw AppError.invalid('missing_google_credential', 'Missing Google idToken or code')
     }
@@ -147,6 +147,6 @@ export class AuthService {
       throw AppError.invalid('incomplete_google_profile', 'Incomplete Google profile')
     }
 
-    return this.accounts.loginWithGoogle(tenantId, { googleId, email, emailVerified, displayName, role: input.role }, meta)
+    return this.accounts.loginWithGoogle(tenantId, { googleId, email, emailVerified, displayName, role: input.role, lang: input.lang }, meta)
   }
 }
