@@ -69,6 +69,10 @@ export class RegisterDto {
   displayName?: string
 
   @IsOptional()
+  @IsString()
+  phone?: string
+
+  @IsOptional()
   @IsIn(['uz', 'ru', 'en'])
   lang?: 'uz' | 'ru' | 'en'
 
@@ -97,4 +101,26 @@ export class PasswordLoginDto {
   @IsString()
   @Length(1, 128)
   password!: string
+}
+
+export class GoogleAuthDto {
+  @IsOptional()
+  @IsString()
+  idToken?: string
+
+  @IsOptional()
+  @IsString()
+  code?: string
+
+  @IsOptional()
+  @IsString()
+  redirectUri?: string
+
+  @IsOptional()
+  @IsIn(['STUDENT', 'TEACHER'])
+  role?: 'STUDENT' | 'TEACHER'
+
+  @IsOptional()
+  @IsIn(['uz', 'ru', 'en'])
+  lang?: 'uz' | 'ru' | 'en'
 }

@@ -1,6 +1,7 @@
 import { Link } from '@/lib/router'
 import { ScheduleChips } from '../../components/course/CourseCard'
 import { ArtCover, Avatar, Badge, EmptyState, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
+import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
 import { resolveGroups } from '../../lib/schedule'
@@ -33,7 +34,7 @@ export function StudentCourses() {
                   <div className="mt-3"><ScheduleChips group={g} /></div>
                   {te && (
                     <div className="mt-4 flex items-center gap-3 border-t border-charcoal/10 pt-4">
-                      <Avatar name={te.name} seed={te.avatarSeed} size={36} url={te.avatarUpload?.previewUrl} />
+                      <Avatar name={te.name} seed={te.avatarSeed} size={36} url={getTeacherAvatarUrl(te)} />
                       <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-charcoal">{te.name}</div><div className="truncate text-xs text-charcoal/55">{tr(te.title)}</div></div>
                       {s.site.features.teacherChannels && te.channelActive && <Link to={`/teachers/${te.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-forest">{t('courses.seeChannel')} <Icon name="arrowRight" className="h-3.5 w-3.5" /></Link>}
                     </div>

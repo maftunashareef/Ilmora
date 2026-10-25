@@ -1,5 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common'
-import { OFFER_VERSION, formatUzPhone } from '@ilmora/shared'
+import { HttpStatus, Inject, Injectable } from '@nestjs/common'
+import { type Lang, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
@@ -38,6 +38,7 @@ export type UserRow = {
   id: string
   tenantId: string
   login: string | null
+  passwordHash?: string | null
   phoneE164: string | null
   displayName: string
   district: string | null
@@ -87,13 +88,27 @@ export class AccountService {
   }
 
   /** The controller has already validated the offer/consent marks (RegisterDto); the timestamps and edition are recorded here. */
-  async register(tenantId: string, input: { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; lang?: 'uz' | 'ru' | 'en' }, meta: SessionMeta): Promise<LoginResult> {
+  async register(
+    tenantId: string,
+    input: { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; phone?: string; lang?: 'uz' | 'ru' | 'en' },
+    meta: SessionMeta,
+  ): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
     if (!roles) throw AppError.invalid('invalid_role', 'Choose Student or Teacher')
     const login = this.normalizeLogin(input.login)
     if (input.password.length < 8 || input.password.length > 128) throw AppError.invalid('weak_password', 'Password must be 8–128 characters')
     const taken = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, select: { id: true } })
     if (taken) throw AppError.conflict('login_taken', 'This login is already in use')
+
+    let phoneE164: string | null = null
+    if (input.phone && input.phone.trim()) {
+      const parsed = normalizeUzPhone(input.phone)
+      if (!parsed.ok) throw AppError.invalid('invalid_phone', 'Invalid phone number format (+998...)')
+      const phoneTaken = await this.prisma.client.user.findFirst({ where: { tenantId, phoneE164: parsed.e164 }, select: { id: true } })
+      if (phoneTaken) throw AppError.conflict('phone_taken', 'This phone number is already registered')
+      phoneE164 = parsed.e164
+    }
+
     const passwordHash = await argon2.hash(input.password, PASSWORD_HASH)
     const displayName = input.displayName?.trim() || login
     const now = new Date()
@@ -101,7 +116,19 @@ export class AccountService {
     try {
       user = await this.prisma.client.$transaction(async (tx) => {
         const created = await tx.user.create({
-          data: { tenantId, login, passwordHash, displayName, preferredLang: input.lang ?? 'uz', roles, lastLoginAt: now, offerAcceptedAt: now, offerVersion: OFFER_VERSION, consentAt: now },
+          data: {
+            tenantId,
+            login,
+            phoneE164,
+            passwordHash,
+            displayName,
+            preferredLang: input.lang ?? 'uz',
+            roles,
+            lastLoginAt: now,
+            offerAcceptedAt: now,
+            offerVersion: OFFER_VERSION,
+            consentAt: now,
+          },
           include: USER_INCLUDE,
         })
         if (input.role === 'TEACHER') {
@@ -120,10 +147,21 @@ export class AccountService {
   }
 
   async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult> {
-    const login = input.login.normalize('NFKC').trim().toLowerCase()
+    const raw = input.login.trim()
+    const login = raw.normalize('NFKC').toLowerCase()
     const key = `login:fail:${tenantId}:${login}`
     await this.assertNotLocked(key)
-    const user = LOGIN_RE.test(login) ? await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: USER_INCLUDE }) : null
+
+    // Lookup user by normalized phone number or by unique login username
+    const phoneParsed = normalizeUzPhone(raw)
+    let user: UserRow | null = null
+    if (phoneParsed.ok) {
+      user = await this.prisma.client.user.findFirst({ where: { tenantId, phoneE164: phoneParsed.e164 }, include: USER_INCLUDE })
+    }
+    if (!user && LOGIN_RE.test(login)) {
+      user = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: USER_INCLUDE })
+    }
+
     // Verify against a dummy hash when the login is unknown so response time does not reveal which logins exist.
     let ok = false
     if (user?.passwordHash) ok = await argon2.verify(user.passwordHash, input.password)
@@ -132,11 +170,83 @@ export class AccountService {
       await this.recordFailure(key)
       throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     }
-    if (!user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
+    if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
     await this.clearFailures(key)
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'password' } })
     return this.openSession(updated, meta)
+  }
+
+  /**
+   * Google Sign-In: validates verified email, creates or retrieves user account safely,
+   * accepts mandatory terms and issues JWT + refresh session.
+   */
+  async loginWithGoogle(
+    tenantId: string,
+    profile: { googleId: string; email: string; emailVerified: boolean; displayName: string; role?: 'STUDENT' | 'TEACHER'; lang?: Lang },
+    meta: SessionMeta,
+  ): Promise<LoginResult> {
+    if (!profile.emailVerified) {
+      throw new AppError('unverified_email', 'Google account email is not verified', HttpStatus.FORBIDDEN)
+    }
+    const email = profile.email.toLowerCase().trim()
+    const baseLogin = email.split('@')[0].replace(/[^a-z0-9._-]/g, '').slice(0, 24) || `user${profile.googleId.slice(0, 6)}`
+    const loginCandidate = baseLogin.length >= 3 ? baseLogin : `${baseLogin}123`
+    const preferredLang: Lang = profile.lang && ['uz', 'ru', 'en'].includes(profile.lang) ? profile.lang : 'uz'
+
+    // Look for existing user by primary username, email prefix, or Google ID pattern
+    let user = await this.prisma.client.user.findFirst({
+      where: { tenantId, login: { in: [loginCandidate, `g_${profile.googleId.slice(0, 16)}`, baseLogin] } },
+      include: USER_INCLUDE,
+    })
+
+    // Security: Do not automatically link to an existing account if it was registered with a password
+    // to prevent unauthorized account takeover via unverified username/email-prefix collision.
+    if (user && user.passwordHash) {
+      user = null
+    }
+
+    if (!user) {
+      const role = profile.role ?? 'STUDENT'
+      const roles = SELF_SERVICE_ROLES[role]
+      const login = await this.freeUserLogin(tenantId, loginCandidate)
+      const now = new Date()
+      user = await this.prisma.client.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            tenantId,
+            login,
+            displayName: profile.displayName.trim() || email,
+            preferredLang,
+            roles,
+            lastLoginAt: now,
+            offerAcceptedAt: now,
+            offerVersion: OFFER_VERSION,
+            consentAt: now,
+          },
+          include: USER_INCLUDE,
+        })
+        if (role === 'TEACHER') {
+          const slug = await this.freeTeacherSlug(tx, tenantId, login)
+          const profileRow = await tx.teacherProfile.create({
+            data: { tenantId, userId: created.id, slug, name: created.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null },
+          })
+          return { ...created, teacherProfile: { id: profileRow.id } }
+        }
+        return created
+      })
+      await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'google', googleId: profile.googleId, email } })
+    } else {
+      if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+      user = await this.prisma.client.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+        include: USER_INCLUDE,
+      })
+      await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'google', googleId: profile.googleId, email } })
+    }
+
+    return this.openSession(user, meta)
   }
 
   /** Records acceptance of the current offer edition and personal-data consent for an existing account. */
@@ -195,6 +305,16 @@ export class AccountService {
       if (!(await tx.teacherProfile.findFirst({ where: { tenantId, slug }, select: { id: true } }))) return slug
     }
     return `${root}-${Date.now().toString(36)}`
+  }
+
+  private async freeUserLogin(tenantId: string, base: string): Promise<string> {
+    const root = base.replace(/[^a-z0-9._-]/g, '').slice(0, 24) || 'user'
+    for (let n = 0; n < 50; n++) {
+      const candidate = n === 0 ? root : `${root.slice(0, 20)}_${n + 1}`
+      const exists = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login: candidate } }, select: { id: true } })
+      if (!exists) return candidate
+    }
+    return `user_${Date.now().toString(36)}`
   }
 
   // ── failed-attempt lock per login (shared across replicas through Redis; per process when REDIS_MODE=off) ──

@@ -150,6 +150,8 @@ export interface Teacher {
   centerId: string | null
   avatarSeed: number
   bannerTone: string
+  avatarUrl?: string | null
+  bannerUrl?: string | null
   avatarUpload?: UploadMeta
   bannerUpload?: UploadMeta
   featured?: { type: 'course' | 'playlist'; id: string }

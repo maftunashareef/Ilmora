@@ -6,7 +6,7 @@ import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AccountService } from './account.service'
-import { ConsentDto, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
+import { ConsentDto, GoogleAuthDto, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
 import { AuthService, type LoginResult } from './auth.service'
 import { REFRESH_COOKIE, SESSION_FLAG, TokenService } from './token.service'
 
@@ -29,6 +29,15 @@ export class AuthController {
   @Post('login')
   async login(@CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
     const result = await this.accounts.loginWithPassword(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
+    return this.respond(res, result)
+  }
+
+  /** Google Sign-In with ID token or authorization code; opens a session on success. */
+  @Public()
+  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  @Post('google')
+  async google(@CurrentTenantId() tenantId: string, @Body() dto: GoogleAuthDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+    const result = await this.auth.authenticateGoogle(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }
 

@@ -27,7 +27,7 @@ export class SessionsService {
     const [fy, fm, fd] = fromDate.split('-').map(Number)
     const dates = scheduleDates(group.days, new Date(fy, fm - 1, fd), days)
     if (!dates.length) return 0
-    const rows = dates.map((date) => {
+    const rows = dates.map((date: string) => {
       const startsAt = zonedTimeToUtc(date, group.startTime, group.timezone)
       const endsAt = zonedTimeToUtc(date, group.endTime, group.timezone)
       return { tenantId: group.tenantId, groupId: group.id, courseId: group.courseId, date: isoToDateColumn(date), startsAt, endsAt, status: endsAt < now ? ('COMPLETED' as const) : ('SCHEDULED' as const), generatedBy }

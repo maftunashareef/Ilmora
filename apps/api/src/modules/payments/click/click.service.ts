@@ -87,7 +87,7 @@ export class ClickService {
       const payment = await this.payments.lockPayment(tx, form.merchant_trans_id!)
       if (!payment) return this.reply(form, CLICK.ORDER_NOT_FOUND)
       if (payment.state === 'PAID') return this.reply(form, CLICK.ALREADY_PAID)
-      if (payment.state !== 'PENDING') return this.reply(form, CLICK.CANCELLED)
+      if (payment.state !== 'PENDING' || (payment.expiresAt && payment.expiresAt < new Date())) return this.reply(form, CLICK.CANCELLED)
       if (payment.amountMinor !== amount) return this.reply(form, CLICK.WRONG_AMOUNT)
       const existing = await tx.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'CLICK', providerTransactionId: form.click_trans_id! } } })
       if (existing) {
@@ -141,7 +141,11 @@ export class ClickService {
         // The money was debited but the order can no longer be fulfilled: per Click's rules answer success and refund
         // through the Merchant API (payment/reversal); the outbox event makes the refund visible to finance admins.
         await tx.paymentTransaction.update({ where: { id: row.id }, data: { state: 'PERFORMED', providerState: 1, performedAt } })
-        await tx.outboxEvent.create({ data: { tenantId: row.tenantId, type: 'payment.refund_required', dedupeKey: `click-refund:${row.id}`, payload: { paymentId: row.paymentId, clickTransId: form.click_trans_id, reason: 'payment_not_pending' } } })
+        await tx.outboxEvent.upsert({
+          where: { dedupeKey: `click-refund:${row.id}` },
+          create: { tenantId: row.tenantId, type: 'payment.refund_required', dedupeKey: `click-refund:${row.id}`, payload: { paymentId: row.paymentId, clickTransId: form.click_trans_id, reason: 'payment_not_pending' } },
+          update: {},
+        })
         return this.reply(form, CLICK.OK, { merchant_confirm_id: row.seq })
       }
       await this.payments.settle(tx, { paymentId: row.paymentId, provider: 'CLICK', providerTransactionId: row.providerTransactionId, performedAt })

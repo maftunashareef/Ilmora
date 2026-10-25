@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
-    "dev": "tsup --watch",
+    "dev": "concurrently -k -n esbuild,types 'tsup --watch' 'tsc -p tsconfig.build.json --watch --preserveWatchOutput'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

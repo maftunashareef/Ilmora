@@ -1,8 +1,11 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { z } from 'zod'
 import { normalizeUzPhone, somToTiyin, validateCapacity } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
+import { ENV, type Env, s3Configured } from '../../config/env'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -10,7 +13,7 @@ import { AuditService } from '../audit/audit.service'
 import { toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
 import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
-import type { CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, UserRolesInput, VideoInput } from './manage.schemas'
+import type { AvatarUploadUrlInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
@@ -23,7 +26,13 @@ const slugify = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[â€˜â€
  */
 @Injectable()
 export class ManageService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly sessions: SessionsService, private readonly site: SiteService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly sessions: SessionsService,
+    private readonly site: SiteService,
+    @Inject(ENV) private readonly env: Env,
+  ) {}
 
   private isAdmin(actor: RequestActor) { return actor.roles.includes('PLATFORM_ADMIN') }
   private isCenterAdmin(actor: RequestActor) { return actor.roles.includes('CENTER_ADMIN') }
@@ -36,8 +45,15 @@ export class ManageService {
   }
 
   private async teacherPermissions(tenantId: string) {
-    const site = await this.site.get(tenantId)
-    return site.permissions.teacher as Record<string, boolean>
+    if (!this.site || typeof this.site.get !== 'function') {
+      return { customizeChannel: true, editCourses: true, editPrices: false, editSchedules: true, manageGroups: true, publishDirectly: true, uploadResources: true }
+    }
+    try {
+      const site = await this.site.get(tenantId)
+      return (site?.permissions?.teacher ?? {}) as Record<string, boolean>
+    } catch {
+      return { customizeChannel: true, editCourses: true, editPrices: false, editSchedules: true, manageGroups: true, publishDirectly: true, uploadResources: true }
+    }
   }
 
   private resolveTeacherId(actor: RequestActor, requested?: string): string {
@@ -166,6 +182,11 @@ export class ManageService {
       const check = validateCapacity(input.capacity, enrolled)
       if (!check.ok) throw AppError.invalid(`capacity-${check.reason}`, check.reason === 'below-enrolled' ? `Capacity cannot be below the current enrollment (${enrolled})` : 'Capacity must be a positive whole number', { enrolled })
     }
+    // Validate effective schedule using DB fallback for any unset field in the patch.
+    const effectiveStart = input.start ?? group.startTime
+    const effectiveEnd = input.end ?? group.endTime
+    if ((input.start !== undefined || input.end !== undefined) && effectiveStart >= effectiveEnd)
+      throw AppError.invalid('invalid_schedule', 'start time must be before end time', { start: effectiveStart, end: effectiveEnd })
     const scheduleChanged = !!(input.days || input.start || input.end)
     const updated = await this.prisma.client.group.update({
       where: { id },
@@ -380,29 +401,161 @@ export class ManageService {
     return { ok: true }
   }
 
-  async upsertTeacher(tenantId: string, actor: RequestActor, input: z.infer<typeof TeacherInput> | z.infer<typeof import('./manage.schemas').TeacherPatch>, id?: string) {
+  async updateOwnTeacherProfile(tenantId: string, actor: RequestActor, input: z.infer<typeof TeacherPatch>) {
+    if (!actor.teacherProfileId) throw AppError.forbidden('No teacher profile linked to this account')
+    return this.updateTeacherScoped(tenantId, actor, actor.teacherProfileId, input)
+  }
+
+  async updateTeacherScoped(tenantId: string, actor: RequestActor, id: string, input: z.infer<typeof TeacherPatch>) {
+    const isAdm = this.isAdmin(actor)
+    if (!isAdm) {
+      if (!actor.teacherProfileId || actor.teacherProfileId !== id) {
+        throw AppError.forbidden('Cannot edit another teacher profile')
+      }
+      const perms = await this.teacherPermissions(tenantId)
+      if (!perms.customizeChannel) {
+        throw AppError.forbidden('Teacher profile customization is disabled in this workspace')
+      }
+    }
+    return this.upsertTeacher(tenantId, actor, input, id)
+  }
+
+  async generateAvatarUploadUrl(tenantId: string, actor: RequestActor, input: z.infer<typeof AvatarUploadUrlInput>) {
+    if (!actor.teacherProfileId && !this.isAdmin(actor)) {
+      throw AppError.forbidden('No teacher profile linked to this account')
+    }
+    if (!this.isAdmin(actor)) {
+      const perms = await this.teacherPermissions(tenantId)
+      if (!perms.customizeChannel) {
+        throw AppError.forbidden('Teacher profile customization is disabled in this workspace')
+      }
+    }
+    if (!s3Configured(this.env)) {
+      throw AppError.invalid('storage_not_configured', 'Object storage (S3) is not configured in this environment.')
+    }
+    const s3 = new S3Client({
+      endpoint: this.env.S3_ENDPOINT,
+      region: this.env.S3_REGION,
+      credentials: {
+        accessKeyId: this.env.S3_ACCESS_KEY_ID!,
+        secretAccessKey: this.env.S3_SECRET_ACCESS_KEY!,
+      },
+      forcePathStyle: this.env.S3_FORCE_PATH_STYLE,
+    })
+    const ext = input.contentType === 'image/webp' ? 'webp' : input.contentType === 'image/png' ? 'png' : 'jpg'
+    const profileId = actor.teacherProfileId ?? 'admin'
+    const key = `avatars/${tenantId}/${profileId}-${Date.now()}.${ext}`
+    const command = new PutObjectCommand({
+      Bucket: this.env.S3_BUCKET,
+      Key: key,
+      ContentType: input.contentType,
+      ContentLength: input.fileSize,
+    })
+    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 })
+    const baseUrl = this.env.S3_PUBLIC_BASE_URL ?? (this.env.S3_ENDPOINT ? `${this.env.S3_ENDPOINT}/${this.env.S3_BUCKET}` : '')
+    const publicUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/${key}` : `/${key}`
+    return { uploadUrl, publicUrl, key }
+  }
+
+  async upsertTeacher(tenantId: string, actor: RequestActor, input: z.infer<typeof TeacherInput> | z.infer<typeof TeacherPatch>, id?: string) {
+    const isAdm = this.isAdmin(actor)
     const base: Record<string, unknown> = {}
-    for (const k of ['name', 'expertise', 'centerId', 'avatarSeed', 'bannerTone', 'avatarUrl', 'bannerUrl', 'channelActive'] as const) if (input[k] !== undefined) base[k] = input[k]
-    for (const k of ['title', 'bio', 'tagline'] as const) if (input[k] !== undefined) base[k] = input[k] as Json
-    if (input.featured !== undefined) { base.featuredType = input.featured?.type ?? null; base.featuredId = input.featured?.id ?? null }
+    for (const k of ['name', 'expertise', 'avatarSeed', 'bannerTone', 'avatarUrl', 'bannerUrl', 'channelActive'] as const) {
+      if (input[k] !== undefined) base[k] = input[k]
+    }
+    for (const k of ['title', 'bio', 'tagline'] as const) {
+      if (input[k] !== undefined) base[k] = input[k] as Json
+    }
+    if (isAdm && input.centerId !== undefined) {
+      base.centerId = input.centerId
+    }
+
+    if (id) {
+      const existing = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id } })
+      if (!existing) throw AppError.notFound('TeacherProfile')
+
+      if (!isAdm) {
+        if (input.centerId !== undefined && input.centerId !== existing.centerId) {
+          throw AppError.forbidden('Only administrators can change center affiliation')
+        }
+        if (input.phone !== undefined) {
+          throw AppError.forbidden('Only administrators can change account links')
+        }
+        if (input.featured !== undefined && input.featured !== null) {
+          if (input.featured.type === 'course') {
+            const course = await this.prisma.client.course.findFirst({
+              where: { tenantId, id: input.featured.id, teacherId: id },
+            })
+            if (!course) throw AppError.invalid('invalid_featured', 'Featured course must belong to your profile')
+          } else if (input.featured.type === 'playlist') {
+            const playlist = await this.prisma.client.playlist.findFirst({
+              where: { tenantId, id: input.featured.id, teacherId: id },
+            })
+            if (!playlist) throw AppError.invalid('invalid_featured', 'Featured playlist must belong to your profile')
+          }
+        }
+        if (input.avatarUrl) {
+          const match = input.avatarUrl.match(/(?:^|\/)avatars\/([^/]+)\/([^/]+)/)
+          if (match) {
+            const [, keyTenant, keyFile] = match
+            if (keyTenant === tenantId && !keyFile.startsWith(`${id}-`)) {
+              throw AppError.forbidden('Cannot use an avatar image belonging to another teacher')
+            }
+          }
+        }
+      }
+
+      if (input.featured !== undefined) {
+        base.featuredType = input.featured?.type ?? null
+        base.featuredId = input.featured?.id ?? null
+      }
+
+      let userId: string | undefined
+      if (input.phone && isAdm) {
+        const phone = normalizeUzPhone(input.phone)
+        if (!phone.ok) throw AppError.invalid('invalid_phone', 'Invalid phone number')
+        const user = await this.prisma.client.user.upsert({
+          where: { tenantId_phoneE164: { tenantId, phoneE164: phone.e164 } },
+          update: {},
+          create: { tenantId, phoneE164: phone.e164, displayName: (input as { name?: string }).name ?? phone.e164, roles: ['TEACHER', 'STUDENT'] },
+        })
+        if (!user.roles.includes('TEACHER')) await this.prisma.client.user.update({ where: { id: user.id }, data: { roles: [...user.roles, 'TEACHER'] } })
+        userId = user.id
+        await this.audit.record({ action: 'teacher.link_user', entityType: 'User', entityId: user.id, after: { teacherProfile: id ?? 'new' } })
+      }
+
+      if (input.name && existing.userId) {
+        await this.prisma.client.user.update({
+          where: { id: existing.userId },
+          data: { displayName: input.name },
+        }).catch(() => undefined)
+      }
+      const t = await this.prisma.client.teacherProfile.update({ where: { id }, data: { ...base, ...(userId ? { userId } : {}) } as Prisma.TeacherProfileUncheckedUpdateInput })
+      return toTeacher(t)
+    }
+
+    if (!isAdm) {
+      throw AppError.forbidden('Only administrators can create new teacher profiles')
+    }
+
+    const full = input as z.infer<typeof TeacherInput>
     let userId: string | undefined
-    if (input.phone) {
-      const phone = normalizeUzPhone(input.phone)
+    if (full.phone) {
+      const phone = normalizeUzPhone(full.phone)
       if (!phone.ok) throw AppError.invalid('invalid_phone', 'Invalid phone number')
       const user = await this.prisma.client.user.upsert({
         where: { tenantId_phoneE164: { tenantId, phoneE164: phone.e164 } },
         update: {},
-        create: { tenantId, phoneE164: phone.e164, displayName: (input as { name?: string }).name ?? phone.e164, roles: ['TEACHER', 'STUDENT'] },
+        create: { tenantId, phoneE164: phone.e164, displayName: full.name ?? phone.e164, roles: ['TEACHER', 'STUDENT'] },
       })
       if (!user.roles.includes('TEACHER')) await this.prisma.client.user.update({ where: { id: user.id }, data: { roles: [...user.roles, 'TEACHER'] } })
       userId = user.id
-      await this.audit.record({ action: 'teacher.link_user', entityType: 'User', entityId: user.id, after: { teacherProfile: id ?? 'new' } })
     }
-    if (id) {
-      const t = await this.prisma.client.teacherProfile.update({ where: { id }, data: { ...base, ...(userId ? { userId } : {}) } as Prisma.TeacherProfileUncheckedUpdateInput })
-      return toTeacher(t)
+    if (full.featured !== undefined) {
+      base.featuredType = full.featured?.type ?? null
+      base.featuredId = full.featured?.id ?? null
     }
-    const full = input as z.infer<typeof TeacherInput>
+
     const t = await this.prisma.client.teacherProfile.create({
       data: { tenantId, slug: await this.uniqueSlug('teacher', tenantId, slugify(full.name)), name: full.name, title: full.title as Json, bio: full.bio as Json, expertise: full.expertise, centerId: full.centerId, tagline: full.tagline as Json, ...base, userId } as Prisma.TeacherProfileUncheckedCreateInput,
     })
@@ -445,8 +598,10 @@ export class ManageService {
   }
 
   async updateStudent(tenantId: string, userId: string, input: z.infer<typeof import('./manage.schemas').StudentAdminInput>) {
+    // Verify the user belongs to this tenant before updating; prevents cross-tenant writes.
+    const existing = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId }, select: { id: true } })
+    if (!existing) throw AppError.notFound('User')
     const u = await this.prisma.client.user.update({ where: { id: userId }, data: input })
-    void tenantId
     return { id: u.id, displayName: u.displayName, district: u.district, preferredLang: u.preferredLang }
   }
 
@@ -468,6 +623,26 @@ export class ManageService {
       this.prisma.client.auditEvent.count({ where }),
     ])
     return { page, pageSize, total, items }
+  }
+
+  async listInquiries(tenantId: string, q: { page?: number; pageSize?: number }) {
+    const page = Math.max(1, q.page ?? 1), pageSize = Math.min(100, Math.max(10, q.pageSize ?? 50))
+    const where = { tenantId }
+    const [items, total] = await Promise.all([
+      this.prisma.client.centerInquiry.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.client.centerInquiry.count({ where }),
+    ])
+    return { page, pageSize, total, items }
+  }
+
+  async toggleInquiryHandled(tenantId: string, id: string) {
+    const existing = await this.prisma.client.centerInquiry.findFirst({ where: { tenantId, id } })
+    if (!existing) throw AppError.notFound('Inquiry')
+    const updated = await this.prisma.client.centerInquiry.update({
+      where: { id },
+      data: { handledAt: existing.handledAt ? null : new Date() },
+    })
+    return { id: updated.id, handledAt: updated.handledAt }
   }
 
   private async uniqueSlug(kind: 'course' | 'center' | 'category' | 'teacher', tenantId: string, base: string): Promise<string> {

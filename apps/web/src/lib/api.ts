@@ -74,7 +74,7 @@ export async function refreshSession(): Promise<boolean> {
 }
 
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const url = `${apiBase()}${path.startsWith('/payments/') || path.startsWith('/health') ? '' : PREFIX}${path}`
+  const url = `${apiBase()}${path.startsWith('/health') ? '' : PREFIX}${path}`
   const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'ilmora', ...(opts.headers ?? {}) }
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
   const useAuth = opts.auth ?? typeof window !== 'undefined'
@@ -88,7 +88,12 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     cache: opts.cache,
     next: opts.next,
   }
-  const res = await fetch(url, init)
+  let res: Response
+  try {
+    res = await fetch(url, init)
+  } catch (cause) {
+    throw new ApiError(0, 'network_error', 'Server bilan aloqa o‘rnatib bo‘lmadi', { cause })
+  }
   if (res.status === 401 && useAuth && accessToken && opts.retryOn401 !== false) {
     const ok = await refreshSession()
     if (ok) return api<T>(path, { ...opts, retryOn401: false })

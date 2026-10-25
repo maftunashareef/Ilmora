@@ -48,48 +48,62 @@ export function PublicShell() {
         )}
       >
         <div className="container-x flex h-[68px] items-center justify-between gap-6">
-          <Link to="/" className="relative flex h-11 items-center sm:h-[52px]" aria-label={site.brand.name}>
+          <Link
+            to="/"
+            className="relative flex h-11 items-center rounded-control focus:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 sm:h-[52px]"
+            aria-label={`${site.brand.name} — ${t('nav.home')}`}
+          >
             {/* Transparent logo: green/gold strokes on the light header, ivory/gold strokes over the dark hero (cross-faded, no card). */}
             <Image src="/brand/ilmora-logo-mark.png" alt={site.brand.name} width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-0' : 'opacity-100')} />
             <Image src="/brand/ilmora-logo-mark-light.png" alt="" aria-hidden width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('absolute inset-y-0 left-0 h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-100' : 'opacity-0')} />
           </Link>
-          <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
+          <nav className="hidden items-center gap-1.5 lg:flex" aria-label="Primary">
             {nav.map((n) => (
               <NavLink
                 key={n.id}
                 to={n.path}
                 className={({ isActive }) =>
-                  cx('whitespace-nowrap rounded-control px-3 py-2 text-[13px] font-medium transition-colors duration-300',
-                    overlay ? (isActive ? 'text-champagne' : 'text-ivory/80 hover:text-ivory') : isActive ? 'text-forest' : 'text-charcoal/65 hover:text-charcoal')
+                  cx(
+                    'whitespace-nowrap rounded-control px-3.5 py-2 text-[13px] font-medium transition-colors duration-300',
+                    overlay ? (isActive ? 'text-champagne' : 'text-ivory/80 hover:text-ivory') : isActive ? 'text-forest font-semibold' : 'text-charcoal/70 hover:text-charcoal'
+                  )
                 }
               >
                 {tr(n.label)}
               </NavLink>
             ))}
           </nav>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div className="hidden md:block"><LangSwitcher /></div>
             <RoleSwitcher />
-            {ws && (
-              <Link to={ws} className={cx('hidden items-center gap-1.5 whitespace-nowrap rounded-control px-3.5 py-2 text-xs font-medium transition md:inline-flex lg:hidden xl:inline-flex', overlay ? 'bg-ivory/15 text-ivory ring-1 ring-ivory/30 hover:bg-ivory/25' : 'bg-forest text-ivory hover:bg-forest/90')}>
+            {ws ? (
+              <Link to={ws} className={cx('hidden items-center gap-1.5 whitespace-nowrap rounded-control px-4 py-2 text-xs font-medium transition-all duration-200 md:inline-flex lg:hidden xl:inline-flex', overlay ? 'bg-ivory/15 text-ivory ring-1 ring-ivory/30 hover:bg-ivory/25' : 'bg-forest text-ivory hover:bg-forest/90')}>
                 {t('nav.myWorkspace')} <Icon name="arrowRight" className="h-3.5 w-3.5" />
               </Link>
+            ) : (
+              <Link to="/builder" className={cx('hidden items-center gap-1.5 whitespace-nowrap rounded-control px-4 py-2 text-xs font-semibold shadow-sm transition-all duration-200 md:inline-flex', overlay ? 'bg-champagne text-forest hover:bg-champagne/90' : 'bg-forest text-ivory hover:bg-forest/90')}>
+                {tr(site.brand.primaryCta)} <Icon name="arrowRight" className="h-4 w-4" />
+              </Link>
             )}
-            <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('nav.menu')} className={cx('rounded-control p-2 lg:hidden', overlay ? 'text-ivory' : 'text-charcoal')}>
+            <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('nav.menu')} className={cx('rounded-control p-2 transition-colors lg:hidden', overlay ? 'text-ivory hover:bg-white/10' : 'text-charcoal hover:bg-sage/50')}>
               <Icon name={open ? 'x' : 'menu'} className="h-5 w-5" />
             </button>
           </div>
         </div>
         {open && (
-          <div className="animate-fade border-t border-charcoal/10 bg-ivory lg:hidden">
-            <div className="container-x flex flex-col gap-1 py-4">
+          <div className="animate-fade border-t border-charcoal/10 bg-ivory/95 backdrop-blur-lg lg:hidden">
+            <div className="container-x flex flex-col gap-1.5 py-4">
               {nav.map((n) => (
-                <NavLink key={n.id} to={n.path} className={({ isActive }) => cx('rounded-control px-3 py-2.5 text-[15px]', isActive ? 'bg-sage text-forest' : 'text-charcoal/80')}>
+                <NavLink key={n.id} to={n.path} className={({ isActive }) => cx('rounded-control px-3.5 py-2.5 text-[15px] font-medium transition-colors', isActive ? 'bg-sage text-forest font-semibold' : 'text-charcoal/80 hover:bg-paper')}>
                   {tr(n.label)}
                 </NavLink>
               ))}
-              {ws && <Link to={ws} className="mt-2 rounded-control bg-forest px-3 py-2.5 text-center text-sm font-medium text-ivory">{t('nav.myWorkspace')}</Link>}
-              <div className="mt-3 flex items-center justify-between"><span className="text-xs text-charcoal/55">{t('common.language')}</span><LangSwitcher /></div>
+              {ws ? (
+                <Link to={ws} className="mt-2 rounded-control bg-forest px-4 py-2.5 text-center text-sm font-medium text-ivory shadow-sm">{t('nav.myWorkspace')}</Link>
+              ) : (
+                <Link to="/builder" className="mt-2 rounded-control bg-forest px-4 py-2.5 text-center text-sm font-semibold text-ivory shadow-sm">{tr(site.brand.primaryCta)}</Link>
+              )}
+              <div className="mt-3 flex items-center justify-between pt-2 border-t border-charcoal/10"><span className="text-xs font-medium text-charcoal/60">{t('common.language')}</span><LangSwitcher /></div>
             </div>
           </div>
         )}

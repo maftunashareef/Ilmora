@@ -57,7 +57,13 @@ export class SubscriptionService {
   /** Validates and stores the builder selection. Throws with the same reason codes the web builder shows. */
   async saveDraft(tenantId: string, studentId: string, input: DraftInput) {
     const groupIds = [...new Set(input.groupIds)]
-    if (input.packageId) await this.validateSelection(tenantId, input.packageId, groupIds, studentId)
+    if (input.packageId) {
+      await this.validateSelection(tenantId, input.packageId, groupIds, studentId)
+    } else if (groupIds.length > 0) {
+      // Even without a package selected, ensure the requested groups actually exist in this tenant.
+      const found = await this.prisma.client.group.count({ where: { tenantId, id: { in: groupIds }, deletedAt: null } })
+      if (found !== groupIds.length) throw AppError.notFound('Group')
+    }
     const grantCourses = input.meyosGrant ? await this.grantCourseIds(tenantId, groupIds) : []
     const existing = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: 'DRAFT' } })
     const data = { packageId: input.packageId, draftGroupIds: groupIds, meyosGrant: input.meyosGrant && grantCourses.length > 0, grantCourseIds: grantCourses }

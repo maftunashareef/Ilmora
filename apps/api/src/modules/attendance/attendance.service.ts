@@ -77,13 +77,21 @@ export class AttendanceService {
     return { session: SessionsService.toDto(updated) }
   }
 
-  /** The QR content is the check-in URL on the tenant's web origin. Only available while attendance is open. */
+  /** The QR content is the check-in URL on the tenant's web origin. Only available while attendance is open and unexpired. */
   async qr(sessionId: string, actor: RequestActor) {
     const session = await this.sessionForTeacher(sessionId, actor)
     if (!session.attendanceOpen) throw AppError.invalid('attendance_closed', 'Open attendance to show the QR code')
+    if (session.attendanceTokenExpiresAt && session.attendanceTokenExpiresAt < new Date()) {
+      await this.prisma.client.lessonSession.update({
+        where: { id: session.id },
+        data: { attendanceOpen: false, attendanceClosedAt: new Date(), attendanceTokenHash: null, attendanceTokenExpiresAt: null },
+      })
+      throw AppError.invalid('attendance_expired', 'Attendance session has expired')
+    }
     // A fresh token is issued on every QR request; the previous one stops working (rotation keeps screenshots short-lived).
     const token = randomToken(24)
     const updated = await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { attendanceTokenHash: sha256(token), tokenVersion: { increment: 1 } } })
+    await this.audit.record({ action: 'attendance.rotate_token', entityType: 'LessonSession', entityId: session.id, after: { tokenVersion: updated.tokenVersion } })
     return { session: SessionsService.toDto(updated), ...(await this.qrPayload(session.id, token)) }
   }
 
@@ -113,7 +121,12 @@ export class AttendanceService {
     const next = status.toUpperCase() as 'SCHEDULED' | 'CANCELLED' | 'COMPLETED'
     const updated = await this.prisma.client.lessonSession.update({
       where: { id: session.id },
-      data: { status: next, ...(next === 'CANCELLED' ? { attendanceOpen: false, attendanceTokenHash: null, cancelledAt: new Date(), cancelledById: actor.id } : { cancelledAt: null, cancelledById: null }) },
+      data: {
+        status: next,
+        ...(next === 'CANCELLED'
+          ? { attendanceOpen: false, attendanceClosedAt: new Date(), attendanceTokenHash: null, attendanceTokenExpiresAt: null, cancelledAt: new Date(), cancelledById: actor.id }
+          : { cancelledAt: null, cancelledById: null }),
+      },
     })
     await this.audit.record({ action: 'session.status', entityType: 'LessonSession', entityId: session.id, before: { status: session.status }, after: { status: next }, reason })
     await this.events.publish(session.id, { type: 'session', session: SessionsService.toDto(updated) })

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { Link } from '@/lib/router'
 import { useT } from '../../i18n/useT'
 import type { L, Lang } from '../../types'
@@ -160,15 +160,15 @@ export function PageTitle({ eyebrow, title, subtitle, action }: { eyebrow?: Reac
 }
 
 export function Card({ children, className, as: Tag = 'div', padded = true }: { children: ReactNode; className?: string; as?: 'div' | 'section' | 'article' | 'li'; padded?: boolean }) {
-  return <Tag className={cx('card', padded && 'p-5 md:p-6', className)}>{children}</Tag>
+  return <Tag className={cx('card transition-all duration-300', padded && 'p-5 md:p-6', className)}>{children}</Tag>
 }
 
 export function EmptyState({ title, body, action, icon }: { title: ReactNode; body?: ReactNode; action?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="card flex flex-col items-center justify-center px-6 py-14 text-center">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-sage text-forest">{icon ?? <span className="font-display text-2xl">·</span>}</div>
-      <h3 className="font-display text-xl text-charcoal">{title}</h3>
-      {body && <p className="mt-2 max-w-md text-sm text-charcoal/60">{body}</p>}
+    <div className="card flex flex-col items-center justify-center px-6 py-14 text-center border-dashed border-charcoal/20 bg-ivory/30">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-sage/60 text-forest shadow-xs">{icon ?? <span className="font-display text-2xl">·</span>}</div>
+      <h3 className="font-display text-2xl text-charcoal">{title}</h3>
+      {body && <p className="mt-2 max-w-md text-sm text-charcoal/65 leading-relaxed">{body}</p>}
       {action && <div className="mt-6">{action}</div>}
     </div>
   )
@@ -185,10 +185,11 @@ export function Notice({ children, tone = 'info', className }: { children: React
 
 export function Stat({ label, value, hint }: { label: ReactNode; value: ReactNode; hint?: ReactNode }) {
   return (
-    <div className="reveal card p-5">
-      <div className="text-xs font-medium text-charcoal/55">{label}</div>
-      <div className="mt-2 font-display text-3xl text-charcoal">{value}</div>
-      {hint && <div className="mt-1 text-xs text-charcoal/45">{hint}</div>}
+    <div className="reveal card relative overflow-hidden p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-lift border border-charcoal/10 hover:border-champagne/40">
+      <div className="text-xs font-semibold uppercase tracking-wider text-charcoal/50">{label}</div>
+      <div className="mt-2 font-display text-3xl text-charcoal tracking-tight">{value}</div>
+      {hint && <div className="mt-1 text-xs text-charcoal/50">{hint}</div>}
+      <div className="pointer-events-none absolute bottom-0 inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-champagne/40 to-transparent" />
     </div>
   )
 }
@@ -271,14 +272,14 @@ const PALETTES = [
   ['#A67C52', '#F7F5F0', '#163C35'],
 ]
 
-export function ArtCover({ seed, className, label, imageUrl, tone }: { seed: number; className?: string; label?: string; imageUrl?: string; tone?: string }) {
+export function ArtCover({ seed, className, label, imageUrl, alt = '', tone }: { seed: number; className?: string; label?: string; imageUrl?: string; alt?: string; tone?: string }) {
   const p = PALETTES[seed % PALETTES.length]
   const r = (n: number) => ((seed * 9301 + n * 49297) % 233280) / 233280
   const base = tone ?? p[0]
   if (imageUrl) {
     return (
-      <div className={cx('relative overflow-hidden bg-sage', className)}>
-        <img src={imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" />
+      <div className={cx('relative overflow-hidden bg-sage/20', className)}>
+        <img src={imageUrl} alt={alt} className="absolute inset-0 h-full w-full object-cover" loading="lazy" />
       </div>
     )
   }
@@ -306,12 +307,86 @@ export function ArtCover({ seed, className, label, imageUrl, tone }: { seed: num
   )
 }
 
-export function Avatar({ name, seed, size = 40, url, className }: { name: string; seed: number; size?: number; url?: string; className?: string }) {
-  const p = PALETTES[seed % PALETTES.length]
-  const ini = name.split(/\s+/).slice(0, 2).map((x) => x[0]?.toUpperCase()).join('')
+export function Avatar({
+  name,
+  seed = 0,
+  size = 40,
+  url,
+  alt,
+  className,
+}: {
+  name: string
+  seed?: number
+  size?: number
+  url?: string | null
+  alt?: string
+  className?: string
+}) {
+  const [loadFailed, setLoadFailed] = useState(false)
+  useEffect(() => {
+    setLoadFailed(false)
+  }, [url])
+
+  const ini = name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join('')
+  const label = alt ?? name
+
+  if (url && !loadFailed) {
+    return (
+      <span
+        role="img"
+        aria-label={label}
+        className={cx(
+          'group/avatar inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-sage/60 ring-1 ring-charcoal/10 transition-transform duration-300',
+          className,
+        )}
+        style={{ width: size, height: size }}
+      >
+        <img
+          src={url}
+          alt={label}
+          loading="lazy"
+          onError={() => setLoadFailed(true)}
+          className="h-full w-full object-cover transition-transform duration-300 group-hover/avatar:scale-105"
+        />
+      </span>
+    )
+  }
+
+  void seed
   return (
-    <span className={cx('inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-display text-ivory', className)} style={{ width: size, height: size, background: `linear-gradient(140deg, ${p[0]}, ${p[1]})`, fontSize: size * 0.4 }} aria-hidden="true">
-      {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : ini}
+    <span
+      role="img"
+      aria-label={label}
+      className={cx(
+        'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-forest/15 bg-sage font-display font-medium text-forest transition-all duration-300',
+        className,
+      )}
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(12, size * 0.38),
+        background: 'linear-gradient(145deg, #E3EBE5 0%, #D5E1D8 100%)',
+      }}
+    >
+      {ini || (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-1/2 w-1/2 text-forest/70"
+          aria-hidden="true"
+        >
+          <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      )}
     </span>
   )
 }
@@ -330,6 +405,7 @@ export function Icon({ name, className = 'h-4 w-4' }: { name: string; className?
     lock: <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
     globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>,
     eye: <><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
+    eyeOff: <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><line x1="2" x2="22" y1="2" y2="22" /></>,
     play: <path d="M6 4v16l14-8z" />,
     file: <><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /></>,
     list: <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,

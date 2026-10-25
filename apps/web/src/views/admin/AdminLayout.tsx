@@ -7,6 +7,7 @@ export function AdminLayout() {
   const { t } = useT()
   const roles = useStore((s) => s.auth.user?.roles ?? [])
   const finance = roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN')
+  const platform = roles.includes('PLATFORM_ADMIN')
   return (
     <DashboardShell role="admin" title={t('dash.admin')} subtitle={t('admin.overview.hello')} items={[
       { id: 'overview', to: '/admin', end: true, label: t('dash.overview'), icon: 'grid' },
@@ -17,6 +18,7 @@ export function AdminLayout() {
       { id: 'content', to: '/admin/content', label: t('admin.content'), icon: 'video' },
       { id: 'people', to: '/admin/people', label: t('admin.people'), icon: 'users' },
       { id: 'centers', to: '/admin/centers', label: t('admin.centers'), icon: 'building' },
+      ...(platform ? [{ id: 'inquiries', to: '/admin/inquiries', label: t('admin.inquiries'), icon: 'archive' }] : []),
       { id: 'packages', to: '/admin/packages', label: t('admin.packages'), icon: 'package' },
       ...(finance ? [{ id: 'finance', to: '/admin/finance', label: t('finance.title'), icon: 'package' }] : []),
       { id: 'permissions', to: '/admin/permissions', label: t('admin.permissions'), icon: 'shield' },
