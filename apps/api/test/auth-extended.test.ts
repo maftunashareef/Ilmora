@@ -233,8 +233,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
 
       // Even if database row had PLATFORM_ADMIN in roles column:
       const effective = await accountService.effectiveRoles({
-        id: 'self-registered-user',
-        tenantId: 'tenant-1',
+        isOwner: false,
         roles: ['STUDENT', 'PLATFORM_ADMIN'] as import('../src/generated/prisma/enums').Role[],
       })
 
@@ -242,13 +241,9 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
       expect(effective).not.toContain('PLATFORM_ADMIN')
     })
 
-    it('grants PLATFORM_ADMIN only to the configured tenant ownerUserId', async () => {
+    it('grants PLATFORM_ADMIN and FINANCE_ADMIN when isOwner is true', async () => {
       const mockPrisma = {
-        client: {
-          tenant: {
-            findUnique: vi.fn().mockResolvedValue({ ownerUserId: 'owner-account-id' }),
-          },
-        },
+        client: {},
       }
 
       const accountService = new AccountService(
@@ -260,8 +255,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
       )
 
       const ownerRoles = await accountService.effectiveRoles({
-        id: 'owner-account-id',
-        tenantId: 'tenant-1',
+        isOwner: true,
         roles: ['STUDENT'],
       })
 
