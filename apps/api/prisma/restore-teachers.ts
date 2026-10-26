@@ -34,12 +34,43 @@ async function main() {
   console.log(`\n=== ILMORA Non-Destructive Teacher & Catalog Restore ===`)
   console.log(`Mode: ${DRY_RUN ? 'DRY-RUN (Simulated, no changes written)' : 'LIVE (Non-destructive insert of missing records)'}\n`)
 
-  const tenant = await prisma.tenant.findUnique({ where: { id: TENANT_ID } })
+  let tenant = await prisma.tenant.findUnique({ where: { id: TENANT_ID } })
   if (!tenant) {
-    throw new Error(`Tenant '${TENANT_ID}' not found. Please ensure database migrations and base seed have run.`)
+    console.log(`[TENANT MISSING -> TO ADD] Tenant '${TENANT_ID}'`)
+    if (!DRY_RUN) {
+      tenant = await prisma.tenant.create({
+        data: {
+          id: TENANT_ID,
+          slug: process.env.DEFAULT_TENANT_SLUG ?? 'ilmora',
+          name: 'ILMORA',
+          webOrigin: process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000',
+        },
+      })
+    }
+  } else {
+    console.log(`[TENANT PRESERVED] Tenant '${tenant.id}' (${tenant.name})`)
   }
 
-  const { centers, teachers, subjects, courses } = sampleData
+  const { categories, centers, teachers, subjects, courses } = sampleData
+
+  for (const [i, cat] of categories.entries()) {
+    const existingCat = await prisma.category.findUnique({ where: { id: cat.id } })
+    if (!existingCat) {
+      console.log(`[CATEGORY MISSING -> TO ADD] ${cat.name.en} (${cat.id})`)
+      if (!DRY_RUN) {
+        await prisma.category.create({
+          data: {
+            id: cat.id,
+            tenantId: TENANT_ID,
+            slug: slugOf(cat.id),
+            name: json(cat.name),
+            glyph: cat.glyph,
+            sortOrder: i,
+          },
+        })
+      }
+    }
+  }
 
   let centersAdded = 0
   let centersPreserved = 0

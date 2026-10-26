@@ -151,7 +151,9 @@ export function TeachersPage() {
           <p className="mx-auto mt-2 max-w-md text-sm text-charcoal/60">
             {isFiltered
               ? t('teachers.noResultsHint')
-              : t('teachers.channelsDisabled')}
+              : !enabled
+                ? t('teachers.channelsDisabled')
+                : t('teachers.noResultsHint')}
           </p>
           {isFiltered && (
             <div className="mt-5">
