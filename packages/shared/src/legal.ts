@@ -32,5 +32,5 @@ export const OPERATOR: {
   },
   phone: '+998 95 662 30 70',
   email: 'infoangirgroup@gmail.com',
-  website: 'https://ilmora-ten.vercel.app',
+  website: 'https://ilmoraa.uz',
 }
