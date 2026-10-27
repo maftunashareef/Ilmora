@@ -11,6 +11,7 @@
 docs
 infra/data
 infra/backups
-apps/web/public/media/*.mp4
+# Only the licensed scroll video stays out of images (not in git); the hero video ilmora-commercial.mp4 ships with the site.
+apps/web/public/media/furniture-scroll.mp4
 apps/api/src/generated
 *.log
