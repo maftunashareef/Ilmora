@@ -77,18 +77,40 @@ export function SnapTrack({ children, prevLabel, nextLabel, className }: { child
 }
 
 /**
- * Full-bleed muted background film.
- * - autoplay/loop/muted/playsInline, paused while offscreen, gentle parallax on scroll
- * - poster or drifting brand gradient while loading / on error / with reduced motion
- * - visible pause/play control for accessibility
+ * Full-bleed muted background film (autoplay / muted / loop / playsInline).
+ * - the poster or drifting brand gradient stays underneath while the film loads, on error and with reduced motion
+ * - the first decoded frame is shown as soon as it exists; playback starts once enough is buffered to play through
+ * - paused while offscreen, gentle parallax on scroll, visible pause/play control for accessibility
+ * Readiness is read from the element itself, not only from React's event props: the server-rendered <video>
+ * starts buffering before hydration, so loadeddata/canplay may already have fired when the handlers attach.
  */
+type FilmState = 'loading' | 'frame' | 'ready' | 'error'
+const MEDIA_EVENTS = ['loadeddata', 'canplay', 'canplaythrough', 'playing', 'play', 'pause', 'emptied', 'error'] as const
+
 export function BackgroundVideo({ src, poster, pauseLabel, playLabel, note }: { src: string; poster?: string; pauseLabel: string; playLabel: string; note?: string }) {
   const ref = useRef<HTMLVideoElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const reduced = useReducedMotion()
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [paused, setPaused] = useState(false)
+  const [state, setState] = useState<FilmState>('loading')
+  const [playing, setPlaying] = useState(false)
+  const [userPaused, setUserPaused] = useState(false)
   const [inView, setInView] = useState(true)
+
+  // Readiness from the element: 'frame' = first frame decoded, 'ready' = can play through (or already playing)
+  useEffect(() => {
+    const v = ref.current
+    if (!v || !src) return
+    const sync = () => {
+      if (v.error) setState('error')
+      else if (!v.paused || v.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) setState('ready')
+      else if (v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) setState('frame')
+      else setState('loading')
+      setPlaying(!v.paused && !v.ended)
+    }
+    sync()
+    for (const e of MEDIA_EVENTS) v.addEventListener(e, sync)
+    return () => { for (const e of MEDIA_EVENTS) v.removeEventListener(e, sync) }
+  }, [src])
 
   useEffect(() => {
     const el = wrap.current
@@ -98,15 +120,17 @@ export function BackgroundVideo({ src, poster, pauseLabel, playLabel, note }: { 
     return () => io.disconnect()
   }, [])
 
-  // Play/pause according to visibility, user choice and reduced motion
+  // Play/pause according to buffering, visibility, user choice and reduced motion.
+  // While only the first frame is in ('frame'), the browser's own autoplay takes over once it can play through.
+  const wantPlay = state === 'ready' && !reduced && !userPaused && inView
   const shouldPlay = useRef(false)
-  shouldPlay.current = state === 'ready' && !reduced && !paused && inView
+  useEffect(() => { shouldPlay.current = wantPlay }, [wantPlay])
   useEffect(() => {
     const v = ref.current
-    if (!v || state !== 'ready') return
-    if (!shouldPlay.current) v.pause()
-    else v.play().catch(() => setPaused(true))
-  }, [state, reduced, paused, inView])
+    if (!v || state === 'loading' || state === 'error') return
+    if (wantPlay) v.play().catch((err: unknown) => { if ((err as { name?: string })?.name !== 'AbortError') setUserPaused(true) })
+    else if (state === 'ready' || reduced) v.pause()
+  }, [wantPlay, state, reduced])
 
   // Keep-alive: if something outside the component pauses the film (tab switch, capture,
   // power saving) while it should be playing, resume once the document is visible again.
@@ -138,31 +162,39 @@ export function BackgroundVideo({ src, poster, pauseLabel, playLabel, note }: { 
     return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
   }, [inView, reduced])
 
-  const showVideo = state === 'ready' && !reduced
+  const showVideo = (state === 'frame' || state === 'ready') && !reduced
+  const toggle = () => {
+    const v = ref.current
+    if (!v) return
+    if (playing) { setUserPaused(true); v.pause() }
+    else { setUserPaused(false); v.play().catch(() => {}) }
+  }
   return (
-    <div ref={wrap} className="absolute inset-0 overflow-hidden" aria-hidden="true">
-      <div className={cx('absolute inset-0', poster ? 'bg-cover bg-center' : 'hero-fallback')} style={poster ? { backgroundImage: `url(${poster})` } : undefined} />
+    <div ref={wrap} className="absolute inset-0 overflow-hidden">
+      {/* Fallback: poster or the drifting brand-green gradient, kept underneath while loading / on error / with reduced motion */}
+      <div className={cx('absolute inset-0', poster ? 'bg-cover bg-center' : 'hero-fallback')} style={poster ? { backgroundImage: `url(${poster})` } : undefined} aria-hidden="true" />
       {src && state !== 'error' && (
         <video
           ref={ref}
           src={src}
           poster={poster || undefined}
+          autoPlay
           muted
           loop
           playsInline
-          autoPlay={!reduced}
           preload="auto"
-          onCanPlay={() => setState('ready')}
-          onError={() => setState('error')}
+          disablePictureInPicture
+          aria-hidden="true"
+          tabIndex={-1}
           className={cx('absolute inset-0 h-full w-full object-cover transition-opacity duration-1000', showVideo ? 'opacity-100' : 'opacity-0')}
           style={{ transform: 'scale(1.06)' }}
         />
       )}
-      {state === 'ready' && !reduced && (
+      {showVideo && (
         <div className="pointer-events-auto absolute bottom-6 right-5 z-10 flex items-center gap-3 sm:right-8 lg:right-12">
           {note && <span className="sr-only">{note}</span>}
-          <button type="button" onClick={() => setPaused((p) => !p)} aria-label={paused ? playLabel : pauseLabel} aria-pressed={paused} className="flex h-10 w-10 items-center justify-center rounded-full border border-ivory/30 bg-charcoal/40 text-ivory backdrop-blur transition hover:bg-charcoal/60">
-            {paused ? <Icon name="play" className="h-4 w-4" /> : <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>}
+          <button type="button" onClick={toggle} aria-label={playing ? pauseLabel : playLabel} aria-pressed={!playing} className="flex h-10 w-10 items-center justify-center rounded-full border border-ivory/30 bg-charcoal/40 text-ivory backdrop-blur transition hover:bg-charcoal/60">
+            {playing ? <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg> : <Icon name="play" className="h-4 w-4" />}
           </button>
         </div>
       )}

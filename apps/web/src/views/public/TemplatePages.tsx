@@ -49,7 +49,9 @@ export function SectionRenderer({ section }: { section: Section }) {
   }
 }
 
-// ─── Hero: full-bleed muted film under a transparent header ──────────────────
+// ─── Hero: full-bleed muted background film (autoplay/muted/loop/playsinline) under a transparent header ───
+// The section is the positioning context (relative + overflow hidden); the film covers it (absolute, object-cover)
+// and the brand-green gradient stays as the fallback while it loads or when playback is restricted.
 function Hero() {
   const { t, tr } = useT()
   const brand = useStore((s) => s.site.brand)
@@ -60,9 +62,8 @@ function Hero() {
   return (
     <section className="relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-charcoal text-ivory">
       <BackgroundVideo src={withBase(media.heroVideoUrl)} poster={withBase(media.heroPosterUrl)} pauseLabel={t('home.pauseVideo')} playLabel={t('home.playVideo')} note={t('home.heroVideoNote')} />
-      {/* Shades for legibility + soft hand-off into the ivory page */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-charcoal/85 via-charcoal/45 to-charcoal/10" aria-hidden="true" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-charcoal/60 to-transparent" aria-hidden="true" />
+      {/* Semi-transparent dark-green overlay over the film so the text and buttons stay readable, then a soft hand-off into the ivory page */}
+      <div className="pointer-events-none absolute inset-0" style={{ background: 'rgba(0, 30, 20, 0.6)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-ivory via-ivory/40 to-transparent" aria-hidden="true" />
 
       <div className="container-x relative flex flex-1 flex-col justify-center pb-28 pt-[calc(68px+4rem)] lg:pt-[calc(68px+5rem)]">
