@@ -14,9 +14,14 @@ export const OFFER_STATUS: 'draft' | 'final' = 'draft'
 /** Offer text by language. `null` = not supplied by the owner; the Uzbek text (the governing one) is shown with a notice. */
 export const OFFER_TEXT: Record<Lang, LegalBlock[] | null> = { uz: OFFER_UZ, ru: OFFER_RU, en: null }
 
-/** Operator details exactly as stated in section 14 of the offer (fields the document leaves blank are omitted). */
+/**
+ * Operator details. Legal name, INN and e-mail are as in section 14 of the offer; the phone, the address and the
+ * copyright name are the owner's current ones (2026-10-28) — the offer document still lists the earlier phone and address.
+ */
 export const OPERATOR: {
   legalName: L
+  /** Company name as the owner wants it in the copyright line, identical in every language. */
+  brandOwner: string
   inn: string
   address: L
   phone: string
@@ -24,13 +29,14 @@ export const OPERATOR: {
   website: string
 } = {
   legalName: { uz: '«ANJIR-GROUP» MChJ', ru: 'ООО «ANJIR-GROUP»', en: 'ANJIR-GROUP LLC' },
+  brandOwner: 'Anjir group LLC',
   inn: '312525684',
   address: {
-    uz: 'Toshkent shahri, Shayxontohur tumani, Hadra MFY, Hadra mavzesi, 5-uy, 54-xonadon',
-    ru: 'г. Ташкент, Шайхантахурский район, МСГ Хадра, массив Хадра, дом 5, кв. 54',
-    en: 'Tashkent, Shaykhantakhur district, Khadra MSG, Khadra massif, house 5, apt. 54',
+    uz: 'Shayxontohur tumani, Qoratosh 106',
+    ru: 'Шайхантахурский район, Каратош 106',
+    en: 'Shaykhontohur district, Qoratosh 106',
   },
-  phone: '+998 95 662 30 70',
+  phone: '+998 77 188 48 80',
   email: 'infoangirgroup@gmail.com',
   website: 'https://ilmoraa.uz',
 }

@@ -129,7 +129,6 @@ export function PublicShell() {
               <li><a href={`tel:${OPERATOR.phone.replace(/\s/g, '')}`} className="hover:text-forest">{OPERATOR.phone}</a></li>
               <li><a href={`mailto:${OPERATOR.email}`} className="hover:text-forest">{OPERATOR.email}</a></li>
               <li className="text-charcoal/60">{tr(OPERATOR.address)}</li>
-              <li className="text-[12px] text-charcoal/50">{t('footer.operator')}: {tr(OPERATOR.legalName)} · {t('footer.inn')} {OPERATOR.inn}</li>
             </ul>
           </div>
           <div className="reveal">
@@ -153,7 +152,7 @@ export function PublicShell() {
         </div>
         <div className="border-t border-charcoal/10">
           <div className="container-x flex flex-wrap items-center justify-between gap-2 py-4 text-[11px] text-charcoal/45">
-            <span>© 2026 {site.brand.name} · {t('common.sampleData')}</span>
+            <span>© 2026 {site.brand.name} · {OPERATOR.brandOwner}</span>
             <span>{tr(site.brand.city)}</span>
           </div>
         </div>
