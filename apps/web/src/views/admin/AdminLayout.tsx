@@ -1,4 +1,6 @@
 'use client'
+import { useEffect } from 'react'
+import { useLocation, useNavigate } from '@/lib/router'
 import { DashboardShell } from '../../components/layout/DashboardShell'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
@@ -8,6 +10,16 @@ export function AdminLayout() {
   const roles = useStore((s) => s.auth.user?.roles ?? [])
   const finance = roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN')
   const platform = roles.includes('PLATFORM_ADMIN')
+  // A finance admin (without the Super Admin role) only gets the finance page of this workspace.
+  const financeOnly = finance && !platform
+  const { pathname } = useLocation()
+  const nav = useNavigate()
+  useEffect(() => {
+    if (financeOnly && !pathname.startsWith('/admin/finance')) nav('/admin/finance', { replace: true })
+  }, [financeOnly, pathname, nav])
+  if (financeOnly) {
+    return <DashboardShell role="admin" title={t('dash.admin')} subtitle={t('finance.title')} items={[{ id: 'finance', to: '/admin/finance', label: t('finance.title'), icon: 'package' }]} />
+  }
   return (
     <DashboardShell role="admin" title={t('dash.admin')} subtitle={t('admin.overview.hello')} items={[
       { id: 'overview', to: '/admin', end: true, label: t('dash.overview'), icon: 'grid' },

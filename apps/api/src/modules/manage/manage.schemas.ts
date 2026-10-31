@@ -1,3 +1,4 @@
+import { checkDiscount, isSafeExternalUrl, MAX_DISCOUNT_PERCENT } from '@ilmora/shared'
 import { z } from 'zod'
 
 export const L = z.object({ uz: z.string().max(2000), ru: z.string().max(2000), en: z.string().max(2000) }).strict()
@@ -27,12 +28,33 @@ export const GroupInput = GroupBase.refine((g) => g.start < g.end, { message: 's
 export const GroupPatch = GroupBase.partial().refine((g) => !g.start || !g.end || g.start < g.end, { message: 'start must be before end', path: ['end'] })
 export type GroupInput = z.infer<typeof GroupInput>
 
+/** A course discount window (instants as UTC ISO strings). The percent limit is technical, not a company rule yet. */
+export const DiscountInput = z
+  .object({ percent: z.number().int().min(1).max(MAX_DISCOUNT_PERCENT), startsAt: z.string().datetime(), endsAt: z.string().datetime() })
+  .strict()
+  .refine((d) => checkDiscount(d).ok, { message: 'The discount must end after it starts' })
+
+/** Body of PUT manage/courses/:id/discount: the new window, or null to remove the discount. */
+export const CourseDiscountBody = z.object({ discount: DiscountInput.nullable() }).strict()
+
+/** Learning format of a course; the service applies the rules for each (see ManageService.createCourse). */
+export const LearningFormatInput = z.enum(['OFFLINE', 'ONLINE'])
+export const CertificateInput = z.enum(['NONE', 'FREE', 'PAID', 'AVAILABLE'])
+
 export const CourseInput = z.object({
   title: L,
   categoryId: id,
-  centerId: id,
-  teacherId: id,
+  /** OFFLINE courses need a center and a teacher; ONLINE courses belong to the platform center and ignore them. */
+  centerId: id.optional(),
+  teacherId: id.optional(),
   subjectId: id.nullable().optional(),
+  learningFormat: LearningFormatInput.optional(),
+  /** ONLINE only: the course page on the provider's site (plain https). */
+  externalUrl: z.string().max(500).refine(isSafeExternalUrl, 'externalUrl must be a plain https link').nullable().optional(),
+  providerName: z.string().trim().min(1).max(120).nullable().optional(),
+  instructorName: z.string().trim().max(160).nullable().optional(),
+  certificate: CertificateInput.optional(),
+  durationText: L.nullable().optional(),
   summary: L,
   description: L,
   curriculum: z.array(L).max(40),
@@ -43,6 +65,8 @@ export const CourseInput = z.object({
   coverSeed: z.number().int().min(0).max(10_000).optional(),
   imageUrl: z.string().max(500).nullable().optional(),
   meyosGrant: z.boolean().optional(),
+  /** A discount window; null removes it, leaving it out keeps the current one. Only the Super Admin or the course's center may set it. */
+  discount: DiscountInput.nullable().optional(),
 }).strict().merge(PublishableInput)
 export const CoursePatch = CourseInput.partial()
 

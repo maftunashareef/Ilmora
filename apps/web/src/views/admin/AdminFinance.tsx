@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Badge, Button, Card, EmptyState, Eyebrow, Icon, Notice, PageTitle, Select } from '../../components/ui'
 import { useT } from '../../i18n/useT'
-import { api, isApiError } from '../../lib/api'
+import { api } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 
@@ -26,7 +27,8 @@ export function AdminFinance() {
   const [total, setTotal] = useState(0)
   const [balances, setBalances] = useState<Balance[]>([])
   const [verify, setVerify] = useState<Record<string, unknown>>({})
-  const [error, setError] = useState<string | null>(null)
+  // The failed request is kept, not its text, so the message follows a language switch.
+  const [error, setError] = useState<unknown>(null)
   const canSee = roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN')
 
   const load = useCallback(async () => {
@@ -35,7 +37,7 @@ export function AdminFinance() {
       const [r, b] = await Promise.all([api<{ items: ReconRow[]; total: number }>(`/admin/finance/reconciliation?${q}`), api<Balance[]>('/admin/finance/balances')])
       setRows(r.items); setTotal(r.total); setBalances(b); setError(null)
     } catch (err) {
-      setError(isApiError(err) ? err.message : String(err))
+      setError(err)
     }
   }, [provider, status])
 
@@ -45,7 +47,7 @@ export function AdminFinance() {
     try {
       const r = await api<Record<string, unknown>>(`/admin/finance/transactions/${row.transactionId}/verify`, { method: 'POST', body: {} })
       setVerify((v) => ({ ...v, [row.transactionId]: r }))
-    } catch (err) { notify(isApiError(err) ? err.message : String(err), 'warn') }
+    } catch (err) { notify(apiErrorText(err, lang), 'warn') }
   }
   const settle = async (row: ReconRow) => {
     const reference = prompt(t('finance.manualReference'))
@@ -53,7 +55,7 @@ export function AdminFinance() {
     try {
       await api(`/admin/finance/payments/${row.paymentId}/manual-settle`, { method: 'POST', body: { reference } })
       notify(t('common.saved')); void load()
-    } catch (err) { notify(isApiError(err) ? err.message : String(err), 'warn') }
+    } catch (err) { notify(apiErrorText(err, lang), 'warn') }
   }
 
   if (!canSee) return <Notice tone="warn">{t('auth.noAccessBody')}</Notice>
@@ -61,7 +63,7 @@ export function AdminFinance() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('finance.title')} subtitle={t('finance.subtitle')} action={<Button size="sm" variant="secondary" onClick={() => void load()}><Icon name="refresh" className="h-3.5 w-3.5" />{t('common.refresh')}</Button>} />
-      {error && <Notice tone="warn" className="mb-4">{error}</Notice>}
+      {error != null && <Notice tone="warn" className="mb-4">{apiErrorText(error, lang)}</Notice>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {balances.map((b) => (
           <Card key={b.account} className="p-4"><div className="text-[11px] uppercase tracking-wider text-charcoal/50">{b.account}</div><div className="mt-1 font-display text-2xl text-charcoal">{som(b.net)}</div><div className="text-[11px] text-charcoal/45">D {som(b.debit)} · C {som(b.credit)}</div></Card>
@@ -70,7 +72,7 @@ export function AdminFinance() {
       <div className="mt-8 flex flex-wrap items-center gap-2">
         <Eyebrow>{t('finance.transactions')} · {total}</Eyebrow>
         <div className="ml-auto flex gap-2">
-          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="CLICK">Click</option><option value="MANUAL">Manual</option></Select>
+          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="CLICK">Click</option><option value="MANUAL">{t('finance.manual')}</option></Select>
           <Select aria-label={t('finance.status')} className="py-2" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">{t('common.all')}</option><option value="CREATED">CREATED</option><option value="PERFORMED">PERFORMED</option><option value="CANCELLED">CANCELLED</option><option value="FAILED">FAILED</option></Select>
         </div>
       </div>
@@ -79,12 +81,12 @@ export function AdminFinance() {
         <div className="card mt-4 overflow-x-auto p-0">
           <table className="w-full min-w-[960px] text-sm">
             <thead className="bg-ivory/70 text-left text-[11px] uppercase tracking-wider text-charcoal/50">
-              <tr><th className="px-4 py-3">{t('finance.provider')}</th><th className="px-3 py-3">Provider ID</th><th className="px-3 py-3">Internal ID</th><th className="px-3 py-3">{t('finance.providerState')}</th><th className="px-3 py-3">{t('finance.paymentState')}</th><th className="px-3 py-3">{t('finance.ledger')}</th><th className="px-3 py-3 text-right">{t('finance.amount')}</th><th className="px-3 py-3">{t('finance.time')}</th><th className="px-3 py-3">{t('finance.discrepancy')}</th><th className="px-3 py-3"></th></tr>
+              <tr><th className="px-4 py-3">{t('finance.provider')}</th><th className="px-3 py-3">{t('finance.providerId')}</th><th className="px-3 py-3">{t('finance.internalId')}</th><th className="px-3 py-3">{t('finance.providerState')}</th><th className="px-3 py-3">{t('finance.paymentState')}</th><th className="px-3 py-3">{t('finance.ledger')}</th><th className="px-3 py-3 text-right">{t('finance.amount')}</th><th className="px-3 py-3">{t('finance.time')}</th><th className="px-3 py-3">{t('finance.discrepancy')}</th><th className="px-3 py-3"></th></tr>
             </thead>
             <tbody className="divide-y divide-charcoal/8">
               {rows.map((r) => (
                 <tr key={r.transactionId} className="align-top hover:bg-ivory/40">
-                  <td className="px-4 py-2.5 font-medium text-charcoal">{r.provider}{r.sandbox && <Badge tone="muted" className="ml-1">test</Badge>}</td>
+                  <td className="px-4 py-2.5 font-medium text-charcoal">{r.provider}{r.sandbox && <Badge tone="muted" className="ml-1">{t('finance.sandbox')}</Badge>}</td>
                   <td className="px-3 py-2.5 font-mono text-xs text-charcoal/70">{r.providerTransactionId}</td>
                   <td className="px-3 py-2.5 font-mono text-xs text-charcoal/70">#{r.seq}<br /><span className="text-charcoal/45">{r.paymentId}</span></td>
                   <td className="px-3 py-2.5 text-charcoal/70">{r.transactionState}{r.providerState !== null && <span className="text-charcoal/45"> ({r.providerState})</span>}</td>
@@ -92,7 +94,7 @@ export function AdminFinance() {
                   <td className="px-3 py-2.5 text-xs text-charcoal/70">{r.ledger.settled ? t('finance.posted') : '—'}{r.ledger.refunded && ` · ${t('finance.reversed')}`}</td>
                   <td className="px-3 py-2.5 text-right text-charcoal">{som(r.amountMinor)}{r.amountMinor !== r.paymentAmountMinor && <div className="text-[11px] text-red-700">≠ {som(r.paymentAmountMinor)}</div>}</td>
                   <td className="px-3 py-2.5 text-xs text-charcoal/60">{formatDate(r.createdAt, lang)} {formatTime(r.createdAt, lang)}{r.performedAt && <div>✓ {formatTime(r.performedAt, lang)}</div>}</td>
-                  <td className="px-3 py-2.5">{r.discrepancy ? <Badge tone="danger">{r.discrepancy}</Badge> : <Badge tone="sage">OK</Badge>}</td>
+                  <td className="px-3 py-2.5">{r.discrepancy ? <Badge tone="danger">{r.discrepancy}</Badge> : <Badge tone="sage">{t('finance.match')}</Badge>}</td>
                   <td className="px-3 py-2.5">
                     <div className="flex flex-col gap-1">
                       <Button size="sm" variant="ghost" onClick={() => void check(r)}>{t('finance.verify')}</Button>

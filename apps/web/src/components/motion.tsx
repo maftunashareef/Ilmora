@@ -62,13 +62,31 @@ export function Marquee({ items, label, className }: { items: ReactNode[]; label
 }
 
 /** Horizontal scroll-snap track with previous/next controls. */
-export function SnapTrack({ children, prevLabel, nextLabel, className }: { children: ReactNode; prevLabel: string; nextLabel: string; className?: string }) {
+export function SnapTrack({ children, prevLabel, nextLabel, className, autoAdvanceMs, pauseLabel, playLabel }: { children: ReactNode; prevLabel: string; nextLabel: string; className?: string; autoAdvanceMs?: number; pauseLabel?: string; playLabel?: string }) {
   const ref = useRef<HTMLDivElement>(null)
+  const reduced = useReducedMotion()
+  const [paused, setPaused] = useState(false)
+  const [engaged, setEngaged] = useState(false) // pointer over the track or focus inside it
   const go = (dir: -1 | 1) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: 'smooth' })
+  // Optional slow auto-advance: off with reduced motion, while the visitor hovers or focuses the track, or after "pause".
+  const auto = !!autoAdvanceMs && !reduced
+  useEffect(() => {
+    if (!auto || paused || engaged) return
+    const id = window.setInterval(() => {
+      const el = ref.current
+      if (!el) return
+      if (el.scrollLeft + el.clientWidth >= el.scrollWidth - 4) el.scrollTo({ left: 0, behavior: 'smooth' })
+      else el.scrollBy({ left: el.clientWidth * 0.8, behavior: 'smooth' })
+    }, autoAdvanceMs)
+    return () => window.clearInterval(id)
+  }, [auto, paused, engaged, autoAdvanceMs])
   return (
-    <div className="relative">
+    <div className="relative" onMouseEnter={() => setEngaged(true)} onMouseLeave={() => setEngaged(false)} onFocus={() => setEngaged(true)} onBlur={() => setEngaged(false)}>
       <div ref={ref} className={cx('snap-track no-scrollbar -mx-5 px-5 sm:-mx-8 sm:px-8 lg:-mx-12 lg:px-12', className)}>{children}</div>
-      <div className="mt-2 flex justify-end gap-2">
+      <div className="mt-2 flex items-center justify-end gap-2">
+        {auto && pauseLabel && playLabel && (
+          <button type="button" onClick={() => setPaused((p) => !p)} aria-pressed={paused} className="mr-auto rounded-full border border-charcoal/15 bg-paper px-3 py-1.5 text-xs font-medium text-charcoal transition hover:border-forest hover:text-forest">{paused ? playLabel : pauseLabel}</button>
+        )}
         <button type="button" onClick={() => go(-1)} aria-label={prevLabel} className="flex h-10 w-10 items-center justify-center rounded-full border border-charcoal/15 bg-paper text-charcoal transition hover:border-forest hover:text-forest"><Icon name="arrowLeft" className="h-4 w-4" /></button>
         <button type="button" onClick={() => go(1)} aria-label={nextLabel} className="flex h-10 w-10 items-center justify-center rounded-full border border-charcoal/15 bg-paper text-charcoal transition hover:border-forest hover:text-forest"><Icon name="arrowRight" className="h-4 w-4" /></button>
       </div>

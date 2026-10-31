@@ -1,11 +1,13 @@
 import { useState } from 'react'
+import { CERTIFICATE_KINDS, courseFormat, discountFromDraft, discountToDraft, emptyDiscountDraft, isOnlineCourse, isSafeExternalUrl, ONLINE_PROVIDER_SLUG, type LearningFormat } from '@ilmora/shared'
 import { useT } from '../../i18n/useT'
 import { emptyL } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
 import { enrolledCount, validateCapacity } from '../../lib/enrollment'
 import type { Course, Group, L, Level, Student } from '../../types'
 import { finalizePublish, PublishFields, type PublishDraft } from '../PublishFields'
-import { Badge, Button, cx, Field, Icon, Input, LField, Notice, Select, Textarea } from '../ui'
+import { DiscountFields } from './DiscountFields'
+import { Badge, Button, cx, Field, Icon, Input, LField, Notice, Segmented, Select, Textarea } from '../ui'
 import { UploadField } from '../UploadField'
 
 const DAYS = [0, 1, 2, 3, 4, 5, 6]
@@ -70,14 +72,19 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
   const perms = useStore((s) => s.site.permissions.teacher)
   const students = useStore((s) => s.students)
   const notify = useStore((s) => s.notify)
-  const ownerId = initial?.teacherId ?? teacherId ?? teachers[0]?.id
+  // The platform center/profile of online courses is not a real center or teacher: it is never offered for an offline course.
+  const offlineCenters = centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG)
+  const offlineTeachers = teachers.filter((x) => x.slug !== ONLINE_PROVIDER_SLUG)
+  const ownerId = initial?.teacherId ?? teacherId ?? offlineTeachers[0]?.id
   const owner = teachers.find((x) => x.id === ownerId)
 
   const [draft, setDraft] = useState<Course>(() => initial ?? {
-    id: uid('c'), title: emptyL(), summary: emptyL(), description: emptyL(), curriculum: [], categoryId: categories[0]?.id ?? '', centerId: owner?.centerId ?? centers[0]?.id ?? '', teacherId: ownerId ?? '',
+    id: uid('c'), title: emptyL(), summary: emptyL(), description: emptyL(), curriculum: [], categoryId: categories[0]?.id ?? '', centerId: owner?.centerId ?? offlineCenters[0]?.id ?? '', teacherId: ownerId ?? '',
     level: 'beginner', durationMonths: 3, price: 500000, coverSeed: Math.floor(Math.random() * 60), groups: [],
     status: 'draft', visibility: 'public', audience: { studentIds: [], groupIds: [] }, featured: false, updatedAt: new Date().toISOString(),
   })
+  // Discount fields (Super Admin only); all empty = no discount.
+  const [disc, setDisc] = useState(() => discountToDraft(initial?.discount))
   const [pub, setPub] = useState<PublishDraft>({ status: initial?.status ?? 'draft', visibility: initial ? initial.visibility : null, audience: initial?.audience ?? { studentIds: [], groupIds: [] } })
   const [curr, setCurr] = useState<Record<'uz' | 'ru' | 'en', string>>({ uz: curriculumToText(draft.curriculum, 'uz'), ru: curriculumToText(draft.curriculum, 'ru'), en: curriculumToText(draft.curriculum, 'en') })
 
@@ -86,24 +93,51 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
   const lockPrice = isTeacher && !perms.editPrices
   const lockSchedule = isTeacher && !(perms.editSchedules && perms.manageGroups)
   const set = <K extends keyof Course>(k: K, v: Course[K]) => setDraft((d) => ({ ...d, [k]: v }))
+  const online = isOnlineCourse(draft)
+
+  // Offline <-> online (Super Admin only). An online course is free and has no groups, so a course that already has groups cannot become one.
+  const switchFormat = (f: LearningFormat) => {
+    if (f === courseFormat(draft)) return
+    if (f === 'ONLINE') {
+      if (draft.groups.length > 0) { notify(t('admin.course.formatLocked'), 'warn'); return }
+      setDraft((d) => ({ ...d, learningFormat: 'ONLINE', price: 0, discount: null, meyosGrant: false, certificate: d.certificate ?? 'NONE' }))
+      setDisc(emptyDiscountDraft())
+    } else {
+      setDraft((d) => ({ ...d, learningFormat: 'OFFLINE', centerId: offlineCenters[0]?.id ?? '', teacherId: offlineTeachers[0]?.id ?? '', price: d.price || 500000, externalUrl: null, providerName: null, instructorName: null, certificate: 'NONE', durationText: null }))
+    }
+  }
 
   const save = () => {
     if (!draft.title.uz && !draft.title.en && !draft.title.ru) { notify(`${t('common.title')}: ${t('common.required')}`, 'warn'); return }
+    if (online && (!isSafeExternalUrl(draft.externalUrl) || !draft.providerName?.trim())) { notify(t('admin.course.linkInvalid'), 'warn'); return }
     const bad = groupsCapacityError(draft.groups, students)
     if (bad) { notify(bad.check.reason === 'not-integer' ? t('capacity.invalid') : t('capacity.belowEnrolled', { n: bad.check.enrolled }), 'warn'); return }
     const r = finalizePublish(pub, mode, perms)
     if (!r.ok) { notify(t(r.error), 'warn'); return }
+    let discount: Course['discount'] = draft.discount ?? null
+    if (mode === 'admin') {
+      const parsed = discountFromDraft(disc)
+      if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
+      discount = parsed.discount
+    }
     const lines = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean)
     const uz = lines(curr.uz), ru = lines(curr.ru), en = lines(curr.en)
     const n = Math.max(uz.length, ru.length, en.length)
     const curriculum: L[] = Array.from({ length: n }, (_, i) => ({ uz: uz[i] ?? en[i] ?? ru[i] ?? '', ru: ru[i] ?? en[i] ?? uz[i] ?? '', en: en[i] ?? uz[i] ?? ru[i] ?? '' }))
-    onSave({ ...draft, curriculum, ...r.patch })
+    onSave({ ...draft, ...(mode === 'admin' ? { discount } : {}), ...(online ? { price: 0, groups: [], discount: null } : {}), curriculum, ...r.patch })
     if (r.note) notify(t(r.note), 'warn')
   }
 
   return (
     <div className="space-y-6">
       {lockText && <Notice tone="warn"><Icon name="lock" className="mr-1 inline h-3.5 w-3.5" />{t('studio.lockedByAdmin')}: {t('perm.teacher.editCourses')}</Notice>}
+      {mode === 'admin' && (
+        <div>
+          <div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('format.label')}</div>
+          <Segmented<LearningFormat> value={courseFormat(draft)} onChange={switchFormat} options={[{ id: 'OFFLINE', label: t('format.badge.OFFLINE') }, { id: 'ONLINE', label: t('format.badge.ONLINE') }]} />
+        </div>
+      )}
+      {online && <Notice tone="info" className="text-xs">{t('admin.course.onlineHint')}</Notice>}
       <LField label={t('common.title')} required value={draft.title} onChange={(v) => set('title', v)} />
       <fieldset disabled={lockText} className="space-y-5 disabled:opacity-70">
         <LField label={t('common.summary')} value={draft.summary} onChange={(v) => set('summary', v)} />
@@ -119,23 +153,35 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
       </fieldset>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label={t('common.category')}><Select value={draft.categoryId} onChange={(e) => set('categoryId', e.target.value)}>{categories.map((c) => <option key={c.id} value={c.id}>{tr(c.name)}</option>)}</Select></Field>
-        <Field label={t('common.center')}><Select disabled={isTeacher} value={draft.centerId} onChange={(e) => set('centerId', e.target.value)}>{centers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
-        <Field label={t('common.teacher')}><Select disabled={isTeacher} value={draft.teacherId} onChange={(e) => set('teacherId', e.target.value)}>{teachers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></Field>
-        <Field label={t('studio.subjects')}><Select value={draft.subjectId ?? ''} onChange={(e) => set('subjectId', e.target.value || undefined)}><option value="">{t('studio.noSubject')}</option>{subjects.filter((s) => s.teacherId === draft.teacherId).map((s) => <option key={s.id} value={s.id}>{tr(s.name)}</option>)}</Select></Field>
+        {!online && <Field label={t('common.center')}><Select disabled={isTeacher} value={draft.centerId} onChange={(e) => set('centerId', e.target.value)}>{offlineCenters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>}
+        {!online && <Field label={t('common.teacher')}><Select disabled={isTeacher} value={draft.teacherId} onChange={(e) => set('teacherId', e.target.value)}>{offlineTeachers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></Field>}
+        {!online && <Field label={t('studio.subjects')}><Select value={draft.subjectId ?? ''} onChange={(e) => set('subjectId', e.target.value || undefined)}><option value="">{t('studio.noSubject')}</option>{subjects.filter((s) => s.teacherId === draft.teacherId).map((s) => <option key={s.id} value={s.id}>{tr(s.name)}</option>)}</Select></Field>}
         <Field label={t('common.level')}><Select value={draft.level} onChange={(e) => set('level', e.target.value as Level)}>{(['beginner', 'intermediate', 'advanced'] as Level[]).map((l) => <option key={l} value={l}>{t(`level.${l}`)}</option>)}</Select></Field>
-        <Field label={`${t('common.duration')} (${t('common.months')})`}><Input type="number" min={1} value={draft.durationMonths} onChange={(e) => set('durationMonths', Number(e.target.value))} /></Field>
-        <Field label={`${t('common.price')} (${t('common.som')} ${t('common.perMonth')})`} hint={lockPrice ? <Badge tone="warn"><Icon name="lock" className="h-3 w-3" />{t('studio.lockedByAdmin')}</Badge> : undefined}><Input disabled={lockPrice} type="number" min={0} step={10000} value={draft.price} onChange={(e) => set('price', Number(e.target.value))} /></Field>
-        {mode === 'admin' && <Field label={t('admin.course.meyos')}><Select value={draft.meyosGrant ? '1' : '0'} onChange={(e) => set('meyosGrant', e.target.value === '1')}><option value="0">{t('common.no')}</option><option value="1">{t('common.yes')}</option></Select></Field>}
+        {!online && <Field label={`${t('common.duration')} (${t('common.months')})`}><Input type="number" min={1} value={draft.durationMonths} onChange={(e) => set('durationMonths', Number(e.target.value))} /></Field>}
+        {!online && <Field label={`${t('common.price')} (${t('common.som')} ${t('common.perMonth')})`} hint={lockPrice ? <Badge tone="warn"><Icon name="lock" className="h-3 w-3" />{t('studio.lockedByAdmin')}</Badge> : undefined}><Input disabled={lockPrice} type="number" min={0} step={10000} value={draft.price} onChange={(e) => set('price', Number(e.target.value))} /></Field>}
+        {mode === 'admin' && !online && <Field label={t('admin.course.meyos')}><Select value={draft.meyosGrant ? '1' : '0'} onChange={(e) => set('meyosGrant', e.target.value === '1')}><option value="0">{t('common.no')}</option><option value="1">{t('common.yes')}</option></Select></Field>}
         {mode === 'admin' && <Field label={t('common.featured')}><Select value={draft.featured ? '1' : '0'} onChange={(e) => set('featured', e.target.value === '1')}><option value="0">{t('common.no')}</option><option value="1">{t('common.yes')}</option></Select></Field>}
       </div>
+      {online && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t('admin.course.externalUrl')} required><Input type="url" inputMode="url" placeholder="https://…" value={draft.externalUrl ?? ''} onChange={(e) => set('externalUrl', e.target.value.trim() || null)} /></Field>
+          <Field label={t('admin.course.provider')} required><Input maxLength={120} value={draft.providerName ?? ''} onChange={(e) => set('providerName', e.target.value || null)} /></Field>
+          <Field label={t('online.instructor')}><Input maxLength={160} value={draft.instructorName ?? ''} onChange={(e) => set('instructorName', e.target.value || null)} /></Field>
+          <Field label={t('online.certificate')}><Select value={draft.certificate ?? 'NONE'} onChange={(e) => set('certificate', e.target.value as NonNullable<Course['certificate']>)}>{CERTIFICATE_KINDS.map((k) => <option key={k} value={k}>{t(`online.cert.${k}` as 'online.cert.NONE')}</option>)}</Select></Field>
+          <div className="md:col-span-2"><LField label={t('admin.course.durationText')} value={draft.durationText ?? emptyL()} onChange={(v) => set('durationText', v)} /></div>
+        </div>
+      )}
+      {mode === 'admin' && !online && <DiscountFields value={disc} onChange={setDisc} price={draft.price} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t('common.imageUrl')} hint={t('common.optional')}><Input placeholder="https://…" value={draft.imageUrl ?? ''} onChange={(e) => set('imageUrl', e.target.value || undefined)} /></Field>
         <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('common.image')} · {t('common.upload')}</div><UploadField kind="image" accept="image/*" value={draft.imageUpload} onChange={(v) => set('imageUpload', v)} /></div>
       </div>
-      <div>
-        <div className="mb-2 flex items-center justify-between"><span className="text-sm font-medium text-charcoal">{t('courses.groupsAndSchedule')}</span>{lockSchedule && <Badge tone="warn"><Icon name="lock" className="h-3 w-3" />{t('studio.lockedByAdmin')}</Badge>}</div>
-        <GroupsEditor groups={draft.groups} onChange={(g) => set('groups', g)} courseId={draft.id} locked={lockSchedule} />
-      </div>
+      {!online && (
+        <div>
+          <div className="mb-2 flex items-center justify-between"><span className="text-sm font-medium text-charcoal">{t('courses.groupsAndSchedule')}</span>{lockSchedule && <Badge tone="warn"><Icon name="lock" className="h-3 w-3" />{t('studio.lockedByAdmin')}</Badge>}</div>
+          <GroupsEditor groups={draft.groups} onChange={(g) => set('groups', g)} courseId={draft.id} locked={lockSchedule} />
+        </div>
+      )}
       <PublishFields value={pub} onChange={setPub} teacherId={draft.teacherId} mode={mode} />
       <div className="flex justify-end gap-2 border-t border-charcoal/10 pt-4">
         <Button variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>

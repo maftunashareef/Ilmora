@@ -1,10 +1,11 @@
 import { Link } from '@/lib/router'
 import { Card, Eyebrow, Icon, Notice, PageTitle, Stat } from '../../components/ui'
+import { countLabel, NOUNS } from '@ilmora/shared'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
 
 export function AdminOverview() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const s = useStore()
   const all = [...s.courses, ...s.videos, ...s.playlists, ...s.resources]
   const drafts = all.filter((x) => x.status === 'draft').length
@@ -22,10 +23,10 @@ export function AdminOverview() {
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.overview.hello')} subtitle={t('admin.overview.body')} />
       <div className="reveal-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label={t('admin.overview.published')} value={s.courses.filter((c) => c.status === 'published').length} hint={`${s.courses.length} ${t('common.all').toLowerCase()}`} />
+        <Stat label={t('admin.overview.published')} value={s.courses.filter((c) => c.status === 'published').length} hint={countLabel(lang, s.courses.length, NOUNS.course)} />
         <Stat label={t('admin.overview.drafts')} value={drafts} hint={review ? `${review} · ${t('admin.reviewQueue')}` : undefined} />
         <Stat label={t('admin.overview.privateItems')} value={privateItems} />
-        <Stat label={t('admin.overview.activeSubs')} value={s.students.filter((x) => x.subscription.status === 'active').length} hint={`${s.students.length} ${t('common.students').toLowerCase()}`} />
+        <Stat label={t('admin.overview.activeSubs')} value={s.students.filter((x) => x.subscription.status === 'active').length} hint={countLabel(lang, s.students.length, NOUNS.student)} />
       </div>
       {review > 0 && (
         <Notice tone="warn" className="mt-6 flex items-center justify-between gap-3">

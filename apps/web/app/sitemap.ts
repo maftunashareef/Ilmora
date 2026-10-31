@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next'
 import { getCatalog, SITE_URL } from '@/lib/server-api'
 
 const LOCALES = ['uz', 'ru', 'en'] as const
-const STATIC = ['', '/courses', '/teachers', '/builder', '/how-it-works', '/centers', '/faq']
+const STATIC = ['', '/courses', '/teachers', '/builder', '/course-finder', '/how-it-works', '/centers', '/faq']
 
 export const revalidate = 3600
 

@@ -29,7 +29,7 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
 
   return (
     <div className="flex min-h-screen bg-ivory">
-      <a href="#dash-main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-control focus:bg-forest focus:px-4 focus:py-2 focus:text-ivory">Skip to content</a>
+      <a href="#dash-main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-control focus:bg-forest focus:px-4 focus:py-2 focus:text-ivory">{t('common.skipToContent')}</a>
       <aside className="hidden w-[264px] shrink-0 flex-col border-r border-charcoal/10 bg-paper/70 px-4 py-6 lg:flex">
         <Link
           to="/"

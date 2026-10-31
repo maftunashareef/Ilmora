@@ -25,6 +25,8 @@
     "db:migrate": "npm run prisma:migrate:deploy -w apps/api",
     "owner:setup": "npm run owner:setup -w apps/api --",
     "db:seed": "npm run prisma:seed -w apps/api",
+    "db:seed:online": "npm run prisma:seed:online -w apps/api",
+    "db:seed:universities": "npm run prisma:seed:universities -w apps/api",
     "db:restore:teachers": "npm run prisma:restore:teachers -w apps/api --"
   },
   "devDependencies": {

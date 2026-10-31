@@ -4,7 +4,7 @@ import { NotFound } from '../../components/AccessGate'
 import { VisibilityBadge } from '../../components/course/badges'
 import { CourseCard } from '../../components/course/CourseCard'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
-import { ArtCover, Avatar, Badge, Button, Card, EmptyState, Eyebrow, Icon, Input, Notice, Tabs } from '../../components/ui'
+import { ArtCover, Avatar, Badge, Button, Card, EmptyState, Eyebrow, Icon, Input, Tabs } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
 import { formatDuration } from '../../lib/format'
@@ -139,9 +139,7 @@ export function TeacherChannelPage() {
               </Card>
               <Card>
                 <Eyebrow className="mb-3">{t('teachers.affiliation')}</Eyebrow>
-                {center && (<><div className="font-display text-2xl text-charcoal">{center.name}</div><div className="text-sm text-charcoal/55">{tr(center.district)}</div><p className="mt-3 text-sm text-charcoal/65">{tr(center.description)}</p></>)}
-                <Notice tone="info" className="mt-5 text-xs">{t('centers.partnersNote')}</Notice>
-              </Card>
+                {center && (<><div className="font-display text-2xl text-charcoal">{center.name}</div><div className="text-sm text-charcoal/55">{tr(center.district)}</div><p className="mt-3 text-sm text-charcoal/65">{tr(center.description)}</p></>)}              </Card>
             </div>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { overlaps } from './schedule.js'
 import type { Group, Student } from './types.js'
 
 /**
@@ -37,4 +38,58 @@ export const migratedCapacity = (previousSeats: unknown, enrolled: number): numb
   const seats = Number(previousSeats)
   const base = Number.isInteger(seats) && seats > 0 ? seats : DEFAULT_CAPACITY
   return Math.max(base, enrolled, 1)
+}
+
+/**
+ * Upper bound on courses in one purchase when no package is chosen ("custom selection"). It is a technical
+ * limit shared by the web cart and the draft endpoint; the business limit has not been decided yet.
+ */
+export const MAX_CART_COURSES = 6
+
+export type CartDropReason = 'unknown' | 'duplicate' | 'full' | 'limit' | 'conflict'
+export interface CartMergeResult {
+  groupIds: string[]
+  dropped: { groupId: string; reason: CartDropReason }[]
+}
+
+/**
+ * Merges a guest's cart into the account's draft. The account always wins: its groups are kept as they are, and a
+ * guest group is added only when its course is new, it still has a free seat, the limit allows it and it does not
+ * overlap anything already kept. Anything else is reported in `dropped` instead of silently replacing a choice.
+ */
+export function mergeCartGroups(
+  accountGroupIds: string[],
+  guestGroupIds: string[],
+  groups: Group[],
+  opts: { limit: number; isFull?: (g: Group) => boolean },
+): CartMergeResult {
+  const byId = new Map(groups.map((g) => [g.id, g]))
+  const kept: string[] = []
+  const keptGroups: Group[] = []
+  const courses = new Set<string>()
+  for (const id of accountGroupIds) {
+    if (kept.includes(id)) continue
+    kept.push(id)
+    const g = byId.get(id)
+    if (g) {
+      keptGroups.push(g)
+      courses.add(g.courseId)
+    }
+  }
+  const dropped: CartMergeResult['dropped'] = []
+  for (const id of guestGroupIds) {
+    if (kept.includes(id)) continue
+    const g = byId.get(id)
+    if (!g) dropped.push({ groupId: id, reason: 'unknown' })
+    else if (courses.has(g.courseId)) dropped.push({ groupId: id, reason: 'duplicate' })
+    else if (opts.isFull?.(g)) dropped.push({ groupId: id, reason: 'full' })
+    else if (kept.length >= opts.limit) dropped.push({ groupId: id, reason: 'limit' })
+    else if (keptGroups.some((k) => overlaps(k, g))) dropped.push({ groupId: id, reason: 'conflict' })
+    else {
+      kept.push(id)
+      keptGroups.push(g)
+      courses.add(g.courseId)
+    }
+  }
+  return { groupIds: kept, dropped }
 }

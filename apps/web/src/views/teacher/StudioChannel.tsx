@@ -17,12 +17,13 @@ import {
 } from '../../components/ui'
 import { UploadField } from '../../components/UploadField'
 import { useT } from '../../i18n/useT'
+import { apiErrorText } from '../../lib/apiErrors'
 import { useCurrentTeacher } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import type { Teacher } from '../../types'
 
 export function StudioChannel() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const teacher = useCurrentTeacher()
   const perms = useStore((s) => s.site.permissions.teacher)
   const courses = useStore((s) => s.courses.filter((c) => c.teacherId === teacher?.id))
@@ -67,8 +68,7 @@ export function StudioChannel() {
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 4000)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setSaveError(msg)
+      setSaveError(apiErrorText(err, lang))
     } finally {
       setSaving(false)
     }

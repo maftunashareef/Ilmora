@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { OFFER_VERSION } from '@ilmora/shared'
 import { useT } from '@/i18n/useT'
-import { isApiError } from '@/lib/api'
+import { apiErrorText } from '@/lib/apiErrors'
 import { Link } from '@/lib/router'
 import { useStore, type AuthUser } from '@/store/useStore'
 import { Button, Card, Icon, Notice } from './ui'
@@ -36,8 +36,8 @@ export function ConsentFields({ value, onChange, invalid }: { value: ConsentStat
   return (
     <fieldset className="space-y-2.5">
       <legend className="sr-only">{t('auth.consent.title')}</legend>
-      {row('acceptOffer', <>{t('auth.consent.offerBefore')} <Link to="/oferta" target="_blank" className="font-medium text-forest underline">{t('auth.consent.offerLink')}</Link> {t('auth.consent.offerAfter')}</>, true)}
-      {row('consentPersonalData', <>{t('auth.consent.pd')} <Link to="/privacy" target="_blank" className="font-medium text-forest underline">{t('legal.privacy')}</Link></>, true)}
+      {row('acceptOffer', <>{t('auth.consent.offerBefore')} <Link to="/oferta" target="_blank" rel="noopener noreferrer" className="font-medium text-forest underline">{t('auth.consent.offerLink')}</Link> {t('auth.consent.offerAfter')}</>, true)}
+      {row('consentPersonalData', <>{t('auth.consent.pd')} <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-forest underline">{t('legal.privacy')}</Link></>, true)}
       {invalid && !consentComplete(value) && <p className="text-xs text-red-700" role="alert">{t('auth.consent.required')}</p>}
     </fieldset>
   )
@@ -45,7 +45,7 @@ export function ConsentFields({ value, onChange, invalid }: { value: ConsentStat
 
 /** Shown instead of a workspace until the signed-in account has accepted the current offer edition. */
 export function ConsentGate() {
-  const { t } = useT()
+  const { t, lang } = useT()
   const giveConsent = useStore((s) => s.giveConsent)
   const [value, setValue] = useState<ConsentState>(EMPTY_CONSENT)
   const [invalid, setInvalid] = useState(false)
@@ -57,7 +57,7 @@ export function ConsentGate() {
     try {
       await giveConsent({ acceptOffer: true, consentPersonalData: true })
     } catch (err) {
-      setError(isApiError(err) ? err.message : String(err))
+      setError(apiErrorText(err, lang))
     } finally { setBusy(false) }
   }
   return (
@@ -70,7 +70,7 @@ export function ConsentGate() {
         {error && <div role="alert" className="mt-4"><Notice tone="warn">{error}</Notice></div>}
         <div className="mt-6 flex flex-wrap gap-2">
           <Button onClick={() => void submit()} disabled={busy}>{busy ? <Icon name="refresh" className="h-4 w-4 animate-spin" /> : <Icon name="check" className="h-4 w-4" />}{t('auth.consent.confirm')}</Button>
-          <Link to="/oferta" target="_blank" className="inline-flex items-center px-3 text-sm font-medium text-forest underline">{t('auth.consent.read')}</Link>
+          <Link to="/oferta" target="_blank" rel="noopener noreferrer" className="inline-flex items-center px-3 text-sm font-medium text-forest underline">{t('auth.consent.read')}</Link>
         </div>
       </Card>
     </div>

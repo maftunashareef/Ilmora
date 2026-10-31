@@ -1,5 +1,5 @@
 import { Link } from '@/lib/router'
-import { ScheduleChips } from '../../components/course/CourseCard'
+import { FormatBadge, ScheduleChips } from '../../components/course/CourseCard'
 import { ArtCover, Avatar, Badge, EmptyState, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { useT } from '../../i18n/useT'
@@ -7,6 +7,7 @@ import { formatSom } from '../../lib/format'
 import { resolveGroups } from '../../lib/schedule'
 import { useCurrentStudent } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
+import { OnlineCoursesSection } from './OnlineCourses'
 
 export function StudentCourses() {
   const { t, tr, lang } = useT()
@@ -28,7 +29,7 @@ export function StudentCourses() {
               <article key={g.id} className="card overflow-hidden p-0">
                 <ArtCover seed={c.coverSeed} tone={center?.tone} imageUrl={c.imageUpload?.previewUrl || c.imageUrl} className="aspect-[16/6] w-full" />
                 <div className="p-5">
-                  <div className="flex flex-wrap items-center gap-2"><Badge tone="sage">{tr(s.categories.find((x) => x.id === c.categoryId)?.name)}</Badge><Badge tone="forest">{t('student.myGroup')}: {g.name}</Badge></div>
+                  <div className="flex flex-wrap items-center gap-2"><FormatBadge course={c} /><Badge tone="sage">{tr(s.categories.find((x) => x.id === c.categoryId)?.name)}</Badge><Badge tone="forest">{t('student.myGroup')}: {g.name}</Badge></div>
                   <h2 className="mt-3 font-display text-2xl text-charcoal"><Link to={`/courses/${c.id}`} className="hover:text-forest">{tr(c.title)}</Link></h2>
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-charcoal/55"><span>{center?.name}</span><span>{t('common.room')} {g.room}</span><span>{formatSom(c.price, lang)} {t('common.perMonth')}</span></div>
                   <div className="mt-3"><ScheduleChips group={g} /></div>
@@ -48,6 +49,7 @@ export function StudentCourses() {
           })}
         </div>
       )}
+      <OnlineCoursesSection />
       <Notice tone="info" className="mt-6 text-xs">{t('vis.enrollmentNote')}</Notice>
     </div>
   )

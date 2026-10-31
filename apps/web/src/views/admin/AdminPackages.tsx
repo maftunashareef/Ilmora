@@ -1,24 +1,26 @@
 import { Button, Card, cx, Field, Icon, Input, LField, Notice, PageTitle, Toggle } from '../../components/ui'
 import { emptyL, useT } from '../../i18n/useT'
-import { uid, useStore } from '../../store/useStore'
+import { useStore } from '../../store/useStore'
 import type { Package } from '../../types'
+import { UniversityPackagesAdmin } from './UniversityPackages'
 
 export function AdminPackages() {
   const { t, tr } = useT()
   const packages = useStore((s) => s.site.packages)
-  const patchSite = useStore((s) => s.patchSite)
+  const savePackage = useStore((s) => s.savePackage)
+  const addPackage = useStore((s) => s.addPackage)
   const notify = useStore((s) => s.notify)
-  const setAll = (list: Package[]) => patchSite((s) => ({ ...s, packages: list }))
-  const up = (id: string, patch: Partial<Package>) => setAll(packages.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+  // Each change is saved to the packages API (the id and code stay the same, so subscriptions keep pointing at the package).
+  const up = (id: string, patch: Partial<Package>) => savePackage(id, patch)
   return (
     <div>
-      <PageTitle eyebrow={t('dash.admin')} title={t('admin.packages')} subtitle={t('admin.packages.hint')} action={<Button onClick={() => { setAll([...packages, { id: uid('pkg'), name: emptyL(), maxCourses: 4, description: emptyL(), perks: [], enabled: false, highlight: false }]); notify(t('common.saved')) }}><Icon name="plus" className="h-4 w-4" />{t('admin.packages.add')}</Button>} />
+      <PageTitle eyebrow={t('dash.admin')} title={t('admin.packages')} subtitle={t('admin.packages.hint')} action={<Button onClick={async () => { await addPackage(); notify(t('common.saved')) }}><Icon name="plus" className="h-4 w-4" />{t('admin.packages.add')}</Button>} />
       <div className="grid gap-6 lg:grid-cols-2">
         {packages.map((p) => (
           <Card key={p.id} className={cx(!p.enabled && 'opacity-70')}>
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="font-display text-3xl text-charcoal">{tr(p.name) || '—'}</div>
-              <div className="flex items-center gap-3"><Toggle checked={p.enabled} onChange={(v) => up(p.id, { enabled: v })} label={t('common.enabled')} /><Button size="sm" variant="danger" disabled={packages.length <= 1} onClick={() => { if (confirm(t('common.confirmDelete'))) setAll(packages.filter((x) => x.id !== p.id)) }}><Icon name="trash" className="h-3.5 w-3.5" /></Button></div>
+              <div className="flex items-center gap-3"><Toggle checked={p.enabled} onChange={(v) => up(p.id, { enabled: v })} label={t('common.enabled')} /><span title={t('admin.packages.noDelete')}><Button size="sm" variant="danger" disabled aria-label={t('admin.packages.noDelete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button></span></div>
             </div>
             <div className="space-y-4">
               <LField label={t('common.name')} value={p.name} onChange={(v) => up(p.id, { name: v })} />
@@ -43,6 +45,7 @@ export function AdminPackages() {
         ))}
       </div>
       <Notice tone="info" className="mt-6 text-xs">{t('builder.transparent')} {t('admin.packages.hint')}</Notice>
+      <UniversityPackagesAdmin />
     </div>
   )
 }

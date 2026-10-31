@@ -1,5 +1,6 @@
+import { billedSom } from '@ilmora/shared'
 import { Link } from '@/lib/router'
-import { ScheduleChips } from '../../components/course/CourseCard'
+import { FormatBadge, ScheduleChips } from '../../components/course/CourseCard'
 import { Badge, Card, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle, Stat } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
@@ -7,6 +8,7 @@ import { formatDate, formatSom } from '../../lib/format'
 import { expandLessons, resolveGroups, upcomingLessons } from '../../lib/schedule'
 import { useCurrentStudent, useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
+import { OnlineCoursesSection } from './OnlineCourses'
 
 export function StudentOverview() {
   const { t, tr, lang } = useT()
@@ -19,7 +21,8 @@ export function StudentOverview() {
   const lessons = expandLessons(groups, s.courses)
   const upcoming = upcomingLessons(lessons, 4)
   const pkg = s.site.packages.find((p) => p.id === student.subscription.packageId)
-  const total = groups.reduce((n, g) => n + (s.courses.find((c) => c.id === g.courseId)?.price ?? 0), 0)
+  // What is billed each period is fixed at checkout (discounts included); demo data without it falls back to list prices.
+  const total = billedSom(student.subscription.amountMinor) ?? groups.reduce((n, g) => n + (s.courses.find((c) => c.id === g.courseId)?.price ?? 0), 0)
   const myTeacherIds = new Set(groups.map((g) => s.courses.find((c) => c.id === g.courseId)?.teacherId))
   const videos = s.videos.filter((v) => { const a = checkAccess(v, viewer); return a.allowed && (a.reason !== 'public' || myTeacherIds.has(v.teacherId)) })
   const resources = s.resources.filter((r) => { const a = checkAccess(r, viewer); return a.allowed && (a.reason !== 'public' || myTeacherIds.has(r.teacherId)) })
@@ -68,6 +71,7 @@ export function StudentOverview() {
               <ul className="space-y-2.5">
                 {groups.map((g) => { const c = s.courses.find((x) => x.id === g.courseId)!; const te = s.teachers.find((x) => x.id === c.teacherId); return (
                   <li key={g.id} className="card group p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lift hover:border-champagne/40">
+                    <div className="mb-1"><FormatBadge course={c} /></div>
                     <Link to={`/courses/${c.id}`} className="font-medium text-charcoal group-hover:text-forest block transition-colors">{tr(c.title)}</Link>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-charcoal/60"><span>{te?.name}</span><ScheduleChips group={g} compact /></div>
                   </li>
@@ -78,6 +82,7 @@ export function StudentOverview() {
           </div>
         </>
       )}
+      <OnlineCoursesSection />
     </div>
   )
 }

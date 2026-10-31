@@ -51,6 +51,23 @@ enum Level {
   ADVANCED
 }
 
+/** How a course is taken: in person with seats and a schedule (OFFLINE), or on the provider's own site (ONLINE). */
+enum LearningFormat {
+  OFFLINE
+  ONLINE
+}
+
+/**
+ * Whether finishing an online course earns a certificate. AVAILABLE: the provider offers one but its course page does
+ * not say whether it is free, so we do not claim either.
+ */
+enum CertificateKind {
+  NONE
+  FREE
+  PAID
+  AVAILABLE
+}
+
 enum SubscriptionStatus {
   DRAFT
   PENDING_PAYMENT
@@ -423,8 +440,28 @@ model Course {
   curriculum       Json
   level            Level          @default(BEGINNER)
   durationMonths   Int            @default(3)
+  /**
+   * OFFLINE (default, every course before this field existed) runs in groups with seats and a schedule and is sold
+   * through subscriptions. ONLINE is a free external course: the learner opens `externalUrl` on the provider's site,
+   * there are no groups, and it never enters a cart or preset. ONLINE courses belong to the platform center/profile;
+   * the real provider and instructor are kept as text so no profile is invented for a real person.
+   */
+  learningFormat   LearningFormat @default(OFFLINE)
+  externalUrl      String?
+  providerName     String?
+  instructorName   String?
+  certificate      CertificateKind @default(NONE)
+  /** Human-readable length of an online course (localized), for example "about 9 weeks"; null when not stated. */
+  durationText     Json?
   /** Monthly price in tiyin (1 so‘m = 100 tiyin). */
   priceMinor       BigInt
+  /**
+   * Optional discount window (one per course). All three are set together or all are null; the API enforces
+   * percent 1..20 and endsAt > startsAt. Active when startsAt <= now < endsAt; see packages/shared/src/pricing.ts.
+   */
+  discountPercent  Int?
+  discountStartsAt DateTime?
+  discountEndsAt   DateTime?
   currency         String         @default("UZS")
   coverSeed        Int            @default(1)
   imageUrl         String?
@@ -450,6 +487,7 @@ model Course {
 
   @@unique([tenantId, slug])
   @@index([tenantId, status, visibility, deletedAt])
+  @@index([tenantId, learningFormat])
   @@index([tenantId, centerId])
   @@index([tenantId, teacherId])
   @@index([tenantId, categoryId])

@@ -1,16 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { overlaps } from '@ilmora/shared'
+import { finalPriceMinor, MAX_CART_COURSES, overlaps } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addMonthsUtc } from '../../common/time'
 import { ENV, type Env } from '../../config/env'
 import type { PaymentProvider } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { AuditService } from '../audit/audit.service'
-import { toGroup } from '../catalog/catalog.service'
+import { discountWindow, toGroup } from '../catalog/catalog.service'
 
 export interface DraftInput { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
 
-type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; priceMinor: bigint; meyosGrant: boolean; status: string } }
+type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; meyosGrant: boolean; status: string } }
 
 /**
  * Subscription lifecycle: draft (builder) → checkout (seat holds + pending payment) → active (on settlement).
@@ -57,13 +57,8 @@ export class SubscriptionService {
   /** Validates and stores the builder selection. Throws with the same reason codes the web builder shows. */
   async saveDraft(tenantId: string, studentId: string, input: DraftInput) {
     const groupIds = [...new Set(input.groupIds)]
-    if (input.packageId) {
-      await this.validateSelection(tenantId, input.packageId, groupIds, studentId)
-    } else if (groupIds.length > 0) {
-      // Even without a package selected, ensure the requested groups actually exist in this tenant.
-      const found = await this.prisma.client.group.count({ where: { tenantId, id: { in: groupIds }, deletedAt: null } })
-      if (found !== groupIds.length) throw AppError.notFound('Group')
-    }
+    // One validation path for both modes: a package enforces its own size, a custom selection (no package) the cart limit.
+    await this.validateSelection(tenantId, input.packageId, groupIds, studentId)
     const grantCourses = input.meyosGrant ? await this.grantCourseIds(tenantId, groupIds) : []
     const existing = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: 'DRAFT' } })
     const data = { packageId: input.packageId, draftGroupIds: groupIds, meyosGrant: input.meyosGrant && grantCourses.length > 0, grantCourseIds: grantCourses }
@@ -74,21 +69,25 @@ export class SubscriptionService {
   }
 
   /**
-   * Rules shared with the client: package exists and is enabled, at most maxCourses courses, one group per course,
-   * no overlapping schedules, every group has a free seat (the student's own current seat does not count against them).
+   * Rules shared with the client: with a package, it exists, is enabled and allows at most maxCourses courses; without
+   * one (custom selection) at most MAX_CART_COURSES. Always: published courses, one group per course, no overlapping
+   * schedules, every group has a free seat (the student's own current seat does not count against them).
    */
-  async validateSelection(tenantId: string, packageId: string, groupIds: string[], studentId?: string, tx?: TransactionClient): Promise<GroupRow[]> {
+  async validateSelection(tenantId: string, packageId: string | null, groupIds: string[], studentId?: string, tx?: TransactionClient): Promise<GroupRow[]> {
     const db = tx ?? this.prisma.client
-    const pkg = await db.package.findFirst({ where: { tenantId, id: packageId } })
-    if (!pkg) throw AppError.invalid('no-package', 'Choose a package first')
-    if (!pkg.enabled) throw AppError.invalid('disabled', 'This package is not available')
+    const pkg = packageId ? await db.package.findFirst({ where: { tenantId, id: packageId } }) : null
+    if (packageId) {
+      if (!pkg) throw AppError.invalid('no-package', 'Choose a package first')
+      if (!pkg.enabled) throw AppError.invalid('disabled', 'This package is not available')
+    }
     if (groupIds.length === 0) return []
-    const groups = (await db.group.findMany({ where: { tenantId, id: { in: groupIds } }, include: { course: { select: { id: true, priceMinor: true, meyosGrant: true, status: true } } } })) as GroupRow[]
+    const groups = (await db.group.findMany({ where: { tenantId, id: { in: groupIds }, deletedAt: null }, include: { course: { select: { id: true, priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, meyosGrant: true, status: true } } } })) as GroupRow[]
     if (groups.length !== groupIds.length) throw AppError.notFound('Group')
     if (groups.some((g) => g.course.status !== 'PUBLISHED')) throw AppError.invalid('disabled', 'One of the courses is not open for enrollment')
     const courses = new Set(groups.map((g) => g.courseId))
     if (courses.size !== groups.length) throw AppError.invalid('duplicate', 'A course can be selected only once')
-    if (groups.length > pkg.maxCourses) throw AppError.invalid('limit', `This package allows ${pkg.maxCourses} courses`)
+    const max = pkg?.maxCourses ?? MAX_CART_COURSES
+    if (groups.length > max) throw AppError.invalid('limit', pkg ? `This package allows ${max} courses` : `A selection can include at most ${max} courses`)
     for (let i = 0; i < groups.length; i++)
       for (let j = i + 1; j < groups.length; j++) {
         const a = groups[i], b = groups[j]
@@ -108,9 +107,15 @@ export class SubscriptionService {
    */
   async checkout(tenantId: string, studentId: string, provider: PaymentProvider) {
     const draft = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: 'DRAFT' } })
-    if (!draft?.packageId) throw AppError.invalid('incomplete', 'Choose a package and your courses first')
-    const pkg = await this.prisma.client.package.findFirst({ where: { tenantId, id: draft.packageId } })
-    if (!pkg || draft.draftGroupIds.length !== pkg.maxCourses) throw AppError.invalid('incomplete', `Select ${pkg?.maxCourses ?? ''} courses to continue`)
+    if (!draft) throw AppError.invalid('incomplete', 'Choose a package and your courses first')
+    if (draft.packageId) {
+      // Duo/Trio style package: the number of courses must match the package exactly.
+      const pkg = await this.prisma.client.package.findFirst({ where: { tenantId, id: draft.packageId } })
+      if (!pkg || draft.draftGroupIds.length !== pkg.maxCourses) throw AppError.invalid('incomplete', `Select ${pkg?.maxCourses ?? ''} courses to continue`)
+    } else if (draft.draftGroupIds.length === 0) {
+      // Custom selection: any number of courses from one up to the cart limit, validated below.
+      throw AppError.invalid('incomplete', 'Select at least one course to continue')
+    }
     const open = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['PENDING_PAYMENT', 'ACTIVE', 'PAST_DUE'] } } })
     if (open) throw AppError.conflict('subscription_exists', 'You already have an active or pending subscription')
 
@@ -119,8 +124,11 @@ export class SubscriptionService {
     const result = await this.prisma.tx(async (tx) => {
       // Row locks serialize concurrent checkouts touching the same groups.
       await tx.$queryRawUnsafe(`SELECT id FROM "Group" WHERE id = ANY($1::text[]) AND "tenantId" = $2 FOR UPDATE`, draft.draftGroupIds, tenantId)
-      const groups = await this.validateSelection(tenantId, pkg.id, draft.draftGroupIds, studentId, tx)
-      const amountMinor = groups.reduce((sum, g) => sum + g.course.priceMinor, 0n)
+      const groups = await this.validateSelection(tenantId, draft.packageId, draft.draftGroupIds, studentId, tx)
+      // Each course is charged its list price minus the discount active right now (none stacks with anything else); the server
+      // decides the amount, the browser only displays it. The amount stays fixed for this payment's hold.
+      const listMinor = groups.reduce((sum, g) => sum + g.course.priceMinor, 0n)
+      const amountMinor = groups.reduce((sum, g) => sum + finalPriceMinor(g.course.priceMinor, discountWindow(g.course), now), 0n)
       const sub = await tx.subscription.update({
         where: { id: draft.id },
         data: { status: 'PENDING_PAYMENT', amountMinor, currency: 'UZS', currentPeriodStart: now, currentPeriodEnd: addMonthsUtc(now, 1) },
@@ -131,7 +139,7 @@ export class SubscriptionService {
       const payment = await tx.payment.create({
         data: { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd: addMonthsUtc(now, 1), amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId },
       })
-      await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider, amountMinor: amountMinor.toString(), groupIds: draft.draftGroupIds } })
+      await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider, amountMinor: amountMinor.toString(), listAmountMinor: listMinor.toString(), discountMinor: (listMinor - amountMinor).toString(), groupIds: draft.draftGroupIds, packageId: draft.packageId } })
       return { subscription: sub, payment }
     })
     return result

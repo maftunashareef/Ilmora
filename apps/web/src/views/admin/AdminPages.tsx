@@ -6,9 +6,9 @@ import { uid, useStore, type PageKey } from '../../store/useStore'
 import type { Section, SectionType } from '../../types'
 
 const PAGE_PATH: Record<PageKey, string> = { home: '/', howItWorks: '/how-it-works', centers: '/centers' }
-const TYPES: SectionType[] = ['hero', 'marquee', 'packages', 'featuredCourses', 'categories', 'howItWorks', 'steps', 'studio3d', 'furnitureStory', 'teachers', 'centers', 'faq', 'centerCta', 'announcement', 'richText', 'inquiryForm']
+const TYPES: SectionType[] = ['hero', 'discounts', 'marquee', 'packages', 'featuredCourses', 'categories', 'howItWorks', 'steps', 'studio3d', 'furnitureStory', 'teachers', 'centers', 'faq', 'centerCta', 'announcement', 'richText', 'inquiryForm', 'courseFinder', 'journey']
 const HAS_ITEMS: SectionType[] = ['howItWorks', 'steps']
-const HAS_COUNT: SectionType[] = ['featuredCourses', 'teachers', 'faq']
+const HAS_COUNT: SectionType[] = ['featuredCourses', 'discounts', 'teachers', 'faq']
 const HAS_BODY: SectionType[] = ['richText']
 
 export function AdminPages() {
@@ -23,7 +23,7 @@ export function AdminPages() {
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.pages')} subtitle={t('admin.pages.hint')} action={
         <>
-          <Link to={PAGE_PATH[page]} target="_blank" className="inline-flex items-center gap-1.5 rounded-control border border-charcoal/15 px-4 py-2.5 text-sm font-medium hover:border-forest/50">{t('admin.pages.openPage')} <Icon name="external" className="h-3.5 w-3.5" /></Link>
+          <Link to={PAGE_PATH[page]} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-control border border-charcoal/15 px-4 py-2.5 text-sm font-medium hover:border-forest/50">{t('admin.pages.openPage')} <Icon name="external" className="h-3.5 w-3.5" /></Link>
           <Button variant="secondary" onClick={() => { if (confirm(t('admin.pages.restoreConfirm'))) { restorePageDefaults(page); notify(t('common.saved')) } }}><Icon name="refresh" className="h-4 w-4" />{t('common.restoreDefaults')}</Button>
         </>
       } />

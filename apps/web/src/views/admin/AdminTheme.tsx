@@ -72,7 +72,7 @@ export function AdminTheme() {
               <li key={n.id} className={cx('rounded-card border border-charcoal/10 bg-ivory/50 p-3', !n.enabled && 'opacity-60')}>
                 <div className="grid items-end gap-3 md:grid-cols-[1fr_12rem_auto]">
                   <LField label={t('common.name')} value={n.label} onChange={(v) => setNav(nav.map((x) => (x.id === n.id ? { ...x, label: v } : x)))} />
-                  <Field label={t('admin.nav.path')}><Select value={n.path} onChange={(e) => setNav(nav.map((x) => (x.id === n.id ? { ...x, path: e.target.value } : x)))}>{['/courses', '/teachers', '/builder', '/how-it-works', '/centers', '/faq', '/preview'].map((p) => <option key={p} value={p}>{p}</option>)}</Select></Field>
+                  <Field label={t('admin.nav.path')}><Select value={n.path} onChange={(e) => setNav(nav.map((x) => (x.id === n.id ? { ...x, path: e.target.value } : x)))}>{['/courses', '/teachers', '/builder', '/course-finder', '/how-it-works', '/centers', '/faq', '/preview'].map((p) => <option key={p} value={p}>{p}</option>)}</Select></Field>
                   <div className="flex items-center gap-1 pb-1">
                     <Toggle checked={n.enabled} onChange={(v) => setNav(nav.map((x) => (x.id === n.id ? { ...x, enabled: v } : x)))} />
                     <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => moveNav(i, -1)} aria-label={t('common.moveUp')}><Icon name="up" className="h-4 w-4" /></Button>

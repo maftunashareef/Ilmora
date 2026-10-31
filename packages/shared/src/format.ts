@@ -28,8 +28,8 @@ const UZ_DAYS_SHORT = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan']
 export function formatDate(iso: string | undefined, lang: Lang): string {
   if (!iso) return '—'
   const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso)
-  // Browsers rarely ship Uzbek Latin month names, so format Uzbek dates by hand.
-  if (lang === 'uz') return `${d.getDate()}-${UZ_MONTHS[d.getMonth()]} ${d.getFullYear()}`
+  // Browsers rarely ship Uzbek Latin month names, so format Uzbek dates by hand, year first: "2026-yil 20-noyabr".
+  if (lang === 'uz') return `${d.getFullYear()}-yil ${d.getDate()}-${UZ_MONTHS[d.getMonth()]}`
   const locale = lang === 'ru' ? 'ru-RU' : 'en-GB'
   try {
     return d.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })

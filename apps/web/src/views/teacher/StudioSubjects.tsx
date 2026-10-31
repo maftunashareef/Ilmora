@@ -4,6 +4,7 @@ import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { ScheduleChips } from '../../components/course/CourseCard'
 import { CourseForm } from '../../components/course/CourseForm'
 import { ArtCover, Badge, Button, Card, Eyebrow, Icon, LField, Modal, Notice, PageTitle } from '../../components/ui'
+import { countLabel, NOUNS } from '@ilmora/shared'
 import { emptyL, useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
 import { useCurrentTeacher } from '../../store/selectors'
@@ -33,7 +34,7 @@ export function StudioSubjects() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {subjects.map((sub) => (
             <Card key={sub.id} className="flex items-start justify-between gap-3 p-4">
-              <div><div className="font-display text-xl text-charcoal">{tr(sub.name)}</div><div className="mt-0.5 text-xs text-charcoal/55">{tr(sub.description)}</div><div className="mt-2 text-[11px] text-charcoal/45">{courses.filter((c) => c.subjectId === sub.id).length} {t('common.courses').toLowerCase()}</div></div>
+              <div><div className="font-display text-xl text-charcoal">{tr(sub.name)}</div><div className="mt-0.5 text-xs text-charcoal/55">{tr(sub.description)}</div><div className="mt-2 text-[11px] text-charcoal/45">{countLabel(lang, courses.filter((c) => c.subjectId === sub.id).length, NOUNS.course)}</div></div>
               <div className="flex gap-0.5"><Button size="sm" variant="ghost" onClick={() => setSubject(sub)} aria-label={t('common.edit')}><Icon name="edit" className="h-3.5 w-3.5" /></Button><Button size="sm" variant="ghost" onClick={() => { if (confirm(t('common.confirmDelete'))) removeSubject(sub.id) }} aria-label={t('common.delete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button></div>
             </Card>
           ))}

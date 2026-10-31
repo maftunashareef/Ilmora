@@ -26,7 +26,7 @@ export function checkAccess(item: Owned, viewer: Viewer): AccessResult {
 export const canAccess = (item: Owned, viewer: Viewer) => checkAccess(item, viewer).allowed
 
 /** Public listing rule: appears in search, catalog, channels for everyone. */
-export const isPublicListed = (item: Publishable) => item.status === 'published' && item.visibility === 'public'
+export const isPublicListed = (item: Pick<Publishable, 'status' | 'visibility'>) => item.status === 'published' && item.visibility === 'public'
 
 /** Items a viewer sees in channel/listing contexts: public + assigned private (published). Owners/admins see everything. */
 export function visibleFor<T extends Owned>(items: T[], viewer: Viewer): T[] {

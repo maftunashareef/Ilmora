@@ -1,15 +1,16 @@
+import { isOnlineCourse, isSafeExternalUrl, MAX_CART_COURSES } from '@ilmora/shared'
 import { Link, useNavigate, useParams } from '@/lib/router'
 import { AccessDenied, NotFound } from '../../components/AccessGate'
 import { AccessBadge, LevelBadge, StatusBadge, VisibilityBadge } from '../../components/course/badges'
-import { PriceTag, ScheduleChips } from '../../components/course/CourseCard'
+import { CoursePrice, FormatBadge, ScheduleChips } from '../../components/course/CourseCard'
 import { getCoursePhotoUrl } from '../../components/course/courseImage'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
-import { ArtCover, Avatar, Badge, Button, Card, cx, Eyebrow, Icon, Notice } from '../../components/ui'
+import { ArtCover, Avatar, Badge, Button, Card, cx, Eyebrow, Icon, LinkButton, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import { formatDuration } from '../../lib/format'
-import { useCurrentStudent, useViewer } from '../../store/selectors'
+import { useCanSaveCourses, useCurrentStudent, useHydrated, useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 
 export function CourseDetailPage() {
@@ -28,8 +29,8 @@ export function CourseDetailPage() {
   const addBuilderGroup = useStore((s) => s.addBuilderGroup)
   const toggleSaved = useStore((s) => s.toggleSavedCourse)
   const notify = useStore((s) => s.notify)
-  const features = useStore((s) => s.site.features)
-  const studentPerms = useStore((s) => s.site.permissions.student)
+  const canSave = useCanSaveCourses()
+  const hydrated = useHydrated()
   const channelsOn = useStore((s) => s.site.features.teacherChannels)
 
   if (!course) return <NotFound />
@@ -38,15 +39,14 @@ export function CourseDetailPage() {
 
   const inPlan = student?.builder.groupIds.find((gid) => course.groups.some((g) => g.id === gid))
   const enrolled = student?.subscription.status === 'active' && student.subscription.groupIds.some((gid) => course.groups.some((g) => g.id === gid))
-  const saved = student?.savedCourseIds.includes(course.id)
-  const canSave = features.savedItems && studentPerms.saveItems && viewer.role === 'student'
+  const saved = hydrated && !!student?.savedCourseIds.includes(course.id)
+  const online = isOnlineCourse(course)
 
   const add = (groupId: string) => {
     if (!student) return
-    if (!student.builder.packageId) { notify(t('builder.pickPackageFirst'), 'warn'); nav('/builder'); return }
     const r = addBuilderGroup(student.id, groupId)
     if (r.ok) notify(t('courses.inPlan'))
-    else if (r.reason === 'limit') notify(t('builder.limitReached'), 'warn')
+    else if (r.reason === 'limit') notify(student.builder.packageId ? t('builder.limitReached') : t('builder.customLimit', { n: MAX_CART_COURSES }), 'warn')
     else if (r.reason === 'duplicate') notify(t('builder.duplicate'), 'warn')
     else if (r.reason === 'conflict') notify(`${t('builder.conflict')}: ${t('builder.conflictHint')}`, 'warn')
     else if (r.reason === 'disabled') notify(t('builder.packageDisabled'), 'warn')
@@ -66,6 +66,7 @@ export function CourseDetailPage() {
         <div>
           <ArtCover seed={course.coverSeed} imageUrl={course.imageUpload?.previewUrl || course.imageUrl || getCoursePhotoUrl(course)} alt={tr(course.title)} tone={center?.tone} className="aspect-[16/8] w-full rounded-card" label={course.id === 'c-bazis' ? 'B' : undefined} />
           <div className="mt-8 flex flex-wrap items-center gap-2">
+            <FormatBadge course={course} />
             {category && <Badge tone="sage">{tr(category.name)}</Badge>}
             <LevelBadge level={course.level} />
             {course.featured && <Badge tone="champagne"><Icon name="star" className="h-3 w-3" />{t('common.featured')}</Badge>}
@@ -74,7 +75,6 @@ export function CourseDetailPage() {
           </div>
           <h1 className="mt-4 font-display text-5xl leading-[1.02] text-charcoal md:text-6xl">{tr(course.title)}</h1>
           <p className="mt-4 max-w-2xl text-lg leading-relaxed text-charcoal/70">{tr(course.summary)}</p>
-          <Notice tone="info" className="mt-6 inline-flex items-center gap-2 text-xs"><Icon name="info" className="h-3.5 w-3.5" />{t('courses.sample')}</Notice>
 
           <section className="mt-12">
             <Eyebrow className="mb-3">{t('courses.aboutCourse')}</Eyebrow>
@@ -140,11 +140,57 @@ export function CourseDetailPage() {
         </div>
 
         <aside className="lg:sticky lg:top-24 lg:self-start">
+          {online && (
+            <>
+              <Card className="p-6 md:p-7">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="eyebrow">{t('format.onlineHint')}</div>
+                    <div className="mt-1 font-display text-4xl text-forest">{t('online.free')}</div>
+                  </div>
+                  {canSave && student && (
+                    <Button variant="ghost" size="sm" aria-pressed={saved} onClick={() => toggleSaved(student.id, course.id)}>
+                      <Icon name={saved ? 'bookmarkFill' : 'bookmark'} className="h-4 w-4" />{saved ? t('channel.saved') : t('channel.save')}
+                    </Button>
+                  )}
+                </div>
+                <dl className="mt-5 grid grid-cols-2 gap-3 text-xs">
+                  {course.providerName && <div className="col-span-2"><dt className="text-charcoal/50">{t('online.provider')}</dt><dd className="mt-0.5 font-medium text-charcoal">{course.providerName}</dd></div>}
+                  {course.instructorName && <div className="col-span-2"><dt className="text-charcoal/50">{t('online.instructor')}</dt><dd className="mt-0.5 font-medium text-charcoal">{course.instructorName}</dd></div>}
+                  {course.durationText && tr(course.durationText) && <div className="col-span-2"><dt className="text-charcoal/50">{t('common.duration')}</dt><dd className="mt-0.5 font-medium text-charcoal">{tr(course.durationText)}</dd></div>}
+                  <div><dt className="text-charcoal/50">{t('common.level')}</dt><dd className="mt-0.5 font-medium text-charcoal">{t(`level.${course.level}`)}</dd></div>
+                  <div><dt className="text-charcoal/50">{t('online.certificate')}</dt><dd className="mt-0.5 font-medium text-charcoal">{t(`online.cert.${course.certificate ?? 'NONE'}` as 'online.cert.NONE')}</dd></div>
+                </dl>
+                {isSafeExternalUrl(course.externalUrl) && (
+                  <LinkButton to={course.externalUrl as string} external size="lg" className="mt-6 w-full justify-center">
+                    {t('online.open')}<Icon name="external" className="h-4 w-4" />
+                  </LinkButton>
+                )}
+                <p className="mt-4 text-[11px] leading-relaxed text-charcoal/50">{t('online.externalNote')}</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-charcoal/50">{t('online.notSubscription')}</p>
+              </Card>
+              <Card className="mt-4 p-6">
+                <div className="eyebrow mb-3">{t('courses.providedBy')}</div>
+                <div className="font-display text-xl text-charcoal">{course.providerName}</div>
+                {course.instructorName && (
+                  <div className="mt-5 flex items-center gap-3 border-t border-charcoal/10 pt-5">
+                    <Avatar name={course.instructorName} seed={course.coverSeed} size={44} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-charcoal">{course.instructorName}</div>
+                      <div className="truncate text-xs text-charcoal/55">{t('online.instructor')}</div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </>
+          )}
+          {!online && (
+          <>
           <Card className="p-6 md:p-7">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="eyebrow">{t('courses.monthlyPrice')}</div>
-                <PriceTag price={course.price} emphasis className="mt-1" />
+                <CoursePrice course={course} emphasis className="mt-1" />
               </div>
               {canSave && student && (
                 <Button variant="ghost" size="sm" aria-pressed={saved} onClick={() => toggleSaved(student.id, course.id)}>
@@ -191,7 +237,7 @@ export function CourseDetailPage() {
                 <span className="mt-1 h-9 w-1 rounded-full" style={{ background: center.tone }} />
                 <div>
                   <div className="font-display text-xl text-charcoal">{center.name}</div>
-                  <div className="text-xs text-charcoal/55">{tr(center.district)} · {t('courses.demoProvider')}</div>
+                  <div className="text-xs text-charcoal/55">{tr(center.district)}</div>
                 </div>
               </div>
             )}
@@ -206,6 +252,8 @@ export function CourseDetailPage() {
               </div>
             )}
           </Card>
+          </>
+          )}
         </aside>
       </div>
     </article>

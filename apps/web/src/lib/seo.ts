@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { pick, type L, type Lang } from '@ilmora/shared'
+import { finalPriceSom, pick, type L, type Lang } from '@ilmora/shared'
 import { SITE_URL } from './server-api'
 
 export const LOCALES: Lang[] = ['uz', 'ru', 'en']
@@ -49,7 +49,7 @@ export function courseJsonLd(course: { title: L; summary: L; description: L; pri
     provider: center ? { '@type': 'EducationalOrganization', name: center.name, address: center.district ? { '@type': 'PostalAddress', addressLocality: 'Tashkent', addressRegion: l(lang, center.district) } : undefined } : undefined,
     instructor: teacher ? { '@type': 'Person', name: teacher.name } : undefined,
     inLanguage: lang,
-    offers: { '@type': 'Offer', price: course.price, priceCurrency: course.currency ?? 'UZS', category: 'Monthly subscription', availability: 'https://schema.org/InStock' },
+    offers: { '@type': 'Offer', price: finalPriceSom(course), priceCurrency: course.currency ?? 'UZS', category: 'Monthly subscription', availability: 'https://schema.org/InStock' },
     hasCourseInstance: { '@type': 'CourseInstance', courseMode: 'Onsite', courseWorkload: `P${course.durationMonths}M` },
   }
 }
@@ -82,6 +82,8 @@ const STATIC_TITLES: Record<string, L> = {
   '/courses': { uz: 'Kurslar', ru: 'Курсы', en: 'Courses' },
   '/teachers': { uz: 'O‘qituvchilar', ru: 'Преподаватели', en: 'Teachers' },
   '/builder': { uz: 'Abonement', ru: 'Абонемент', en: 'Subscription' },
+  '/course-finder': { uz: 'Mening to‘plamim', ru: 'Свой набор', en: 'My set' },
+  '/favorites': { uz: 'Saqlangan kurslar', ru: 'Избранное', en: 'Saved courses' },
   '/how-it-works': { uz: 'Qanday ishlaydi', ru: 'Как это работает', en: 'How it works' },
   '/centers': { uz: 'Markazlar uchun', ru: 'Для центров', en: 'For centers' },
   '/faq': { uz: 'Savol-javob', ru: 'FAQ', en: 'FAQ' },

@@ -1,18 +1,22 @@
 import { useState } from 'react'
 import { Link } from '@/lib/router'
-import { normalizeUzPhone } from '@ilmora/shared'
+import { carouselCourses, countLabel, finalPriceSom, isOnlineCourse, MAX_CAROUSEL_COURSES, MAX_CART_COURSES, normalizeUzPhone, NOUNS, ONLINE_PROVIDER_SLUG } from '@ilmora/shared'
 import { api, isApiError } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
 import { formatSom } from '../../lib/format'
 import { withBase } from '../../lib/url'
 import { useStore, type PageKey } from '../../store/useStore'
 import type { Section } from '../../types'
-import { CourseCard, PriceTag, ScheduleChips } from '../../components/course/CourseCard'
+import { CourseCard, CoursePrice, ScheduleChips } from '../../components/course/CourseCard'
 import { BackgroundVideo, CountUp, Marquee, SnapTrack, SplitWords } from '../../components/motion'
 import dynamic from 'next/dynamic'
 import { Avatar, Badge, Button, Card, cx, Eyebrow, Field, Icon, Input, LinkButton, Notice, SectionHeading, Textarea } from '../../components/ui'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
+import { CourseFinderTeaser } from './CourseFinder'
+import { DiscountShowcase } from '../../components/course/DiscountShowcase'
+import { JourneySection as Journey } from '../../components/JourneySteps'
 
 const Scene3D = dynamic(() => import('../../components/three/Scene3D').then((m) => m.Scene3D), { ssr: false })
 const ScrollVideo = dynamic(() => import('../../components/three/ScrollVideo').then((m) => m.ScrollVideo), { ssr: false })
@@ -31,6 +35,7 @@ export function SectionRenderer({ section }: { section: Section }) {
   switch (section.type) {
     case 'hero': return <Hero />
     case 'marquee': return <MarqueeSection s={section} />
+    case 'discounts': return <DiscountsSection s={section} />
     case 'packages': return <Packages s={section} />
     case 'featuredCourses': return <FeaturedCourses s={section} />
     case 'categories': return <Categories s={section} />
@@ -45,6 +50,8 @@ export function SectionRenderer({ section }: { section: Section }) {
     case 'announcement': return <AnnouncementSection s={section} />
     case 'richText': return <RichText s={section} />
     case 'inquiryForm': return <InquiryForm s={section} />
+    case 'courseFinder': return <CourseFinderTeaser s={section} />
+    case 'journey': return <JourneySection s={section} />
     default: return null
   }
 }
@@ -56,7 +63,7 @@ function Hero() {
   const { t, tr } = useT()
   const brand = useStore((s) => s.site.brand)
   const media = useStore((s) => s.site.media)
-  const nCenters = useStore((s) => s.centers.length)
+  const nCenters = useStore((s) => s.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG).length)
   const nCourses = useStore((s) => s.courses.filter(isPublicListed).length)
   const nCats = useStore((s) => s.categories.length)
   return (
@@ -94,10 +101,25 @@ function Hero() {
   )
 }
 
+// ─── Discount carousel: published public courses whose discount is active now (they also stay in the catalog) ───
+function DiscountsSection({ s }: { s: Section }) {
+  const { t, tr } = useT()
+  const courses = useStore((st) => st.courses)
+  const list = carouselCourses(courses, new Date(), s.count ?? MAX_CAROUSEL_COURSES)
+  if (list.length === 0) return null
+  return <DiscountShowcase courses={list} title={tr(s.title) || t('discounts.title')} subtitle={tr(s.subtitle) || t('discounts.subtitle')} />
+}
+
+// ─── How ILMORA works: five-step journey (admin title/subtitle when set, else the dictionary texts) ───
+function JourneySection({ s }: { s: Section }) {
+  const { tr } = useT()
+  return <Journey title={tr(s.title)} subtitle={tr(s.subtitle)} />
+}
+
 // ─── Marquee ticker of sample centers & categories ───────────────────────────
 function MarqueeSection({ s }: { s: Section }) {
   const { tr } = useT()
-  const centers = useStore((st) => st.centers)
+  const centers = useStore((st) => st.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG))
   const categories = useStore((st) => st.categories)
   const items = [
     ...centers.map((c) => <span key={c.id} className="font-display text-2xl text-charcoal/80">{c.name}</span>),
@@ -111,22 +133,23 @@ function MarqueeSection({ s }: { s: Section }) {
   )
 }
 
-// ─── Packages: Duo and Trio Subscriptions with visual composition ────────────
+// ─── Packages: Flex, Winx (database packages) and Build Your Own (no package) ─
 function Packages({ s }: { s: Section }) {
   const { t, tr, lang } = useT()
   const packages = useStore((st) => st.site.packages)
   const courses = useStore((st) => st.courses.filter(isPublicListed))
-  const cheapest = [...courses].sort((a, b) => a.price - b.price)
+  // Only offline courses go into a subscription; free online courses would make every "from" price 0.
+  const cheapest = courses.filter((c) => !isOnlineCourse(c)).sort((a, b) => finalPriceSom(a) - finalPriceSom(b))
 
   return (
     <section className="relative overflow-hidden bg-sage/40 py-20 lg:py-28">
       <div className="float-a pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full border border-champagne/30" aria-hidden="true" />
       <div className="float-b pointer-events-none absolute -right-16 bottom-6 h-56 w-56 rounded-full border border-forest/15" aria-hidden="true" />
       <div className="container-x relative">
-        <SectionHeading eyebrow={t('common.demo')} title={tr(s.title)} subtitle={tr(s.subtitle)} />
-        <div className="reveal-stagger grid gap-8 md:grid-cols-2 lg:mx-auto lg:max-w-4xl pt-3.5">
+        <SectionHeading title={tr(s.title)} subtitle={tr(s.subtitle)} />
+        <div className="reveal-stagger grid gap-8 md:grid-cols-2 lg:mx-auto lg:max-w-6xl lg:grid-cols-3 pt-3.5">
           {packages.filter((p) => p.enabled).map((p) => {
-            const from = cheapest.slice(0, p.maxCourses).reduce((n, c) => n + c.price, 0)
+            const from = cheapest.slice(0, p.maxCourses).reduce((n, c) => n + finalPriceSom(c), 0)
             const isTrio = p.maxCourses >= 3
             return (
               <div key={p.id} className="reveal reveal-scale">
@@ -197,6 +220,43 @@ function Packages({ s }: { s: Section }) {
               </div>
             )
           })}
+          {/* Build Your Own: the existing custom selection (no package), 1 to MAX_CART_COURSES courses. */}
+          <div className="reveal reveal-scale">
+            <Card className="relative flex h-full flex-col border-dashed border-forest/30 bg-paper p-8 transition duration-500 hover:-translate-y-1.5 hover:border-forest/50 hover:shadow-lift md:p-10">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-display text-4xl leading-tight text-charcoal">{t('builder.custom')}</span>
+                <span className="shrink-0 rounded-full bg-sage px-2.5 py-0.5 text-xs font-semibold text-forest">{t('packages.byoRange', { n: MAX_CART_COURSES })}</span>
+              </div>
+              <div className="mt-5 rounded-control border border-dashed border-charcoal/15 bg-ivory/60 p-3.5">
+                <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-charcoal/50">{t('packages.byoComposition')}</div>
+                <div className="grid gap-2">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="flex items-center gap-2.5 rounded-control border border-dashed border-forest/25 bg-paper px-3 py-2 text-xs text-charcoal/60">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full border border-forest/40 text-forest"><Icon name="plus" className="h-3 w-3" /></span>
+                      <span className="truncate font-medium">{t('packages.byoSlot')}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-5 text-[15px] leading-relaxed text-charcoal/70">{t('builder.customHint', { n: MAX_CART_COURSES })}</p>
+              <ul className="mt-6 space-y-2.5 text-sm text-charcoal/75">
+                {(['packages.byoPerk1', 'packages.byoPerk2', 'packages.byoPerk3'] as const).map((k) => (
+                  <li key={k} className="flex gap-2.5"><Icon name="check" className="mt-0.5 h-4 w-4 shrink-0 text-forest" />{t(k, { n: MAX_CART_COURSES })}</li>
+                ))}
+              </ul>
+              <div className="mt-8 flex items-end justify-between gap-4 border-t border-charcoal/10 pt-6">
+                {cheapest[0] && (
+                  <div className="font-display text-2xl text-charcoal">
+                    {t('home.priceFrom', { price: formatSom(finalPriceSom(cheapest[0]), lang) })}
+                    <span className="ml-1 text-xs text-charcoal/50">{t('common.perMonth')}</span>
+                  </div>
+                )}
+                <LinkButton to="/builder?package=custom" variant="secondary">
+                  {t('common.select')} <Icon name="arrowRight" className="h-4 w-4" />
+                </LinkButton>
+              </div>
+            </Card>
+          </div>
         </div>
         <p className="reveal mt-8 text-center text-xs text-charcoal/50">{t('builder.transparent')}</p>
       </div>
@@ -310,7 +370,7 @@ function Studio3D({ s }: { s: Section }) {
             {category && <Badge tone="champagne">{tr(category.name)}</Badge>}
           </div>
           <Link to={`/courses/${course.id}`} className="absolute bottom-12 right-5 flex items-center gap-4 rounded-control border border-charcoal/10 bg-paper/90 px-4 py-3 shadow-soft backdrop-blur transition hover:shadow-lift sm:bottom-5">
-            <div><div className="eyebrow">{t('courses.monthlyPrice')}</div><PriceTag price={course.price} /></div>
+            <div><div className="eyebrow">{t('courses.monthlyPrice')}</div><CoursePrice course={course} /></div>
             {group && <div className="hidden border-l border-charcoal/10 pl-4 sm:block"><div className="eyebrow">{t('common.schedule')}</div><div className="mt-1"><ScheduleChips group={group} compact /></div></div>}
           </Link>
         </div>
@@ -401,8 +461,8 @@ function TeachersSection({ s }: { s: Section }) {
 
 // ─── Centers list ────────────────────────────────────────────────────────────
 function CentersSection({ s }: { s: Section }) {
-  const { t, tr } = useT()
-  const centers = useStore((st) => st.centers)
+  const { tr, lang } = useT()
+  const centers = useStore((st) => st.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG))
   const courses = useStore((st) => st.courses.filter(isPublicListed))
   return (
     <section className="py-16 lg:py-24">
@@ -415,14 +475,13 @@ function CentersSection({ s }: { s: Section }) {
                 <span className="mt-1 h-10 w-1 shrink-0 rounded-full" style={{ background: c.tone }} />
                 <div>
                   <div className="font-display text-xl text-charcoal">{c.name}</div>
-                  <div className="text-xs text-charcoal/55">{tr(c.district)} · {courses.filter((x) => x.centerId === c.id).length} {t('common.courses').toLowerCase()}</div>
+                  <div className="text-xs text-charcoal/55">{tr(c.district)} · {countLabel(lang, courses.filter((x) => x.centerId === c.id).length, NOUNS.course)}</div>
                   <p className="mt-2 text-sm text-charcoal/65">{tr(c.description)}</p>
                 </div>
               </Card>
             </div>
           ))}
         </div>
-        <p className="reveal mt-6 text-xs text-charcoal/45">{t('centers.partnersNote')}</p>
       </div>
     </section>
   )
@@ -456,7 +515,7 @@ function FaqSection({ s }: { s: Section }) {
     <section className="py-20 lg:py-28">
       <div className="container-x grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
         <div className="reveal reveal-left">
-          <Eyebrow className="mb-3">FAQ</Eyebrow>
+          <Eyebrow className="mb-3">{t('feature.faq')}</Eyebrow>
           <h2 className="font-display text-4xl text-charcoal md:text-5xl">{tr(s.title) || t('faq.title')}</h2>
           {tr(s.subtitle) && <p className="mt-4 text-charcoal/65">{tr(s.subtitle)}</p>}
           <Link to="/faq" className="arrow-nudge mt-6 inline-flex items-center gap-1 text-sm font-medium text-forest">{t('common.all')} <Icon name="arrowRight" className="h-4 w-4" /></Link>
@@ -521,7 +580,7 @@ function RichText({ s }: { s: Section }) {
 
 // ─── Inquiry form — sent to POST /public/inquiries (stored with the consent timestamp) ──────
 function InquiryForm({ s }: { s: Section }) {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const enabled = useStore((st) => st.site.features.centerInquiry)
   const [sent, setSent] = useState(false)
   const [form, setForm] = useState({
@@ -591,9 +650,9 @@ function InquiryForm({ s }: { s: Section }) {
         } else if (err.status >= 500) {
           setError(t('centers.form.serverError'))
         } else if (err.code === 'validation_failed' && Array.isArray(err.details) && err.details.length) {
-          setError(String(err.details[0]))
+          setError(lang === 'en' ? String(err.details[0]) : t('apiError.validation'))
         } else if (err.message && err.message !== 'Internal Server Error' && err.message !== 'Validation failed') {
-          setError(err.message)
+          setError(apiErrorText(err, lang))
         } else {
           setError(t('centers.form.error'))
         }

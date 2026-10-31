@@ -1,5 +1,5 @@
 'use client'
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { useStore } from './useStore'
 import type { Features, Viewer } from '../types'
 
@@ -32,6 +32,20 @@ export const useCenter = (id: string | undefined) => useStore((s) => s.centers.f
 export const useCategory = (id: string | undefined) => useStore((s) => s.categories.find((c) => c.id === id))
 
 export const useFeature = (key: keyof Features) => useStore((s) => s.site.features[key])
+
+/** Visitors and students may save courses, subject to the Super Admin switches (`savedItems`, student `saveItems`). */
+export function useCanSaveCourses(): boolean {
+  const role = useStore((s) => s.role)
+  const savedItems = useStore((s) => s.site.features.savedItems)
+  const saveItems = useStore((s) => s.site.permissions.student.saveItems)
+  return savedItems && (role === 'visitor' || (role === 'student' && saveItems))
+}
+
+/** False on the server and during the first client render, so values read from localStorage never cause a hydration mismatch. */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(subscribeNever, () => true, () => false)
+}
+const subscribeNever = () => () => undefined
 
 export const useModuleEnabled = (dash: 'student' | 'teacher', id: string) =>
   useStore((s) => s.site.dashboards[dash].find((m) => m.id === id)?.enabled ?? true)

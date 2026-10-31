@@ -75,7 +75,7 @@ export function StudioGroupDetail() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-5"><div className="text-xs text-charcoal/55">{t('common.schedule')}</div><div className="mt-2"><ScheduleChips group={group} /></div><div className="mt-1 text-xs text-charcoal/50">{t('common.room')} {group.room}</div></Card>
         <Card className="p-5"><div className="text-xs text-charcoal/55">{t('capacity.enrolled')}</div><div className="mt-2 font-display text-3xl text-charcoal">{roster.length} <span className="text-lg text-charcoal/40">/ {group.capacity}</span></div>{roster.length >= group.capacity ? <div className="mt-1 text-xs text-amber-800">{t('capacity.full')}</div> : <div className="mt-1 text-xs text-charcoal/50">{t('capacity.left', { n: group.capacity - roster.length })}</div>}</Card>
-        <Card className="p-5"><div className="text-xs text-charcoal/55">{t('group.sessions')}</div><div className="mt-2 font-display text-3xl text-charcoal">{sessions.length}</div><div className="mt-1 text-xs text-charcoal/50">{upcoming.length} {t('group.upcoming').toLowerCase()} · {completed.length} {t('session.status.completed').toLowerCase()}</div></Card>
+        <Card className="p-5"><div className="text-xs text-charcoal/55">{t('group.sessions')}</div><div className="mt-2 font-display text-3xl text-charcoal">{sessions.length}</div><div className="mt-1 text-xs text-charcoal/50">{t('group.upcoming')}: {upcoming.length} · {t('session.status.completed')}: {completed.length}</div></Card>
         <Card className="p-5"><div className="text-xs text-charcoal/55">{t('group.attendanceRate')}</div><div className="mt-2 font-display text-3xl text-charcoal">{completed.length && roster.length ? Math.round((completed.reduce((n, x) => n + (recordsBySession.get(x.id) ?? 0), 0) / (completed.length * roster.length)) * 100) : 0}%</div><div className="mt-1 text-xs text-charcoal/50">{t('student.attendance.rate')}</div></Card>
       </div>
 
@@ -219,7 +219,7 @@ function SessionPanel({ session, course, group, roster }: { session: LessonSessi
             : <Button size="sm" disabled={busy} onClick={() => toggle(true)}><Icon name="play" className="h-3.5 w-3.5" />{t('session.open')}</Button>)}
           {url && <Button size="sm" variant="ghost" onClick={copy}><Icon name="external" className="h-3.5 w-3.5" />{t('common.copyLink')}</Button>}
         </div>
-        {url && <a href={url} target="_blank" rel="noreferrer" className="text-[11px] text-forest hover:underline font-medium">{t('session.testScan')}</a>}
+        {url && <a href={url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-forest hover:underline font-medium">{t('session.testScan')}</a>}
       </div>
       <div className="min-w-0 space-y-4">
         <div>

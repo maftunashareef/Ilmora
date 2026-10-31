@@ -8,7 +8,7 @@ import { QUEUES } from '../../infra/queue/queues'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { SiteService } from '../site/site.service'
 import {
-  AvatarUploadUrlInput, CategoryInput, CenterInput, CourseInput, CoursePatch, GroupInput, GroupPatch, PackageInput, PackagePatch, PlaylistInput, PlaylistPatch, ResourceInput, ResourcePatch, StudentAdminInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput, VideoPatch,
+  AvatarUploadUrlInput, CategoryInput, CenterInput, CourseDiscountBody, CourseInput, CoursePatch, GroupInput, GroupPatch, PackageInput, PackagePatch, PlaylistInput, PlaylistPatch, ResourceInput, ResourcePatch, StudentAdminInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput, VideoPatch,
 } from './manage.schemas'
 import { ManageService } from './manage.service'
 
@@ -19,7 +19,8 @@ const QueueParam = z.enum([QUEUES.sms, QUEUES.notifications, QUEUES.sessions, QU
 
 /** Teacher Studio and Super Admin write API. */
 @Controller()
-@Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
+// Center admins are deliberately not listed here: they get only the center endpoints below (and attendance), never the Teacher Studio write API.
+@Roles('TEACHER', 'PLATFORM_ADMIN')
 export class ManageController {
   constructor(
     private readonly manage: ManageService,
@@ -37,6 +38,9 @@ export class ManageController {
   // courses & groups
   @Post('manage/courses') createCourse(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(body(CourseInput)) dto: z.infer<typeof CourseInput>) { return this.manage.createCourse(t, a, dto) }
   @Patch('manage/courses/:id') updateCourse(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(body(CoursePatch)) dto: z.infer<typeof CoursePatch>) { return this.manage.updateCourse(t, a, id, dto) }
+  /** Center admins: the courses of their own center, and their discounts. */
+  @Roles('CENTER_ADMIN') @Get('manage/center/courses') centerCourses(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor) { return this.manage.listCenterCourses(t, a) }
+  @Roles('CENTER_ADMIN', 'PLATFORM_ADMIN') @Put('manage/courses/:id/discount') setCourseDiscount(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(body(CourseDiscountBody)) dto: z.infer<typeof CourseDiscountBody>) { return this.manage.setCourseDiscount(t, a, id, dto.discount) }
   @Delete('manage/courses/:id') deleteCourse(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.manage.deleteCourse(t, a, id) }
   @Post('manage/courses/:courseId/groups') createGroup(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('courseId') courseId: string, @Body(body(GroupInput)) dto: GroupInput) { return this.manage.createGroup(t, a, courseId, dto) }
   @Get('manage/groups') groups(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor) { return this.manage.myGroups(t, a) }
@@ -60,6 +64,8 @@ export class ManageController {
   @Delete('manage/subjects/:id') deleteSubject(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.manage.deleteSubject(t, a, id) }
 
   // ── Super Admin ──
+  /** Full site configuration for the Super Admin editor, including presets that are still disabled (internal). */
+  @Roles('PLATFORM_ADMIN') @Get('admin/site') adminSite(@CurrentTenantId() t: string) { return this.site.get(t, true) }
   @Roles('PLATFORM_ADMIN') @Put('admin/site') updateSite(@CurrentTenantId() t: string, @Body(body(SiteDto)) dto: z.infer<typeof SiteDto>) { return this.site.update(t, dto.data, dto.version) }
   @Roles('PLATFORM_ADMIN') @Post('admin/centers') createCenter(@CurrentTenantId() t: string, @Body(body(CenterInput)) dto: z.infer<typeof CenterInput>) { return this.manage.upsertCenter(t, dto) }
   @Roles('PLATFORM_ADMIN') @Put('admin/centers/:id') updateCenter(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(CenterInput)) dto: z.infer<typeof CenterInput>) { return this.manage.upsertCenter(t, dto, id) }

@@ -25,7 +25,7 @@ function embedFor(url: string): { kind: 'iframe' | 'video' | 'none'; src: string
 }
 
 function Player({ v }: { v: Video }) {
-  const { t } = useT()
+  const { t, tr } = useT()
   if (v.source.kind === 'upload') {
     return v.source.file.previewUrl ? (
       <video src={v.source.file.previewUrl} controls className="aspect-video w-full rounded-card bg-charcoal" />
@@ -41,7 +41,7 @@ function Player({ v }: { v: Video }) {
     )
   }
   const e = embedFor(v.source.url)
-  if (e.kind === 'iframe') return <iframe src={e.src} title="video" className="aspect-video w-full rounded-card bg-charcoal" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen loading="lazy" />
+  if (e.kind === 'iframe') return <iframe src={e.src} title={tr(v.title) || t('common.video')} className="aspect-video w-full rounded-card bg-charcoal" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen loading="lazy" />
   if (e.kind === 'video') return <video src={e.src} controls className="aspect-video w-full rounded-card bg-charcoal" />
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded-card">
@@ -193,7 +193,7 @@ export function ResourcePage() {
             <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-card bg-sage text-forest"><Icon name={r.kind === 'link' ? 'external' : 'file'} className="h-8 w-8" /></span>
             <div className="min-w-0 flex-1">
               {r.file && (<><div className="truncate font-medium text-charcoal">{r.file.name}</div><div className="mt-1 text-xs text-charcoal/55">{r.file.mime} · {formatBytes(r.file.size)}{r.pages ? ` · ${r.pages} ${t('common.pages')}` : ''}</div></>)}
-              {r.url && <a href={r.url} target="_blank" rel="noreferrer" className="truncate text-sm text-forest underline">{r.url}</a>}
+              {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="truncate text-sm text-forest underline">{r.url}</a>}
             </div>
             <div className="flex flex-col gap-2">
               {r.url && <LinkButton to={r.url} external variant="primary" size="sm">{t('channel.openExternal')} <Icon name="external" className="h-3.5 w-3.5" /></LinkButton>}

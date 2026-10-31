@@ -1,13 +1,14 @@
 import { Link } from '@/lib/router'
 import { Timetable } from '../../components/Timetable'
 import { Card, Eyebrow, Icon, Notice, PageTitle, Stat } from '../../components/ui'
+import { countLabel, NOUNS } from '@ilmora/shared'
 import { useT } from '../../i18n/useT'
 import { useCurrentTeacher } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import { enrolledCount } from '../../lib/enrollment'
 
 export function StudioOverview() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const teacher = useCurrentTeacher()
   const accountName = useStore((x) => x.auth.user?.displayName)
   const s = useStore()
@@ -31,7 +32,7 @@ export function StudioOverview() {
         <Stat label={t('studio.stat.public')} value={mine.filter((x) => x.status === 'published' && x.visibility === 'public').length} />
         <Stat label={t('studio.stat.private')} value={mine.filter((x) => x.status === 'published' && x.visibility === 'private').length} />
         <Stat label={t('studio.stat.drafts')} value={mine.filter((x) => x.status === 'draft').length} hint={mine.some((x) => x.reviewRequested) ? t('studio.reviewPending') : undefined} />
-        <Stat label={t('studio.stat.students')} value={studentsInGroups} hint={`${groups.length} ${t('common.groups').toLowerCase()}`} />
+        <Stat label={t('studio.stat.students')} value={studentsInGroups} hint={countLabel(lang, groups.length, NOUNS.group)} />
       </div>
       {s.site.features.announcements && anns.length > 0 && (
         <div className="mt-6 grid gap-3 md:grid-cols-2">{anns.map((a) => <Notice key={a.id} tone="info"><span className="font-medium">{tr(a.title)}</span> — {tr(a.body)}</Notice>)}</div>

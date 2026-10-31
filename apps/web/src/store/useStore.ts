@@ -3,11 +3,13 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { OFFER_VERSION, overlaps, sampleData, toMin as sharedToMin } from '@ilmora/shared'
+import { isOnlineCourse, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
+import { apiErrorText } from '../lib/apiErrors'
+import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
 import type {
-  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Playlist, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student,
+  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student, University,
   StudentProfile, Subject, Teacher, Video,
 } from '../types'
 
@@ -70,12 +72,19 @@ interface Actions {
   giveConsent: (input: ConsentInput) => Promise<AuthUser>
   logout: () => Promise<void>
   ensureWorkspace: () => Promise<void>
+  loadAdminPresets: () => Promise<void>
+  /** Loads the visitor's saved cart and favorites from this device (called after mount, so server and first client render match). */
+  hydrateGuest: () => void
   loadGroupDetail: (groupId: string) => Promise<void>
   loadMyAttendance: () => Promise<void>
   loadStudentOverview: () => Promise<void>
 
   // Site config (Super Admin)
   patchSite: (fn: (site: SiteConfig) => SiteConfig) => void
+  /** Super Admin: saves package fields through the packages API (packages are not part of the site save; id and code never change). */
+  savePackage: (id: string, patch: Partial<Package>) => void
+  /** Super Admin: creates a new, switched-off package through the packages API. */
+  addPackage: () => Promise<void>
   updateSection: (page: PageKey, id: string, patch: Partial<Section>) => void
   moveSection: (page: PageKey, id: string, dir: -1 | 1) => void
   addSection: (page: PageKey, type: SectionType) => void
@@ -136,6 +145,8 @@ export interface StoreState extends DemoState, Actions {
   auth: { status: 'idle' | 'loading' | 'anonymous' | 'authenticated'; user: AuthUser | null }
   siteVersion: number
   workspaceLoaded: boolean
+  /** Super Admin only: the full preset list (including disabled ones) has been loaded into `site.presets`. */
+  presetsLoaded: boolean
   myPayments: PaymentSummary[]
   /** Latest QR token/url per session (teacher side, returned when attendance is opened). */
   sessionQr: Record<string, { token: string; url: string }>
@@ -144,17 +155,21 @@ export interface StoreState extends DemoState, Actions {
 const upsertIn = <T extends { id: string }>(list: T[], item: T): T[] => (list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item])
 export const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 export const toMin = sharedToMin
+/** Local cart of a visitor who is not signed in; merged into the account (and removed) after login. */
 const DRAFT_KEY = 'ilmora-builder-draft'
+/** Courses a visitor saved while signed out; merged into the account's favorites after login. */
+const GUEST_SAVED_KEY = 'ilmora-guest-saved-courses'
 let toastSeq = 1
 
-const roleOf = (u: AuthUser | null): Role => (!u ? 'visitor' : u.roles.includes('PLATFORM_ADMIN') ? 'admin' : u.roles.includes('TEACHER') ? 'teacher' : 'student')
+/** The workspace an account lands in. Teacher comes before center admin so accounts that are both keep the Teacher Studio; /center stays reachable from the account menu. */
+export const roleOf = (u: AuthUser | null): Role => (!u ? 'visitor' : u.roles.includes('PLATFORM_ADMIN') ? 'admin' : u.roles.includes('TEACHER') ? 'teacher' : u.roles.includes('CENTER_ADMIN') ? 'center' : 'student')
 
 export const GUEST_STUDENT_ID = 'guest-student'
-const emptyGuestStudent = (builder?: Student['builder'] | null): Student => ({
+const emptyGuestStudent = (builder?: Student['builder'] | null, savedCourseIds: string[] = []): Student => ({
   id: GUEST_STUDENT_ID,
   profile: { displayName: '', district: '', preferredLang: 'uz', reminders: false },
   subscription: { packageId: null, groupIds: [], status: 'none' },
-  savedCourseIds: [],
+  savedCourseIds,
   savedTeacherIds: [],
   builder: builder ?? { packageId: null, groupIds: [], meyosGrant: false },
 })
@@ -173,9 +188,23 @@ const publishableInput = (p: Partial<Publishable>) => ({
   ...(p.status ? { status: p.status } : {}), ...(p.visibility ? { visibility: p.visibility } : {}), ...(p.audience ? { audience: p.audience } : {}),
   ...(p.featured !== undefined ? { featured: p.featured } : {}), ...(p.reviewRequested !== undefined ? { reviewRequested: p.reviewRequested } : {}),
 })
-const courseInput = (c: Course) => ({
-  title: c.title, categoryId: c.categoryId, centerId: c.centerId, teacherId: c.teacherId, subjectId: c.subjectId ?? null, summary: c.summary, description: c.description, curriculum: c.curriculum,
+/** What a visitor may see of the packages: published ones, and only the universities that have one. */
+const publicSite = (site: SiteConfig): SiteConfig => {
+  const presets = (site.presets ?? []).filter((p) => p.enabled)
+  const used = new Set(presets.map((p) => p.universityId))
+  return { ...site, presets, universities: (site.universities ?? []).filter((u) => used.has(u.id)) }
+}
+const courseInput = (c: Course, withDiscount = false) => ({
+  title: c.title, categoryId: c.categoryId, subjectId: c.subjectId ?? null, summary: c.summary, description: c.description, curriculum: c.curriculum,
+  // An online course belongs to the platform center/profile, which the server sets; only offline courses send them.
+  ...(isOnlineCourse(c) ? {} : { centerId: c.centerId, teacherId: c.teacherId }),
   level: c.level, durationMonths: c.durationMonths, price: Math.round(c.price), coverSeed: c.coverSeed, imageUrl: c.imageUrl ?? null, meyosGrant: !!c.meyosGrant, ...publishableInput(c),
+  // Only the Super Admin sends the discount; the server refuses it from anyone else.
+  ...(withDiscount ? { discount: c.discount ?? null } : {}),
+  // The learning format always travels; the link, provider and certificate only for online courses (the server accepts them from the Super Admin only).
+  ...(isOnlineCourse(c)
+    ? { learningFormat: 'ONLINE' as const, externalUrl: c.externalUrl ?? null, providerName: c.providerName ?? null, instructorName: c.instructorName ?? null, certificate: c.certificate ?? ('NONE' as const), durationText: c.durationText ?? null }
+    : { learningFormat: 'OFFLINE' as const }),
 })
 const groupInput = (g: Course['groups'][number]) => ({ name: g.name, days: g.days, start: g.start, end: g.end, room: g.room, capacity: g.capacity })
 const videoInput = (v: Video) => ({
@@ -202,7 +231,7 @@ const mapVideo = (v: Video & { source: { kind: string; url?: string; key?: strin
 
 type ApiOverview = {
   builder: { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
-  subscription: { id: string; packageId: string | null; status: string; groupIds: string[]; startedAt: string | null; currentPeriodStart: string | null; currentPeriodEnd: string | null; funding: { meyosGrant: boolean; courseIds: string[] } } | null
+  subscription: { id: string; packageId: string | null; status: string; groupIds: string[]; startedAt: string | null; currentPeriodStart: string | null; currentPeriodEnd: string | null; funding: { meyosGrant: boolean; courseIds: string[] }; amountMinor: string } | null
   payments: PaymentSummary[]
 }
 
@@ -225,12 +254,33 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       /* private mode */
     }
   }
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(DRAFT_KEY)
+    } catch {
+      /* private mode */
+    }
+  }
+  const readGuestSaved = (): string[] => {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(GUEST_SAVED_KEY) : null
+      const list: unknown = raw ? JSON.parse(raw) : []
+      return Array.isArray(list) ? [...new Set(list.filter((x): x is string => typeof x === 'string'))] : []
+    } catch {
+      return []
+    }
+  }
+  const writeGuestSaved = (ids: string[]) => {
+    try {
+      if (ids.length) localStorage.setItem(GUEST_SAVED_KEY, JSON.stringify(ids))
+      else localStorage.removeItem(GUEST_SAVED_KEY)
+    } catch {
+      /* private mode */
+    }
+  }
 
   return createStore<StoreState>()((set, get) => {
-    const toast = (err: unknown) => {
-      const text = isApiError(err) ? err.message : err instanceof Error ? err.message : String(err)
-      get().notify(text, 'warn')
-    }
+    const toast = (err: unknown) => get().notify(apiErrorText(err, get().lang), 'warn')
     const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
       try {
         return await fn()
@@ -240,12 +290,17 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       }
     }
     let saveSiteTimer: ReturnType<typeof setTimeout> | undefined
+    const packageTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    const packagePatches = new Map<string, Partial<Package>>()
     const scheduleSiteSave = () => {
       if (get().role !== 'admin') return
       clearTimeout(saveSiteTimer)
       saveSiteTimer = setTimeout(async () => {
-        const { packages: _p, ...data } = get().site
+        const { packages: _p, presets, universities, ...rest } = get().site
         void _p
+        // Presets and universities are sent only once the full lists have been loaded; without them the server keeps the
+        // stored ones, so a save made before the load can never delete packages that are still drafts.
+        const data = get().presetsLoaded ? { ...rest, presets, universities } : rest
         try {
           const r = await api<{ version: number }>('/admin/site', { method: 'PUT', body: { data, version: get().siteVersion } })
           set({ siteVersion: r.version })
@@ -259,11 +314,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
     const syncDraft = () => {
       const me = get().students.find((x) => x.id === get().currentStudentId)
       if (!me) return
-      writeDraft(me.builder)
-      if (get().auth.status !== 'authenticated') return
+      // Signed out: the local draft is the visitor's cart. Signed in: the server draft is the only copy, so a stale
+      // local one can never be merged back into the account later.
+      if (get().auth.status !== 'authenticated') {
+        writeDraft(me.builder)
+        return
+      }
       clearTimeout(draftTimer)
       draftTimer = setTimeout(() => {
-        api('/student/subscription/draft', { method: 'PUT', body: { packageId: me.builder.packageId, groupIds: me.builder.groupIds, meyosGrant: me.builder.meyosGrant } }).catch(toast)
+        api('/student/subscription/draft', { method: 'PUT', body: { packageId: me.builder.packageId, groupIds: me.builder.groupIds, meyosGrant: me.builder.meyosGrant } }).then(() => clearDraft()).catch(toast)
       }, 500)
     }
     const applyAuth = (user: AuthUser | null) => {
@@ -276,8 +335,11 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         currentTeacherId: user?.teacherProfileId ?? '',
         students: user
           ? upsertIn(s.students.filter((x) => x.id !== user.id && x.id !== GUEST_STUDENT_ID), { ...emptyStudent(user), builder: currentDraft })
-          : [emptyGuestStudent(currentDraft)],
+          : [emptyGuestStudent(currentDraft, readGuestSaved())],
         workspaceLoaded: false,
+        // Disabled presets are internal: drop them from memory on every sign-in/out; admins reload the full list.
+        presetsLoaded: false,
+        site: s.site.presets ? publicSite(s.site) : s.site,
       }))
     }
     /** Store the access token, apply the account and warm the student overview; used by every sign-in path. */
@@ -299,6 +361,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         subjects: get().role === 'admin' ? mine.subjects : [...s.subjects.filter((x) => !mine.subjects.some((m) => m.id === x.id)), ...mine.subjects],
       }))
       if (get().role === 'admin') {
+        // Not fatal: without it the preset editor keeps waiting and site saves leave presets alone.
+        await get().loadAdminPresets().catch(() => undefined)
         const users = await api<{ items: { id: string; displayName: string; district: string | null; preferredLang: Lang; roles: string[]; subscription: { packageId: string | null; status: string; startedAt: string | null; currentPeriodEnd: string | null } | null; groupIds: string[] }[] }>('/admin/users?pageSize=200')
         set((s) => ({
           students: [
@@ -322,7 +386,9 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       videos: [],
       playlists: [],
       resources: [],
-      students: [emptyGuestStudent(readDraft())],
+      // Empty on purpose: reading localStorage here would make the first client render differ from the server HTML (hydration
+      // mismatch). StoreProvider calls hydrateGuest() after mount instead.
+      students: [emptyGuestStudent()],
       sessions: [],
       attendance: [],
       lang: initial.lang,
@@ -332,6 +398,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       toasts: [],
       auth: { status: 'idle', user: null },
       workspaceLoaded: false,
+      presetsLoaded: false,
       myPayments: [],
       sessionQr: {},
 
@@ -370,7 +437,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         return api<{ accessToken: string; user: AuthUser }>('/auth/google', { method: 'POST', body: payload, credentials: true, auth: false })
           .then(openSession)
           .catch((err) => {
-            if (input.idToken && input.idToken.startsWith('mock-google-token:')) {
+            if (DEMO_LOGIN_ENABLED && input.idToken && input.idToken.startsWith('mock-google-token:')) {
               const parts = input.idToken.split(':')
               const chosenLang = input.lang || get().lang
               const demoUser: AuthUser = {
@@ -395,6 +462,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           })
       },
       loginAsDemo: async (role, customUser) => {
+        if (!DEMO_LOGIN_ENABLED) throw new Error('demo_login_disabled')
         const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'
         const demoUser: AuthUser = {
           id,
@@ -447,20 +515,65 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         if (get().workspaceLoaded || get().role === 'visitor' || get().role === 'student') return
         await guard(refreshWorkspace)
       },
+      hydrateGuest: () => {
+        if (get().auth.status === 'authenticated') return
+        const draft = readDraft()
+        const saved = readGuestSaved()
+        if (!draft && saved.length === 0) return
+        set((s) => ({
+          students: s.students.map((x) =>
+            x.id !== GUEST_STUDENT_ID
+              ? x
+              : { ...x, builder: x.builder.packageId || x.builder.groupIds.length > 0 ? x.builder : (draft ?? x.builder), savedCourseIds: x.savedCourseIds.length > 0 ? x.savedCourseIds : saved },
+          ),
+        }))
+      },
+      loadAdminPresets: async () => {
+        // The public site response leaves out presets that are not enabled; the admin editor needs the full list.
+        const full = await api<{ presets?: Preset[]; universities?: University[] }>('/admin/site')
+        set((s) => ({ site: { ...s.site, presets: full.presets ?? [], universities: full.universities ?? [] }, presetsLoaded: true }))
+      },
       loadStudentOverview: async () => {
         const o = await api<ApiOverview>('/student/subscription')
-        const localDraft = readDraft()
+        // The local draft only ever holds what was chosen while signed out. Merge it into the account's draft
+        // (the account wins on conflicts, duplicates are impossible) and drop it once the server has the result.
+        const guestCart = readDraft()
+        const hasServerDraft = !!o.builder.packageId || o.builder.groupIds.length > 0
+        let builder: Student['builder'] | null = hasServerDraft ? o.builder : null
+        let pushDraft = false
+        if (guestCart && (guestCart.packageId || guestCart.groupIds.length > 0)) {
+          const packageId = o.builder.packageId ?? guestCart.packageId
+          const limit = get().site.packages.find((p) => p.id === packageId)?.maxCourses ?? MAX_CART_COURSES
+          const me = get().currentStudentId
+          const merged = mergeCartGroups(o.builder.groupIds, guestCart.groupIds, get().courses.flatMap((c) => c.groups), {
+            limit,
+            isFull: (g) => enrolledCount(get().students, g.id, me) >= g.capacity,
+          })
+          builder = { packageId, groupIds: merged.groupIds, meyosGrant: hasServerDraft ? o.builder.meyosGrant : guestCart.meyosGrant }
+          pushDraft = merged.groupIds.length !== o.builder.groupIds.length || packageId !== o.builder.packageId || builder.meyosGrant !== o.builder.meyosGrant
+          if (merged.dropped.length > 0) get().notify(translate(get().lang, 'cart.mergeDropped'), 'warn')
+          if (!pushDraft) clearDraft()
+        }
         patchMe((st) => ({
           ...st,
           subscription: o.subscription
-            ? { packageId: o.subscription.packageId, groupIds: o.subscription.groupIds, status: o.subscription.status === 'ACTIVE' || o.subscription.status === 'PAST_DUE' ? 'active' : 'none', startedAt: o.subscription.startedAt ?? undefined, renewsAt: o.subscription.currentPeriodEnd ?? undefined, funding: o.subscription.funding }
+            ? { packageId: o.subscription.packageId, groupIds: o.subscription.groupIds, status: o.subscription.status === 'ACTIVE' || o.subscription.status === 'PAST_DUE' ? 'active' : 'none', startedAt: o.subscription.startedAt ?? undefined, renewsAt: o.subscription.currentPeriodEnd ?? undefined, funding: o.subscription.funding, amountMinor: o.subscription.amountMinor }
             : { packageId: null, groupIds: [], status: 'none' },
-          builder: o.builder.packageId || o.builder.groupIds.length ? o.builder : (localDraft ?? st.builder),
+          builder: builder ?? st.builder,
         }))
         set({ myPayments: o.payments })
-        if (localDraft && !o.builder.packageId && !o.builder.groupIds.length && (localDraft.packageId || localDraft.groupIds.length)) syncDraft()
-        const saved = await api<{ courseIds: string[]; teacherIds: string[] }>('/student/saved').catch(() => ({ courseIds: [], teacherIds: [] }))
-        patchMe((st) => ({ ...st, savedCourseIds: saved.courseIds, savedTeacherIds: saved.teacherIds }))
+        if (pushDraft) syncDraft()
+        const saved: { courseIds: string[]; teacherIds: string[] } = await api<{ courseIds: string[]; teacherIds: string[] }>('/student/saved').catch(() => ({ courseIds: [], teacherIds: [] }))
+        // Favorites saved while signed out join the account's list without duplicates; ids that are no longer in
+        // the catalog are discarded, and any that fail to upload stay local for the next sign-in.
+        const guestSaved = readGuestSaved().filter((id) => !saved.courseIds.includes(id) && get().courses.some((c) => c.id === id))
+        patchMe((st) => ({ ...st, savedCourseIds: [...saved.courseIds, ...guestSaved], savedTeacherIds: saved.teacherIds }))
+        if (readGuestSaved().length > 0) {
+          const results = await Promise.allSettled(guestSaved.map((id) => api('/student/saved', { method: 'PUT', body: { kind: 'course', itemId: id, saved: true } })))
+          const failed = guestSaved.filter((_, i) => results[i].status === 'rejected')
+          writeGuestSaved(failed)
+          if (failed.length > 0) patchMe((st) => ({ ...st, savedCourseIds: st.savedCourseIds.filter((id) => !failed.includes(id)) }))
+        }
       },
       loadGroupDetail: async (groupId) => {
         const d = await guard(() => api<{ group: Course['groups'][number]; roster: { id: string; displayName: string; district: string | null; packageId: string | null; since: string }[]; sessions: (LessonSession & { records: { studentId: string; status: string; method: string; checkedInAt: string }[] })[] }>(`/manage/groups/${groupId}`))
@@ -494,6 +607,26 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
 
       // ── site ──
       patchSite: (fn) => { set((s) => ({ site: fn(s.site) })); scheduleSiteSave() },
+      savePackage: (id, patch) => {
+        set((s) => ({ site: { ...s.site, packages: s.site.packages.map((p) => (p.id === id ? { ...p, ...patch } : p)) } }))
+        if (get().role !== 'admin') return
+        // Typing in a field saves once it pauses; changes to one package are sent together.
+        packagePatches.set(id, { ...packagePatches.get(id), ...patch })
+        clearTimeout(packageTimers.get(id))
+        packageTimers.set(id, setTimeout(() => {
+          const { name, description, perks, maxCourses, enabled, highlight } = packagePatches.get(id) ?? {}
+          packagePatches.delete(id)
+          api(`/admin/packages/${id}`, { method: 'PATCH', body: { name, description, perks, maxCourses, enabled, highlight } }).catch(toast)
+        }, 700))
+      },
+      addPackage: async () => {
+        await guard(async () => {
+          const blank = { uz: '', ru: '', en: '' }
+          const code = `pkg-${Math.random().toString(36).slice(2, 10)}`
+          const created = await api<{ id: string }>('/admin/packages', { method: 'POST', body: { code, name: blank, description: blank, perks: [], maxCourses: 4, enabled: false, highlight: false, sortOrder: get().site.packages.length } })
+          set((s) => ({ site: { ...s.site, packages: [...s.site.packages, { id: created.id, name: blank, description: blank, perks: [], maxCourses: 4, enabled: false, highlight: false }] } }))
+        })
+      },
       updateSection: (page, id, patch) => get().patchSite((site) => ({ ...site, pages: { ...site.pages, [page]: site.pages[page].map((sec) => (sec.id === id ? { ...sec, ...patch } : sec)) } })),
       moveSection: (page, id, dir) =>
         get().patchSite((site) => {
@@ -514,8 +647,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         await guard(async () => {
           const existing = get().courses.find((x) => x.id === c.id)
           let saved: Course
-          if (existing) saved = await api<Course>(`/manage/courses/${c.id}`, { method: 'PATCH', body: courseInput(c) })
-          else saved = await api<Course>('/manage/courses', { method: 'POST', body: courseInput(c) })
+          if (existing) saved = await api<Course>(`/manage/courses/${c.id}`, { method: 'PATCH', body: courseInput(c, get().role === 'admin') })
+          else saved = await api<Course>('/manage/courses', { method: 'POST', body: courseInput(c, get().role === 'admin') })
           const before = existing?.groups ?? []
           for (const g of c.groups) {
             const prev = before.find((x) => x.id === g.id)
@@ -618,9 +751,12 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         const s = get()
         const st = s.students.find((x) => x.id === studentId)
         if (!st) return { ok: false, reason: 'no-package' }
+        // No package selected is a custom selection (any number of courses up to MAX_CART_COURSES); a package id
+        // that no longer exists is still rejected.
         const pkg = s.site.packages.find((p) => p.id === st.builder.packageId)
-        if (!pkg) return { ok: false, reason: 'no-package' }
-        if (!pkg.enabled) return { ok: false, reason: 'disabled' }
+        if (st.builder.packageId && !pkg) return { ok: false, reason: 'no-package' }
+        if (pkg && !pkg.enabled) return { ok: false, reason: 'disabled' }
+        const limit = pkg?.maxCourses ?? MAX_CART_COURSES
         const allGroups = s.courses.flatMap((c) => c.groups)
         const target = allGroups.find((g) => g.id === groupId)
         if (!target) return { ok: false, reason: 'no-package' }
@@ -628,7 +764,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         const current = st.builder.groupIds.map((id) => allGroups.find((g) => g.id === id)).filter(Boolean) as typeof allGroups
         const sameCourse = current.find((g) => g.courseId === target.courseId)
         const others = sameCourse ? current.filter((g) => g.courseId !== target.courseId) : current
-        if (!sameCourse && others.length >= pkg.maxCourses) return { ok: false, reason: 'limit' }
+        if (!sameCourse && others.length >= limit) return { ok: false, reason: 'limit' }
         const clash = others.find((g) => overlaps(g, target))
         if (clash) return { ok: false, reason: 'conflict', conflictWith: clash.courseId }
         set((state) => ({ students: state.students.map((x) => (x.id === studentId ? { ...x, builder: { ...x.builder, groupIds: [...others.map((g) => g.id), groupId] } } : x)) }))
@@ -659,6 +795,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         const saved = !me?.savedCourseIds.includes(courseId)
         set((s) => ({ students: s.students.map((x) => (x.id === studentId ? { ...x, savedCourseIds: saved ? [...x.savedCourseIds, courseId] : x.savedCourseIds.filter((c) => c !== courseId) } : x)) }))
         if (get().auth.status === 'authenticated') api('/student/saved', { method: 'PUT', body: { kind: 'course', itemId: courseId, saved } }).catch(toast)
+        else if (studentId === GUEST_STUDENT_ID) writeGuestSaved(get().students.find((x) => x.id === studentId)?.savedCourseIds ?? [])
       },
       toggleSavedTeacher: (studentId, teacherId) => {
         const me = get().students.find((x) => x.id === studentId)
@@ -735,6 +872,7 @@ export function StoreProvider({ initial, children }: { initial: InitialData; chi
     if (store.getState().lang !== initial.lang) store.setState({ lang: initial.lang })
   }, [store, initial.lang])
   useEffect(() => {
+    store.getState().hydrateGuest()
     void store.getState().bootstrap()
   }, [store])
   return createElement(StoreContext.Provider, { value: store }, children)

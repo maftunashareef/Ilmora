@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { useNavigate } from '@/lib/router'
 import { Avatar, Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, Modal, Notice, PageTitle, Select, Toggle } from '../../components/ui'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
+import { countLabel, NOUNS } from '@ilmora/shared'
 import { emptyL, useT } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import type { Student, Teacher } from '../../types'
 
 export function AdminPeople() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const nav = useNavigate()
   const s = useStore()
   const [teacher, setTeacher] = useState<Teacher | null>(null)
@@ -32,7 +33,7 @@ export function AdminPeople() {
                 <Avatar name={te.name || '?'} seed={te.avatarSeed} size={40} url={getTeacherAvatarUrl(te)} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{te.name}</span>{te.channelActive ? <Badge tone="sage">{t('admin.people.channelActive')}</Badge> : <Badge tone="muted">{t('teachers.channelInactive')}</Badge>}</div>
-                  <div className="truncate text-xs text-charcoal/55">{tr(te.title)} · {s.centers.find((c) => c.id === te.centerId)?.name} · {s.courses.filter((c) => c.teacherId === te.id).length} {t('common.courses').toLowerCase()}</div>
+                  <div className="truncate text-xs text-charcoal/55">{tr(te.title)} · {s.centers.find((c) => c.id === te.centerId)?.name} · {countLabel(lang, s.courses.filter((c) => c.teacherId === te.id).length, NOUNS.course)}</div>
                 </div>
                 <Button size="sm" variant="ghost" onClick={() => actAs('teacher', te.id)} title={t('admin.people.actAs')}><Icon name="eye" className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="secondary" onClick={() => setTeacher(te)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>

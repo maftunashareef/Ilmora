@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import type { DiscountWindow } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -122,15 +123,33 @@ export const toTeacher = (t: { id: string; slug: string; name: string; title: un
 export const toGroup = (g: { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number }, seats?: Map<string, number>) => ({
   id: g.id, courseId: g.courseId, name: g.name, days: g.days, start: g.startTime, end: g.endTime, room: g.room, capacity: g.capacity, enrolled: seats?.get(g.id) ?? 0,
 })
+/** Stored discount columns -> window used by the price rules (null when no discount is set). */
+export const discountWindow = (c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }): DiscountWindow | null =>
+  c.discountPercent && c.discountStartsAt && c.discountEndsAt ? { percent: c.discountPercent, startsAt: c.discountStartsAt, endsAt: c.discountEndsAt } : null
+
+/** What the browser gets: the window while it has not expired (it may start later). The browser decides "active now". */
+const publicDiscount = (c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }, now = new Date()) => {
+  const w = discountWindow(c)
+  return w && (w.endsAt as Date) > now ? { percent: w.percent, startsAt: (w.startsAt as Date).toISOString(), endsAt: (w.endsAt as Date).toISOString() } : null
+}
+
+/** A localized text object with at least one non-empty language. */
+const hasText = (v: unknown): v is Record<'uz' | 'ru' | 'en', string> =>
+  !!v && typeof v === 'object' && Object.values(v as Record<string, unknown>).some((s) => typeof s === 'string' && s.trim() !== '')
+
 export const toCourse = (c: {
   id: string; slug: string; title: unknown; categoryId: string; centerId: string; teacherId: string; subjectId: string | null; summary: unknown; description: unknown; curriculum: unknown;
-  level: string; durationMonths: number; priceMinor: bigint; currency: string; coverSeed: number; imageUrl: string | null; meyosGrant: boolean; status: string; visibility: string;
+  level: string; durationMonths: number; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; currency: string; coverSeed: number; imageUrl: string | null; meyosGrant: boolean; status: string; visibility: string;
   audienceStudentIds: string[]; audienceGroupIds: string[]; featured: boolean; reviewRequested: boolean; updatedAt: Date;
+  learningFormat: string; externalUrl: string | null; providerName: string | null; instructorName: string | null; certificate: string; durationText: unknown;
   groups: { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number }[]
 }, seats?: Map<string, number>) => ({
   id: c.id, slug: c.slug, title: c.title, categoryId: c.categoryId, centerId: c.centerId, teacherId: c.teacherId, subjectId: c.subjectId ?? undefined,
   summary: c.summary, description: c.description, curriculum: c.curriculum, level: lower(c.level), durationMonths: c.durationMonths,
-  price: Number(c.priceMinor / 100n), priceMinor: c.priceMinor.toString(), currency: c.currency, coverSeed: c.coverSeed, imageUrl: c.imageUrl ?? undefined, meyosGrant: c.meyosGrant,
+  learningFormat: c.learningFormat,
+  // The provider's link, names and certificate only exist for ONLINE courses.
+  ...(c.learningFormat === 'ONLINE' ? { externalUrl: c.externalUrl ?? undefined, providerName: c.providerName ?? undefined, instructorName: c.instructorName ?? undefined, certificate: c.certificate, durationText: hasText(c.durationText) ? c.durationText : undefined } : {}),
+  price: Number(c.priceMinor / 100n), priceMinor: c.priceMinor.toString(), discount: publicDiscount(c), currency: c.currency, coverSeed: c.coverSeed, imageUrl: c.imageUrl ?? undefined, meyosGrant: c.meyosGrant,
   status: lower(c.status), visibility: lower(c.visibility), audience: { studentIds: c.audienceStudentIds, groupIds: c.audienceGroupIds }, featured: c.featured, reviewRequested: c.reviewRequested,
   updatedAt: c.updatedAt.toISOString(), groups: c.groups.map((g) => toGroup(g, seats)),
 })

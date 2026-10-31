@@ -37,7 +37,7 @@ export function Button({ variant = 'primary', size = 'md', className, children, 
 
 export function LinkButton({ to, variant = 'primary', size = 'md', className, children, external }: { to: string; variant?: Variant; size?: Size; className?: string; children: ReactNode; external?: boolean }) {
   const cls = cx('arrow-nudge inline-flex items-center justify-center rounded-control font-medium tracking-tight transition duration-200', variantCls[variant], sizeCls[size], className)
-  if (external) return <a href={to} target="_blank" rel="noreferrer" className={cls}>{children}</a>
+  if (external) return <a href={to} target="_blank" rel="noopener noreferrer" className={cls}>{children}</a>
   return <Link to={to} className={cls}>{children}</Link>
 }
 
@@ -412,6 +412,7 @@ export function Icon({ name, className = 'h-4 w-4' }: { name: string; className?
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 11h18" /></>,
     bookmark: <path d="M6 3h12v18l-6-4-6 4z" />,
     bookmarkFill: <path d="M6 3h12v18l-6-4-6 4z" fill="currentColor" />,
+    cart: <><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.5L21.5 8H6" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
     menu: <path d="M4 7h16M4 12h16M4 17h16" />,
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,

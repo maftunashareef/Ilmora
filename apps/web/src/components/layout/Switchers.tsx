@@ -55,10 +55,10 @@ export function LangSwitcher({ compact }: { compact?: boolean }) {
   )
 }
 
-const WORKSPACE: Record<Role, string | null> = { visitor: null, student: '/student', teacher: '/teacher', admin: '/admin' }
+const WORKSPACE: Record<Role, string | null> = { visitor: null, student: '/student', teacher: '/teacher', center: '/center', admin: '/admin' }
 
 /** Account menu: sign in / out and shortcuts to the workspaces the account can use. Kept under the old export name. */
-export function RoleSwitcher({ align = 'right' }: { align?: 'left' | 'right' }) {
+export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align?: 'left' | 'right'; showNameOnWide?: boolean }) {
   const { t } = useT()
   const role = useStore((s) => s.role)
   const auth = useStore((s) => s.auth)
@@ -86,7 +86,7 @@ export function RoleSwitcher({ align = 'right' }: { align?: 'left' | 'right' }) 
     )
   }
   const user = auth.user
-  const workspaces = (['admin', 'teacher', 'student'] as Role[]).filter((r) => (r === 'admin' && user.roles.includes('PLATFORM_ADMIN')) || (r === 'teacher' && user.roles.includes('TEACHER')) || (r === 'student' && user.roles.includes('STUDENT')))
+  const workspaces = (['admin', 'teacher', 'center', 'student'] as Role[]).filter((r) => (r === 'admin' && user.roles.includes('PLATFORM_ADMIN')) || (r === 'teacher' && user.roles.includes('TEACHER')) || (r === 'center' && user.roles.includes('CENTER_ADMIN')) || (r === 'student' && user.roles.includes('STUDENT')))
 
   return (
     <div ref={ref} className="relative">
@@ -95,10 +95,12 @@ export function RoleSwitcher({ align = 'right' }: { align?: 'left' | 'right' }) 
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-label={user.displayName}
         className="inline-flex items-center gap-2 rounded-full border border-champagne/70 bg-champagne/15 py-1 pl-1 pr-3 text-xs font-medium text-charcoal transition hover:bg-champagne/30"
       >
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-forest text-ivory"><Icon name="user" className="h-3 w-3" /></span>
-        <span className="max-w-[10rem] truncate">{user.displayName}</span>
+        {/* Phones (and wide screens, when the full menu needs the room) show only the avatar; the name is the button's label and is shown in the menu. */}
+        <span data-account-name className={cx('hidden max-w-[10rem] truncate sm:inline', !showNameOnWide && 'xl:hidden')}>{user.displayName}</span>
         <Icon name="down" className="h-3 w-3 text-charcoal/50" />
       </button>
       {open && (

@@ -21,7 +21,7 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const wanted = Array.isArray(role) ? role : [role]
-  const allowed = wanted.includes(current) || roles.includes('PLATFORM_ADMIN') || (wanted.includes('teacher') && roles.includes('TEACHER')) || (wanted.includes('student') && roles.includes('STUDENT'))
+  const allowed = wanted.includes(current) || roles.includes('PLATFORM_ADMIN') || (wanted.includes('teacher') && roles.includes('TEACHER')) || (wanted.includes('student') && roles.includes('STUDENT')) || (wanted.includes('center') && roles.includes('CENTER_ADMIN')) || (wanted.includes('admin') && roles.includes('FINANCE_ADMIN'))
 
   useEffect(() => {
     if (status === 'anonymous') navigate(`/login?next=${encodeURIComponent(pathname)}`, { replace: true })

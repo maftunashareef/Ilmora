@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { z } from 'zod'
-import { normalizeUzPhone, somToTiyin, validateCapacity } from '@ilmora/shared'
+import { isSafeExternalUrl, normalizeUzPhone, somToTiyin, validateCapacity } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import { ENV, type Env, s3Configured } from '../../config/env'
@@ -10,9 +10,10 @@ import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
+import { discountWindow, toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
 import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
+import { ONLINE_PROVIDER } from './online-provider'
 import type { AvatarUploadUrlInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
 
 type Json = Prisma.InputJsonValue
@@ -36,6 +37,25 @@ export class ManageService {
 
   private isAdmin(actor: RequestActor) { return actor.roles.includes('PLATFORM_ADMIN') }
   private isCenterAdmin(actor: RequestActor) { return actor.roles.includes('CENTER_ADMIN') }
+  /** Discounts: the Super Admin, or the center admin of the course's own center. Never a teacher. */
+  private canSetDiscount(actor: RequestActor, centerId: string) {
+    return this.isAdmin(actor) || (this.isCenterAdmin(actor) && !!actor.centerId && actor.centerId === centerId)
+  }
+  private discountColumns(d: { percent: number; startsAt: string; endsAt: string } | null) {
+    return d
+      ? { discountPercent: d.percent, discountStartsAt: new Date(d.startsAt), discountEndsAt: new Date(d.endsAt) }
+      : { discountPercent: null, discountStartsAt: null, discountEndsAt: null }
+  }
+  /** Serializable discount for audit records. */
+  private discountSummary(c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }) {
+    const w = discountWindow(c)
+    return w ? { percent: w.percent, startsAt: (w.startsAt as Date).toISOString(), endsAt: (w.endsAt as Date).toISOString() } : null
+  }
+  private sameDiscount(input: { percent: number; startsAt: string; endsAt: string } | null, stored: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }) {
+    const current = discountWindow(stored)
+    if (!input || !current) return !input && !current
+    return input.percent === current.percent && Date.parse(input.startsAt) === (current.startsAt as Date).getTime() && Date.parse(input.endsAt) === (current.endsAt as Date).getTime()
+  }
 
   private assertTeacherScope(actor: RequestActor, item: { teacherId: string; centerId?: string | null }) {
     if (this.isAdmin(actor)) return
@@ -105,22 +125,99 @@ export class ManageService {
   }
 
   // ───────── courses ─────────
+  // ONLINE courses are free links to a provider's own site: Super Admin only, no groups, no price, no discount, and they
+  // hang on the platform center/profile. OFFLINE courses keep the rules they always had.
+  /** The platform center and profile that ONLINE courses belong to (created on first use). */
+  private async ensureOnlineProvider(tenantId: string): Promise<{ centerId: string; teacherId: string }> {
+    const db = this.prisma.client
+    const slug = ONLINE_PROVIDER.slug
+    let center = await db.center.findFirst({ where: { tenantId, slug } })
+    if (!center) center = await db.center.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, district: ONLINE_PROVIDER.district as Json, description: ONLINE_PROVIDER.description as Json, tone: ONLINE_PROVIDER.tone } })
+    else if (center.deletedAt) center = await db.center.update({ where: { id: center.id }, data: { deletedAt: null } })
+    let teacher = await db.teacherProfile.findFirst({ where: { tenantId, slug } })
+    if (!teacher) teacher = await db.teacherProfile.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, title: ONLINE_PROVIDER.teacherTitle as Json, bio: ONLINE_PROVIDER.description as Json, tagline: ONLINE_PROVIDER.teacherTagline as Json, centerId: center.id, channelActive: false } })
+    else if (teacher.deletedAt) teacher = await db.teacherProfile.update({ where: { id: teacher.id }, data: { deletedAt: null } })
+    return { centerId: center.id, teacherId: teacher.id }
+  }
+
+  /** Validated columns of an ONLINE course: a plain https link and a provider are required. */
+  private onlineColumns(v: { externalUrl?: string | null; providerName?: string | null; instructorName?: string | null; certificate?: string; durationText?: unknown }) {
+    if (!isSafeExternalUrl(v.externalUrl)) throw AppError.invalid('external_url_required', 'An online course needs a plain https link to its course page')
+    const providerName = v.providerName?.trim()
+    if (!providerName) throw AppError.invalid('provider_required', 'An online course needs the provider name')
+    return {
+      learningFormat: 'ONLINE' as const, externalUrl: v.externalUrl as string, providerName, instructorName: v.instructorName?.trim() || null,
+      certificate: (v.certificate ?? 'NONE') as 'NONE' | 'FREE' | 'PAID' | 'AVAILABLE', durationText: (v.durationText ?? { uz: '', ru: '', en: '' }) as Json,
+    }
+  }
+
+  private assertOnlineIsFree(price: number | undefined, discount: unknown) {
+    if (price !== undefined && price !== 0) throw AppError.invalid('online_course_is_free', 'Online courses are free: the price must be 0')
+    if (discount) throw AppError.invalid('online_course_no_discount', 'Online courses are free and cannot have a discount')
+  }
+
+  private sendsOnlineFields(v: { externalUrl?: string | null; providerName?: string | null; instructorName?: string | null; certificate?: string; durationText?: unknown }) {
+    return !!(v.externalUrl || v.providerName || v.instructorName || v.durationText || (v.certificate && v.certificate !== 'NONE'))
+  }
+
   async createCourse(tenantId: string, actor: RequestActor, input: z.infer<typeof CourseInput>) {
-    const teacherId = this.resolveTeacherId(actor, input.teacherId)
+    const online = input.learningFormat === 'ONLINE'
+    let formatData: Record<string, unknown> = { learningFormat: 'OFFLINE' }
+    let centerId: string
+    let teacherId: string
+    if (online) {
+      if (!this.isAdmin(actor)) throw AppError.forbidden('Only the Super Admin can create online courses')
+      formatData = this.onlineColumns(input)
+      this.assertOnlineIsFree(input.price, input.discount)
+      ;({ centerId, teacherId } = await this.ensureOnlineProvider(tenantId))
+    } else {
+      teacherId = this.resolveTeacherId(actor, input.teacherId)
+      if (!input.centerId) throw AppError.invalid('center_required', 'centerId is required for an offline course')
+      if (this.sendsOnlineFields(input)) throw AppError.invalid('online_fields_on_offline_course', 'A link, provider or certificate belongs to an online course')
+      centerId = input.centerId
+    }
     const perms = await this.teacherPermissions(tenantId)
     if (!this.isAdmin(actor) && !perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
+    if (input.discount && !this.canSetDiscount(actor, centerId)) throw AppError.forbidden('Only the Super Admin or the course center can set discounts')
     const slug = await this.uniqueSlug('course', tenantId, slugify(input.title.en || input.title.uz))
     const course = await this.prisma.client.course.create({
       data: {
-        tenantId, slug, title: input.title as Json, categoryId: input.categoryId, centerId: input.centerId, teacherId, subjectId: input.subjectId ?? null,
+        ...formatData,
+        tenantId, slug, title: input.title as Json, categoryId: input.categoryId, centerId, teacherId, subjectId: input.subjectId ?? null,
         summary: input.summary as Json, description: input.description as Json, curriculum: input.curriculum as Json, level: up(input.level), durationMonths: input.durationMonths,
-        priceMinor: somToTiyin(input.price), coverSeed: input.coverSeed ?? Math.floor(Math.random() * 1000), imageUrl: input.imageUrl ?? null, meyosGrant: this.isAdmin(actor) ? (input.meyosGrant ?? false) : false,
+        priceMinor: somToTiyin(input.price), ...this.discountColumns(input.discount ?? null), coverSeed: input.coverSeed ?? Math.floor(Math.random() * 1000), imageUrl: input.imageUrl ?? null, meyosGrant: this.isAdmin(actor) ? (input.meyosGrant ?? false) : false,
         createdById: actor.id, ...this.publishableData(input, actor, !!perms.publishDirectly),
       } as Prisma.CourseUncheckedCreateInput,
       include: { groups: true },
     })
-    await this.audit.record({ action: 'course.create', entityType: 'Course', entityId: course.id, after: { slug } })
+    await this.audit.record({ action: 'course.create', entityType: 'Course', entityId: course.id, after: { slug, discount: input.discount ?? null } })
     return toCourse(course)
+  }
+
+  /** Center admins: the courses of their own center (matched on the course's center), newest changes first. */
+  async listCenterCourses(tenantId: string, actor: RequestActor) {
+    if (!actor.centerId) throw AppError.forbidden('Your account is not linked to a center', { reason: 'center_required' })
+    const [center, courses] = await Promise.all([
+      this.prisma.client.center.findFirst({ where: { tenantId, id: actor.centerId, deletedAt: null } }),
+      this.prisma.client.course.findMany({ where: { tenantId, centerId: actor.centerId, deletedAt: null }, include: { groups: { where: { deletedAt: null } } }, orderBy: { updatedAt: 'desc' }, take: 500 }),
+    ])
+    if (!center) throw AppError.notFound('Center')
+    return { center: { id: center.id, name: center.name }, courses: courses.map((c) => toCourse(c)) }
+  }
+
+  /**
+   * Sets or removes a course discount. Allowed for the Super Admin and for the center admin of the course's own center,
+   * independent of the teacher permission switches. The change applies immediately and is audited.
+   */
+  async setCourseDiscount(tenantId: string, actor: RequestActor, id: string, discount: { percent: number; startsAt: string; endsAt: string } | null) {
+    const course = await this.prisma.client.course.findFirst({ where: { tenantId, id, deletedAt: null }, include: { groups: { where: { deletedAt: null } } } })
+    if (!course) throw AppError.notFound('Course')
+    if (!this.canSetDiscount(actor, course.centerId)) throw AppError.forbidden('Only the Super Admin or the center of this course can change its discount')
+    if (course.learningFormat === 'ONLINE') this.assertOnlineIsFree(undefined, discount)
+    if (this.sameDiscount(discount, course)) return toCourse(course)
+    const updated = await this.prisma.client.course.update({ where: { id }, data: { ...this.discountColumns(discount), updatedById: actor.id }, include: { groups: { where: { deletedAt: null } } } })
+    await this.audit.record({ action: 'course.discount', entityType: 'Course', entityId: id, before: { discount: this.discountSummary(course) }, after: { discount: this.discountSummary(updated) } })
+    return toCourse(updated)
   }
 
   async updateCourse(tenantId: string, actor: RequestActor, id: string, input: z.infer<typeof CoursePatch>) {
@@ -133,14 +230,51 @@ export class ManageService {
       if (input.price !== undefined && !perms.editPrices) throw AppError.forbidden('Price changes require Super Admin')
       if (input.meyosGrant !== undefined) delete input.meyosGrant
     }
+    const wasOnline = course.learningFormat === 'ONLINE'
+    const isOnline = (input.learningFormat ?? course.learningFormat) === 'ONLINE'
+    if (!this.isAdmin(actor) && (wasOnline || isOnline || this.sendsOnlineFields(input))) throw AppError.forbidden('Only the Super Admin can manage online courses')
     const data: Record<string, unknown> = { ...this.publishableData(input, actor, !!perms.publishDirectly), updatedById: actor.id }
     for (const k of ['title', 'summary', 'description', 'curriculum'] as const) if (input[k] !== undefined) data[k] = input[k] as Json
-    for (const k of ['categoryId', 'centerId', 'subjectId', 'durationMonths', 'coverSeed', 'imageUrl', 'meyosGrant'] as const) if (input[k] !== undefined) data[k] = input[k]
-    if (input.teacherId && this.isAdmin(actor)) data.teacherId = input.teacherId
+    for (const k of ['categoryId', 'subjectId', 'durationMonths', 'coverSeed', 'imageUrl', 'meyosGrant'] as const) if (input[k] !== undefined) data[k] = input[k]
     if (input.level) data.level = up(input.level)
-    if (input.price !== undefined) data.priceMinor = somToTiyin(input.price)
+    if (isOnline) {
+      // Online: the platform center/profile, no price, no discount; a link and provider are required.
+      if (!wasOnline) {
+        const groups = await this.prisma.client.group.count({ where: { tenantId, courseId: id, deletedAt: null } })
+        if (groups > 0) throw AppError.conflict('has_groups', 'Remove the course groups before making it an online course')
+        Object.assign(data, await this.ensureOnlineProvider(tenantId), this.discountColumns(null))
+      }
+      this.assertOnlineIsFree(input.price, input.discount)
+      Object.assign(data, this.onlineColumns({
+        externalUrl: input.externalUrl !== undefined ? input.externalUrl : course.externalUrl,
+        providerName: input.providerName !== undefined ? input.providerName : course.providerName,
+        instructorName: input.instructorName !== undefined ? input.instructorName : course.instructorName,
+        certificate: input.certificate ?? course.certificate,
+        durationText: input.durationText !== undefined ? input.durationText : course.durationText,
+      }), { priceMinor: 0n })
+    } else {
+      if (wasOnline) {
+        // Back to offline: a real center and teacher are needed again, and the online-only columns are cleared.
+        if (!input.centerId || !input.teacherId) throw AppError.invalid('center_teacher_required', 'Choose a center and a teacher to make this an offline course')
+        Object.assign(data, { learningFormat: 'OFFLINE', centerId: input.centerId, teacherId: input.teacherId, externalUrl: null, providerName: null, instructorName: null, certificate: 'NONE', durationText: { uz: '', ru: '', en: '' } })
+      } else {
+        if (this.sendsOnlineFields(input)) throw AppError.invalid('online_fields_on_offline_course', 'A link, provider or certificate belongs to an online course')
+        // The center decides who controls a course's discount, so only the Super Admin may move a course to another center.
+        if (input.centerId !== undefined && input.centerId !== course.centerId) {
+          if (!this.isAdmin(actor)) throw AppError.forbidden('Only the Super Admin can move a course to another center')
+          data.centerId = input.centerId
+        }
+        if (input.teacherId && this.isAdmin(actor)) data.teacherId = input.teacherId
+      }
+      if (input.price !== undefined) data.priceMinor = somToTiyin(input.price)
+      // A discount is changed only by the Super Admin or the course's own center admin; resending the stored one is not a change.
+      if (input.discount !== undefined && !this.sameDiscount(input.discount, course)) {
+        if (!this.canSetDiscount(actor, course.centerId)) throw AppError.forbidden('Only the Super Admin or the course center can change discounts')
+        Object.assign(data, this.discountColumns(input.discount))
+      }
+    }
     const updated = await this.prisma.client.course.update({ where: { id }, data: data as Prisma.CourseUncheckedUpdateInput, include: { groups: { where: { deletedAt: null } } } })
-    await this.audit.record({ action: 'course.update', entityType: 'Course', entityId: id, before: { status: course.status, priceMinor: course.priceMinor }, after: { status: updated.status, priceMinor: updated.priceMinor } })
+    await this.audit.record({ action: 'course.update', entityType: 'Course', entityId: id, before: { status: course.status, priceMinor: course.priceMinor, discount: this.discountSummary(course) }, after: { status: updated.status, priceMinor: updated.priceMinor, discount: this.discountSummary(updated) } })
     return toCourse(updated)
   }
 
@@ -160,6 +294,7 @@ export class ManageService {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id: courseId } })
     if (!course) throw AppError.notFound('Course')
     this.assertTeacherScope(actor, course)
+    if (course.learningFormat === 'ONLINE') throw AppError.invalid('online_course_has_no_groups', 'Online courses are taken on the provider’s site and have no groups')
     const perms = await this.teacherPermissions(tenantId)
     if (!this.isAdmin(actor) && !perms.manageGroups) throw AppError.forbidden('Group management is disabled for teachers')
     const group = await this.prisma.client.group.create({ data: { tenantId, courseId, name: input.name, days: input.days, startTime: input.start, endTime: input.end, room: input.room, capacity: input.capacity } })
@@ -578,7 +713,10 @@ export class ManageService {
 
   async listUsers(tenantId: string, q: { role?: string; search?: string; page?: number; pageSize?: number }) {
     const page = Math.max(1, q.page ?? 1), pageSize = Math.min(200, Math.max(10, q.pageSize ?? 50))
-    const where = { tenantId, ...(q.role ? { roles: { has: q.role as 'STUDENT' } } : {}), ...(q.search ? { OR: [{ displayName: { contains: q.search, mode: 'insensitive' as const } }, { phoneE164: { contains: q.search.replace(/\D/g, '') } }] } : {}) }
+    // The phone clause only applies to searches that contain digits: an empty digit string would match every phone number.
+    const search = q.search?.trim()
+    const digits = search?.replace(/\D/g, '') ?? ''
+    const where = { tenantId, ...(q.role ? { roles: { has: q.role as 'STUDENT' } } : {}), ...(search ? { OR: [{ displayName: { contains: search, mode: 'insensitive' as const } }, { login: { contains: search.toLowerCase() } }, ...(digits ? [{ phoneE164: { contains: digits } }] : [])] } : {}) }
     const [rows, total] = await Promise.all([
       this.prisma.client.user.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { teacherProfile: { select: { id: true } }, subscriptions: { where: { status: { in: ['ACTIVE', 'PENDING_PAYMENT', 'PAST_DUE'] } }, select: { id: true, status: true, packageId: true, startedAt: true, currentPeriodEnd: true }, take: 1 }, enrollments: { where: { status: 'ACTIVE' }, select: { groupId: true } } } }),
       this.prisma.client.user.count({ where }),

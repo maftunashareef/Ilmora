@@ -1,12 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { ScheduleChips } from '../../components/course/CourseCard'
+import { MAX_CART_COURSES, priceTotals } from '@ilmora/shared'
+import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { Badge, Button, Card, cx, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
-import { formatSom } from '../../lib/format'
 import { findConflicts, lessonsPerWeek, resolveGroups, weeklyHours } from '../../lib/schedule'
 import { Link, useLocation, useNavigate } from '../../lib/router'
 import { useCurrentStudent } from '../../store/selectors'
@@ -16,7 +16,7 @@ const PROVIDER_LABEL: Record<PaymentProviderId, string> = { PAYME: 'Payme', CLIC
 
 /** Step 3: review the selection, pick Payme or Click and go to the provider's hosted payment page. */
 export function PreviewPage() {
-  const { t, tr, lang } = useT()
+  const { t, tr } = useT()
   const nav = useNavigate()
   const { pathname } = useLocation()
   const auth = useStore((s) => s.auth)
@@ -42,9 +42,12 @@ export function PreviewPage() {
   const pkg = packages.find((p) => p.id === builder.packageId)
   const groups = resolveGroups(builder.groupIds, courses)
   const conflicts = findConflicts(groups)
-  const total = groups.reduce((n, g) => n + (courses.find((c) => c.id === g.courseId)?.price ?? 0), 0)
+  // Display only: the server charges the same rule (finalPriceMinor) at checkout and decides the amount.
+  const totals = priceTotals(groups.map((g) => courses.find((x) => x.id === g.courseId)).filter((c): c is NonNullable<typeof c> => !!c))
   const fullGroups = groups.filter((g) => isGroupFull(g, students, student?.id))
-  const ok = !!pkg && groups.length === pkg.maxCourses && conflicts.length === 0 && fullGroups.length === 0
+  // A package needs exactly its number of courses; without one (custom selection) any 1..MAX_CART_COURSES courses will do.
+  const countOk = pkg ? groups.length === pkg.maxCourses : groups.length >= 1 && groups.length <= MAX_CART_COURSES
+  const ok = countOk && conflicts.length === 0 && fullGroups.length === 0
   const grantCourses = groups.map((g) => courses.find((c) => c.id === g.courseId)).filter((c): c is NonNullable<typeof c> => !!c?.meyosGrant)
   const hasSubscription = student?.subscription.status === 'active'
 
@@ -61,7 +64,7 @@ export function PreviewPage() {
     )
   }
 
-  if (!student || !pkg || groups.length === 0) {
+  if (!student || groups.length === 0) {
     return (
       <div className="container-x py-16">
         <EmptyState title={t('preview.emptyTitle')} body={t('preview.emptyBody')} action={<LinkButton to="/builder">{t('builder.title')}</LinkButton>} />
@@ -98,7 +101,7 @@ export function PreviewPage() {
                   <div className="mt-1 text-xs text-charcoal/55">{center?.name} · {g.name} · {t('common.room')} {g.room}</div>
                   <div className="mt-2 flex flex-wrap items-center gap-2"><ScheduleChips group={g} /><Badge tone={full ? 'warn' : 'muted'}>{t('capacity.students', { n: enrolledCount(students, g.id, student.id), max: g.capacity })}</Badge></div>
                   {full && <div className="mt-2 text-xs text-amber-800">{t('capacity.full')} — {t('capacity.fullHint')}</div>}
-                  <div className="mt-3 text-sm font-medium text-charcoal">{formatSom(c.price, lang)} <span className="text-xs font-normal text-charcoal/50">{t('common.perMonth')}</span></div>
+                  <div className="mt-3 text-sm font-medium text-charcoal"><PriceNow course={c} withCurrency /> <span className="text-xs font-normal text-charcoal/50">{t('common.perMonth')}</span></div>
                 </li>
               )
             })}
@@ -139,16 +142,16 @@ export function PreviewPage() {
 
         <aside className="lg:sticky lg:top-24 lg:self-start">
           <Card className="p-6">
-            <div className="flex items-center justify-between"><Eyebrow>{t('student.sub.package')}</Eyebrow><Badge tone="sage">{tr(pkg.name)}</Badge></div>
+            <div className="flex items-center justify-between"><Eyebrow>{t('student.sub.package')}</Eyebrow><Badge tone="sage">{pkg ? tr(pkg.name) : t('builder.custom')}</Badge></div>
             <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
-              <div><dt className="text-charcoal/50">{t('common.courses')}</dt><dd className="mt-0.5 font-medium text-charcoal">{groups.length} / {pkg.maxCourses}</dd></div>
+              <div><dt className="text-charcoal/50">{t('common.courses')}</dt><dd className="mt-0.5 font-medium text-charcoal">{pkg ? `${groups.length} / ${pkg.maxCourses}` : groups.length}</dd></div>
               <div><dt className="text-charcoal/50">{t('common.week')}</dt><dd className="mt-0.5 font-medium text-charcoal">{lessonsPerWeek(groups)} {t('student.lessonsPerWeek')} · {weeklyHours(groups)} h</dd></div>
               <div><dt className="text-charcoal/50">{t('checkout.provider')}</dt><dd className="mt-0.5 font-medium text-charcoal">{PROVIDER_LABEL[provider]}</dd></div>
               {grantCourses.length > 0 && <div><dt className="text-charcoal/50">{t('grant.meyos')}</dt><dd className="mt-0.5 font-medium text-charcoal">{builder.meyosGrant ? t('grant.selected') : t('grant.notSelected')}</dd></div>}
             </dl>
-            <div className="mt-5 flex items-end justify-between border-t border-charcoal/10 pt-4">
-              <span className="text-sm text-charcoal/60">{t('builder.monthlyTotal')}</span>
-              <span className="font-display text-3xl text-charcoal">{formatSom(total, lang)}</span>
+            <div className="mt-5 flex items-end justify-between gap-3 border-t border-charcoal/10 pt-4">
+              <span className="pb-1 text-sm text-charcoal/60">{t('builder.monthlyTotal')}</span>
+              <TotalPrice list={totals.list} final={totals.final} />
             </div>
             <p className="mt-2 text-[11px] text-charcoal/45">{t('builder.transparent')}</p>
             <div className="mt-5 space-y-2">

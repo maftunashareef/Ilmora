@@ -21,7 +21,7 @@ export function StudentProfile() {
         <Field label={t('student.profile.displayName')} required><Input value={draft.displayName} onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} /></Field>
         <Field label={t('student.profile.district')}><Input value={draft.district} onChange={(e) => setDraft({ ...draft, district: e.target.value })} /></Field>
         <Field label={t('student.profile.lang')}><Select value={draft.preferredLang} onChange={(e) => setDraft({ ...draft, preferredLang: e.target.value as Lang })}>{LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</Select></Field>
-        <Toggle checked={draft.reminders} onChange={(v) => setDraft({ ...draft, reminders: v })} label={t('student.profile.reminders')} description={t('common.demo')} />
+        <Toggle checked={draft.reminders} onChange={(v) => setDraft({ ...draft, reminders: v })} label={t('student.profile.reminders')} />
         <div className="flex items-center justify-between gap-3 border-t border-charcoal/10 pt-5">
           <span className="text-xs text-charcoal/50">{dirty ? t('common.unsaved') : t('common.saved')}</span>
           <Button disabled={!dirty || !draft.displayName.trim()} onClick={() => { updateProfile(student.id, draft); setLang(draft.preferredLang); notify(t('common.saved')) }}>{t('common.saveChanges')}</Button>

@@ -1,7 +1,8 @@
-import { countLabel, NOUNS } from '@ilmora/shared'
+import { activePercent, countLabel, finalPriceSom, isOnlineCourse, NOUNS } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
+import { useCanSaveCourses, useHydrated } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import type { Course, Group } from '../../types'
 import { Avatar, cx, Icon } from '../ui'
@@ -9,16 +10,59 @@ import { getTeacherAvatarUrl } from '../teacher/teacherImage'
 import { StatusBadge, VisibilityBadge } from './badges'
 import { getCoursePhotoUrl } from './courseImage'
 
-export function PriceTag({ price, emphasis, className }: { price: number; emphasis?: boolean; className?: string }) {
+export function PriceTag({ price, original, percent, emphasis, className }: { price: number; original?: number; percent?: number; emphasis?: boolean; className?: string }) {
   const { t, lang } = useT()
   return (
-    <span className={cx('inline-flex items-baseline gap-1', className)}>
+    <span className={cx('inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5', className)}>
+      {original !== undefined && (
+        <span className="text-xs text-charcoal/45 line-through" title={t('discount.was')}>
+          <span className="sr-only">{t('discount.was')}: </span>
+          {formatSom(original, lang, false)}
+        </span>
+      )}
       <span className={cx('font-display tracking-tight text-charcoal font-semibold', emphasis ? 'text-2xl' : 'text-xl')}>
         {formatSom(price, lang, false)}
       </span>
       <span className="text-[11px] text-charcoal/55 font-medium">
         {t('common.som')} {t('common.perMonth')}
       </span>
+      {percent ? <span className="rounded-full bg-champagne px-2 py-0.5 text-[10px] font-bold text-forest">−{percent}%</span> : null}
+    </span>
+  )
+}
+
+/** A course's monthly price with its active discount: original struck through, price to pay, percentage. */
+export function CoursePrice({ course, emphasis, className }: { course: Course; emphasis?: boolean; className?: string }) {
+  const percent = activePercent(course)
+  return <PriceTag price={finalPriceSom(course)} original={percent ? course.price : undefined} percent={percent || undefined} emphasis={emphasis} className={className} />
+}
+
+/** A monthly total (see priceTotals): the total before discounts struck through when one applies, the total to pay, and the amount saved. */
+export function TotalPrice({ list, final, className }: { list: number; final: number; className?: string }) {
+  const { t, lang } = useT()
+  const saved = list - final
+  return (
+    <div className={cx('text-right', className)}>
+      {saved > 0 && (
+        <div className="text-sm text-charcoal/45 line-through">
+          <span className="sr-only">{t('discount.was')}: </span>
+          {formatSom(list, lang)}
+        </div>
+      )}
+      <div className="font-display text-3xl text-charcoal">{formatSom(final, lang)}</div>
+      {saved > 0 && <div className="mt-0.5 text-xs font-semibold text-forest">{t('builder.saving', { price: formatSom(saved, lang) })}</div>}
+    </div>
+  )
+}
+
+/** Compact price for list rows (no unit text): the price to pay, with the original struck through while a discount is active. */
+export function PriceNow({ course, withCurrency }: { course: Course; withCurrency?: boolean }) {
+  const { lang } = useT()
+  const percent = activePercent(course)
+  return (
+    <span>
+      {percent ? <span className="mr-1.5 text-xs text-charcoal/45 line-through">{formatSom(course.price, lang, false)}</span> : null}
+      {formatSom(finalPriceSom(course), lang, withCurrency ?? false)}
     </span>
   )
 }
@@ -39,6 +83,46 @@ export function ScheduleChips({ group, compact }: { group: Group; compact?: bool
   )
 }
 
+/** Bookmark toggle for guests and students. Saving a course is never a purchase; the saved list lives at /favorites. */
+export function SaveButton({ courseId }: { courseId: string }) {
+  const { t } = useT()
+  const canSave = useCanSaveCourses()
+  const hydrated = useHydrated()
+  const studentId = useStore((s) => s.currentStudentId)
+  const saved = useStore((s) => s.students.find((x) => x.id === s.currentStudentId)?.savedCourseIds.includes(courseId) ?? false)
+  const toggle = useStore((s) => s.toggleSavedCourse)
+  if (!canSave) return null
+  const on = hydrated && saved
+  const label = on ? t('favorites.remove') : t('favorites.add')
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-label={label}
+      title={label}
+      onClick={() => toggle(studentId, courseId)}
+      className={cx(
+        'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control border transition-colors duration-200',
+        on ? 'border-forest/40 bg-sage text-forest' : 'border-charcoal/15 text-charcoal/55 hover:border-forest/40 hover:text-forest',
+      )}
+    >
+      <Icon name={on ? 'bookmarkFill' : 'bookmark'} className="h-4 w-4" />
+    </button>
+  )
+}
+
+/** "Online" or "Offline", in the same place on every course card and course list. */
+export function FormatBadge({ course, className }: { course: Pick<Course, 'learningFormat'>; className?: string }) {
+  const { t } = useT()
+  const online = isOnlineCourse(course)
+  return (
+    <span className={cx('inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold', online ? 'border-forest bg-forest text-ivory' : 'border-forest/20 bg-sage/70 text-forest', className)}>
+      <Icon name={online ? 'globe' : 'building'} className="h-3 w-3" />
+      {t(online ? 'format.badge.ONLINE' : 'format.badge.OFFLINE')}
+    </span>
+  )
+}
+
 export function CourseCard({ course, showInternal, compact }: { course: Course; showInternal?: boolean; compact?: boolean }) {
   const { t, tr, lang } = useT()
   const tpl = useStore((s) => s.site.courseCard)
@@ -46,6 +130,9 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
   const center = useStore((s) => s.centers.find((x) => x.id === course.centerId))
   const category = useStore((s) => s.categories.find((x) => x.id === course.categoryId))
   const g = course.groups[0]
+  const online = isOnlineCourse(course)
+  // Offline courses run for a number of months; an online course's length is the provider's own wording.
+  const durationLabel = online ? (course.durationText ? tr(course.durationText) : '') : course.durationMonths > 0 ? `${course.durationMonths} ${tr({ uz: 'oy', ru: 'мес', en: 'mo' })}` : ''
 
   return (
     <article
@@ -102,10 +189,10 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
               {t(`level.${course.level}`)}
             </span>
           ) : <span />}
-          {course.durationMonths > 0 && (
-            <span className="bg-charcoal/75 backdrop-blur-sm px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-ivory/20 shadow-xs flex items-center gap-1">
-              <Icon name="clock" className="h-3 w-3 text-champagne" />
-              {course.durationMonths} {tr({ uz: 'oy', ru: 'мес', en: 'mo' })}
+          {durationLabel && (
+            <span className="bg-charcoal/75 backdrop-blur-sm px-2.5 py-0.5 rounded-full text-[10px] font-semibold border border-ivory/20 shadow-xs flex items-center gap-1 max-w-[60%]">
+              <Icon name="clock" className="h-3 w-3 shrink-0 text-champagne" />
+              <span className="truncate">{durationLabel}</span>
             </span>
           )}
         </div>
@@ -113,12 +200,15 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
 
       {/* Card Content Body */}
       <div className={cx('flex flex-1 flex-col', compact ? 'p-4' : 'p-5')}>
-        {showInternal && (
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            <StatusBadge status={course.status} />
-            <VisibilityBadge visibility={course.visibility} />
-          </div>
-        )}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <FormatBadge course={course} />
+          {showInternal && (
+            <>
+              <StatusBadge status={course.status} />
+              <VisibilityBadge visibility={course.visibility} />
+            </>
+          )}
+        </div>
 
         {/* Title */}
         <h3 className={cx('font-display leading-snug text-charcoal group-hover:text-forest transition-colors duration-200', compact ? 'text-xl' : 'text-2xl')}>
@@ -136,14 +226,35 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
 
         {/* Metadata section (Teacher, Center, Schedule) */}
         <div className="mt-4 space-y-2.5 border-t border-charcoal/8 pt-3 text-xs">
-          {tpl.showTeacher && teacher && (
+          {online && course.providerName && (
+            <div className="flex items-center gap-2 text-charcoal/65">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-sage/60 text-forest">
+                <Icon name="globe" className="h-3 w-3" />
+              </span>
+              <span className="truncate font-medium text-charcoal/80">{course.providerName}</span>
+            </div>
+          )}
+          {online && course.instructorName && (
+            <div className="flex items-center gap-2 text-charcoal/85">
+              <Avatar name={course.instructorName} seed={course.coverSeed} size={22} className="shadow-2xs text-[10px] shrink-0" />
+              <span className="font-medium truncate">{course.instructorName}</span>
+            </div>
+          )}
+          {online && course.certificate && course.certificate !== 'NONE' && (
+            <div className="flex items-center gap-1.5 text-charcoal/65">
+              <Icon name="check" className="h-3.5 w-3.5 shrink-0 text-forest" />
+              <span className="truncate">{t(`online.cert.${course.certificate}` as 'online.cert.FREE')}</span>
+            </div>
+          )}
+
+          {!online && tpl.showTeacher && teacher && (
             <div className="flex items-center gap-2 text-charcoal/85">
               <Avatar name={teacher.name} seed={teacher.avatarSeed} url={getTeacherAvatarUrl(teacher)} size={22} className="shadow-2xs text-[10px] shrink-0" />
               <span className="font-medium truncate">{teacher.name}</span>
             </div>
           )}
 
-          {tpl.showCenter && center && (
+          {!online && tpl.showCenter && center && (
             <div className="flex items-center gap-2 text-charcoal/65">
               <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-sage/60 text-forest">
                 <Icon name="building" className="h-3 w-3" />
@@ -155,7 +266,7 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
             </div>
           )}
 
-          {tpl.showSchedule && g && (
+          {!online && tpl.showSchedule && g && (
             <div className="flex items-center gap-1.5 pt-0.5">
               <ScheduleChips group={g} compact />
               {course.groups.length > 1 && (
@@ -171,10 +282,12 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
         <div className="mt-auto flex items-end justify-between gap-3 border-t border-charcoal/8 pt-4">
           <div>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-charcoal/40 block leading-tight">
-              {t('courses.monthlyPrice')}
+              {online ? t('format.onlineHint') : t('courses.monthlyPrice')}
             </span>
-            <PriceTag price={course.price} emphasis={tpl.priceStyle === 'emphasis'} />
+            {online ? <span className="font-display text-xl font-semibold tracking-tight text-forest">{t('online.free')}</span> : <CoursePrice course={course} emphasis={tpl.priceStyle === 'emphasis'} />}
           </div>
+          <div className="flex shrink-0 items-center gap-2">
+          <SaveButton courseId={course.id} />
           <Link
             to={`/courses/${course.id}`}
             className="inline-flex items-center justify-center gap-1.5 rounded-control bg-sage/70 px-3.5 py-2 text-xs font-semibold text-forest shadow-2xs transition-all duration-300 group-hover:bg-forest group-hover:text-ivory group-hover:shadow-sm shrink-0"
@@ -182,6 +295,7 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
             {t('common.view')}
             <Icon name="arrowRight" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
           </Link>
+          </div>
         </div>
       </div>
     </article>

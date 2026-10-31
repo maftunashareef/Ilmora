@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Put } from '@nestjs/common'
+import { MAX_CART_COURSES } from '@ilmora/shared'
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Length, ValidateIf } from 'class-validator'
 import { CurrentActor, CurrentTenantId } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -11,7 +12,7 @@ class DraftDto {
   @IsString()
   @Length(1, 80)
   packageId!: string | null
-  @IsArray() @ArrayMaxSize(6) @IsString({ each: true }) groupIds!: string[]
+  @IsArray() @ArrayMaxSize(MAX_CART_COURSES) @IsString({ each: true }) groupIds!: string[]
   @IsBoolean() meyosGrant!: boolean
 }
 class CheckoutDto {

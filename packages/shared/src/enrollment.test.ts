@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { enrolledCount, isGroupFull, migratedCapacity, seatsLeft, validateCapacity } from './enrollment.js'
+import { enrolledCount, isGroupFull, mergeCartGroups, migratedCapacity, seatsLeft, validateCapacity } from './enrollment.js'
 import type { Group, Student } from './types.js'
 
 const student = (id: string, groupIds: string[], status: 'active' | 'none' = 'active'): Student => ({
@@ -45,5 +45,38 @@ describe('enrollment', () => {
     expect(migratedCapacity(undefined, 3)).toBe(12)
     expect(migratedCapacity(2, 5)).toBe(5)
     expect(migratedCapacity('oops', 0)).toBe(12)
+  })
+})
+
+describe('mergeCartGroups', () => {
+  const g = (id: string, courseId: string, day: number, start = '18:00', end = '19:00', capacity = 5): Group => ({ id, courseId, name: id, days: [day], start, end, room: '1', capacity })
+  const groups = [g('a1', 'a', 0), g('a2', 'a', 1), g('b1', 'b', 1), g('c1', 'c', 2), g('d1', 'd', 0, '18:30', '19:30'), g('e1', 'e', 3)]
+  const opts = { limit: 3 }
+
+  it('keeps the account selection first and adds new guest courses without duplicates', () => {
+    const r = mergeCartGroups(['a1'], ['b1', 'a1', 'b1'], groups, opts)
+    expect(r.groupIds).toEqual(['a1', 'b1'])
+    expect(r.dropped).toEqual([])
+  })
+
+  it('lets the account win when the same course is in another group', () => {
+    const r = mergeCartGroups(['a1'], ['a2'], groups, opts)
+    expect(r.groupIds).toEqual(['a1'])
+    expect(r.dropped).toEqual([{ groupId: 'a2', reason: 'duplicate' }])
+  })
+
+  it('drops overlapping, full, unknown and over-limit guest groups and reports why', () => {
+    const r = mergeCartGroups(['a1'], ['d1', 'zz', 'c1', 'b1', 'e1'], groups, { limit: 3, isFull: (x) => x.id === 'c1' })
+    expect(r.groupIds).toEqual(['a1', 'b1', 'e1'])
+    expect(r.dropped).toEqual([
+      { groupId: 'd1', reason: 'conflict' },
+      { groupId: 'zz', reason: 'unknown' },
+      { groupId: 'c1', reason: 'full' },
+    ])
+    expect(mergeCartGroups(['a1', 'b1', 'c1'], ['e1'], groups, opts).dropped).toEqual([{ groupId: 'e1', reason: 'limit' }])
+  })
+
+  it('returns the account selection unchanged when the guest cart is empty', () => {
+    expect(mergeCartGroups(['a1', 'a1'], [], groups, opts)).toEqual({ groupIds: ['a1'], dropped: [] })
   })
 })

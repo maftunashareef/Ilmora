@@ -24,6 +24,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:status": "prisma migrate status",
     "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:seed:online": "tsx prisma/seed-online-courses.ts",
+    "prisma:seed:universities": "tsx prisma/seed-university-packages.ts",
     "prisma:restore:teachers": "tsx prisma/restore-teachers.ts",
     "owner:setup": "tsx src/cli/owner-setup.ts",
     "prisma:studio": "prisma studio"

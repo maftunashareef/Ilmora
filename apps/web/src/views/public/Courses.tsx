@@ -1,3 +1,4 @@
+import { filterCourses, finalPriceSom, formatCounts, formatFilterFromParam, formatFilterToParam, ONLINE_PROVIDER_SLUG, type FormatFilter } from '@ilmora/shared'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from '@/lib/router'
 import { CourseCard } from '../../components/course/CourseCard'
@@ -6,16 +7,18 @@ import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
 import { useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
+import { CourseFinderPrompt } from './CourseFinder'
 
 type Sort = 'featured' | 'priceAsc' | 'priceDesc' | 'title'
 
 export function CoursesPage() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const [params, setParams] = useSearchParams()
   const viewer = useViewer()
   const courses = useStore((s) => s.courses)
   const categories = useStore((s) => s.categories)
-  const centers = useStore((s) => s.centers)
+  // The platform center that holds online courses is not a real center, so it is never listed or counted.
+  const centers = useStore((s) => s.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG))
   const teachers = useStore((s) => s.teachers)
   const searchOn = useStore((s) => s.site.features.publicSearch)
 
@@ -24,6 +27,7 @@ export function CoursesPage() {
   const center = params.get('center') ?? ''
   const level = params.get('level') ?? ''
   const day = params.get('day') ?? ''
+  const format = formatFilterFromParam(params.get('format'))
   const sort = (params.get('sort') as Sort) || 'featured'
   const setP = (k: string, v: string) => {
     const p = new URLSearchParams(params)
@@ -32,64 +36,50 @@ export function CoursesPage() {
     setParams(p, { replace: true })
   }
 
-  // Pre-calculate counts per category for the discovery chips
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {}
-    courses.forEach((c) => {
-      const acc = checkAccess(c, viewer)
-      if (acc.allowed) {
-        counts[c.categoryId] = (counts[c.categoryId] || 0) + 1
-      }
-    })
-    return counts
-  }, [courses, viewer])
-
-  const totalAllowedCourses = useMemo(
-    () => courses.filter((c) => checkAccess(c, viewer).allowed).length,
-    [courses, viewer]
+  // The courses this viewer may see; every filter below narrows this list.
+  const visible = useMemo(
+    () =>
+      courses.filter((c) => {
+        const acc = checkAccess(c, viewer)
+        if (!acc.allowed) return false
+        if (acc.reason === 'public') return true
+        return viewer.role === 'admin' || viewer.role === 'teacher'
+      }),
+    [courses, viewer],
   )
 
-  const list = useMemo(() => {
-    const ql = q.trim().toLowerCase()
-    let out = courses.filter((c) => {
-      const acc = checkAccess(c, viewer)
-      if (!acc.allowed) return false
-      if (acc.reason === 'public') return true
-      return viewer.role === 'admin' || viewer.role === 'teacher'
-    })
-    if (cat) out = out.filter((c) => c.categoryId === cat)
-    if (center) out = out.filter((c) => c.centerId === center)
-    if (level) out = out.filter((c) => c.level === level)
-    if (day) out = out.filter((c) => c.groups.some((g) => g.days.includes(Number(day))))
-    if (ql) {
-      out = out.filter((c) => {
-        const teacher = teachers.find((x) => x.id === c.teacherId)?.name ?? ''
-        const categoryName = tr(categories.find((x) => x.id === c.categoryId)?.name)
-        const centerName = centers.find((x) => x.id === c.centerId)?.name ?? ''
-        const hay = [
-          tr(c.title),
-          tr(c.summary),
-          tr(c.description),
-          teacher,
-          centerName,
-          categoryName,
-          ...c.curriculum.map(tr),
-        ]
-          .join(' ')
-          .toLowerCase()
-        return hay.includes(ql)
-      })
-    }
-    const sorters: Record<Sort, (a: (typeof out)[number], b: (typeof out)[number]) => number> = {
-      featured: (a, b) => Number(b.featured) - Number(a.featured) || tr(a.title).localeCompare(tr(b.title)),
-      priceAsc: (a, b) => a.price - b.price,
-      priceDesc: (a, b) => b.price - a.price,
-      title: (a, b) => tr(a.title).localeCompare(tr(b.title)),
-    }
-    return [...out].sort(sorters[sort])
-  }, [courses, viewer, cat, center, level, day, q, sort, tr, teachers, categories, centers])
+  const haystack = (c: (typeof courses)[number]) =>
+    [
+      tr(c.title),
+      tr(c.summary),
+      tr(c.description),
+      teachers.find((x) => x.id === c.teacherId)?.name ?? '',
+      centers.find((x) => x.id === c.centerId)?.name ?? '',
+      tr(categories.find((x) => x.id === c.categoryId)?.name),
+      c.providerName ?? '',
+      c.instructorName ?? '',
+      ...c.curriculum.map(tr),
+    ].join(' ')
+  const filters = { categoryId: cat, centerId: center, level, day: day ? Number(day) : null, q }
 
-  const hasFilters = Boolean(cat || center || level || day || q)
+  // The catalog is small, so the counts and the list are worked out on every render.
+  // Counts on the category chips follow the format tab; counts on the format tabs follow every other filter.
+  const categoryCounts: Record<string, number> = {}
+  for (const c of filterCourses(visible, { format }, haystack)) categoryCounts[c.categoryId] = (categoryCounts[c.categoryId] || 0) + 1
+  const totalAllowedCourses = filterCourses(visible, { format }, haystack).length
+  const tabCounts = formatCounts(filterCourses(visible, { ...filters, format: 'ALL' }, haystack))
+
+  const matching = filterCourses(visible, { ...filters, format }, haystack)
+  const sorters: Record<Sort, (a: (typeof matching)[number], b: (typeof matching)[number]) => number> = {
+    // An explicit locale, so the server and the browser sort Latin and Cyrillic titles the same way (no hydration mismatch).
+    featured: (a, b) => Number(b.featured) - Number(a.featured) || tr(a.title).localeCompare(tr(b.title), lang),
+    priceAsc: (a, b) => finalPriceSom(a) - finalPriceSom(b),
+    priceDesc: (a, b) => finalPriceSom(b) - finalPriceSom(a),
+    title: (a, b) => tr(a.title).localeCompare(tr(b.title), lang),
+  }
+  const list = [...matching].sort(sorters[sort])
+
+  const hasFilters = Boolean(cat || center || level || day || q || format !== 'ALL')
   const clear = () => {
     setQ('')
     setParams({}, { replace: true })
@@ -113,7 +103,7 @@ export function CoursesPage() {
         {/* Live Catalog Metadata Pill Strip */}
         <div className="mt-4 flex flex-wrap items-center gap-2.5 text-xs text-charcoal/70">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-ivory px-3 py-1 border border-charcoal/10 font-medium">
-            <span className="font-bold text-forest">{totalAllowedCourses}</span> {tr({ uz: 'ta kurs', ru: 'курсов', en: 'courses' })}
+            <span className="font-bold text-forest">{visible.length}</span> {tr({ uz: 'ta kurs', ru: 'курсов', en: 'courses' })}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-ivory px-3 py-1 border border-charcoal/10 font-medium">
             <span className="font-bold text-forest">{centers.length}</span> {tr({ uz: 'ta markaz', ru: 'центров', en: 'centers' })}
@@ -122,6 +112,30 @@ export function CoursesPage() {
             <span className="font-bold text-forest">{categories.length}</span> {tr({ uz: 'ta yo‘nalish', ru: 'направлений', en: 'categories' })}
           </span>
         </div>
+      </div>
+
+      <CourseFinderPrompt className="mb-6" />
+
+      {/* Learning format: all / offline / online (kept in the URL as ?format=offline|online) */}
+      <div className="mb-4 grid grid-cols-3 gap-1 rounded-2xl border border-charcoal/12 bg-paper p-1 sm:inline-grid sm:w-auto" role="group" aria-label={t('format.label')}>
+        {(['ALL', 'OFFLINE', 'ONLINE'] as FormatFilter[]).map((f) => {
+          const active = format === f
+          return (
+            <button
+              key={f}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setP('format', formatFilterToParam(f))}
+              className={cx(
+                'flex flex-col items-center justify-center gap-0.5 rounded-xl px-2 py-2 text-xs font-semibold transition-colors sm:flex-row sm:gap-2 sm:px-5',
+                active ? 'bg-forest text-ivory shadow-xs' : 'text-charcoal/70 hover:bg-sage/60 hover:text-forest'
+              )}
+            >
+              <span>{t(f === 'ALL' ? 'format.all' : f === 'OFFLINE' ? 'format.offline' : 'format.online')}</span>
+              <span className={cx('rounded-full px-1.5 py-0.5 text-[10px]', active ? 'bg-ivory/25 text-ivory' : 'bg-charcoal/8 text-charcoal/60')}>{tabCounts[f]}</span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Category Quick Filter Chips */}
@@ -188,7 +202,7 @@ export function CoursesPage() {
               {q && (
                 <button
                   type="button"
-                  aria-label="Clear search"
+                  aria-label={t('courses.clearSearch')}
                   onClick={() => {
                     setQ('')
                     setP('q', '')
@@ -204,7 +218,7 @@ export function CoursesPage() {
           {/* Sort Dropdown */}
           <div className="flex items-center gap-2">
             <Select
-              aria-label="Sort"
+              aria-label={t('courses.sort')}
               value={sort}
               onChange={(e) => setP('sort', e.target.value)}
               className="w-full sm:w-auto min-w-[200px] bg-ivory/50"
@@ -274,12 +288,26 @@ export function CoursesPage() {
               {tr({ uz: 'Faol filtrlar:', ru: 'Активные фильтры:', en: 'Active filters:' })}
             </span>
 
+            {format !== 'ALL' && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-sage/70 px-3 py-1 font-medium text-forest border border-forest/15 shadow-2xs">
+                <span>{t(format === 'OFFLINE' ? 'format.offline' : 'format.online')}</span>
+                <button
+                  type="button"
+                  aria-label={t('courses.removeFilter', { name: t(format === 'OFFLINE' ? 'format.offline' : 'format.online') })}
+                  onClick={() => setP('format', '')}
+                  className="hover:text-red-700 transition-colors"
+                >
+                  <Icon name="x" className="h-3 w-3" />
+                </button>
+              </span>
+            )}
+
             {q && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-sage/70 px-3 py-1 font-medium text-forest border border-forest/15 shadow-2xs">
                 <span>&ldquo;{q}&rdquo;</span>
                 <button
                   type="button"
-                  aria-label="Remove search filter"
+                  aria-label={t('courses.removeFilter', { name: q })}
                   onClick={() => {
                     setQ('')
                     setP('q', '')
@@ -296,7 +324,7 @@ export function CoursesPage() {
                 <span>{tr(categories.find((c) => c.id === cat)?.name)}</span>
                 <button
                   type="button"
-                  aria-label="Remove category filter"
+                  aria-label={t('courses.removeFilter', { name: tr(categories.find((c) => c.id === cat)?.name) })}
                   onClick={() => setP('cat', '')}
                   className="hover:text-red-700 transition-colors"
                 >
@@ -310,7 +338,7 @@ export function CoursesPage() {
                 <span>{centers.find((c) => c.id === center)?.name}</span>
                 <button
                   type="button"
-                  aria-label="Remove center filter"
+                  aria-label={t('courses.removeFilter', { name: centers.find((c) => c.id === center)?.name ?? '' })}
                   onClick={() => setP('center', '')}
                   className="hover:text-red-700 transition-colors"
                 >
@@ -324,7 +352,7 @@ export function CoursesPage() {
                 <span>{t(`level.${level}` as 'level.beginner')}</span>
                 <button
                   type="button"
-                  aria-label="Remove level filter"
+                  aria-label={t('courses.removeFilter', { name: t(`level.${level}` as 'level.beginner') })}
                   onClick={() => setP('level', '')}
                   className="hover:text-red-700 transition-colors"
                 >
@@ -338,7 +366,7 @@ export function CoursesPage() {
                 <span>{t(`day.${day}` as 'day.0')}</span>
                 <button
                   type="button"
-                  aria-label="Remove day filter"
+                  aria-label={t('courses.removeFilter', { name: t(`day.${day}` as 'day.0') })}
                   onClick={() => setP('day', '')}
                   className="hover:text-red-700 transition-colors"
                 >
@@ -364,15 +392,22 @@ export function CoursesPage() {
           <span className="font-bold text-forest text-sm">{list.length}</span> {t('common.results')}
           {hasFilters && (
             <span className="text-charcoal/50 ml-1.5">
-              ({totalAllowedCourses} {tr({ uz: 'kursdan', ru: 'из курсов', en: 'from courses' })})
+              ({visible.length} {tr({ uz: 'kursdan', ru: 'из курсов', en: 'from courses' })})
             </span>
           )}
         </span>
 
-        <div className="hidden sm:inline-flex items-center gap-2 text-forest text-[11px] font-medium bg-sage/40 px-3 py-1 rounded-full border border-forest/10">
-          <Icon name="check" className="h-3 w-3 text-forest" />
-          <span>{tr({ uz: 'Duo va Trio abonementlariga mos', ru: 'Подходит для абонементов Duo и Trio', en: 'Eligible for Duo and Trio subscriptions' })}</span>
-        </div>
+        {format === 'ONLINE' ? (
+          <div className="inline-flex items-center gap-2 text-forest text-[11px] font-medium bg-sage/40 px-3 py-1 rounded-full border border-forest/10">
+            <Icon name="info" className="h-3 w-3 shrink-0 text-forest" />
+            <span>{t('online.notSubscription')}</span>
+          </div>
+        ) : format === 'OFFLINE' ? (
+          <div className="hidden sm:inline-flex items-center gap-2 text-forest text-[11px] font-medium bg-sage/40 px-3 py-1 rounded-full border border-forest/10">
+            <Icon name="check" className="h-3 w-3 text-forest" />
+            <span>{t('courses.subscriptionEligible')}</span>
+          </div>
+        ) : null}
       </div>
 
       {/* Empty State vs. Results Grid */}

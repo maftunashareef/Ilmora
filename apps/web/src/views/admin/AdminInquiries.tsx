@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Badge, Button, Card, EmptyState, Eyebrow, Icon, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
-import { api, isApiError } from '../../lib/api'
+import { api } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 
@@ -29,7 +30,8 @@ export function AdminInquiries() {
   const roles = useStore((s) => s.auth.user?.roles ?? [])
   const [data, setData] = useState<InquiryPage | null>(null)
   const [page, setPage] = useState(1)
-  const [error, setError] = useState<string | null>(null)
+  // The failed request is kept, not its text, so the message follows a language switch.
+  const [error, setError] = useState<unknown>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [handlingId, setHandlingId] = useState<string | null>(null)
@@ -44,7 +46,7 @@ export function AdminInquiries() {
       setData(res)
       setPage(p)
     } catch (err) {
-      setError(isApiError(err) ? err.message : String(err))
+      setError(err)
     } finally {
       setLoading(false)
     }
@@ -60,7 +62,7 @@ export function AdminInquiries() {
         items: prev.items.map((it) => (it.id === id ? { ...it, handledAt: res.handledAt } : it)),
       } : prev))
     } catch (err) {
-      setError(isApiError(err) ? err.message : String(err))
+      setError(err)
     } finally {
       setHandlingId(null)
     }
@@ -87,7 +89,7 @@ export function AdminInquiries() {
         }
       />
 
-      {error && <Notice tone="warn" className="mb-4">{error}</Notice>}
+      {error != null && <Notice tone="warn" className="mb-4">{apiErrorText(error, lang)}</Notice>}
 
       {data && (
         <div className="mb-4">

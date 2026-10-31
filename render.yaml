@@ -2,7 +2,7 @@
 #   ilmora-api    web service running the API and the queue worker in one process (APP_ROLE=all)
 #   ilmora-redis  Key Value (Redis) for queues, throttling, OTP windows and live attendance events
 #   ilmora-db     PostgreSQL (free plan: 1 GB, expires after 30 days unless upgraded — move to Neon or a paid plan before that)
-# Migrations and the demo seed run at start (infra/render-start.sh); the seed only while SEED_ON_DEPLOY=true.
+# Migrations run at start (infra/render-start.sh); the seed runs only if SEED_ON_DEPLOY=true, which stays off in production.
 # Super Admin: add OWNER_LOGIN and OWNER_PASSWORD to the service's environment once, redeploy, then remove them.
 services:
   - type: web
@@ -58,11 +58,12 @@ services:
         value: Asia/Tashkent
       - key: LOG_LEVEL
         value: info
+      # Off: no demo students, teacher logins, subscriptions or attendance in production.
       - key: SEED_DEMO
-        value: "true"
-      # Demo catalog texts are re-applied on deploy while the owner is not editing the catalog yet; set "false" once admin edits begin.
+        value: "false"
+      # Off: packages, site content and courses are managed in the Admin Panel; a deploy must never re-apply the sample data.
       - key: SEED_ON_DEPLOY
-        value: "true"
+        value: "false"
       # Test accounts created during the launch checks; removed once, harmless afterwards.
       - key: CLEANUP_LOGINS
         value: cloud.teacher6966,live.student.one

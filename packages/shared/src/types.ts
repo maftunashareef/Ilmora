@@ -7,7 +7,7 @@
 export type Lang = 'uz' | 'ru' | 'en'
 export type L = Record<Lang, string>
 
-export type Role = 'visitor' | 'student' | 'teacher' | 'admin'
+export type Role = 'visitor' | 'student' | 'teacher' | 'center' | 'admin'
 
 export type Status = 'draft' | 'published' | 'archived'
 export type Visibility = 'public' | 'private'
@@ -76,6 +76,18 @@ export interface Group {
 
 export type Level = 'beginner' | 'intermediate' | 'advanced'
 
+/** OFFLINE: groups with seats and a schedule, sold through subscriptions. ONLINE: a free external course opened on the provider's site. */
+export type LearningFormat = 'OFFLINE' | 'ONLINE'
+/** Whether an online course ends with a certificate. AVAILABLE: offered, but the provider's page does not say whether it is free. */
+export type CertificateKind = 'NONE' | 'FREE' | 'PAID' | 'AVAILABLE'
+
+/** A course discount window; instants are ISO-8601 UTC strings. Active when startsAt <= now < endsAt. */
+export interface CourseDiscount {
+  percent: number
+  startsAt: string
+  endsAt: string
+}
+
 export interface Course extends Publishable {
   id: string
   slug?: string
@@ -89,8 +101,22 @@ export interface Course extends Publishable {
   curriculum: L[]
   level: Level
   durationMonths: number
-  /** Monthly price in Uzbek so‘m */
+  /** Absent means OFFLINE (every course created before the field existed). Use courseFormat() / isOnlineCourse(). */
+  learningFormat?: LearningFormat
+  /** ONLINE only: the course page on the provider's own site (https). */
+  externalUrl?: string | null
+  /** ONLINE only: the organisation that publishes the course, as a name (not an ILMORA center). */
+  providerName?: string | null
+  /** ONLINE only: the instructor or teaching team named by the provider, as text. */
+  instructorName?: string | null
+  /** ONLINE only; absent means no certificate is offered. */
+  certificate?: CertificateKind
+  /** ONLINE only: how long the course takes, in words, as the provider states it. */
+  durationText?: L | null
+  /** Monthly price in Uzbek so‘m (ONLINE courses are free: 0) */
   price: number
+  /** Discount window while it has not expired (it may start later). `price` stays the list price: use finalPriceSom(). */
+  discount?: CourseDiscount | null
   coverSeed: number
   imageUrl?: string
   imageUpload?: UploadMeta
@@ -184,6 +210,8 @@ export interface Subscription {
   status: 'none' | 'active'
   startedAt?: string
   renewsAt?: string
+  /** Amount billed per period in tiyin, exactly as charged at checkout (discounts included); absent in demo data. */
+  amountMinor?: string
   /** Simulated payment record — the demo never collects or stores card numbers or CVVs */
   payment?: { method: PaymentMethodId; simulated: true; confirmedAt: string }
   /** Separate grant-funding selection, not a payment method; never changes the amount due or marks anything as paid */
@@ -242,6 +270,68 @@ export interface Package {
   highlight: boolean
 }
 
+/**
+ * One required subject of a ready-made preset. `label` is the subject as the university states it; `courseId` points at
+ * the existing ILMORA offline course that prepares for it (null while the catalog has no such course: it is then reported
+ * as missing and the package stays a draft, never filled with an invented course).
+ */
+export interface PresetSlot {
+  id: string
+  label: L
+  courseId: string | null
+}
+
+/** A university that has preparation packages. Plain data entered by the Super Admin; ILMORA is not affiliated with it. */
+export interface University {
+  id: string
+  name: string
+  /** Short form shown on small cards, for example "WIUT". */
+  shortName?: string
+  city?: string
+  /** The university's official website (https). */
+  website?: string
+}
+
+/** needs_review: the requirement could not be confirmed from an official page (or no source is recorded yet). */
+export type AdmissionStatus = 'verified' | 'needs_review'
+
+/** Where a package's required subjects come from, and whether they were confirmed against an official page. */
+export interface AdmissionSource {
+  /** The official page the requirement comes from (https); empty until one is recorded. */
+  url: string
+  /** The academic year that page states, such as "2025/2026"; empty when it states none. */
+  academicYear: string
+  /** The date the page was last checked, YYYY-MM-DD; empty until checked. */
+  checkedOn: string
+  status: AdmissionStatus
+  /** A short plain note: what was confirmed, or what is unclear. */
+  note: string
+}
+
+/**
+ * A ready-made set of existing courses (for example a university-preparation package). It only fills the cart:
+ * pricing, seats, schedule rules and checkout stay the regular ones. Hidden from the public until `enabled` (published),
+ * and a university package can only be published while its admission requirements are verified.
+ */
+export interface Preset {
+  id: string
+  /** The university this package prepares for. Absent for presets that are not about a university. */
+  universityId?: string
+  /** Older free-text university name (before universities were records); used only when `universityId` is absent. */
+  university?: string
+  /** The faculty or program this package prepares for. */
+  program?: L
+  /** Package title. */
+  name: L
+  description: L
+  /** The required subjects, each mapped to an ILMORA course. */
+  slots: PresetSlot[]
+  /** Official source of the required subjects and their verification state. */
+  admission?: AdmissionSource
+  /** Published (shown on the site) when true, otherwise a draft. */
+  enabled: boolean
+}
+
 export type SectionType =
   | 'hero'
   | 'packages'
@@ -259,6 +349,11 @@ export type SectionType =
   | 'steps'
   | 'inquiryForm'
   | 'marquee'
+  | 'discounts'
+  /** Teaser for "My set", the course finder page (/course-finder). */
+  | 'courseFinder'
+  /** "How ILMORA works": the five-step journey from choosing courses to the first lesson (texts from the dictionary). */
+  | 'journey'
 
 export interface Section {
   id: string
@@ -372,6 +467,10 @@ export interface SiteConfig {
   features: Features
   permissions: Permissions
   packages: Package[]
+  /** Ready-made course presets; absent in site configs saved before presets existed. */
+  presets?: Preset[]
+  /** Universities that preparation packages (presets) refer to; absent in site configs saved before they existed. */
+  universities?: University[]
   announcements: Announcement[]
   media: {
     /** Muted looping background film for the home hero (supplied asset) */

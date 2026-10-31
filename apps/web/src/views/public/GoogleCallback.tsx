@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card, Eyebrow, Icon, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { useNavigate, useSearchParams } from '../../lib/router'
 import { useStore, type AuthUser } from '../../store/useStore'
 
@@ -113,7 +114,7 @@ export function GoogleCallbackPage() {
           if (err.code === 'google_unconfigured') msg = t('auth.err.googleUnconfigured')
           else if (err.code === 'account_disabled') msg = t('auth.err.disabled')
           else if (err.code === 'unverified_email') msg = t('auth.err.google')
-          else if (err.message) msg = err.message
+          else msg = apiErrorText(err, lang)
         }
         setError(msg)
         notify(msg, 'warn')
@@ -143,7 +144,7 @@ export function GoogleCallbackPage() {
           ) : (
             <div className="space-y-4">
               <Icon name="refresh" className="mx-auto h-8 w-8 animate-spin text-forest" />
-              <h1 className="font-display text-2xl text-charcoal">Google Sign-In</h1>
+              <h1 className="font-display text-2xl text-charcoal">{t('auth.google')}</h1>
               <p className="text-sm text-charcoal/70">
                 {t('auth.welcome', { name: '' })}...
               </p>

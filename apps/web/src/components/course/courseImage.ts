@@ -35,6 +35,13 @@ export const COURSE_PHOTOGRAPHS: Record<string, string> = {
 export const CATEGORY_PHOTOGRAPHS: Record<string, string> = {
   'cat-english': '/images/courses/english-study.jpg',
   'cat-it': '/images/courses/frontend-dev.jpg',
+  // Online catalog categories: ILMORA's own photographs (provider images are not used, their licences were not checked).
+  'cat-python': '/images/courses/python-data.jpg',
+  'cat-frontend': '/images/courses/frontend-dev.jpg',
+  'cat-backend': '/images/courses/frontend-dev.jpg',
+  'cat-ai-ml': '/images/courses/python-data.jpg',
+  'cat-ui-ux': '/images/courses/interior-design.jpg',
+  'cat-graphic-design': '/images/courses/interior-design.jpg',
   'cat-furniture': '/images/courses/furniture-craft.jpg',
   'cat-design': '/images/courses/interior-design.jpg',
   'cat-math': '/images/courses/mathematics.jpg',
