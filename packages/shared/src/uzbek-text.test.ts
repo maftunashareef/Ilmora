@@ -6,15 +6,23 @@ import * as sample from './sample-data.js'
 import { ONLINE_CATEGORIES, ONLINE_COURSES } from './online-courses.js'
 import { UNIVERSITIES, UNIVERSITY_PACKAGES } from './university-packages.js'
 
+/**
+ * ILMORA writes Uzbek with its own alphabet: Ğ ğ (for G‘ g‘), Ö ö (O‘ o‘), Ş ş (Sh sh) and Ç ç (Ch ch). English words,
+ * names and links inside Uzbek text keep their own spelling. One phrase is kept exactly as the owner wrote it: the name
+ * “Mening to’plamim” (course finder and custom package). See docs/uz-glossary.md.
+ */
+const OWNER_NAME = 'Mening to’plamim'
+const ENGLISH_WORDS = new Set(['Charles', 'English', 'Etch-a-Sketch', 'Michigan'])
+
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
 
-/** Every Uzbek string shown in the interface or seeded as content, with where it comes from. */
-function uzbekStrings(): [string, string][] {
-  const out: [string, string][] = Object.entries(dict).map(([k, v]) => [`dict:${k}`, v.uz])
+/** Every Uzbek string shown in the interface or seeded as content: where it comes from, the text and its English twin. */
+function uzbekStrings(): [string, string, string][] {
+  const out: [string, string, string][] = Object.entries(dict).map(([k, v]) => [`dict:${k}`, v.uz, v.en])
   const walk = (path: string, o: unknown) => {
     if (!o || typeof o !== 'object') return
     const r = o as Record<string, unknown>
-    if (typeof r.uz === 'string' && typeof r.ru === 'string' && typeof r.en === 'string') return void out.push([path, r.uz])
+    if (typeof r.uz === 'string' && typeof r.ru === 'string' && typeof r.en === 'string') return void out.push([path, r.uz, r.en])
     for (const [k, v] of Object.entries(r)) walk(`${path}.${k}`, v)
   }
   walk('sample', sample)
@@ -23,7 +31,13 @@ function uzbekStrings(): [string, string][] {
   return out
 }
 
-describe('Uzbek text (modern Latin orthography)', () => {
+/** The Uzbek words of a string: links, {placeholders} and English words (also present in the English twin) removed. */
+function uzbekWords(uz: string, en: string): string[] {
+  const words = uz.replace(/https?:\/\/\S+/g, ' ').replace(/\{\w+\}/g, ' ').match(/[A-Za-zĞğÖöŞşÇç’'-]+/g) ?? []
+  return words.filter((w) => !ENGLISH_WORDS.has(w) && !new RegExp(`(^|[^A-Za-z])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^A-Za-z]|$)`).test(en))
+}
+
+describe('Uzbek text (ILMORA alphabet: Ğ, Ö, Ş, Ç)', () => {
   const strings = uzbekStrings()
 
   it('covers the dictionary and the seeded content', () => {
@@ -44,33 +58,40 @@ describe('Uzbek text (modern Latin orthography)', () => {
     for (const [where, s] of strings) expect(s, where).not.toMatch(/[Ѐ-ӿ]/)
   })
 
-  it('uses only the Uzbek Latin alphabet (no ş, ç, ğ, ñ, ı, ö, ü — Sh, Ch, G‘, Ng are written as such)', () => {
-    for (const [where, s] of strings) expect(s, where).not.toMatch(/[şçğñıöüŞÇĞÑİÖÜ]/)
-  })
-
-  it('avoids the Russian loanwords replaced in the Uzbek review', () => {
-    for (const [where, s] of strings) expect(s, where).not.toMatch(/kartochk|sessiya|skroll|aksent|\blimit|setka|\bbrif\b/i)
-  })
-
-  it('writes o‘ and g‘ with the turned comma (‘), not an apostrophe or backtick', () => {
-    for (const [where, s] of strings) expect(s, where).not.toMatch(/[oOgG]['’`ʼ´]/)
-  })
-
-  it('writes the tutuq belgisi with ’, not with the o‘/g‘ mark or a plain apostrophe', () => {
+  it('uses Ö and Ğ, never the old o‘ / g‘ marks (‘ ʻ or an apostrophe after o or g)', () => {
     for (const [where, s] of strings) {
-      const text = s.replace(/https?:\/\/\S+/g, '')
-      expect(text, where).not.toMatch(/(?<![oOgG])‘(?=[a-z])/)
-      expect(text, where).not.toMatch(/[a-zA-Z]'(?=[a-zA-Z])/)
+      expect(s, where).not.toMatch(/[‘ʻ]/)
+      expect(s.replace(/https?:\/\/\S+/g, ''), where).not.toMatch(/[oOgG]['`´]/)
     }
   })
 
-  it('spells “onlayn” and “oflayn” the Uzbek way', () => {
-    for (const [where, s] of strings) expect(s, where).not.toMatch(/\b(online|offline)\b/i)
+  it('uses Ş and Ç in Uzbek words, never the digraphs sh / ch (English words and names keep theirs)', () => {
+    for (const [where, s, en] of strings) {
+      const old = uzbekWords(s, en).filter((w) => /sh|ch/i.test(w))
+      expect(old, where).toEqual([])
+    }
+  })
+
+  it('uses only ILMORA’s accented letters, precomposed (Unicode NFC) and with no stray combining marks', () => {
+    for (const [where, s] of strings) {
+      expect(s, where).toBe(s.normalize('NFC'))
+      expect(s, where).not.toMatch(/[̀-ͯ]/)
+      expect(s, where).not.toMatch(/[ñıüÜÑİșȘőŐ]/)
+    }
+    expect(strings.some(([, s]) => /[ĞğÖöŞşÇç]/.test(s))).toBe(true)
+  })
+
+  it('writes the tutuq belgisi with ’, never a plain apostrophe inside a word', () => {
+    for (const [where, s] of strings) expect(s.replace(/https?:\/\/\S+/g, ''), where).not.toMatch(/[A-Za-z]'(?=[A-Za-z])/)
+  })
+
+  it('avoids the Russian loanwords replaced in the Uzbek review', () => {
+    for (const [where, s] of strings) expect(s, where).not.toMatch(/kartoçk|kartochk|sessiya|skroll|aksent|\blimit|setka|\bbrif\b/i)
   })
 
   it('keeps the noun singular after a number (“0 ta guruh”, never “0 guruhlar”)', () => {
     expect(countLabel('uz', 0, NOUNS.group)).toBe('0 ta guruh')
-    expect(countLabel('uz', 3, NOUNS.teacher)).toBe('3 ta o‘qituvchi')
+    expect(countLabel('uz', 3, NOUNS.teacher)).toBe('3 ta öqituvçi')
     expect(countLabel('ru', 5, NOUNS.student)).toBe('5 студентов')
     expect(countLabel('en', 1, NOUNS.teacher)).toBe('1 teacher')
   })
@@ -79,8 +100,15 @@ describe('Uzbek text (modern Latin orthography)', () => {
     expect(formatDate('2026-11-20', 'uz')).toBe('2026-yil 20-noyabr')
   })
 
-  it('spells the product names with o‘', () => {
-    expect(dict['finder.title'].uz).toBe('Mening to‘plamim')
-    expect(dict['builder.custom'].uz).toBe('O‘z to‘plamingni yarat')
+  it('keeps “Mening to’plamim” exactly as written (not converted) and spells key words in the ILMORA alphabet', () => {
+    expect(dict['finder.title'].uz).toBe(OWNER_NAME)
+    expect(dict['builder.custom'].uz).toBe(OWNER_NAME)
+    for (const [where, s] of strings) expect(s, where).not.toMatch(/Mening t[öő]plamim|t[öő]plamingni yarat/)
+    expect(dict['footer.city'].uz).toBe('Toşkent, Özbekiston')
+    expect(dict['common.som'].uz).toBe('söm')
+  })
+
+  it('leaves Russian and English untouched', () => {
+    for (const v of Object.values(dict)) expect(`${v.ru} ${v.en}`).not.toMatch(/[ĞğÖöŞş]/)
   })
 })

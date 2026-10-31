@@ -9,7 +9,7 @@ import type { Role } from '../../types'
 import { Button, cx, Icon } from '../ui'
 
 export const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: string; short: 'UZ' | 'RU' | 'EN' }[] = [
-  { code: 'uz', label: 'O‘zbekcha', short: 'UZ' },
+  { code: 'uz', label: 'Özbekça', short: 'UZ' },
   { code: 'ru', label: 'Русский', short: 'RU' },
   { code: 'en', label: 'English', short: 'EN' },
 ] as const

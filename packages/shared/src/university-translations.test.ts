@@ -38,7 +38,7 @@ describe('university package strings', () => {
   it('never claim an official affiliation', () => {
     const disclaimer = dict['uni.disclaimer']
     expect(disclaimer.en).toMatch(/not officially affiliated/i)
-    expect(disclaimer.uz).toMatch(/rasmiy bog‘liq emas/)
+    expect(disclaimer.uz).toMatch(/rasmiy boğliq emas/)
     expect(disclaimer.ru).toMatch(/официально не связаны/)
   })
 })

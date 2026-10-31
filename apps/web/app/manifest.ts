@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'ILMORA',
     short_name: 'ILMORA',
-    description: 'Turli o‘quv markazlari. Bitta abonement.',
+    description: 'Turli öquv markazlari. Bitta abonement.',
     start_url: '/uz',
     display: 'standalone',
     background_color: '#F7F5F0',

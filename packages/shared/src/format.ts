@@ -1,6 +1,20 @@
 import type { Lang } from './types.js'
 
-const UNIT: Record<Lang, string> = { uz: 'so‘m', ru: 'сум', en: 'so‘m' }
+const UNIT: Record<Lang, string> = { uz: 'söm', ru: 'сум', en: 'so‘m' }
+
+/**
+ * Text for search matching. ILMORA's Uzbek letters and the traditional spellings fold to one form, so "öquvçi",
+ * "o‘quvchi", "o'quvchi" and "oquvchi" (or "şahar" and "shahar") find each other; case and accents are ignored.
+ */
+export function foldForSearch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/ş/g, 'sh')
+    .replace(/ç/g, 'ch')
+    .replace(/[‘’ʻʼ'`]/g, '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+}
 
 /** 1200000 → "1 200 000 so‘m" */
 export function formatSom(n: number, lang: Lang, withUnit = true): string {
@@ -23,7 +37,7 @@ export function formatBytes(bytes: number): string {
 
 const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr']
 const UZ_MONTHS_SHORT = ['yan', 'fev', 'mar', 'apr', 'may', 'iyn', 'iyl', 'avg', 'sen', 'okt', 'noy', 'dek']
-const UZ_DAYS_SHORT = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan']
+const UZ_DAYS_SHORT = ['Yak', 'Duş', 'Seş', 'Çor', 'Pay', 'Jum', 'Şan']
 
 export function formatDate(iso: string | undefined, lang: Lang): string {
   if (!iso) return '—'

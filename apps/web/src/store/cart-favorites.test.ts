@@ -111,6 +111,27 @@ describe('flexible cart (custom selection)', () => {
   })
 })
 
+describe('visitor cart and package links', () => {
+  it('restores the saved cart before a package link applies, so switching the package keeps the courses (trimmed to the package)', () => {
+    memory.set(DRAFT_KEY, JSON.stringify({ packageId: 'pkg-trio', groupIds: ['g1', 'g2', 'g4'], meyosGrant: false }))
+    const fresh = createIlmoraStore(initialMock)
+    expect(fresh.getState().guestHydrated).toBe(false) // the builder waits for this before applying ?package=…
+    fresh.getState().hydrateGuest()
+    expect(fresh.getState().guestHydrated).toBe(true)
+    expect(fresh.getState().students[0].builder.groupIds).toEqual(['g1', 'g2', 'g4'])
+    // A Flex link (2 courses) then switches the package: the first two courses stay, nothing else is lost.
+    fresh.getState().setBuilderPackage(GUEST_STUDENT_ID, 'pkg-duo')
+    expect(fresh.getState().students[0].builder).toMatchObject({ packageId: 'pkg-duo', groupIds: ['g1', 'g2'] })
+    expect(JSON.parse(memory.get(DRAFT_KEY) ?? '{}')).toMatchObject({ packageId: 'pkg-duo', groupIds: ['g1', 'g2'] })
+  })
+
+  it('marks the cart as read even when nothing was saved', () => {
+    const fresh = createIlmoraStore(initialMock)
+    fresh.getState().hydrateGuest()
+    expect(fresh.getState().guestHydrated).toBe(true)
+  })
+})
+
 describe('favorites for visitors', () => {
   it('persists saved courses on the device and restores them in a new store', () => {
     const store = createIlmoraStore(initialMock)

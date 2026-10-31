@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { courseFormat, filterCourses, formatCounts, formatFilterFromParam, formatFilterToParam, isOnlineCourse, isSafeExternalUrl } from './catalog.js'
+import { foldForSearch } from './format.js'
 import type { LearningFormat } from './types.js'
 
 type C = { id: string; title: string; learningFormat?: LearningFormat; categoryId: string; centerId: string; level: string; groups: { days: number[] }[] }
@@ -58,6 +59,28 @@ describe('catalog filters', () => {
     expect(ids(filterCourses(COURSES, { q: 'english', format: 'OFFLINE', categoryId: 'english' }, text))).toEqual([])
     expect(ids(filterCourses(COURSES, { q: '   ' }, text))).toHaveLength(5)
     expect(ids(filterCourses(COURSES, { q: 'zzz' }, text))).toEqual([])
+  })
+
+  it('"Barça çegirmalar": only offline courses whose discount is active now; expired, future and online ones are left out', () => {
+    const day = 86_400_000
+    const at = (offsetDays: number) => new Date(Date.now() + offsetDays * day).toISOString()
+    const withDiscount = (id: string, format: LearningFormat, startsAt: string, endsAt: string) => ({ ...c(id, id, format, 'x'), discount: { percent: 15, startsAt, endsAt } })
+    const list = [
+      withDiscount('active', 'OFFLINE', at(-2), at(5)),
+      withDiscount('expired', 'OFFLINE', at(-9), at(-1)),
+      withDiscount('future', 'OFFLINE', at(2), at(9)),
+      withDiscount('online', 'ONLINE', at(-2), at(5)),
+      c('plain', 'plain', 'OFFLINE', 'x'),
+    ]
+    expect(ids(filterCourses(list, { sale: true }, text))).toEqual(['active'])
+    expect(ids(filterCourses(list, {}, text))).toHaveLength(5)
+  })
+
+  it('search finds Uzbek text whichever spelling is typed (ILMORA letters, o‘/sh/ch, apostrophes or plain letters)', () => {
+    const uz = [c('u1', 'Öquvçilar uçun şahmat', 'OFFLINE', 'other'), c('u2', 'Boğ dizayni', 'OFFLINE', 'other')]
+    for (const q of ['öquvçi', 'O‘QUVCHI', "o'quvchi", 'oquvchi', 'shahmat', 'ŞAHMAT', 'uchun']) expect(ids(filterCourses(uz, { q }, text)), q).toEqual(['u1'])
+    for (const q of ['boğ', 'bog‘', 'bog']) expect(ids(filterCourses(uz, { q }, text)), q).toEqual(['u2'])
+    expect(foldForSearch('Özbekiston Ğalaba Şahar Çiroyli')).toBe('ozbekiston galaba shahar chiroyli')
   })
 
   it('level, center and day filters keep working with the format filter', () => {

@@ -49,7 +49,7 @@ export function AdminTheme() {
           <div className="mt-5 rounded-card border border-charcoal/10 bg-ivory p-5">
             <div className="eyebrow mb-2">{t('admin.theme.sample')}</div>
             <div className="font-display text-3xl text-charcoal">{tr(site.brand.heroHeadline)}</div>
-            <p className="mt-2 text-sm text-charcoal/65">Oʻzbekcha · Русский · English — 1 200 000 so‘m</p>
+            <p className="mt-2 text-sm text-charcoal/65">Özbekça · Ğğ Öö Şş Çç · Русский · English — 1 200 000 söm</p>
             <div className="mt-3 flex gap-2"><span className="rounded-control bg-forest px-3 py-1.5 text-xs text-ivory">{tr(site.brand.primaryCta)}</span><span className="rounded-control bg-champagne px-3 py-1.5 text-xs text-charcoal">Bazis</span></div>
           </div>
         </Card>

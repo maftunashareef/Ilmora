@@ -18,7 +18,7 @@ import type { AvatarUploadUrlInput, CourseInput, CoursePatch, GroupInput, Packag
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
-const slugify = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'item'
+const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'item'
 
 /**
  * Teacher Studio + Super Admin write operations. Teachers act on their own content (ownership = teacherId),

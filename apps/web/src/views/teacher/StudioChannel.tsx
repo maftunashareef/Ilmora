@@ -295,7 +295,7 @@ export function StudioChannel() {
               </p>
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {[
-                  'O‘zbek tili',
+                  'Özbek tili',
                   'Rus tili',
                   'Ingliz tili',
                   '5+ yil tajriba',

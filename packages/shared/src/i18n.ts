@@ -33,7 +33,7 @@ export const NOUNS = {
   video: { uz: 'video dars', ru: ['видеоурок', 'видеоурока', 'видеоуроков'], en: ['video lesson', 'video lessons'] },
   group: { uz: 'guruh', ru: ['группа', 'группы', 'групп'], en: ['group', 'groups'] },
   lesson: { uz: 'dars', ru: ['урок', 'урока', 'уроков'], en: ['lesson', 'lessons'] },
-  teacher: { uz: 'o‘qituvchi', ru: ['преподаватель', 'преподавателя', 'преподавателей'], en: ['teacher', 'teachers'] },
+  teacher: { uz: 'öqituvçi', ru: ['преподаватель', 'преподавателя', 'преподавателей'], en: ['teacher', 'teachers'] },
   student: { uz: 'talaba', ru: ['студент', 'студента', 'студентов'], en: ['student', 'students'] },
 } as const satisfies Record<string, CountNoun>
 export function countLabel(lang: Lang, n: number, noun: CountNoun): string {

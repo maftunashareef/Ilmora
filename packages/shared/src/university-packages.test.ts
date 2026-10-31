@@ -106,7 +106,7 @@ describe('researched university packages', () => {
     for (const p of UNIVERSITY_PACKAGES) {
       expect(p.description.en, p.id).toMatch(/not officially affiliated/i)
       expect(p.description.ru, p.id).toMatch(/официально не связан/)
-      expect(p.description.uz, p.id).toMatch(/rasmiy bog‘liq emas/)
+      expect(p.description.uz, p.id).toMatch(/rasmiy boğliq emas/)
     }
   })
 })

@@ -135,9 +135,21 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
 @media (prefers-reduced-motion: reduce) { .marquee { animation: none; } }
 
 /* How It Works journey: the connecting line draws in when shown; the builder tracker's current step breathes gently. */
-.journey-line { transform-origin: left center; }
-html.reveal-on .journey-line.reveal { opacity: 1; transform: scaleX(0); transition: transform 1.4s var(--ease-out-soft); }
-html.reveal-on .journey-line.reveal.is-visible { transform: scaleX(1); }
+.journey-progress { transition: transform 0.7s var(--ease-out-soft); }
+/* Each step's screen fades in; its parts pop in one after another (--d is the delay); the timer bar fills while the tour plays. */
+.journey-screen { animation: journeyScreenIn 0.55s var(--ease-out-soft) both; }
+.journey-pop { animation: journeyPop 0.5s var(--ease-out-soft) both; animation-delay: var(--d, 0ms); }
+.journey-timer { width: 0; animation-name: journeyTimer; animation-timing-function: linear; animation-fill-mode: forwards; }
+.journey-typing { display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom; max-width: 14rem; animation: journeyTyping 1.6s steps(24, end) both; }
+@keyframes journeyScreenIn { from { opacity: 0; transform: translateY(12px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes journeyPop { 0% { opacity: 0; transform: scale(0.85) translateY(6px); } 70% { opacity: 1; transform: scale(1.03); } 100% { opacity: 1; transform: none; } }
+@keyframes journeyTimer { to { width: 100%; } }
+@keyframes journeyTyping { from { max-width: 0; } to { max-width: 14rem; } }
+@media (prefers-reduced-motion: reduce) {
+  .journey-progress { transition: none; }
+  .journey-screen, .journey-pop, .journey-typing { animation: none; }
+  .journey-timer, .journey-toggle { display: none; }
+}
 .journey-current::after {
   content: ""; position: absolute; inset: -5px; border-radius: 9999px;
   border: 2px solid color-mix(in srgb, var(--c-champagne) 70%, transparent);
@@ -165,6 +177,29 @@ html.reveal-on .journey-line.reveal.is-visible { transform: scaleX(1); }
   animation: discountGlow 2.6s ease-in-out infinite;
 }
 @keyframes discountGlow { 0%, 100% { opacity: 0.35; transform: scale(0.94); } 50% { opacity: 0.95; transform: scale(1.14); } }
+/* Small SALE ribbon on discounted cards: only a light sweep crosses the ribbon, the card itself never flashes.
+   The element sets `relative overflow-hidden` with Tailwind (no position here, see .discount-glow). */
+.sale-ribbon::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 25%, rgba(255, 255, 255, 0.55) 50%, transparent 75%);
+  transform: translateX(-130%);
+  animation: ribbonShine 3.6s ease-in-out infinite;
+}
+@keyframes ribbonShine { 0%, 55% { transform: translateX(-130%); } 100% { transform: translateX(130%); } }
+/* Golden SALE badge: a soft glow that breathes around the badge (box-shadow on a small element) under the sweep above. */
+.sale-badge { animation: saleBadgePulse 2.8s ease-in-out infinite; }
+@keyframes saleBadgePulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-champagne) 0%, transparent), 0 0 10px color-mix(in srgb, var(--c-champagne) 35%, transparent); }
+  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-champagne) 30%, transparent), 0 0 22px color-mix(in srgb, var(--c-champagne) 70%, transparent); }
+}
+/* "Mening töplamim" choices: the selected one gets a deep green border and a soft green glow. */
+.finder-choice-on {
+  box-shadow: inset 0 0 0 1.5px var(--c-forest), 0 0 0 4px color-mix(in srgb, var(--c-forest) 9%, transparent), 0 14px 30px -18px color-mix(in srgb, var(--c-forest) 70%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sale-ribbon::after { animation: none; display: none; }
+  .sale-badge { animation: none; box-shadow: 0 0 12px color-mix(in srgb, var(--c-champagne) 50%, transparent); }
+}
 @media (prefers-reduced-motion: reduce) {
   .discount-track { animation: none; }
   .discount-marquee { overflow-x: auto; mask-image: none; scroll-snap-type: x mandatory; }

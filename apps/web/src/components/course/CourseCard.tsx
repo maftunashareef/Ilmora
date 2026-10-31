@@ -8,6 +8,7 @@ import type { Course, Group } from '../../types'
 import { Avatar, cx, Icon } from '../ui'
 import { getTeacherAvatarUrl } from '../teacher/teacherImage'
 import { StatusBadge, VisibilityBadge } from './badges'
+import { SaleRibbon } from './DiscountShowcase'
 import { getCoursePhotoUrl } from './courseImage'
 
 export function PriceTag({ price, original, percent, emphasis, className }: { price: number; original?: number; percent?: number; emphasis?: boolean; className?: string }) {
@@ -20,7 +21,7 @@ export function PriceTag({ price, original, percent, emphasis, className }: { pr
           {formatSom(original, lang, false)}
         </span>
       )}
-      <span className={cx('font-display tracking-tight text-charcoal font-semibold', emphasis ? 'text-2xl' : 'text-xl')}>
+      <span className={cx('font-display tracking-tight font-semibold', original !== undefined ? 'text-forest' : 'text-charcoal', emphasis || original !== undefined ? 'text-2xl' : 'text-xl')}>
         {formatSom(price, lang, false)}
       </span>
       <span className="text-[11px] text-charcoal/55 font-medium">
@@ -131,6 +132,8 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
   const category = useStore((s) => s.categories.find((x) => x.id === course.categoryId))
   const g = course.groups[0]
   const online = isOnlineCourse(course)
+  // A discount only ever applies to a paid offline course; the card then gets a gold frame and a SALE ribbon.
+  const salePercent = online ? 0 : activePercent(course)
   // Offline courses run for a number of months; an online course's length is the provider's own wording.
   const durationLabel = online ? (course.durationText ? tr(course.durationText) : '') : course.durationMonths > 0 ? `${course.durationMonths} ${tr({ uz: 'oy', ru: 'мес', en: 'mo' })}` : ''
 
@@ -138,12 +141,15 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
     <article
       className={cx(
         'card group relative flex h-full flex-col overflow-hidden rounded-card transition-all duration-400 hover:-translate-y-1.5 hover:shadow-lift border',
-        course.featured
-          ? 'border-champagne/60 hover:border-champagne bg-gradient-to-b from-paper via-paper to-champagne/[0.04] ring-1 ring-champagne/25'
-          : 'border-charcoal/10 hover:border-forest/35 bg-paper'
+        salePercent > 0
+          ? 'border-champagne/80 hover:border-champagne bg-gradient-to-b from-paper via-paper to-champagne/[0.08] ring-1 ring-champagne/40'
+          : course.featured
+            ? 'border-champagne/60 hover:border-champagne bg-gradient-to-b from-paper via-paper to-champagne/[0.04] ring-1 ring-champagne/25'
+            : 'border-charcoal/10 hover:border-forest/35 bg-paper'
       )}
       style={{ padding: 0 }}
     >
+      {salePercent > 0 && <span className="pointer-events-none absolute inset-x-0 top-0 z-20 h-1 bg-gradient-to-r from-[#b8923d] via-champagne to-[#b8923d]" aria-hidden="true" />}
       {/* Top Cover Media: Editorial photographic representation */}
       <Link to={`/courses/${course.id}`} className="block relative overflow-hidden focus-visible:outline-offset-[-3px] bg-sage/20">
         <div className={cx('relative overflow-hidden', compact ? 'aspect-[16/8]' : 'aspect-[16/10]')}>
@@ -167,7 +173,8 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
             </span>
           ) : <span />}
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            {salePercent > 0 && <SaleRibbon percent={salePercent} />}
             {course.featured && (
               <span className="shimmer-pill rounded-full bg-champagne text-charcoal px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-sm border border-champagne/70 flex items-center gap-1">
                 <Icon name="star" className="h-3 w-3 fill-current text-charcoal/80" />
@@ -285,9 +292,22 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
               {online ? t('format.onlineHint') : t('courses.monthlyPrice')}
             </span>
             {online ? <span className="font-display text-xl font-semibold tracking-tight text-forest">{t('online.free')}</span> : <CoursePrice course={course} emphasis={tpl.priceStyle === 'emphasis'} />}
+            {salePercent > 0 && <span className="mt-0.5 block text-[11px] font-semibold text-forest">{t('discounts.save', { price: formatSom(course.price - finalPriceSom(course), lang) })}</span>}
           </div>
           <div className="flex shrink-0 items-center gap-2">
           <SaveButton courseId={course.id} />
+          {online && course.externalUrl && (
+            <a
+              href={course.externalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`${t('online.openOnProvider')}: ${course.providerName ?? ''}`}
+              title={t('online.openOnProvider')}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-charcoal/15 text-charcoal/55 transition-colors duration-200 hover:border-forest/40 hover:text-forest"
+            >
+              <Icon name="external" className="h-4 w-4" />
+            </a>
+          )}
           <Link
             to={`/courses/${course.id}`}
             className="inline-flex items-center justify-center gap-1.5 rounded-control bg-sage/70 px-3.5 py-2 text-xs font-semibold text-forest shadow-2xs transition-all duration-300 group-hover:bg-forest group-hover:text-ivory group-hover:shadow-sm shrink-0"

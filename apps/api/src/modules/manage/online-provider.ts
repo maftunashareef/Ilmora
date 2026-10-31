@@ -11,7 +11,7 @@ export const ONLINE_PROVIDER = {
   tone: '#163C35',
   district: { uz: 'Onlayn', ru: 'Онлайн', en: 'Online' },
   description: {
-    uz: 'Ishonchli ta’lim platformalarining bepul onlayn kurslari. Darslar provayderning o‘z saytida o‘tiladi.',
+    uz: 'Işonçli ta’lim platformalarining bepul onlayn kurslari. Darslar provayderning öz saytida ötiladi.',
     ru: 'Бесплатные онлайн-курсы известных образовательных платформ. Обучение проходит на сайте самого провайдера.',
     en: 'Free online courses from established education providers, taken on the provider’s own site.',
   },

@@ -1,3 +1,4 @@
+import { foldForSearch } from '@ilmora/shared'
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from '@/lib/router'
 import { NotFound } from '../../components/AccessGate'
@@ -35,8 +36,8 @@ export function TeacherChannelPage() {
 
   const isOwner = viewer.role === 'teacher' && viewer.teacherId === id
   const canSeeInactive = isOwner || viewer.role === 'admin'
-  const ql = q.trim().toLowerCase()
-  const match = (s: string) => !ql || s.toLowerCase().includes(ql)
+  const ql = foldForSearch(q.trim())
+  const match = (s: string) => !ql || foldForSearch(s).includes(ql)
   // Plain derivations (cheap) — keeps hook order stable regardless of the early returns below.
   const courses = allCourses.filter((c) => checkAccess(c, viewer).allowed && match(tr(c.title) + tr(c.summary)))
   const videos = allVideos.filter((v) => checkAccess(v, viewer).allowed && match(tr(v.title) + tr(v.description)))

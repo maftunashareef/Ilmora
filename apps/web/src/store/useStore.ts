@@ -145,6 +145,8 @@ export interface StoreState extends DemoState, Actions {
   auth: { status: 'idle' | 'loading' | 'anonymous' | 'authenticated'; user: AuthUser | null }
   siteVersion: number
   workspaceLoaded: boolean
+  /** The visitor's saved cart and favourites have been read from this device (hydrateGuest ran). */
+  guestHydrated: boolean
   /** Super Admin only: the full preset list (including disabled ones) has been loaded into `site.presets`. */
   presetsLoaded: boolean
   myPayments: PaymentSummary[]
@@ -398,6 +400,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       toasts: [],
       auth: { status: 'idle', user: null },
       workspaceLoaded: false,
+      guestHydrated: false,
       presetsLoaded: false,
       myPayments: [],
       sessionQr: {},
@@ -516,11 +519,12 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         await guard(refreshWorkspace)
       },
       hydrateGuest: () => {
-        if (get().auth.status === 'authenticated') return
+        if (get().auth.status === 'authenticated') return set({ guestHydrated: true })
         const draft = readDraft()
         const saved = readGuestSaved()
-        if (!draft && saved.length === 0) return
+        if (!draft && saved.length === 0) return set({ guestHydrated: true })
         set((s) => ({
+          guestHydrated: true,
           students: s.students.map((x) =>
             x.id !== GUEST_STUDENT_ID
               ? x

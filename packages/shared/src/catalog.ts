@@ -1,3 +1,5 @@
+import { foldForSearch } from './format.js'
+import { activePercent } from './pricing.js'
 import type { CertificateKind, Course, LearningFormat } from './types.js'
 
 /** Format of a course; courses saved before the field existed are OFFLINE. */
@@ -27,20 +29,22 @@ export interface CourseFilters {
   level?: string
   /** 0 = Monday … 6 = Sunday; only offline courses have scheduled days. */
   day?: number | null
-  /** Free-text search, matched case-insensitively against `haystack(course)`. */
+  /** Free-text search, matched against `haystack(course)` ignoring case, accents and Uzbek spelling (see foldForSearch). */
   q?: string
+  /** Only courses with a discount active right now ("Barça çegirmalar"); online courses never have one. */
+  sale?: boolean
 }
 
 /**
  * The catalog filters, all applied together. `haystack` builds the searchable text of a course (title, summary,
  * provider, instructor, category and so on) so the caller decides how it is localised.
  */
-export function filterCourses<T extends Pick<Course, 'learningFormat' | 'categoryId' | 'centerId'> & { level: string; groups: { days: number[] }[] }>(
+export function filterCourses<T extends Pick<Course, 'learningFormat' | 'categoryId' | 'centerId'> & { level: string; groups: { days: number[] }[]; discount?: Course['discount'] }>(
   courses: T[],
   filters: CourseFilters,
   haystack: (course: T) => string,
 ): T[] {
-  const q = (filters.q ?? '').trim().toLowerCase()
+  const q = foldForSearch((filters.q ?? '').trim())
   const format = filters.format ?? 'ALL'
   return courses.filter((c) => {
     if (format !== 'ALL' && courseFormat(c) !== format) return false
@@ -48,7 +52,8 @@ export function filterCourses<T extends Pick<Course, 'learningFormat' | 'categor
     if (filters.centerId && c.centerId !== filters.centerId) return false
     if (filters.level && c.level !== filters.level) return false
     if (filters.day != null && !c.groups.some((g) => g.days.includes(filters.day as number))) return false
-    if (q && !haystack(c).toLowerCase().includes(q)) return false
+    if (filters.sale && (isOnlineCourse(c) || activePercent(c) === 0)) return false
+    if (q && !foldForSearch(haystack(c)).includes(q)) return false
     return true
   })
 }

@@ -1,7 +1,8 @@
-import { filterCourses, finalPriceSom, formatCounts, formatFilterFromParam, formatFilterToParam, ONLINE_PROVIDER_SLUG, type FormatFilter } from '@ilmora/shared'
+import { activePercent, filterCourses, finalPriceSom, formatCounts, formatFilterFromParam, formatFilterToParam, ONLINE_PROVIDER_SLUG, type FormatFilter } from '@ilmora/shared'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from '@/lib/router'
 import { CourseCard } from '../../components/course/CourseCard'
+import { SaleRibbon } from '../../components/course/DiscountShowcase'
 import { Button, Icon, Input, Select, cx } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
@@ -28,6 +29,8 @@ export function CoursesPage() {
   const level = params.get('level') ?? ''
   const day = params.get('day') ?? ''
   const format = formatFilterFromParam(params.get('format'))
+  // "Barça çegirmalar": only courses whose discount is active now (?sale=1).
+  const sale = params.get('sale') === '1'
   const sort = (params.get('sort') as Sort) || 'featured'
   const setP = (k: string, v: string) => {
     const p = new URLSearchParams(params)
@@ -60,7 +63,7 @@ export function CoursesPage() {
       c.instructorName ?? '',
       ...c.curriculum.map(tr),
     ].join(' ')
-  const filters = { categoryId: cat, centerId: center, level, day: day ? Number(day) : null, q }
+  const filters = { categoryId: cat, centerId: center, level, day: day ? Number(day) : null, q, sale }
 
   // The catalog is small, so the counts and the list are worked out on every render.
   // Counts on the category chips follow the format tab; counts on the format tabs follow every other filter.
@@ -68,18 +71,20 @@ export function CoursesPage() {
   for (const c of filterCourses(visible, { format }, haystack)) categoryCounts[c.categoryId] = (categoryCounts[c.categoryId] || 0) + 1
   const totalAllowedCourses = filterCourses(visible, { format }, haystack).length
   const tabCounts = formatCounts(filterCourses(visible, { ...filters, format: 'ALL' }, haystack))
+  const saleCount = filterCourses(visible, { ...filters, format, sale: true }, haystack).length
 
   const matching = filterCourses(visible, { ...filters, format }, haystack)
   const sorters: Record<Sort, (a: (typeof matching)[number], b: (typeof matching)[number]) => number> = {
     // An explicit locale, so the server and the browser sort Latin and Cyrillic titles the same way (no hydration mismatch).
-    featured: (a, b) => Number(b.featured) - Number(a.featured) || tr(a.title).localeCompare(tr(b.title), lang),
+    // In the discounts view the biggest discount comes first.
+    featured: (a, b) => (sale ? activePercent(b) - activePercent(a) : 0) || Number(b.featured) - Number(a.featured) || tr(a.title).localeCompare(tr(b.title), lang),
     priceAsc: (a, b) => finalPriceSom(a) - finalPriceSom(b),
     priceDesc: (a, b) => finalPriceSom(b) - finalPriceSom(a),
     title: (a, b) => tr(a.title).localeCompare(tr(b.title), lang),
   }
   const list = [...matching].sort(sorters[sort])
 
-  const hasFilters = Boolean(cat || center || level || day || q || format !== 'ALL')
+  const hasFilters = Boolean(cat || center || level || day || q || sale || format !== 'ALL')
   const clear = () => {
     setQ('')
     setParams({}, { replace: true })
@@ -93,11 +98,12 @@ export function CoursesPage() {
           <span className="h-2 w-2 rounded-full bg-forest animate-pulse" />
           <span>{t('common.courses')}</span>
         </div>
-        <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl text-charcoal tracking-tight">
-          {t('courses.title')}
+        <h1 className="flex flex-wrap items-center gap-3 font-display text-4xl sm:text-5xl lg:text-6xl text-charcoal tracking-tight">
+          {sale ? t('offers.all') : t('courses.title')}
+          {sale && <SaleRibbon className="text-xs" />}
         </h1>
         <p className="mt-3 max-w-2xl text-[15px] sm:text-base text-charcoal/75 leading-relaxed">
-          {t('courses.subtitle')}
+          {sale ? t('offers.allSubtitle') : t('courses.subtitle')}
         </p>
 
         {/* Live Catalog Metadata Pill Strip */}
@@ -109,7 +115,7 @@ export function CoursesPage() {
             <span className="font-bold text-forest">{centers.length}</span> {tr({ uz: 'ta markaz', ru: 'центров', en: 'centers' })}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-ivory px-3 py-1 border border-charcoal/10 font-medium">
-            <span className="font-bold text-forest">{categories.length}</span> {tr({ uz: 'ta yo‘nalish', ru: 'направлений', en: 'categories' })}
+            <span className="font-bold text-forest">{categories.length}</span> {tr({ uz: 'ta yönaliş', ru: 'направлений', en: 'categories' })}
           </span>
         </div>
       </div>
@@ -137,6 +143,21 @@ export function CoursesPage() {
           )
         })}
       </div>
+
+      {/* All active discounts (kept in the URL as ?sale=1) */}
+      <button
+        type="button"
+        aria-pressed={sale}
+        onClick={() => setP('sale', sale ? '' : '1')}
+        className={cx(
+          'mb-4 ml-0 inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-semibold transition-colors sm:ml-2',
+          sale ? 'border-forest bg-forest text-champagne shadow-xs' : 'border-champagne/70 bg-gradient-to-r from-champagne/25 to-paper text-forest hover:border-champagne'
+        )}
+      >
+        <Icon name="star" className="h-3.5 w-3.5" />
+        <span>{t('offers.all')}</span>
+        <span className={cx('rounded-full px-1.5 py-0.5 text-[10px]', sale ? 'bg-champagne/25 text-champagne' : 'bg-champagne/40 text-forest')}>{saleCount}</span>
+      </button>
 
       {/* Category Quick Filter Chips */}
       <div className="mb-6 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -288,6 +309,20 @@ export function CoursesPage() {
               {tr({ uz: 'Faol filtrlar:', ru: 'Активные фильтры:', en: 'Active filters:' })}
             </span>
 
+            {sale && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-champagne/40 px-3 py-1 font-medium text-forest border border-champagne/70 shadow-2xs">
+                <span>{t('offers.all')}</span>
+                <button
+                  type="button"
+                  aria-label={t('courses.removeFilter', { name: t('offers.all') })}
+                  onClick={() => setP('sale', '')}
+                  className="hover:text-red-700 transition-colors"
+                >
+                  <Icon name="x" className="h-3 w-3" />
+                </button>
+              </span>
+            )}
+
             {format !== 'ALL' && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-sage/70 px-3 py-1 font-medium text-forest border border-forest/15 shadow-2xs">
                 <span>{t(format === 'OFFLINE' ? 'format.offline' : 'format.online')}</span>
@@ -421,7 +456,7 @@ export function CoursesPage() {
           </h3>
           <p className="mt-2 max-w-md text-sm text-charcoal/70 leading-relaxed">
             {tr({
-              uz: 'Siz tanlagan mezonlar yoki qidiruv so‘zi bo‘yicha kurslar topilmadi. Qidiruv so‘zini o‘zgartiring yoki filtrlarni tozalang.',
+              uz: 'Siz tanlagan mezonlar yoki qidiruv sözi böyiça kurslar topilmadi. Qidiruv sözini özgartiring yoki filtrlarni tozalang.',
               ru: 'По выбранным критериям или поисковому запросу ничего не найдено. Попробуйте изменить запрос или сбросить фильтры.',
               en: 'No courses found matching your criteria. Try adjusting your search query or clearing active filters.',
             })}
@@ -434,7 +469,7 @@ export function CoursesPage() {
               to="/builder"
               className="inline-flex items-center gap-1.5 rounded-control border border-charcoal/20 bg-paper px-4 py-2.5 text-xs font-medium text-charcoal transition hover:border-forest hover:text-forest shadow-2xs"
             >
-              {tr({ uz: 'Abonement yig‘ish', ru: 'Собрать абонемент', en: 'Build subscription' })}
+              {tr({ uz: 'Abonement yiğiş', ru: 'Собрать абонемент', en: 'Build subscription' })}
               <Icon name="arrowRight" className="h-3.5 w-3.5" />
             </Link>
           </div>

@@ -107,7 +107,7 @@ function DiscountsSection({ s }: { s: Section }) {
   const courses = useStore((st) => st.courses)
   const list = carouselCourses(courses, new Date(), s.count ?? MAX_CAROUSEL_COURSES)
   if (list.length === 0) return null
-  return <DiscountShowcase courses={list} title={tr(s.title) || t('discounts.title')} subtitle={tr(s.subtitle) || t('discounts.subtitle')} />
+  return <DiscountShowcase courses={list} title={tr(s.title) || t('offers.title')} subtitle={tr(s.subtitle) || t('offers.subtitle')} />
 }
 
 // ─── How ILMORA works: five-step journey (admin title/subtitle when set, else the dictionary texts) ───
@@ -180,7 +180,7 @@ function Packages({ s }: { s: Section }) {
                   <div className="mt-5 rounded-control border border-charcoal/10 bg-ivory/60 p-3.5 shadow-inner">
                     <div className="text-[11px] font-semibold uppercase tracking-wider text-charcoal/50 mb-2.5 flex items-center justify-between">
                       <span>{tr({ uz: 'Abonement tarkibi', ru: 'Состав абонемента', en: 'Subscription composition' })}</span>
-                      <span className="text-[10px] text-forest font-medium">{tr({ uz: '✓ 0% to‘qnashuv', ru: '✓ 0% конфликтов', en: '✓ 0% conflicts' })}</span>
+                      <span className="text-[10px] text-forest font-medium">{tr({ uz: '✓ 0% töqnaşuv', ru: '✓ 0% конфликтов', en: '✓ 0% conflicts' })}</span>
                     </div>
                     <div className="grid gap-2">
                       {Array.from({ length: p.maxCourses }).map((_, slotIdx) => (
@@ -189,7 +189,7 @@ function Packages({ s }: { s: Section }) {
                           <span className="font-medium truncate">
                             {slotIdx === 0 && tr({ uz: '1-kurs: Tillar / IELTS (istalgan markaz)', ru: 'Курс 1: Языки / IELTS (любой центр)', en: 'Course 1: Languages / IELTS (any center)' })}
                             {slotIdx === 1 && tr({ uz: '2-kurs: Kasb / Dizayn / Bazis', ru: 'Курс 2: Профессия / Дизайн / Bazis', en: 'Course 2: Career / Design / Bazis' })}
-                            {slotIdx === 2 && tr({ uz: '3-kurs: IT / Aniq fanlar / Dasturlash', ru: 'Курс 3: IT / Точные науки / Код', en: 'Course 3: IT / Exact sciences / Code' })}
+                            {slotIdx === 2 && tr({ uz: '3-kurs: IT / Aniq fanlar / Dasturlaş', ru: 'Курс 3: IT / Точные науки / Код', en: 'Course 3: IT / Exact sciences / Code' })}
                           </span>
                         </div>
                       ))}
@@ -539,7 +539,7 @@ function CenterCta({ s }: { s: Section }) {
         <div className="relative max-w-xl">
           <h2 className="font-display text-4xl leading-tight md:text-5xl">{tr(s.title)}</h2>
           <p className="mt-4 text-ivory/70">{tr(s.subtitle)}</p>
-          <LinkButton to="/centers" variant="champagne" size="lg" className="mt-8">{tr({ uz: 'So‘rov qoldirish', ru: 'Оставить запрос', en: 'Leave an inquiry' })} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
+          <LinkButton to="/centers" variant="champagne" size="lg" className="mt-8">{tr({ uz: 'Sörov qoldiriş', ru: 'Оставить запрос', en: 'Leave an inquiry' })} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
         </div>
       </div>
     </section>

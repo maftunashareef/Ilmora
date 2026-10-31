@@ -9,7 +9,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
           <h1 style={{ fontWeight: 500 }}>ILMORA</h1>
           <p>Xatolik yuz berdi · Произошла ошибка · Something went wrong</p>
           {error.digest && <p style={{ fontSize: 12, opacity: 0.6 }}>ref: {error.digest}</p>}
-          <button type="button" onClick={reset} style={{ marginTop: 16, padding: '10px 20px', borderRadius: 10, border: 0, background: '#163C35', color: '#F7F5F0' }}>Qayta urinish · Повторить · Try again</button>
+          <button type="button" onClick={reset} style={{ marginTop: 16, padding: '10px 20px', borderRadius: 10, border: 0, background: '#163C35', color: '#F7F5F0' }}>Qayta uriniş · Повторить · Try again</button>
         </div>
       </body>
     </html>

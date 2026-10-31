@@ -12,7 +12,7 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
         <div className="eyebrow mb-2">ILMORA</div>
         <h1 className="font-display text-3xl text-charcoal">Xatolik yuz berdi · Произошла ошибка · Something went wrong</h1>
         {error.digest && <p className="mt-2 text-[11px] text-charcoal/45">ref: {error.digest}</p>}
-        <button type="button" onClick={reset} className="mt-6 rounded-control bg-forest px-5 py-2.5 text-sm font-medium text-ivory">Qayta urinish · Повторить · Try again</button>
+        <button type="button" onClick={reset} className="mt-6 rounded-control bg-forest px-5 py-2.5 text-sm font-medium text-ivory">Qayta uriniş · Повторить · Try again</button>
       </div>
     </div>
   )

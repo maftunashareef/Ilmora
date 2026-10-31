@@ -1,4 +1,4 @@
-import { countLabel, NOUNS } from '@ilmora/shared'
+import { countLabel, foldForSearch, NOUNS } from '@ilmora/shared'
 import { useMemo, useState } from 'react'
 import { Link } from '@/lib/router'
 import { Avatar, Badge, Button, Icon, Input, Notice, PageTitle, Select } from '../../components/ui'
@@ -38,7 +38,7 @@ export function TeachersPage() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
   }, [subjects, courses, tr])
 
-  const ql = q.trim().toLowerCase()
+  const ql = foldForSearch(q.trim())
 
   const list = useMemo(() => {
     return teachers.filter((te) => {
@@ -57,15 +57,7 @@ export function TeachersPage() {
       // Search query (teacher name, title, expertise, center)
       if (ql) {
         const center = centers.find((c) => c.id === te.centerId)
-        const haystack = [
-          te.name,
-          tr(te.title),
-          tr(te.tagline),
-          ...te.expertise,
-          center?.name ?? '',
-        ]
-          .join(' ')
-          .toLowerCase()
+        const haystack = foldForSearch([te.name, tr(te.title), tr(te.tagline), ...te.expertise, center?.name ?? ''].join(' '))
         if (!haystack.includes(ql)) return false
       }
 

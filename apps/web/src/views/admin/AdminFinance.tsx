@@ -14,7 +14,8 @@ interface ReconRow {
 }
 interface Balance { account: string; accountType: string; debit: string; credit: string; net: string }
 
-const som = (minor: string) => `${(Number(minor) / 100).toLocaleString('ru-RU')} so‘m`
+/** Exact amount with tiyin (never rounded: this is reconciliation), followed by the currency name in the current language. */
+const som = (minor: string, unit: string) => `${(Number(minor) / 100).toLocaleString('ru-RU')} ${unit}`
 
 /** Finance admin: provider transactions vs. internal payment state vs. ledger postings, plus independent provider checks. */
 export function AdminFinance() {
@@ -66,7 +67,7 @@ export function AdminFinance() {
       {error != null && <Notice tone="warn" className="mb-4">{apiErrorText(error, lang)}</Notice>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {balances.map((b) => (
-          <Card key={b.account} className="p-4"><div className="text-[11px] uppercase tracking-wider text-charcoal/50">{b.account}</div><div className="mt-1 font-display text-2xl text-charcoal">{som(b.net)}</div><div className="text-[11px] text-charcoal/45">D {som(b.debit)} · C {som(b.credit)}</div></Card>
+          <Card key={b.account} className="p-4"><div className="text-[11px] uppercase tracking-wider text-charcoal/50">{b.account}</div><div className="mt-1 font-display text-2xl text-charcoal">{som(b.net, t('common.som'))}</div><div className="text-[11px] text-charcoal/45">D {som(b.debit, t('common.som'))} · C {som(b.credit, t('common.som'))}</div></Card>
         ))}
       </div>
       <div className="mt-8 flex flex-wrap items-center gap-2">
@@ -92,7 +93,7 @@ export function AdminFinance() {
                   <td className="px-3 py-2.5 text-charcoal/70">{r.transactionState}{r.providerState !== null && <span className="text-charcoal/45"> ({r.providerState})</span>}</td>
                   <td className="px-3 py-2.5"><Badge tone={r.paymentState === 'PAID' ? 'sage' : r.paymentState === 'PENDING' ? 'neutral' : 'warn'}>{r.paymentState}</Badge></td>
                   <td className="px-3 py-2.5 text-xs text-charcoal/70">{r.ledger.settled ? t('finance.posted') : '—'}{r.ledger.refunded && ` · ${t('finance.reversed')}`}</td>
-                  <td className="px-3 py-2.5 text-right text-charcoal">{som(r.amountMinor)}{r.amountMinor !== r.paymentAmountMinor && <div className="text-[11px] text-red-700">≠ {som(r.paymentAmountMinor)}</div>}</td>
+                  <td className="px-3 py-2.5 text-right text-charcoal">{som(r.amountMinor, t('common.som'))}{r.amountMinor !== r.paymentAmountMinor && <div className="text-[11px] text-red-700">≠ {som(r.paymentAmountMinor, t('common.som'))}</div>}</td>
                   <td className="px-3 py-2.5 text-xs text-charcoal/60">{formatDate(r.createdAt, lang)} {formatTime(r.createdAt, lang)}{r.performedAt && <div>✓ {formatTime(r.performedAt, lang)}</div>}</td>
                   <td className="px-3 py-2.5">{r.discrepancy ? <Badge tone="danger">{r.discrepancy}</Badge> : <Badge tone="sage">{t('finance.match')}</Badge>}</td>
                   <td className="px-3 py-2.5">

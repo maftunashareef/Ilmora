@@ -38,7 +38,7 @@ import { useStore, type BuilderResult } from '../../store/useStore'
 import type { Course, Section } from '../../types'
 
 /**
- * "My set" (Mening to‘plamim): six questions, then courses and a ready set from the catalog. The suggestions come from the
+ * "My set" (Mening to’plamim): six questions, then courses and a ready set from the catalog. The suggestions come from the
  * rules in @ilmora/shared (recommendCourses); nothing here is presented as AI. Adding to the cart goes through the same
  * store actions as the builder, so package limits, schedule clashes and seats are checked exactly as they are there.
  */
@@ -282,6 +282,14 @@ export function CourseFinderPage() {
     if (!hydrated || loaded.current) return
     loaded.current = true
     const fromUrl = finderAnswersFromParams(params, subjectIds)
+    // A goal picked on the home page teaser (?goal=…) is pre-selected; answers saved in this browser are kept.
+    const urlGoal = params.get('goal')
+    if (!fromUrl.complete && urlGoal && fromUrl.answers.goal === urlGoal) {
+      const stored = readStoredAnswers(subjectIds)
+      setAnswers({ ...(stored ?? DEFAULT_FINDER_ANSWERS), goal: fromUrl.answers.goal })
+      setAnswered(stored ? QUESTIONS : ['goal'])
+      return
+    }
     const restored = fromUrl.complete ? fromUrl.answers : readStoredAnswers(subjectIds)
     if (!restored) return
     setAnswers(restored)
@@ -467,7 +475,8 @@ export function CourseFinderPage() {
             <div key={step} className="page-in mt-7">
               <h2 ref={heading} tabIndex={-1} className="font-display text-3xl leading-tight text-charcoal outline-none sm:text-4xl">{t(QUESTION_TEXT[q].title)}</h2>
               {QUESTION_TEXT[q].hint && <p className="mt-2 text-sm text-charcoal/60">{t(QUESTION_TEXT[q].hint!)}</p>}
-              <div role="group" aria-label={t(QUESTION_TEXT[q].title)} className={cx('mt-6 grid gap-3', q === 'subject' ? 'grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2')}>
+              {/* The four goals stay a balanced 2x2 grid at every width (icon above the label on phones). */}
+              <div role="group" aria-label={t(QUESTION_TEXT[q].title)} className={cx('mt-6 grid gap-2.5 sm:gap-3', q === 'goal' ? 'max-w-[44rem] grid-cols-2' : q === 'subject' ? 'grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2')}>
                 {options(q).map((o) => {
                   const on = selectedValues(q).includes(o.value)
                   return (
@@ -476,16 +485,21 @@ export function CourseFinderPage() {
                       type="button"
                       aria-pressed={on}
                       onClick={() => choose(q, o.value)}
-                      className={cx('card flex items-start gap-3 p-4 text-left transition duration-300 hover:-translate-y-0.5 hover:border-forest/40', on && 'ring-inset-forest border-forest bg-sage/40')}
+                      className={cx(
+                        'relative flex gap-2.5 rounded-2xl border bg-paper p-3 text-left shadow-[0_1px_2px_rgba(32,39,37,0.05),0_8px_20px_-14px_rgba(22,60,53,0.35)] transition duration-300 ease-out hover:-translate-y-1 hover:border-forest/40 hover:shadow-soft motion-reduce:transition-none motion-reduce:hover:translate-y-0',
+                        // On phones a goal tile puts its icon and tick on one row, so the label can use the full width.
+                        q === 'goal' ? 'flex-col items-start sm:flex-row sm:pr-10' : 'items-start pr-9 sm:pr-10',
+                        on ? 'finder-choice-on border-forest bg-sage/40' : 'border-charcoal/10',
+                      )}
                     >
-                      <span aria-hidden="true" className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-display text-lg transition-colors duration-300', on ? 'bg-forest text-ivory' : 'bg-sage/70 text-forest')}>
-                        {o.glyph ?? <Icon name={o.icon ?? 'check'} className="h-4.5 w-4.5" />}
+                      <span aria-hidden="true" className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-display text-base transition-colors duration-300', on ? 'bg-forest text-ivory' : 'bg-sage/70 text-forest')}>
+                        {o.glyph ?? <Icon name={o.icon ?? 'check'} className="h-4 w-4" />}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block font-medium text-charcoal">{o.label}</span>
+                        <span className="block text-[15px] font-medium leading-snug text-charcoal">{o.label}</span>
                         {o.hint && <span className="mt-0.5 block text-xs leading-relaxed text-charcoal/55">{o.hint}</span>}
                       </span>
-                      <span className={cx('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors', on ? 'border-forest bg-forest text-ivory' : 'border-charcoal/20')}>{on && <Icon name="check" className="h-3 w-3" />}</span>
+                      <span className={cx('absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border transition-colors', on ? 'border-forest bg-forest text-ivory' : 'border-charcoal/20 bg-paper')}>{on && <Icon name="check" className="h-3 w-3" />}</span>
                     </button>
                   )
                 })}
@@ -641,6 +655,8 @@ export function CourseFinderPage() {
 export function CourseFinderTeaser({ s }: { s: Section }) {
   const { t, tr } = useT()
   const goals: FinderGoal[] = ['university', 'ielts', 'career', 'personal']
+  // The highlighted goal follows the pointer and keyboard focus; each tile opens the finder with that goal chosen.
+  const [active, setActive] = useState(0)
   return (
     <section className="container-x py-16 lg:py-24">
       <div className="reveal reveal-scale relative overflow-hidden rounded-card border border-charcoal/10 bg-gradient-to-br from-paper via-ivory to-sage/50 px-6 py-12 sm:px-10 md:px-14 md:py-16">
@@ -658,16 +674,28 @@ export function CourseFinderTeaser({ s }: { s: Section }) {
             </ul>
             <LinkButton to="/course-finder" size="lg" className="mt-8">{t('finder.teaser.cta')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
           </div>
-          {/* A glimpse of the first question; decorative, the real one is on the page. */}
-          <div className="reveal-stagger hidden gap-2.5 sm:grid sm:grid-cols-2" aria-hidden="true">
-            {goals.map((g, i) => (
-              <div key={g} className={cx('reveal card flex items-center gap-3 p-4', i === 0 && 'ring-inset-forest border-forest bg-sage/40')}>
-                <span className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', i === 0 ? 'bg-forest text-ivory' : 'bg-sage/70 text-forest')}>
-                  <Icon name={{ university: 'book', ielts: 'globe', career: 'layers', personal: 'star' }[g]} className="h-4 w-4" />
-                </span>
-                <span className="text-sm font-medium text-charcoal">{t(`finder.goal.${g}` as TKey)}</span>
-              </div>
-            ))}
+          {/* The first question of the finder: four goals in a balanced 2x2 grid that open the finder with the goal chosen. */}
+          <div className="reveal-stagger grid w-full max-w-[25.5rem] grid-cols-2 gap-2.5 justify-self-center lg:justify-self-end" onMouseLeave={() => setActive(0)}>
+            {goals.map((g, i) => {
+              const on = i === active
+              return (
+                <Link
+                  key={g}
+                  to={`/course-finder?goal=${g}`}
+                  onMouseEnter={() => setActive(i)}
+                  onFocus={() => setActive(i)}
+                  className={cx(
+                    'reveal flex min-h-[3.75rem] items-center gap-2.5 rounded-2xl border bg-paper p-3 shadow-[0_1px_2px_rgba(32,39,37,0.05),0_8px_20px_-14px_rgba(22,60,53,0.35)] transition duration-300 ease-out hover:-translate-y-1 motion-reduce:transition-none motion-reduce:hover:translate-y-0',
+                    on ? 'finder-choice-on border-forest bg-sage/40' : 'border-charcoal/10',
+                  )}
+                >
+                  <span aria-hidden="true" className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors duration-300', on ? 'bg-forest text-ivory' : 'bg-sage/70 text-forest')}>
+                    <Icon name={{ university: 'book', ielts: 'globe', career: 'layers', personal: 'star' }[g]} className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 text-sm font-medium leading-snug text-charcoal">{t(`finder.goal.${g}` as TKey)}</span>
+                </Link>
+              )
+            })}
           </div>
         </div>
       </div>

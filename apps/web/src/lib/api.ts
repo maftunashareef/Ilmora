@@ -92,7 +92,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   try {
     res = await fetch(url, init)
   } catch (cause) {
-    throw new ApiError(0, 'network_error', 'Server bilan aloqa o‘rnatib bo‘lmadi', { cause })
+    throw new ApiError(0, 'network_error', 'Server bilan aloqa örnatib bölmadi', { cause })
   }
   if (res.status === 401 && useAuth && accessToken && opts.retryOn401 !== false) {
     const ok = await refreshSession()

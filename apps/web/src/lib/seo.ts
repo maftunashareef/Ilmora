@@ -80,14 +80,14 @@ export function organizationJsonLd(name: string, lang: Lang) {
 
 const STATIC_TITLES: Record<string, L> = {
   '/courses': { uz: 'Kurslar', ru: 'Курсы', en: 'Courses' },
-  '/teachers': { uz: 'O‘qituvchilar', ru: 'Преподаватели', en: 'Teachers' },
+  '/teachers': { uz: 'Öqituvçilar', ru: 'Преподаватели', en: 'Teachers' },
   '/builder': { uz: 'Abonement', ru: 'Абонемент', en: 'Subscription' },
-  '/course-finder': { uz: 'Mening to‘plamim', ru: 'Свой набор', en: 'My set' },
+  '/course-finder': { uz: 'Mening to’plamim', ru: 'Свой набор', en: 'My set' },
   '/favorites': { uz: 'Saqlangan kurslar', ru: 'Избранное', en: 'Saved courses' },
-  '/how-it-works': { uz: 'Qanday ishlaydi', ru: 'Как это работает', en: 'How it works' },
-  '/centers': { uz: 'Markazlar uchun', ru: 'Для центров', en: 'For centers' },
+  '/how-it-works': { uz: 'Qanday işlaydi', ru: 'Как это работает', en: 'How it works' },
+  '/centers': { uz: 'Markazlar uçun', ru: 'Для центров', en: 'For centers' },
   '/faq': { uz: 'Savol-javob', ru: 'FAQ', en: 'FAQ' },
   '/oferta': { uz: 'Ommaviy oferta', ru: 'Публичная оферта', en: 'Public offer' },
-  '/privacy': { uz: 'Shaxsiy ma’lumotlar va maxfiylik', ru: 'Персональные данные и конфиденциальность', en: 'Personal data and privacy' },
+  '/privacy': { uz: 'Şaxsiy ma’lumotlar va maxfiylik', ru: 'Персональные данные и конфиденциальность', en: 'Personal data and privacy' },
 }
 export const staticTitle = (lang: Lang, path: string) => pick(lang, STATIC_TITLES[path]) || 'ILMORA'

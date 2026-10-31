@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { countLabel, isOnlineCourse, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals } from '@ilmora/shared'
+import { countLabel, foldForSearch, isOnlineCourse, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals } from '@ilmora/shared'
 import { Link, useNavigate, useSearchParams } from '@/lib/router'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
@@ -30,6 +30,7 @@ export function BuilderPage() {
   const addBuilderGroup = useStore((s) => s.addBuilderGroup)
   const removeBuilderCourse = useStore((s) => s.removeBuilderCourse)
   const notify = useStore((s) => s.notify)
+  const guestHydrated = useStore((s) => s.guestHydrated)
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('')
   const [picker, setPicker] = useState<Course | null>(null)
@@ -38,12 +39,22 @@ export function BuilderPage() {
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
 
+  // ?package=… (from a package card) is applied once per link, and only after a visitor's saved cart has been read from
+  // the device, so it switches the package without wiping the chosen courses. Afterwards the student's own choice with
+  // the package buttons wins (re-applying it on every change used to snap the package back to the one in the link).
+  const appliedPackageParam = useRef<string | null>(null)
   useEffect(() => {
     const p = params.get('package')
+    if (!p || !student || !guestHydrated || appliedPackageParam.current === p) return
     // ?package=custom is "Build Your Own" (no package); any other value must be an enabled package.
-    if (p === 'custom' && student && student.builder.packageId !== null) setBuilderPackage(student.id, null)
-    else if (p && student && packages.some((x) => x.id === p && x.enabled) && student.builder.packageId !== p) setBuilderPackage(student.id, p)
-  }, [params, student, packages, setBuilderPackage])
+    if (p === 'custom') {
+      appliedPackageParam.current = p
+      if (student.builder.packageId !== null) setBuilderPackage(student.id, null)
+    } else if (packages.some((x) => x.id === p && x.enabled)) {
+      appliedPackageParam.current = p
+      if (student.builder.packageId !== p) setBuilderPackage(student.id, p)
+    }
+  }, [params, student, packages, setBuilderPackage, guestHydrated])
 
   const pkg = packages.find((p) => p.id === student?.builder.packageId)
   const selectedGroups = useMemo(() => resolveGroups(student?.builder.groupIds ?? [], courses), [student, courses])
@@ -51,17 +62,20 @@ export function BuilderPage() {
   const totals = priceTotals(selectedGroups.map((g) => courses.find((x) => x.id === g.courseId)).filter((c): c is Course => !!c))
   // Only offline courses (groups with seats and a schedule) can be put in a subscription; online courses open on the provider's site.
   const publicCourses = courses.filter((c) => isPublicListed(c) && !isOnlineCourse(c))
-  const list = publicCourses.filter((c) => (!cat || c.categoryId === cat) && (!q || (tr(c.title) + (teachers.find((x) => x.id === c.teacherId)?.name ?? '')).toLowerCase().includes(q.toLowerCase())))
+  const list = publicCourses.filter((c) => (!cat || c.categoryId === cat) && (!q || foldForSearch(`${tr(c.title)} ${teachers.find((x) => x.id === c.teacherId)?.name ?? ''}`).includes(foldForSearch(q.trim()))))
   const selectedCourseIds = new Set(selectedGroups.map((g) => g.courseId))
   // Without a package this is a custom selection: any number of courses from one up to the cart limit.
   const maxSelectable = pkg?.maxCourses ?? MAX_CART_COURSES
   const complete = (pkg ? selectedGroups.length === pkg.maxCourses : selectedGroups.length >= 1) && conflicts.length === 0
   // How It Works tracker: courses chosen, the package's course count met, the selection checked (no clashes); then review.
-  const journeyDone = [selectedGroups.length > 0, pkg ? selectedGroups.length === pkg.maxCourses : selectedGroups.length >= 1, complete, false, false]
-  const journeyCurrent = Math.min(journeyDone.indexOf(false), 3)
+  // The six steps of "How ILMORA works": browse, choose, package, price, cart (review and payment), learn.
+  const hasCourses = selectedGroups.length > 0
+  const journeyDone = [hasCourses, hasCourses, pkg ? selectedGroups.length === pkg.maxCourses : hasCourses, complete, false, false]
+  const journeyCurrent = Math.min(journeyDone.indexOf(false), 4)
   const goToStep = (step: number) => {
-    if (step === 3) { if (complete) nav('/preview'); return }
-    document.getElementById(['builder-courses', 'builder-packages', 'builder-summary'][step])?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (step === 0) { nav('/courses'); return }
+    if (step === 4) { if (complete) nav('/preview'); return }
+    document.getElementById(['', 'builder-courses', 'builder-packages', 'builder-summary'][step])?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const tryAdd = (groupId: string) => {

@@ -8,10 +8,10 @@ import { getCatalog, getSite } from '@/lib/server-api'
 import { organizationJsonLd, pageMetadata } from '@/lib/seo'
 import '../globals.css'
 
-const cormorant = Cormorant_Garamond({ subsets: ['latin', 'cyrillic'], weight: ['400', '500', '600'], style: ['normal', 'italic'], variable: '--font-cormorant', display: 'swap' })
-const playfair = Playfair_Display({ subsets: ['latin', 'cyrillic'], weight: ['400', '500', '600'], variable: '--font-playfair', display: 'swap' })
-const inter = Inter({ subsets: ['latin', 'cyrillic'], weight: ['300', '400', '500', '600'], variable: '--font-inter', display: 'swap' })
-const manrope = Manrope({ subsets: ['latin', 'cyrillic'], weight: ['300', '400', '500', '600'], variable: '--font-manrope', display: 'swap' })
+const cormorant = Cormorant_Garamond({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['400', '500', '600'], style: ['normal', 'italic'], variable: '--font-cormorant', display: 'swap' })
+const playfair = Playfair_Display({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['400', '500', '600'], variable: '--font-playfair', display: 'swap' })
+const inter = Inter({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['300', '400', '500', '600'], variable: '--font-inter', display: 'swap' })
+const manrope = Manrope({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['300', '400', '500', '600'], variable: '--font-manrope', display: 'swap' })
 
 export const viewport: Viewport = { themeColor: '#163C35', width: 'device-width', initialScale: 1 }
 
