@@ -104,7 +104,8 @@ describe('Uzbek text (ILMORA alphabet: Ğ, Ö, Ş, Ç)', () => {
     expect(dict['finder.title'].uz).toBe(OWNER_NAME)
     expect(dict['builder.custom'].uz).toBe(OWNER_NAME)
     for (const [where, s] of strings) expect(s, where).not.toMatch(/Mening t[öő]plamim|t[öő]plamingni yarat/)
-    expect(dict['footer.city'].uz).toBe('Toşkent, Özbekiston')
+    expect(dict['footer.city']).toEqual({ uz: 'Toşkent şahri', ru: 'г. Ташкент', en: 'Tashkent, Uzbekistan' })
+    expect(dict['builder.custom']).toEqual({ uz: OWNER_NAME, ru: 'Собрать свой набор', en: 'Build your own package' })
     expect(dict['common.som'].uz).toBe('söm')
   })
 
