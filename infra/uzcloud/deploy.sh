@@ -5,7 +5,7 @@
 #   sh infra/uzcloud/deploy.sh web       on ilmora-web:   api + site + Caddy, then checks from outside
 # Order on release: admin first (migrations are backward compatible with the running api), then web.
 # Rollback: cp .env.previous .env (the release workflow keeps the previous image lines there) and run the same command;
-# images stay on the machine for two weeks, so no registry login is needed (pull failures are ignored, up uses them).
+# images stay on the machine for two weeks, so no registry login is needed (a failed pull falls back to them).
 set -eu
 ROLE=${1:?usage: deploy.sh admin|web}
 cd "$(dirname "$0")/$ROLE"
@@ -21,9 +21,28 @@ wait_healthy() {
   echo "$1 did not become healthy"; $COMPOSE logs --tail=80 "$1"; return 1
 }
 
+# Pulls this release's images before anything changes. The link from UzCloud to GitHub's download host
+# (pkg-containers.githubusercontent.com) sometimes times out, so a failed pull is retried with growing waits (layers
+# already downloaded are kept). If it still fails, images already on this machine (a rollback) are used; a release image
+# (pinned by digest) that is still missing stops the rollout here, before migrations or restarts.
+pull_images() {
+  for attempt in 1 2 3 4 5; do
+    $COMPOSE "$@" pull --quiet --ignore-buildable && return 0
+    [ "$attempt" = 5 ] && break
+    echo "image pull failed (attempt $attempt of 5), retrying in $((attempt * 20))s"
+    sleep $((attempt * 20))
+  done
+  missing=""
+  for image in $($COMPOSE "$@" config --images | grep '@sha256:'); do
+    docker image inspect "$image" > /dev/null 2>&1 || missing="$missing $image"
+  done
+  [ -z "$missing" ] && { echo "pull failed; using the images already on this machine"; return 0; }
+  echo "could not pull from the registry:$missing"; return 1
+}
+
 case "$ROLE" in
   admin)
-    $COMPOSE --profile migrate pull --quiet --ignore-buildable --ignore-pull-failures
+    pull_images --profile migrate
     $COMPOSE up -d postgres redis
     wait_healthy postgres
     echo "== migrations"
@@ -39,7 +58,7 @@ case "$ROLE" in
     wait_healthy admin
     ;;
   web)
-    $COMPOSE pull --quiet --ignore-pull-failures
+    pull_images
     $COMPOSE up -d
     wait_healthy api
     wait_healthy web
