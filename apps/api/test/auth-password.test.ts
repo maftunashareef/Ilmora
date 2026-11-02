@@ -4,6 +4,7 @@ import { RedisService } from '../src/infra/redis/redis.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { AccountService } from '../src/modules/auth/account.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
+import { notificationsStub } from './stubs'
 
 const meta = { ip: '127.0.0.1', userAgent: 'vitest' }
 
@@ -11,7 +12,7 @@ describe.skipIf(!DB_AVAILABLE)('login + password accounts and the owner rule', (
   const ctx = new TestContext()
   // Three failures lock a login; Redis off keeps the counter in memory for the test process.
   const env = testEnv({ REDIS_MODE: 'off', LOGIN_MAX_FAILURES: '3', LOGIN_LOCK_SECONDS: '60' })
-  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), env)
+  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), notificationsStub, env)
   beforeAll(() => ctx.connect())
   afterAll(() => ctx.close())
 

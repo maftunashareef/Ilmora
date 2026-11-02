@@ -9,7 +9,9 @@ import { AuthModule } from './modules/auth/auth.module'
 import { CatalogModule } from './modules/catalog/catalog.module'
 import { EnrollmentModule } from './modules/enrollment/enrollment.module'
 import { HealthController } from './modules/health/health.controller'
+import { CenterModule } from './modules/center/center.module'
 import { ManageModule } from './modules/manage/manage.module'
+import { NotificationsModule } from './modules/notifications/notifications.module'
 import { PaymentsModule } from './modules/payments/payments.module'
 import { REDIS_OFF } from './infra/queue/queue.module'
 import { WorkerModule } from './worker.module'
@@ -18,12 +20,14 @@ import { WorkerModule } from './worker.module'
 @Module({
   imports: [
     CoreModule,
+    NotificationsModule,
     AuthModule,
     CatalogModule,
     EnrollmentModule,
     PaymentsModule,
     AttendanceModule,
     ManageModule,
+    CenterModule,
     ...(process.env.APP_ROLE === 'api' || REDIS_OFF ? [] : [WorkerModule]),
   ],
   controllers: [HealthController],

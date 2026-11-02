@@ -9,6 +9,7 @@ import { CourseInput, CoursePatch } from '../src/modules/manage/manage.schemas'
 import { ManageService } from '../src/modules/manage/manage.service'
 import type { SessionsService } from '../src/modules/sessions/sessions.service'
 import type { SiteService } from '../src/modules/site/site.service'
+import { notificationsStub } from './stubs'
 
 const L = (s: string) => ({ uz: s, ru: s, en: s })
 const ONLINE_BODY = {
@@ -75,6 +76,7 @@ describe('online courses (stubbed storage)', () => {
       { record: async () => undefined } as unknown as AuditService,
       { generateForGroup: async () => 0, todayLocal: () => '2026-10-31' } as unknown as SessionsService,
       { get: async () => ({ permissions: { teacher: { editCourses: true, editPrices: true, publishDirectly: true, manageGroups: true, editSchedules: true } } }) } as unknown as SiteService,
+      notificationsStub,
       {} as unknown as Env,
     )
     return { service, prisma, created, updated }

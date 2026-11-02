@@ -105,6 +105,39 @@ export const ResourcePatch = ResourceInput.partial()
 
 export const SubjectInput = z.object({ teacherId: id.optional(), name: L, description: L }).strict()
 export const CenterInput = z.object({ name: z.string().min(1).max(120), district: L, description: L, tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), address: z.string().max(300).nullable().optional() }).strict()
+/** Super Admin: approval state of a center. */
+export const CenterStatusInput = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'BLOCKED']), reason: z.string().trim().max(300).optional() }).strict()
+export type CenterStatusInput = z.infer<typeof CenterStatusInput>
+export const DeleteUserInput = z.object({ reason: z.string().trim().min(3).max(300) }).strict()
+/** Center workspace: the center's own profile and check-in settings (all optional; only sent fields change). */
+export const CenterProfileInput = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  district: L.optional(),
+  description: L.optional(),
+  tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  address: z.string().trim().max(300).nullable().optional(),
+  phone: z.string().trim().min(7).max(20).nullable().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
+  /** Metres; null switches the location check off. */
+  geoRadiusM: z.number().int().min(20).max(5000).nullable().optional(),
+  checkInBeforeMin: z.number().int().min(0).max(180).optional(),
+  absenceAfterMin: z.number().int().min(0).max(240).optional(),
+}).strict()
+export type CenterProfileInput = z.infer<typeof CenterProfileInput>
+/** Center workspace: a teacher of the center; `login` links the registered account of that teacher. */
+export const CenterTeacherInput = z.object({
+  name: z.string().trim().min(1).max(120),
+  title: L.optional(),
+  bio: L.optional(),
+  tagline: L.optional(),
+  expertise: z.array(z.string().max(60)).max(20).optional(),
+  avatarUrl: z.string().max(500).nullable().optional(),
+  login: z.string().trim().min(3).max(32).optional(),
+}).strict()
+export const CenterTeacherPatch = CenterTeacherInput.omit({ login: true }).partial()
+export type CenterTeacherInput = z.infer<typeof CenterTeacherInput>
+export type CenterTeacherPatch = z.infer<typeof CenterTeacherPatch>
 export const CategoryInput = z.object({ name: L, glyph: z.string().max(8).optional(), sortOrder: z.number().int().optional() }).strict()
 export const SafeMediaUrl = z.string().max(500).refine((val) => {
   if (!val) return true

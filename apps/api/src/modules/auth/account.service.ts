@@ -1,12 +1,14 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { type Lang, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
+import { randomToken } from '../../common/crypto'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { Role } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { RedisService } from '../../infra/redis/redis.service'
 import { AuditService } from '../audit/audit.service'
+import { NotificationsService } from '../notifications/notifications.service'
 import { type SessionMeta, TokenService } from './token.service'
 
 export interface PublicUser {
@@ -58,8 +60,13 @@ export type UserRow = {
 /** OWASP's minimum argon2id configuration; the same parameters hash one-time codes. */
 export const PASSWORD_HASH = { type: argon2.argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 } as const
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
-const SELF_SERVICE_ROLES: Record<'STUDENT' | 'TEACHER', Role[]> = { STUDENT: ['STUDENT'], TEACHER: ['TEACHER'] }
+/** Roles a person can choose at registration. CENTER = an Educational Center account (its first administrator). */
+export type SelfServiceRole = 'STUDENT' | 'TEACHER' | 'CENTER'
+const SELF_SERVICE_ROLES: Record<SelfServiceRole, Role[]> = { STUDENT: ['STUDENT'], TEACHER: ['TEACHER'], CENTER: ['CENTER_ADMIN'] }
 const USER_INCLUDE = { teacherProfile: { select: { id: true } } } as const
+const EMPTY_L = { uz: '', ru: '', en: '' }
+/** URL slug for a center name written in any of the three alphabets. */
+const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').replace(/ö/g, 'o').replace(/ğ/g, 'g').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'center'
 
 /**
  * Accounts with a login + password, and the one rule every session relies on: Super Admin (PLATFORM_ADMIN)
@@ -77,6 +84,7 @@ export class AccountService {
     private readonly tokens: TokenService,
     private readonly audit: AuditService,
     private readonly redis: RedisService,
+    private readonly notifications: NotificationsService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -87,14 +95,20 @@ export class AccountService {
     return login
   }
 
-  /** The controller has already validated the offer/consent marks (RegisterDto); the timestamps and edition are recorded here. */
+  /**
+   * The controller has already validated the offer/consent marks (RegisterDto); the timestamps and edition are recorded here.
+   * An Educational Center registration also creates the center (PENDING until the Super Admin approves it) with this
+   * account as its first administrator; Super Admins are notified.
+   */
   async register(
     tenantId: string,
-    input: { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; phone?: string; lang?: 'uz' | 'ru' | 'en' },
+    input: { role: SelfServiceRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; lang?: 'uz' | 'ru' | 'en' },
     meta: SessionMeta,
   ): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
-    if (!roles) throw AppError.invalid('invalid_role', 'Choose Student or Teacher')
+    if (!roles) throw AppError.invalid('invalid_role', 'Choose Student, Teacher or Educational Center')
+    const centerName = input.role === 'CENTER' ? input.centerName?.trim() ?? '' : ''
+    if (input.role === 'CENTER' && (centerName.length < 2 || centerName.length > 120)) throw AppError.invalid('invalid_center_name', 'Enter the name of the center (2–120 characters)')
     const login = this.normalizeLogin(input.login)
     if (input.password.length < 8 || input.password.length > 128) throw AppError.invalid('weak_password', 'Password must be 8–128 characters')
     const taken = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, select: { id: true } })
@@ -136,14 +150,35 @@ export class AccountService {
           const profile = await tx.teacherProfile.create({ data: { tenantId, userId: created.id, slug, name: displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null } })
           return { ...created, teacherProfile: { id: profile.id } }
         }
+        if (input.role === 'CENTER') {
+          const slug = await this.freeCenterSlug(tx, tenantId, slugify(centerName))
+          const center = await tx.center.create({
+            data: { tenantId, slug, name: centerName, district: EMPTY_L, description: EMPTY_L, status: 'PENDING', ownerUserId: created.id, phoneE164, checkInCode: randomToken(16), checkInCodeRotatedAt: now },
+          })
+          return tx.user.update({ where: { id: created.id }, data: { centerId: center.id }, include: USER_INCLUDE })
+        }
         return created
       })
     } catch (err) {
       if ((err as { code?: string }).code === 'P2002') throw AppError.conflict('login_taken', 'This login is already in use')
       throw err
     }
-    await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'password' } })
+    await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'password', centerId: user.centerId } })
+    if (input.role === 'CENTER' && user.centerId) {
+      const centerId = user.centerId
+      await this.notifications.safely('center.registered', async () =>
+        this.notifications.notify({ tenantId, userIds: await this.notifications.ownerIds(tenantId), type: 'center.registered', params: { centerName, centerId, login }, dedupeKey: `center-registered:${centerId}` }),
+      )
+    }
     return this.openSession(user, meta)
+  }
+
+  private async freeCenterSlug(tx: TransactionClient, tenantId: string, base: string): Promise<string> {
+    for (let n = 0; n < 50; n++) {
+      const slug = n === 0 ? base : `${base}-${n + 1}`
+      if (!(await tx.center.findFirst({ where: { tenantId, slug }, select: { id: true }, includeDeleted: true } as never))) return slug
+    }
+    return `${base}-${Date.now().toString(36)}`
   }
 
   async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult> {

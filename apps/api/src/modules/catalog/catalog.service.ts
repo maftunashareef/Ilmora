@@ -12,15 +12,15 @@ import type { RequestActor } from '../../infra/tenancy/tenant-context'
 export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Everything a public page needs in one round trip; private/draft content is excluded. */
+  /** Everything a public page needs in one round trip; private/draft content and centers that are not ACTIVE are excluded. */
   async publicCatalog(tenantId: string) {
     const [centers, categories, teachers, subjects, courses, seats] = await Promise.all([
-      this.prisma.client.center.findMany({ where: { tenantId }, orderBy: { name: 'asc' } }),
+      this.prisma.client.center.findMany({ where: { tenantId, status: 'ACTIVE' }, orderBy: { name: 'asc' } }),
       this.prisma.client.category.findMany({ where: { tenantId }, orderBy: { sortOrder: 'asc' } }),
-      // Self-registered teachers stay out of the public catalog until an admin assigns them to a center.
-      this.prisma.client.teacherProfile.findMany({ where: { tenantId, centerId: { not: null } }, orderBy: { name: 'asc' } }),
+      // Self-registered teachers stay out of the public catalog until a center takes them; pending/blocked centers hide theirs.
+      this.prisma.client.teacherProfile.findMany({ where: { tenantId, centerId: { not: null }, center: { status: 'ACTIVE' } }, orderBy: { name: 'asc' } }),
       this.prisma.client.subject.findMany({ where: { tenantId } }),
-      this.prisma.client.course.findMany({ where: { tenantId, status: 'PUBLISHED', visibility: 'PUBLIC' }, include: { groups: { where: { deletedAt: null } } }, orderBy: { createdAt: 'asc' } }),
+      this.prisma.client.course.findMany({ where: { tenantId, status: 'PUBLISHED', visibility: 'PUBLIC', center: { status: 'ACTIVE' } }, include: { groups: { where: { deletedAt: null } } }, orderBy: { createdAt: 'asc' } }),
       this.seatCounts(tenantId),
     ])
     return {
@@ -38,15 +38,18 @@ export class CatalogService {
   }
 
   async courseBySlugOrId(tenantId: string, key: string, actor?: RequestActor) {
-    const course = await this.prisma.client.course.findFirst({ where: { tenantId, OR: [{ slug: key }, { id: key }] }, include: { groups: { where: { deletedAt: null } } } })
+    const course = await this.prisma.client.course.findFirst({ where: { tenantId, OR: [{ slug: key }, { id: key }] }, include: { groups: { where: { deletedAt: null } }, center: { select: { status: true } } } })
     if (!course) throw AppError.notFound('Course')
+    // A pending or blocked center's courses exist only for its own staff and the Super Admin.
+    const staff = !!actor && (actor.roles.includes('PLATFORM_ADMIN') || (actor.roles.includes('CENTER_ADMIN') && actor.centerId === course.centerId) || actor.teacherProfileId === course.teacherId)
+    if (course.center.status !== 'ACTIVE' && !staff) throw AppError.notFound('Course')
     if (!canView(course, actor, await this.actorGroupIds(actor))) throw AppError.forbidden('This course is not available', { reason: course.status !== 'PUBLISHED' ? course.status.toLowerCase() : 'private' })
     const seats = await this.seatCounts(tenantId)
     return toCourse(course, seats)
   }
 
   async teacherContent(tenantId: string, teacherKey: string, actor?: RequestActor) {
-    const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, centerId: { not: null }, OR: [{ slug: teacherKey }, { id: teacherKey }] } })
+    const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, centerId: { not: null }, center: { status: 'ACTIVE' }, OR: [{ slug: teacherKey }, { id: teacherKey }] } })
     if (!teacher) throw AppError.notFound('Teacher')
     const groupIds = await this.actorGroupIds(actor)
     const [videos, playlists, resources, courses, seats] = await Promise.all([
@@ -85,10 +88,10 @@ export class CatalogService {
     return toResource(r)
   }
 
-  /** Group ids of the actor's ACTIVE enrollments (drives private-content access). */
+  /** Group ids of the actor's ACTIVE enrollments under an ACTIVE subscription (drives private-content access; a blocked subscription grants nothing). */
   async actorGroupIds(actor?: RequestActor): Promise<string[]> {
     if (!actor) return []
-    const rows = await this.prisma.client.enrollment.findMany({ where: { studentId: actor.id, status: 'ACTIVE' }, select: { groupId: true } })
+    const rows = await this.prisma.client.enrollment.findMany({ where: { studentId: actor.id, status: 'ACTIVE', subscription: { status: 'ACTIVE' } }, select: { groupId: true } })
     return rows.map((r) => r.groupId)
   }
 }
@@ -113,7 +116,9 @@ const denyReason = (item: Publishable) => (item.status === 'DRAFT' ? 'draft' : i
 
 const lower = <T extends string>(v: T) => v.toLowerCase()
 
-export const toCenter = (c: { id: string; slug: string; name: string; district: unknown; description: unknown; tone: string }) => ({ id: c.id, slug: c.slug, name: c.name, district: c.district, description: c.description, tone: c.tone })
+export const toCenter = (c: { id: string; slug: string; name: string; district: unknown; description: unknown; tone: string; status?: string; address?: string | null }) => ({
+  id: c.id, slug: c.slug, name: c.name, district: c.district, description: c.description, tone: c.tone, ...(c.status ? { status: c.status } : {}), ...(c.address !== undefined ? { address: c.address } : {}),
+})
 export const toCategory = (c: { id: string; slug: string; name: unknown; glyph: string }) => ({ id: c.id, slug: c.slug, name: c.name, glyph: c.glyph })
 export const toTeacher = (t: { id: string; slug: string; name: string; title: unknown; bio: unknown; expertise: string[]; centerId: string | null; avatarSeed: number; bannerTone: string; avatarUrl: string | null; bannerUrl: string | null; tagline: unknown; channelActive: boolean; featuredType: string | null; featuredId: string | null }) => ({
   id: t.id, slug: t.slug, name: t.name, title: t.title, bio: t.bio, expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, bannerTone: t.bannerTone,

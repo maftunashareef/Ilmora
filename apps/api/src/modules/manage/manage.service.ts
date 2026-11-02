@@ -11,14 +11,17 @@ import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { discountWindow, toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
+import { NotificationsService } from '../notifications/notifications.service'
 import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
 import { ONLINE_PROVIDER } from './online-provider'
-import type { AvatarUploadUrlInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
+import type { AvatarUploadUrlInput, CenterStatusInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
 const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'item'
+/** Everything a center may do with its own courses and groups, whatever the teacher switches say. */
+const CENTER_OWNER_PERMS = { customizeChannel: false, editCourses: true, editPrices: true, editSchedules: true, manageGroups: true, publishDirectly: true, uploadResources: false }
 
 /**
  * Teacher Studio + Super Admin write operations. Teachers act on their own content (ownership = teacherId),
@@ -32,11 +35,25 @@ export class ManageService {
     private readonly audit: AuditService,
     private readonly sessions: SessionsService,
     private readonly site: SiteService,
+    private readonly notifications: NotificationsService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
   private isAdmin(actor: RequestActor) { return actor.roles.includes('PLATFORM_ADMIN') }
   private isCenterAdmin(actor: RequestActor) { return actor.roles.includes('CENTER_ADMIN') }
+  /** A center administrator acting on their own center's course. */
+  private isCenterOwner(actor: RequestActor, centerId: string | null | undefined) { return this.isCenterAdmin(actor) && !!actor.centerId && actor.centerId === centerId }
+  /** Permission switches that apply to this actor for a course of `centerId`: Super Admin and the course's center bypass the teacher switches. */
+  private async permsFor(tenantId: string, actor: RequestActor, centerId: string | null | undefined) {
+    if (this.isAdmin(actor) || this.isCenterOwner(actor, centerId)) return CENTER_OWNER_PERMS
+    return this.teacherPermissions(tenantId)
+  }
+  /** Courses of a pending or blocked center cannot be published; the Super Admin can still prepare them. */
+  private async assertCanPublish(tenantId: string, actor: RequestActor, centerId: string, status: string | undefined) {
+    if (status !== 'published' || this.isAdmin(actor)) return
+    const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { status: true } })
+    if (center && center.status !== 'ACTIVE') throw AppError.forbidden('The center is not approved yet, so its courses cannot be published', { code: 'center_not_approved', status: center.status })
+  }
   /** Discounts: the Super Admin, or the center admin of the course's own center. Never a teacher. */
   private canSetDiscount(actor: RequestActor, centerId: string) {
     return this.isAdmin(actor) || (this.isCenterAdmin(actor) && !!actor.centerId && actor.centerId === centerId)
@@ -103,12 +120,14 @@ export class ManageService {
   async mine(tenantId: string, actor: RequestActor) {
     const teacherId = this.isAdmin(actor) || this.isCenterAdmin(actor) ? undefined : actor.teacherProfileId ?? '__none__'
     const where = teacherId ? { tenantId, teacherId } : this.isCenterAdmin(actor) ? { tenantId, teacher: { centerId: actor.centerId ?? '__none__' } } : { tenantId }
+    // A center sees the courses that run at the center (whoever teaches them) and the content of its teachers.
+    const courseWhere = teacherId ? { tenantId, teacherId } : this.isCenterAdmin(actor) ? { tenantId, centerId: actor.centerId ?? '__none__' } : { tenantId }
     const [courses, videos, playlists, resources, subjects, seats] = await Promise.all([
-      this.prisma.client.course.findMany({ where, include: { groups: { where: { deletedAt: null } } }, orderBy: { updatedAt: 'desc' } }),
+      this.prisma.client.course.findMany({ where: courseWhere, include: { groups: { where: { deletedAt: null } } }, orderBy: { updatedAt: 'desc' } }),
       this.prisma.client.video.findMany({ where, orderBy: { updatedAt: 'desc' } }),
       this.prisma.client.playlist.findMany({ where, include: { items: { orderBy: { position: 'asc' } } }, orderBy: { updatedAt: 'desc' } }),
       this.prisma.client.resource.findMany({ where, orderBy: { updatedAt: 'desc' } }),
-      this.prisma.client.subject.findMany({ where: teacherId ? { tenantId, teacherId } : { tenantId } }),
+      this.prisma.client.subject.findMany({ where: teacherId ? { tenantId, teacherId } : this.isCenterAdmin(actor) ? { tenantId, teacher: { centerId: actor.centerId ?? '__none__' } } : { tenantId } }),
       this.prisma.client.enrollment.groupBy({ by: ['groupId'], where: { tenantId, status: { in: ['PENDING', 'ACTIVE'] } }, _count: { _all: true } }),
     ])
     const seatMap = new Map(seats.map((s) => [s.groupId, s._count._all]))
@@ -175,10 +194,17 @@ export class ManageService {
       if (!input.centerId) throw AppError.invalid('center_required', 'centerId is required for an offline course')
       if (this.sendsOnlineFields(input)) throw AppError.invalid('online_fields_on_offline_course', 'A link, provider or certificate belongs to an online course')
       centerId = input.centerId
+      // A center creates courses for itself only, taught by its own teachers.
+      if (this.isCenterAdmin(actor) && !this.isAdmin(actor)) {
+        if (centerId !== actor.centerId) throw AppError.forbidden('A center can only create courses for itself', { code: 'wrong_center' })
+        const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
+        if (!teacher || teacher.centerId !== centerId) throw AppError.invalid('teacher_not_in_center', 'Choose a teacher of your center')
+      }
     }
-    const perms = await this.teacherPermissions(tenantId)
+    const perms = await this.permsFor(tenantId, actor, centerId)
     if (!this.isAdmin(actor) && !perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
     if (input.discount && !this.canSetDiscount(actor, centerId)) throw AppError.forbidden('Only the Super Admin or the course center can set discounts')
+    await this.assertCanPublish(tenantId, actor, centerId, input.status)
     const slug = await this.uniqueSlug('course', tenantId, slugify(input.title.en || input.title.uz))
     const course = await this.prisma.client.course.create({
       data: {
@@ -224,12 +250,19 @@ export class ManageService {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id } })
     if (!course) throw AppError.notFound('Course')
     this.assertTeacherScope(actor, course)
-    const perms = await this.teacherPermissions(tenantId)
+    const perms = await this.permsFor(tenantId, actor, course.centerId)
     if (!this.isAdmin(actor)) {
       if (!perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
       if (input.price !== undefined && !perms.editPrices) throw AppError.forbidden('Price changes require Super Admin')
       if (input.meyosGrant !== undefined) delete input.meyosGrant
+      // A center may hand a course to another of its teachers; teachers never reassign.
+      if (input.teacherId && input.teacherId !== course.teacherId) {
+        if (!this.isCenterOwner(actor, course.centerId)) throw AppError.forbidden('Only the center or the Super Admin can change the teacher of a course')
+        const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: input.teacherId }, select: { centerId: true } })
+        if (!teacher || teacher.centerId !== course.centerId) throw AppError.invalid('teacher_not_in_center', 'Choose a teacher of your center')
+      }
     }
+    await this.assertCanPublish(tenantId, actor, course.centerId, input.status)
     const wasOnline = course.learningFormat === 'ONLINE'
     const isOnline = (input.learningFormat ?? course.learningFormat) === 'ONLINE'
     if (!this.isAdmin(actor) && (wasOnline || isOnline || this.sendsOnlineFields(input))) throw AppError.forbidden('Only the Super Admin can manage online courses')
@@ -264,7 +297,7 @@ export class ManageService {
           if (!this.isAdmin(actor)) throw AppError.forbidden('Only the Super Admin can move a course to another center')
           data.centerId = input.centerId
         }
-        if (input.teacherId && this.isAdmin(actor)) data.teacherId = input.teacherId
+        if (input.teacherId && (this.isAdmin(actor) || this.isCenterOwner(actor, course.centerId))) data.teacherId = input.teacherId
       }
       if (input.price !== undefined) data.priceMinor = somToTiyin(input.price)
       // A discount is changed only by the Super Admin or the course's own center admin; resending the stored one is not a change.
@@ -295,7 +328,7 @@ export class ManageService {
     if (!course) throw AppError.notFound('Course')
     this.assertTeacherScope(actor, course)
     if (course.learningFormat === 'ONLINE') throw AppError.invalid('online_course_has_no_groups', 'Online courses are taken on the provider’s site and have no groups')
-    const perms = await this.teacherPermissions(tenantId)
+    const perms = await this.permsFor(tenantId, actor, course.centerId)
     if (!this.isAdmin(actor) && !perms.manageGroups) throw AppError.forbidden('Group management is disabled for teachers')
     const group = await this.prisma.client.group.create({ data: { tenantId, courseId, name: input.name, days: input.days, startTime: input.start, endTime: input.end, room: input.room, capacity: input.capacity } })
     await this.sessions.generateForGroup(group, this.sessions.todayLocal(), 28, `user:${actor.id}`)
@@ -307,7 +340,7 @@ export class ManageService {
     const group = await this.prisma.client.group.findFirst({ where: { tenantId, id }, include: { course: true } })
     if (!group) throw AppError.notFound('Group')
     this.assertTeacherScope(actor, group.course)
-    const perms = await this.teacherPermissions(tenantId)
+    const perms = await this.permsFor(tenantId, actor, group.course.centerId)
     if (!this.isAdmin(actor)) {
       if (!perms.manageGroups) throw AppError.forbidden('Group management is disabled for teachers')
       if ((input.days || input.start || input.end) && !perms.editSchedules) throw AppError.forbidden('Schedule changes require Super Admin')
@@ -328,11 +361,19 @@ export class ManageService {
       data: { name: input.name, days: input.days, startTime: input.start, endTime: input.end, room: input.room, capacity: input.capacity },
     })
     if (scheduleChanged) {
-      // Future scheduled sessions without attendance are regenerated; past ones are history and stay.
+      // Future scheduled sessions without attendance are regenerated; past ones, one-off lessons and moved lessons stay.
       const today = this.sessions.todayLocal()
-      const future = await this.prisma.client.lessonSession.findMany({ where: { groupId: id, status: 'SCHEDULED', date: { gte: new Date(`${today}T00:00:00Z`) }, attendance: { none: {} } }, select: { id: true } })
+      const future = await this.prisma.client.lessonSession.findMany({ where: { groupId: id, status: 'SCHEDULED', isExtra: false, date: { gte: new Date(`${today}T00:00:00Z`) }, attendance: { none: {} } }, select: { id: true } })
       if (future.length) await this.prisma.client.lessonSession.deleteMany({ where: { id: { in: future.map((f) => f.id) } } })
       await this.sessions.generateForGroup(updated, addDays(today, 0), 28, `user:${actor.id}`)
+      await this.notifications.safely('schedule.pattern', async () => {
+        const [students, teacher] = await Promise.all([this.notifications.groupStudentIds(id), this.notifications.teacherUserId(group.course.teacherId)])
+        await this.notifications.notify({
+          tenantId, userIds: [...students, ...(teacher ? [teacher] : [])], type: 'schedule.pattern',
+          params: { courseTitle: group.course.title, courseId: group.course.id, groupName: updated.name, days: updated.days, start: updated.startTime, end: updated.endTime },
+          dedupeKey: `schedule-pattern:${id}:${updated.updatedAt.toISOString()}`,
+        })
+      })
     }
     await this.audit.record({ action: 'group.update', entityType: 'Group', entityId: id, before: { capacity: group.capacity, days: group.days, start: group.startTime, end: group.endTime }, after: { capacity: updated.capacity, days: updated.days, start: updated.startTime, end: updated.endTime } })
     return toGroup(updated)
@@ -523,6 +564,77 @@ export class ManageService {
     const used = await this.prisma.client.course.count({ where: { tenantId, centerId: id } }) + (await this.prisma.client.teacherProfile.count({ where: { tenantId, centerId: id } }))
     if (used > 0) throw AppError.conflict('in_use', 'Center has courses or teachers')
     await this.prisma.client.center.update({ where: { id }, data: { deletedAt: new Date() } })
+    return { ok: true }
+  }
+
+  /** Super Admin: every center with its approval status, counts and the account that registered it. */
+  async listCenters(tenantId: string) {
+    const rows = await this.prisma.client.center.findMany({
+      where: { tenantId },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: { _count: { select: { courses: true, teachers: true, staff: true } } },
+    })
+    const ownerIds = rows.map((r) => r.ownerUserId).filter((x): x is string => !!x)
+    const owners = ownerIds.length ? await this.prisma.client.user.findMany({ where: { tenantId, id: { in: ownerIds } }, select: { id: true, login: true, displayName: true, phoneE164: true } }) : []
+    const ownerOf = new Map(owners.map((o) => [o.id, o]))
+    return rows.map((c) => {
+      const owner = c.ownerUserId ? ownerOf.get(c.ownerUserId) : undefined
+      return {
+        id: c.id, slug: c.slug, name: c.name, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
+        status: c.status, approvedAt: c.approvedAt, blockedAt: c.blockedAt, blockReason: c.blockReason, createdAt: c.createdAt,
+        counts: { courses: c._count.courses, teachers: c._count.teachers, admins: c._count.staff },
+        owner: owner ? { id: owner.id, login: owner.login, displayName: owner.displayName, phoneMasked: owner.phoneE164 ? owner.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null } : null,
+      }
+    })
+  }
+
+  /** Super Admin: approve, block or reopen a center. The center's administrators are told; blocked centers vanish from the catalog. */
+  async setCenterStatus(tenantId: string, actor: RequestActor, id: string, input: z.infer<typeof CenterStatusInput>) {
+    const center = await this.prisma.client.center.findFirst({ where: { tenantId, id } })
+    if (!center) throw AppError.notFound('Center')
+    if (center.status === input.status) return { id: center.id, status: center.status }
+    const now = new Date()
+    const updated = await this.prisma.client.center.update({
+      where: { id },
+      data: {
+        status: input.status,
+        ...(input.status === 'ACTIVE' ? { approvedAt: center.approvedAt ?? now, blockedAt: null, blockReason: null } : {}),
+        ...(input.status === 'BLOCKED' ? { blockedAt: now, blockReason: input.reason ?? null } : {}),
+        ...(input.status === 'PENDING' ? { blockedAt: null, blockReason: null } : {}),
+      },
+    })
+    await this.audit.record({ action: 'center.status', entityType: 'Center', entityId: id, before: { status: center.status }, after: { status: updated.status }, reason: input.reason })
+    await this.notifications.safely('center.status', async () => {
+      const admins = await this.notifications.centerAdminIds(tenantId, id)
+      const type = input.status === 'ACTIVE' ? 'center.approved' : input.status === 'BLOCKED' ? 'center.blocked' : 'center.pending'
+      await this.notifications.notify({ tenantId, userIds: admins, type, params: { centerName: center.name, centerId: id, reason: input.reason ?? null }, dedupeKey: `center-${type}:${id}:${now.toISOString()}` })
+    })
+    void actor
+    return { id: updated.id, status: updated.status, approvedAt: updated.approvedAt, blockedAt: updated.blockedAt, blockReason: updated.blockReason }
+  }
+
+  /**
+   * Super Admin: delete an account. Soft delete: the row stays for audit and history (attendance, payments), sessions are
+   * revoked, the subscription is cancelled (seats released), the login and phone are freed, a teacher profile is unlinked.
+   */
+  async deleteUser(tenantId: string, actor: RequestActor, userId: string, reason: string) {
+    const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId }, include: { teacherProfile: { select: { id: true } } } })
+    if (!user) throw AppError.notFound('User')
+    if (user.isOwner) throw AppError.forbidden('The owner account cannot be deleted here', { code: 'owner_protected' })
+    if (user.id === actor.id) throw AppError.forbidden('You cannot delete your own account', { code: 'self_delete' })
+    const now = new Date()
+    await this.prisma.tx(async (tx) => {
+      await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now, revokedReason: 'account_deleted' } })
+      const subs = await tx.subscription.findMany({ where: { tenantId, studentId: userId, status: { in: ['DRAFT', 'PENDING_PAYMENT', 'ACTIVE', 'PAST_DUE'] } }, select: { id: true } })
+      for (const s of subs) {
+        await tx.enrollment.updateMany({ where: { subscriptionId: s.id, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: now } })
+        await tx.payment.updateMany({ where: { subscriptionId: s.id, state: 'PENDING' }, data: { state: 'CANCELLED', cancelledAt: now } })
+        await tx.subscription.update({ where: { id: s.id }, data: { status: 'CANCELLED', cancelledAt: now } })
+      }
+      if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { userId: null } })
+      await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, roles: [], centerId: null } })
+      await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId }, reason })
+    })
     return { ok: true }
   }
   async upsertCategory(tenantId: string, input: z.infer<typeof import('./manage.schemas').CategoryInput>, id?: string) {

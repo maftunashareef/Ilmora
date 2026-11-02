@@ -5,13 +5,15 @@ import { pick } from '@ilmora/shared'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { JOBS, QUEUES } from '../../infra/queue/queues'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
+import { SubscriptionService } from '../enrollment/subscription.service'
 import { SmsService } from '../sms/sms.service'
 import { OutboxService } from './outbox.service'
 import { PaymentsService } from './payments.service'
 
 /**
- * Worker: drains the transactional outbox (receipts, refund notices) every 20 s and expires stale payments
- * every 10 minutes. Both are repeatable BullMQ jobs; multiple workers are safe (SKIP LOCKED / unique keys).
+ * Worker: drains the transactional outbox (receipts, refund notices) every 20 s, expires stale payments and runs the
+ * subscription lifecycle (blocking, expiry, reminders) every 10 minutes. All are repeatable BullMQ jobs; multiple
+ * workers are safe (SKIP LOCKED / unique keys / idempotent updates).
  */
 @Processor(QUEUES.outbox, { concurrency: 1 })
 export class OutboxProcessor extends WorkerHost implements OnModuleInit {
@@ -22,6 +24,7 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly sms: SmsService,
     private readonly payments: PaymentsService,
+    private readonly subscriptions: SubscriptionService,
     @InjectQueue(QUEUES.outbox) private readonly queue: Queue,
   ) {
     super()
@@ -30,10 +33,12 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
   async onModuleInit() {
     await this.queue.upsertJobScheduler('outbox-dispatch', { every: 20_000 }, { name: JOBS.outbox.dispatch, data: {} })
     await this.queue.upsertJobScheduler('payments-expire', { every: 10 * 60_000 }, { name: JOBS.maintenance.expirePayments, data: {} })
+    await this.queue.upsertJobScheduler('subscriptions-lifecycle', { every: 10 * 60_000 }, { name: JOBS.maintenance.subscriptionLifecycle, data: {} })
   }
 
   async process(job: Job): Promise<unknown> {
     if (job.name === JOBS.maintenance.expirePayments) return { expired: await this.payments.expireAll() }
+    if (job.name === JOBS.maintenance.subscriptionLifecycle) return this.subscriptions.runLifecycleAll()
     const events = await TenantContext.system(() => this.outbox.claim(50))
     let done = 0
     for (const ev of events) {
