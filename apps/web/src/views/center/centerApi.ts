@@ -1,0 +1,67 @@
+'use client'
+import type { AttendanceMethod, CenterCheckInSettings, CenterStatus, Course, L, LessonSession, SubscriptionAccess, Teacher } from '@ilmora/shared'
+
+/** Shapes of the center workspace API (`/v1/center/*`). */
+
+export interface CenterProfile {
+  id: string
+  slug: string
+  name: string
+  district: L
+  description: L
+  tone: string
+  address: string | null
+  phone: string | null
+  status: CenterStatus
+  approvedAt: string | null
+  blockedAt: string | null
+  blockReason: string | null
+  createdAt: string
+  checkIn: CenterCheckInSettings
+}
+
+export interface CenterLesson {
+  session: LessonSession
+  courseTitle: L
+  courseId: string
+  teacherName: string
+  group: { id: string; name: string; room: string }
+  roster: number
+  present: number
+  absent: number
+}
+
+export interface CenterOverview {
+  center: CenterProfile
+  counts: { teachers: number; courses: number; groups: number; students: number }
+  today: CenterLesson[]
+}
+
+export interface CenterQr { code: string; url: string; rotatedAt: string | null }
+
+export type CenterTeacher = Teacher & { account: { id: string; login: string | null; isActive: boolean } | null; courses: number }
+
+export interface CenterStudent {
+  id: string
+  displayName: string
+  district: string | null
+  phoneMasked: string | null
+  isActive: boolean
+  groups: { id: string; name: string; courseId: string; courseTitle: L }[]
+  subscription: (SubscriptionAccess & { status: string; kind: 'PERIOD' | 'LESSONS' }) | null
+  attendance: { present: number; absent: number; excused: number }
+}
+
+export type CenterCourses = { center: { id: string; name: string }; courses: Course[] }
+
+/** What the center sends for one of its offline courses (CourseInput on the API; the center id is fixed server-side). */
+export const centerCourseInput = (c: Course) => ({
+  title: c.title, categoryId: c.categoryId, subjectId: c.subjectId ?? null, summary: c.summary, description: c.description, curriculum: c.curriculum,
+  centerId: c.centerId, teacherId: c.teacherId, level: c.level, durationMonths: c.durationMonths, price: Math.round(c.price), coverSeed: c.coverSeed, imageUrl: c.imageUrl ?? null,
+  learningFormat: 'OFFLINE' as const, discount: c.discount ?? null,
+  status: c.status, visibility: c.visibility, audience: c.audience, reviewRequested: c.reviewRequested ?? false,
+})
+
+export const centerGroupInput = (g: Course['groups'][number]) => ({ name: g.name, days: g.days, start: g.start, end: g.end, room: g.room, capacity: g.capacity })
+
+export const methodLabelKey = (m: AttendanceMethod) => (m === 'center_qr' ? 'session.centerQr' : m === 'auto' ? 'session.autoAbsent' : m === 'manual' ? 'session.correct' : 'session.qrTitle')

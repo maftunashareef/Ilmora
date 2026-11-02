@@ -817,9 +817,17 @@ export class ManageService {
 
   async upsertPackage(tenantId: string, input: z.infer<typeof PackageInput> | z.infer<typeof import('./manage.schemas').PackagePatch>, id?: string) {
     const data: Record<string, unknown> = {}
-    for (const k of ['code', 'maxCourses', 'enabled', 'highlight', 'sortOrder'] as const) if (input[k] !== undefined) data[k] = input[k]
+    for (const k of ['code', 'maxCourses', 'enabled', 'highlight', 'sortOrder', 'accessKind', 'periodDays', 'lessonCount'] as const) if (input[k] !== undefined) data[k] = input[k]
     for (const k of ['name', 'description', 'perks'] as const) if (input[k] !== undefined) data[k] = input[k] as Json
-    if (id) return this.prisma.client.package.update({ where: { id }, data: data as Prisma.PackageUncheckedUpdateInput })
+    if (id) {
+      // A package that stops being lesson-based needs no lesson count; one that becomes lesson-based must have one.
+      const current = await this.prisma.client.package.findFirst({ where: { tenantId, id }, select: { accessKind: true, lessonCount: true } })
+      if (!current) throw AppError.notFound('Package')
+      const kind = (data.accessKind as string | undefined) ?? current.accessKind
+      const lessons = data.lessonCount !== undefined ? (data.lessonCount as number | null) : current.lessonCount
+      if (kind === 'LESSONS' && !lessons) throw AppError.invalid('lesson_count_required', 'A lesson-based package needs a lesson count')
+      return this.prisma.client.package.update({ where: { id }, data: data as Prisma.PackageUncheckedUpdateInput })
+    }
     return this.prisma.client.package.create({ data: { tenantId, ...data } as Prisma.PackageUncheckedCreateInput })
   }
 

@@ -161,7 +161,7 @@ export class AttendanceService {
     await this.audit.record({ action: 'session.status', entityType: 'LessonSession', entityId: session.id, before: { status: session.status }, after: { status: next }, reason })
     await this.events.publish(session.id, { type: 'session', session: SessionsService.toDto(updated) })
     if (session.status !== next && (next === 'CANCELLED' || session.status === 'CANCELLED')) {
-      await this.notifyGroup(session, next === 'CANCELLED' ? 'schedule.cancelled' : 'schedule.changed', { ...this.lessonParams(session), reason: reason ?? null }, `session-${next.toLowerCase()}:${session.id}:${Date.now()}`)
+      await this.notifyGroup(session, next === 'CANCELLED' ? 'schedule.cancelled' : 'schedule.restored', { ...this.lessonParams(session), reason: reason ?? null }, `session-${next.toLowerCase()}:${session.id}:${Date.now()}`)
     }
     return { session: SessionsService.toDto(updated) }
   }
@@ -439,7 +439,7 @@ export class AttendanceService {
       const clash = await this.prisma.client.lessonSession.findFirst({ where: { groupId: session.groupId, date: isoToDateColumn(date) }, select: { id: true, status: true } })
       if (clash) throw AppError.conflict('session_exists', 'The group already has a lesson on that date', { sessionId: clash.id, status: clash.status.toLowerCase() })
       result = await this.prisma.tx(async (tx) => {
-        await tx.lessonSession.update({ where: { id: session.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledById: actor.id, attendanceOpen: false, attendanceTokenHash: null, attendanceTokenExpiresAt: null, absenceMarkedAt: new Date(), note: `Moved to ${date} ${start}` } })
+        await tx.lessonSession.update({ where: { id: session.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledById: actor.id, attendanceOpen: false, attendanceTokenHash: null, attendanceTokenExpiresAt: null, absenceMarkedAt: new Date(), note } })
         return tx.lessonSession.create({
           data: { tenantId: session.tenantId, groupId: session.groupId, courseId: session.courseId, date: isoToDateColumn(date), startsAt, endsAt, status: endsAt < new Date() ? 'COMPLETED' : 'SCHEDULED', isExtra: true, rescheduledFromId: session.id, note, generatedBy: `user:${actor.id}` },
           include: SESSION_INCLUDE,

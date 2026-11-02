@@ -166,8 +166,19 @@ export const AvatarUploadUrlInput = z.object({
   contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
   fileSize: z.number().int().min(1).max(2 * 1024 * 1024), // max 2MB
 }).strict()
-export const PackageInput = z.object({ code: z.string().regex(/^[a-z0-9-]{2,30}$/), name: L, description: L, perks: z.array(L).max(12), maxCourses: z.number().int().min(1).max(6), enabled: z.boolean(), highlight: z.boolean(), sortOrder: z.number().int().optional() }).strict()
-export const PackagePatch = PackageInput.partial()
+export const PackageInput = z.object({
+  code: z.string().regex(/^[a-z0-9-]{2,30}$/), name: L, description: L, perks: z.array(L).max(12), maxCourses: z.number().int().min(1).max(6), enabled: z.boolean(), highlight: z.boolean(), sortOrder: z.number().int().optional(),
+  /** PERIOD: periodDays per payment (null = one calendar month); LESSONS: lessonCount attended lessons per payment. */
+  accessKind: z.enum(['PERIOD', 'LESSONS']).optional(),
+  periodDays: z.number().int().min(1).max(366).nullable().optional(),
+  lessonCount: z.number().int().min(1).max(500).nullable().optional(),
+}).strict().refine((p) => p.accessKind !== 'LESSONS' || (p.lessonCount ?? 0) > 0, { message: 'A lesson-based package needs a lesson count', path: ['lessonCount'] })
+export const PackagePatch = z.object({
+  code: z.string().regex(/^[a-z0-9-]{2,30}$/).optional(), name: L.optional(), description: L.optional(), perks: z.array(L).max(12).optional(), maxCourses: z.number().int().min(1).max(6).optional(), enabled: z.boolean().optional(), highlight: z.boolean().optional(), sortOrder: z.number().int().optional(),
+  accessKind: z.enum(['PERIOD', 'LESSONS']).optional(),
+  periodDays: z.number().int().min(1).max(366).nullable().optional(),
+  lessonCount: z.number().int().min(1).max(500).nullable().optional(),
+}).strict()
 export const UserRolesInput = z.object({
   /** PLATFORM_ADMIN (Super Admin) is deliberately absent: it exists only for the configured owner account. */
   roles: z.array(z.enum(['FINANCE_ADMIN', 'CENTER_ADMIN', 'TEACHER', 'STUDENT'])).min(1),

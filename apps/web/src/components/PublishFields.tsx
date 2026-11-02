@@ -7,11 +7,14 @@ import { VisibilityControl } from './VisibilityControl'
 
 export interface PublishDraft { status: Status; visibility: Visibility | null; audience: Audience }
 
+/** Who is editing: the Super Admin, a teacher (subject to the teacher switches) or a center (publishes its own courses directly). */
+export type PublishMode = 'admin' | 'teacher' | 'center'
+
 /** Status (draft/published/archived) + required Public/Private choice with audience selector. */
-export function PublishFields({ value, onChange, teacherId, mode }: { value: PublishDraft; onChange: (v: PublishDraft) => void; teacherId: string; mode: 'admin' | 'teacher' }) {
+export function PublishFields({ value, onChange, teacherId, mode }: { value: PublishDraft; onChange: (v: PublishDraft) => void; teacherId: string; mode: PublishMode }) {
   const { t } = useT()
   const perms = useStore((s) => s.site.permissions.teacher)
-  const canPublish = mode === 'admin' || perms.publishDirectly
+  const canPublish = mode !== 'teacher' || perms.publishDirectly
   return (
     <div className="space-y-5">
       <div>
@@ -34,7 +37,7 @@ export type FinalizeResult =
   | { ok: true; patch: { status: Status; visibility: Visibility; audience: Audience; reviewRequested: boolean; updatedAt: string }; note?: TKey }
 
 /** Enforce: publishing requires a visibility choice; teachers without publish rights get a review request instead. */
-export function finalizePublish(draft: PublishDraft, mode: 'admin' | 'teacher', perms: Permissions['teacher']): FinalizeResult {
+export function finalizePublish(draft: PublishDraft, mode: PublishMode, perms: Permissions['teacher']): FinalizeResult {
   if (draft.status === 'published' && draft.visibility === null) return { ok: false, error: 'vis.required' }
   const visibility: Visibility = draft.visibility ?? 'private'
   const audience = visibility === 'public' ? { studentIds: [], groupIds: [] } : draft.audience

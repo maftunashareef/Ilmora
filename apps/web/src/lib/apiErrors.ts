@@ -77,6 +77,20 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   attendance_closed: 'apiError.attendanceClosed',
   attendance_expired: 'attend.expired',
   not_enrolled: 'apiError.notEnrolled',
+  session_exists: 'session.exists',
+  has_attendance: 'session.hasAttendance',
+  invalid_date: 'apiError.schedule',
+  // educational centers
+  center_not_approved: 'center.err.notApproved',
+  center_blocked: 'center.blockedNotice',
+  wrong_center: 'center.err.wrongCenter',
+  teacher_not_in_center: 'center.err.teacherNotInCenter',
+  teacher_login_not_found: 'center.err.teacherNotFound',
+  teacher_elsewhere: 'center.err.teacherElsewhere',
+  // Super Admin
+  owner_protected: 'admin.accounts.ownerProtected',
+  self_delete: 'apiError.forbidden',
+  lesson_count_required: 'admin.packages.lessonCount',
 }
 
 /**

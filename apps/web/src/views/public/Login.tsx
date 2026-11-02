@@ -41,7 +41,8 @@ export function LoginPage() {
   const notify = useStore((s) => s.notify)
 
   const [mode, setMode] = useState<Mode>(params.get('mode') === 'register' ? 'register' : 'signin')
-  const [role, setRole] = useState<'STUDENT' | 'TEACHER' | null>(null)
+  const [role, setRole] = useState<'STUDENT' | 'TEACHER' | 'CENTER' | null>(null)
+  const [centerName, setCenterName] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [loginName, setLoginName] = useState('')
@@ -55,7 +56,7 @@ export function LoginPage() {
   const [googleBusy, setGoogleBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [networkOffline, setNetworkOffline] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm', string>>>({})
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName', string>>>({})
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return
@@ -85,6 +86,7 @@ export function LoginPage() {
       case 'invalid_phone': return t('auth.err.phone')
       case 'weak_password': return t('auth.err.password')
       case 'invalid_role': return t('auth.err.role')
+      case 'invalid_center_name': return t('auth.err.centerName')
       case 'account_disabled': return t('auth.err.disabled')
       case 'unverified_email': return t('auth.err.google')
       case 'invalid_google_token': return t('auth.err.google')
@@ -112,6 +114,7 @@ export function LoginPage() {
       }
     } else {
       if (!role) next.role = t('auth.err.role')
+      if (role === 'CENTER' && centerName.trim().length < 2) next.centerName = t('auth.err.centerName')
       if (!name.trim() || name.trim().length < 2) next.name = t('auth.err.name')
       if (phone.trim()) {
         const phoneCheck = normalizeUzPhone(phone)
@@ -143,6 +146,7 @@ export function LoginPage() {
           password,
           displayName: name.trim() || undefined,
           phone: phone.trim() || undefined,
+          centerName: role === 'CENTER' ? centerName.trim() : undefined,
           acceptOffer: true,
           consentPersonalData: true,
         })
@@ -168,7 +172,8 @@ export function LoginPage() {
         const redirectUri = `${window.location.origin}/auth/google/callback`
         const statePayload = {
           lang: currentLang,
-          role: mode === 'register' && role ? role : undefined,
+          // Google Sign-In creates student or teacher accounts; a center registers with a login and password.
+          role: mode === 'register' && role && role !== 'CENTER' ? role : undefined,
           next: safeNext || undefined,
         }
         const state = encodeURIComponent(JSON.stringify(statePayload))
@@ -250,8 +255,8 @@ export function LoginPage() {
             {mode === 'register' && (
               <fieldset>
                 <legend className="mb-2 text-xs font-medium text-charcoal/70">{t('auth.whoAreYou')}</legend>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {(['STUDENT', 'TEACHER'] as const).map((r) => (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(['STUDENT', 'TEACHER', 'CENTER'] as const).map((r) => (
                     <button
                       key={r}
                       type="button"
@@ -260,17 +265,32 @@ export function LoginPage() {
                       className={cx('rounded-control border p-3 text-left transition', role === r ? 'border-forest bg-sage/60 shadow-lift' : 'border-charcoal/12 bg-ivory/60 hover:border-forest/50')}
                     >
                       <div className="flex items-center gap-2 text-sm font-semibold text-charcoal">
-                        <Icon name={r === 'STUDENT' ? 'user' : 'edit'} className="h-4 w-4 text-forest" />
-                        {t(r === 'STUDENT' ? 'role.student' : 'role.teacher')}
+                        <Icon name={r === 'STUDENT' ? 'user' : r === 'TEACHER' ? 'edit' : 'building'} className="h-4 w-4 text-forest" />
+                        {t(r === 'STUDENT' ? 'role.student' : r === 'TEACHER' ? 'role.teacher' : 'auth.role.center')}
                       </div>
                       <div className="mt-1 text-[11px] leading-relaxed text-charcoal/60">
-                        {t(r === 'STUDENT' ? 'auth.role.studentHint' : 'auth.role.teacherHint')}
+                        {t(r === 'STUDENT' ? 'auth.role.studentHint' : r === 'TEACHER' ? 'auth.role.teacherHint' : 'auth.role.centerHint')}
                       </div>
                     </button>
                   ))}
                 </div>
                 {fieldErrors.role && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.role}</p>}
               </fieldset>
+            )}
+
+            {mode === 'register' && role === 'CENTER' && (
+              <Field label={t('auth.centerName')} required>
+                <Input
+                  maxLength={120}
+                  value={centerName}
+                  onChange={(e) => {
+                    setCenterName(e.target.value)
+                    if (fieldErrors.centerName) setFieldErrors((f) => ({ ...f, centerName: undefined }))
+                  }}
+                  aria-invalid={!!fieldErrors.centerName}
+                />
+                {fieldErrors.centerName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.centerName}</p>}
+              </Field>
             )}
 
             {mode === 'register' && (
