@@ -1357,7 +1357,7 @@ export const dict = {
   'admin.accounts.roles': d('Rollar', 'Роли', 'Roles'),
   'admin.accounts.rolesTitle': d('Rollarni özgartiriş', 'Изменить роли', 'Change roles'),
   'admin.accounts.rolesHint': d('Super Admin roli bu yerda berilmaydi: uni faqat serverda owner-setup buyrugi beradi.', 'Роль Супер-админа здесь не выдаётся: её даёт только команда owner-setup на сервере.', 'The Super Admin role is not granted here: only the owner-setup command on the server grants it.'),
-  'admin.accounts.role.STUDENT': d('Kursni körish, abonement va guruhlar', 'Просмотр курсов, абонемент и группы', 'Courses, subscription and groups'),
+  'admin.accounts.role.STUDENT': d('Kursni köriş, abonement va guruhlar', 'Просмотр курсов, абонемент и группы', 'Courses, subscription and groups'),
   'admin.accounts.role.TEACHER': d('Öqituvçi studiyasi: kurslar, video va materiallar', 'Студия учителя: курсы, видео и материалы', 'Teacher studio: courses, videos and materials'),
   'admin.accounts.role.CENTER_ADMIN': d('Tanlangan öquv markazini boşqariş', 'Управление выбранным учебным центром', 'Manages the selected learning center'),
   'admin.accounts.role.FINANCE_ADMIN': d('Tölovlar, moliya bölimi va audit jurnali', 'Платежи, раздел финансов и журнал аудита', 'Payments, the finance section and the audit log'),
