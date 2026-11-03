@@ -164,10 +164,10 @@ export function UniversitiesBand({ className, prominent }: { className?: string;
       </div>
       <div className="min-w-0 flex-1">
         {!prominent && <div className="font-display text-xl text-charcoal">{t('uni.page.title')}</div>}
-        <p className={prominent ? 'text-[15px] leading-relaxed text-charcoal/75' : 'text-sm text-charcoal/65'}>{t('uni.catalogBand')}</p>
+        <p className={prominent ? 'text-[15px] leading-relaxed text-charcoal/75' : 'text-sm text-charcoal/65'}>{t(prominent ? 'uni.homeBand' : 'uni.catalogBand')}</p>
       </div>
       {prominent ? (
-        <span className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-control bg-forest px-5 py-2.5 text-sm font-semibold text-ivory shadow-sm transition group-hover:bg-forest/90">{t('uni.choose')} <Icon name="arrowRight" className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
+        <span className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-control bg-forest px-5 py-2.5 text-sm font-semibold text-ivory shadow-sm transition group-hover:bg-forest/90">{t('uni.homeCta')} <Icon name="arrowRight" className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
       ) : (
         <span className="inline-flex items-center gap-1.5 text-sm font-medium text-forest">{t('uni.allUniversities')} <Icon name="arrowRight" className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
       )}

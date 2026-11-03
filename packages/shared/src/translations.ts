@@ -289,6 +289,8 @@ export const dict = {
   'uni.entranceSubjects': d('Kiriş fanlari', 'Вступительные предметы', 'Entrance subjects'),
   'uni.noSubjects': d('Rasmiy sahifada fanlar körsatilmagan', 'На официальной странице предметы не указаны', 'The official page names no subjects'),
   'uni.noPackage': d('Bu yönaliş uçun hozirça e’lon qilingan paket yöq: talablar tekşirilmoqda yoki ILMORA katalogida kerakli kurs yöq.', 'Для этого направления пока нет опубликованного пакета: требования проверяются или в каталоге ILMORA нет нужного курса.', 'No published package for this direction yet: the requirements are being checked or the ILMORA catalog lacks a needed course.'),
+  'uni.homeBand': d('Universitet, fakultet va yönalişni tanlang — keyin kiriş fanlari böyiça tayyorgarlik paketini sotib oling.', 'Выберите университет, факультет и направление — затем оформите пакет подготовки по вступительным предметам.', 'Choose a university, faculty and direction, then get a preparation package for its entrance subjects.'),
+  'uni.homeCta': d('Universitetlarni köriş', 'Выбрать университет', 'View universities'),
   'uni.packagesSoon': d('Paketlar tekşirilmoqda', 'Пакеты проверяются', 'Packages being verified'),
   'uni.noPackagesYet': d('Bu universitet uçun hozirça e’lon qilingan paket yöq: qabul talablari rasmiy sahifa böyiça tekşirilmoqda.', 'Для этого университета пока нет опубликованного пакета: требования к поступлению проверяются по официальной странице.', 'No published package for this university yet: the admission requirements are being checked against the official page.'),
   'uni.otherPrograms': d('Boşqa dasturlar', 'Другие программы', 'Other programmes'),

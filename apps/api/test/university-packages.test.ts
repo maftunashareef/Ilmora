@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sampleData, UNIVERSITIES, type AdmissionSource, type Preset, type University } from '@ilmora/shared'
+import { sampleData, UNIVERSITIES, UNIVERSITY_PACKAGES, type AdmissionSource, type Preset, type University } from '@ilmora/shared'
 import { SiteConfigSchema, SiteService } from '../src/modules/site/site.service'
 
 const label = { uz: 'x', ru: 'x', en: 'x' }
@@ -48,6 +48,16 @@ describe('university package input', () => {
 
   it('accepts every researched university as stored (the records the production migration adds)', () => {
     const result = SiteConfigSchema.safeParse(body({ universities: UNIVERSITIES }))
+    expect(result.success, JSON.stringify(result.error?.issues.slice(0, 3))).toBe(true)
+  })
+
+  it('accepts the researched packages as stored (the records the production migration adds)', () => {
+    const presets: Preset[] = UNIVERSITY_PACKAGES.map((p) => ({
+      id: p.id, universityId: p.universityId, program: p.program, directionIds: p.directionIds ?? [], name: p.name, description: p.description,
+      slots: p.subjects.map((s, i) => ({ id: `${p.id}-s${i + 1}`, label: s.label, courseId: s.course, ...(s.optional ? { optional: true } : {}) })),
+      admission: { ...p.admission }, enabled: false,
+    }))
+    const result = SiteConfigSchema.safeParse(body({ universities: UNIVERSITIES, presets }))
     expect(result.success, JSON.stringify(result.error?.issues.slice(0, 3))).toBe(true)
   })
 

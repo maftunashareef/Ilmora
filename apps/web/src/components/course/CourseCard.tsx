@@ -21,13 +21,16 @@ export function PriceTag({ price, original, percent, emphasis, className }: { pr
           {formatSom(original, lang, false)}
         </span>
       )}
-      <span className={cx('font-display tracking-tight font-semibold', original !== undefined ? 'text-forest' : 'text-charcoal', emphasis || original !== undefined ? 'text-2xl' : 'text-xl')}>
-        {formatSom(price, lang, false)}
+      {/* The amount, its unit and the discount stay on one line ("900 000" never breaks between its digits). */}
+      <span className="inline-flex items-baseline gap-x-1.5 whitespace-nowrap">
+        <span className={cx('font-display tracking-tight font-semibold', original !== undefined || percent ? 'text-forest' : 'text-charcoal', emphasis || original !== undefined ? 'text-2xl' : 'text-xl')}>
+          {formatSom(price, lang, false)}
+        </span>
+        <span className="text-[11px] text-charcoal/55 font-medium">
+          {t('common.som')} {t('common.perMonth')}
+        </span>
+        {percent ? <span className="rounded-full bg-champagne px-2 py-0.5 text-[10px] font-bold text-forest">−{percent}%</span> : null}
       </span>
-      <span className="text-[11px] text-charcoal/55 font-medium">
-        {t('common.som')} {t('common.perMonth')}
-      </span>
-      {percent ? <span className="rounded-full bg-champagne px-2 py-0.5 text-[10px] font-bold text-forest">−{percent}%</span> : null}
     </span>
   )
 }
@@ -285,15 +288,25 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
           )}
         </div>
 
-        {/* Footer: Price + Action Button */}
-        <div className="mt-auto flex items-end justify-between gap-3 border-t border-charcoal/8 pt-4">
-          <div>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-charcoal/40 block leading-tight">
+        {/* Footer: the same three rows on every card (label with the old price, price on one line, saving and buttons),
+            so prices and buttons line up across a row of cards. */}
+        <div className="mt-auto border-t border-charcoal/8 pt-4">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-charcoal/40 leading-tight">
               {online ? t('format.onlineHint') : t('courses.monthlyPrice')}
             </span>
-            {online ? <span className="font-display text-xl font-semibold tracking-tight text-forest">{t('online.free')}</span> : <CoursePrice course={course} emphasis={tpl.priceStyle === 'emphasis'} />}
-            {salePercent > 0 && <span className="mt-0.5 block text-[11px] font-semibold text-forest">{t('discounts.save', { price: formatSom(course.price - finalPriceSom(course), lang) })}</span>}
+            {salePercent > 0 && (
+              <span className="whitespace-nowrap text-xs text-charcoal/45 line-through" title={t('discount.was')}>
+                <span className="sr-only">{t('discount.was')}: </span>
+                {formatSom(course.price, lang, false)}
+              </span>
+            )}
           </div>
+          <div className="mt-1 [&_.font-display]:text-[26px] [&_.font-display]:leading-tight">
+            {online ? <span className="font-display font-semibold tracking-tight text-forest">{t('online.free')}</span> : <PriceTag price={finalPriceSom(course)} percent={salePercent || undefined} emphasis={tpl.priceStyle === 'emphasis'} />}
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            {salePercent > 0 ? <span className="min-w-0 text-[11px] font-semibold leading-snug text-forest">{t('discounts.save', { price: formatSom(course.price - finalPriceSom(course), lang) })}</span> : <span />}
           <div className="flex shrink-0 items-center gap-2">
           <SaveButton courseId={course.id} />
           {online && course.externalUrl && (
@@ -315,6 +328,7 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
             {t('common.view')}
             <Icon name="arrowRight" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
           </Link>
+          </div>
           </div>
         </div>
       </div>

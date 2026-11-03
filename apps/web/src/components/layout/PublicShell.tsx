@@ -115,6 +115,7 @@ export function PublicShell() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
   const nav = site.nav.filter((n) => n.enabled)
+  const universities = nav.find((n) => n.path === '/universities')
   const ws = role !== 'visitor' ? WORKSPACE[role] : null
   // On the home page the header floats transparently over the hero film until the user scrolls.
   const isHome = loc.pathname === '/' && site.pages.home.some((s) => s.type === 'hero' && s.enabled)
@@ -142,6 +143,22 @@ export function PublicShell() {
             <Image src="/brand/ilmora-logo-mark.png" alt={site.brand.name} width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-0' : 'opacity-100')} />
             <Image src="/brand/ilmora-logo-mark-light.png" alt="" aria-hidden width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('absolute inset-y-0 left-0 h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-100' : 'opacity-0')} />
           </Link>
+          {/* While the full menu is folded into the menu button (tablets), University preparation stays next to the logo. */}
+          {universities && (
+            <NavLink
+              to={universities.path}
+              className={({ isActive }) =>
+                cx(
+                  'mr-auto hidden items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-300 lg:inline-flex',
+                  fits && 'xl:hidden',
+                  overlay ? 'border-ivory/30 text-ivory hover:bg-white/10' : isActive ? 'border-forest bg-forest text-ivory' : 'border-charcoal/15 text-charcoal/80 hover:border-forest hover:text-forest'
+                )
+              }
+            >
+              <Icon name="building" className="h-3.5 w-3.5" />
+              {tr(universities.label)}
+            </NavLink>
+          )}
           <nav className={cx('hidden items-center gap-0.5', fits && 'xl:flex')} aria-label={t('nav.primary')}>
             {nav.map((n) => (
               <NavLink

@@ -3,8 +3,8 @@
 -- Adds, only when missing, to the ILMORA site settings (as packages/shared/src/sample-data.ts has them):
 --   * the menu item "Universitetlar / Университеты / Universities" (/universities) as the first item, unless an item for
 --     /universities exists already (also when an admin switched it off) or the menu is full (12 items);
---   * the homepage section "University preparation" right after the special offers (after the hero when there are none),
---     unless the homepage has a universities section already.
+--   * the homepage section "University preparation" right after "How ILMORA works" (the journey section; after the
+--     special offers, or the hero, when it is missing), unless the homepage has a universities section already.
 -- Append-only: nothing is removed, reordered or rewritten; no other setting, user, subscription, payment, enrollment,
 -- course or group is touched.
 -- Safety: the stored menu, homepage and version are written to "AuditEvent" (action 'content.sync', id
@@ -57,8 +57,11 @@ BEGIN
       nav := jsonb_build_array(nav_item) || nav;
     END IF;
     IF add_section THEN
-      -- right after the special offers, or after the hero when there are none, or first
-      SELECT min(x.i) INTO pos FROM jsonb_array_elements(home) WITH ORDINALITY AS x(v, i) WHERE x.v->>'type' = 'discounts';
+      -- right after "How ILMORA works", else after the special offers, else after the hero, else first
+      SELECT min(x.i) INTO pos FROM jsonb_array_elements(home) WITH ORDINALITY AS x(v, i) WHERE x.v->>'type' = 'journey';
+      IF pos IS NULL THEN
+        SELECT min(x.i) INTO pos FROM jsonb_array_elements(home) WITH ORDINALITY AS x(v, i) WHERE x.v->>'type' = 'discounts';
+      END IF;
       IF pos IS NULL THEN
         SELECT min(x.i) INTO pos FROM jsonb_array_elements(home) WITH ORDINALITY AS x(v, i) WHERE x.v->>'type' = 'hero';
       END IF;
