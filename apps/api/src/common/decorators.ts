@@ -1,4 +1,6 @@
-import { createParamDecorator, type ExecutionContext, SetMetadata } from '@nestjs/common'
+import { applyDecorators, createParamDecorator, type ExecutionContext, SetMetadata } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+import { Throttle } from '@nestjs/throttler'
 import type { Request } from 'express'
 import type { Role } from '../generated/prisma/enums'
 import type { RequestActor } from '../infra/tenancy/tenant-context'
@@ -39,3 +41,15 @@ export const ClientInfo = createParamDecorator((_: unknown, ctx: ExecutionContex
   return { ip: req.ip ?? '', userAgent: (req.headers['user-agent'] ?? '').slice(0, 300), requestId: requestIdOf(req) }
 })
 export type ClientInfoValue = { ip: string; userAgent: string; requestId?: string }
+
+export const AUTH_THROTTLE_KEY = 'ilmora:auth-throttle'
+/**
+ * Puts a route under the strict "auth" throttler (login, OTP, registration). Only routes marked with this are
+ * counted by it — every other route is governed by the "default" throttler alone. Requests are counted per client IP.
+ */
+export const AuthThrottle = (limit: number, ttl = 60_000) => applyDecorators(SetMetadata(AUTH_THROTTLE_KEY, true), Throttle({ auth: { limit, ttl } }))
+
+/** True when the handler (or its controller) opted into the "auth" throttler via @AuthThrottle(). */
+const reflector = new Reflector()
+export const isAuthThrottled = (ctx: ExecutionContext): boolean =>
+  reflector.getAllAndOverride<boolean | undefined>(AUTH_THROTTLE_KEY, [ctx.getHandler(), ctx.getClass()]) === true

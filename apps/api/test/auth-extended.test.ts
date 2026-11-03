@@ -195,6 +195,49 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
       expect(result.user.id).toBe('new-google-user')
       expect(createdUserData.login).toBe('john_2')
       expect(createdUserData.preferredLang).toBe('en')
+      expect(createdUserData.googleId).toBe('gid-999')
+    })
+
+    // Regression: accounts used to be matched by the part of the e-mail before "@", so anvar@mail.ru (another Google
+    // account) signed into the Google-created account of anvar@gmail.com.
+    const googleAccountService = (existing: Record<string, unknown> | null) => {
+      const created: Record<string, unknown>[] = []
+      const client = {
+        user: {
+          findFirst: vi.fn().mockResolvedValue({ id: 'victim', login: 'anvar', passwordHash: null, roles: ['STUDENT'], isActive: true }),
+          findUnique: vi.fn().mockImplementation(({ where }: any) => {
+            if (where.tenantId_googleId) return Promise.resolve(where.tenantId_googleId.googleId === existing?.googleId ? existing : null)
+            if (where.tenantId_login?.login === 'anvar') return Promise.resolve({ id: 'victim' })
+            return Promise.resolve(null)
+          }),
+          create: vi.fn().mockImplementation(({ data }: any) => {
+            created.push(data)
+            return Promise.resolve({ id: 'new-google-user', roles: data.roles, tenantId: data.tenantId, login: data.login, displayName: data.displayName, isOwner: false, centerId: null, teacherProfile: null })
+          }),
+          update: vi.fn().mockImplementation(({ where }: any) => Promise.resolve({ ...existing, id: where.id })),
+        },
+        $transaction: vi.fn(async (cb: any) => cb(client)),
+      }
+      const tokens = { signAccess: vi.fn().mockResolvedValue('jwt'), issueRefresh: vi.fn().mockResolvedValue({ raw: 'r', expiresAt: new Date() }) } as unknown as TokenService
+      const audit = { record: vi.fn().mockResolvedValue(undefined) } as unknown as AuditService
+      const service = new AccountService({ client } as unknown as PrismaService, tokens, audit, {} as unknown as RedisService, notificationsStub, env)
+      return { service, client, created }
+    }
+
+    it('does not sign a different Google account into an account with the same e-mail local part', async () => {
+      const { service, created } = googleAccountService({ id: 'victim', googleId: 'gid-victim', login: 'anvar', roles: ['STUDENT'], isActive: true, isOwner: false, centerId: null, teacherProfile: null })
+      const result = await service.loginWithGoogle('tenant-1', { googleId: 'gid-attacker', email: 'anvar@mail.ru', emailVerified: true, displayName: 'Attacker' }, {})
+      expect(result.user.id).toBe('new-google-user')
+      expect(created).toHaveLength(1)
+      expect(created[0].googleId).toBe('gid-attacker')
+      expect(created[0].login).not.toBe('anvar')
+    })
+
+    it('signs the same Google account back into its own account by Google id', async () => {
+      const { service, created } = googleAccountService({ id: 'victim', googleId: 'gid-victim', login: 'anvar', roles: ['STUDENT'], isActive: true, isOwner: false, centerId: null, teacherProfile: null })
+      const result = await service.loginWithGoogle('tenant-1', { googleId: 'gid-victim', email: 'anvar@gmail.com', emailVerified: true, displayName: 'Anvar' }, {})
+      expect(result.user.id).toBe('victim')
+      expect(created).toHaveLength(0)
     })
   })
 

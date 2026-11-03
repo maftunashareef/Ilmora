@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, EmptyState, Icon, Input, Notice, PageTitle, Select } from '../../components/ui'
+import { Badge, Button, EmptyState, Field, Icon, Input, Modal, Notice, PageTitle, Select } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
@@ -10,6 +10,9 @@ import { useStore } from '../../store/useStore'
 type Account = { id: string; login: string | null; phoneMasked: string | null; displayName: string; roles: string[]; centerId: string | null; isActive: boolean; subscription: { status: string } | null; createdAt: string; lastLoginAt: string | null }
 type Page = { page: number; pageSize: number; total: number; items: Account[] }
 const ROLES = ['', 'STUDENT', 'TEACHER', 'CENTER_ADMIN', 'FINANCE_ADMIN'] as const
+/** Every role the Super Admin may grant; PLATFORM_ADMIN is owner-only (owner-setup on the server). */
+const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'FINANCE_ADMIN'] as const
+type AssignableRole = (typeof ASSIGNABLE)[number]
 
 /** Super Admin: every account on the platform with search, blocking and deletion (live API, not the demo people list). */
 export function AdminAccounts() {
@@ -21,6 +24,7 @@ export function AdminAccounts() {
   const [role, setRole] = useState<(typeof ROLES)[number]>('')
   const [page, setPage] = useState<Page | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [editing, setEditing] = useState<Account | null>(null)
 
   const load = useCallback(async (p = 1) => {
     const qs = new URLSearchParams({ page: String(p), pageSize: '50', ...(role ? { role } : {}), ...(query.trim() ? { search: query.trim() } : {}) })
@@ -28,9 +32,10 @@ export function AdminAccounts() {
   }, [role, query, notify, lang])
   useEffect(() => { void load(1) }, [load])
 
-  const act = async (id: string, fn: () => Promise<unknown>, done: string) => {
+  /** Runs an admin action; resolves true when it succeeded (errors are shown as a toast). */
+  const act = async (id: string, fn: () => Promise<unknown>, done: string): Promise<boolean> => {
     setBusy(id)
-    try { await fn(); notify(done); await load(page?.page ?? 1) } catch (err) { notify(isApiError(err) ? apiErrorText(err, lang) : String(err), 'warn') } finally { setBusy(null) }
+    try { await fn(); notify(done); await load(page?.page ?? 1); return true } catch (err) { notify(isApiError(err) ? apiErrorText(err, lang) : String(err), 'warn'); return false } finally { setBusy(null) }
   }
   const toggleActive = (a: Account) => {
     const roles = a.roles.filter((r) => r !== 'PLATFORM_ADMIN')
@@ -64,6 +69,7 @@ export function AdminAccounts() {
               </div>
               {a.id !== me && !a.roles.includes('PLATFORM_ADMIN') && (
                 <>
+                  <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => setEditing(a)}><Icon name="user" className="h-3.5 w-3.5" />{t('admin.accounts.roles')}</Button>
                   <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void toggleActive(a)}><Icon name={a.isActive ? 'lock' : 'check'} className="h-3.5 w-3.5" />{a.isActive ? t('admin.accounts.block') : t('admin.accounts.unblock')}</Button>
                   <Button size="sm" variant="danger" disabled={busy === a.id} onClick={() => void remove(a)}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
                 </>
@@ -79,6 +85,72 @@ export function AdminAccounts() {
         </div>
       )}
       <Notice tone="info" className="mt-6 text-xs">{t('admin.accounts.ownerProtected')}</Notice>
+      {editing && (
+        <RolesEditor
+          account={editing}
+          centers={centers}
+          roleLabel={roleLabel}
+          onClose={() => setEditing(null)}
+          onSave={(body) => act(editing.id, () => api(`/admin/users/${editing.id}/roles`, { method: 'PUT', body }), t('admin.accounts.rolesSaved')).then((ok) => { if (ok) setEditing(null) })}
+        />
+      )}
     </div>
+  )
+}
+
+type RolesBody = { roles: AssignableRole[]; centerId: string | null; reason: string }
+
+/** Checkbox editor for one account's roles; a center administrator must be tied to a center. */
+function RolesEditor({ account, centers, roleLabel, onClose, onSave }: { account: Account; centers: { id: string; name: string }[]; roleLabel: (r: string) => string; onClose: () => void; onSave: (body: RolesBody) => Promise<void> }) {
+  const { t } = useT()
+  const [roles, setRoles] = useState<AssignableRole[]>(() => account.roles.filter((r): r is AssignableRole => (ASSIGNABLE as readonly string[]).includes(r)))
+  const [centerId, setCenterId] = useState<string>(account.centerId ?? '')
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const toggle = (r: AssignableRole) => setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]))
+  const needsCenter = roles.includes('CENTER_ADMIN')
+  const problem = roles.length === 0 ? t('admin.accounts.noRoles') : needsCenter && !centerId ? t('admin.accounts.centerRequired') : null
+  const canSave = !problem && reason.trim().length >= 3 && !saving
+  const save = async () => {
+    if (!canSave) return
+    setSaving(true)
+    // Keep the order stable so the audit log shows the same list for the same set of roles.
+    try { await onSave({ roles: ASSIGNABLE.filter((r) => roles.includes(r)), centerId: centerId || null, reason: reason.trim() }) } finally { setSaving(false) }
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`${t('admin.accounts.rolesTitle')} · ${account.displayName}`}
+      footer={<div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button><Button disabled={!canSave} onClick={() => void save()}>{t('common.save')}</Button></div>}
+    >
+      <div className="space-y-4">
+        <fieldset className="space-y-2">
+          <legend className="mb-2 text-sm font-medium text-charcoal">{t('admin.accounts.roles')}</legend>
+          {ASSIGNABLE.map((r) => (
+            <label key={r} className="flex cursor-pointer items-start gap-3 rounded-control border border-charcoal/10 bg-paper px-3 py-2.5 hover:border-forest/40">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-forest" checked={roles.includes(r)} onChange={() => toggle(r)} />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-charcoal">{roleLabel(r)}</span>
+                <span className="block text-xs text-charcoal/55">{t(`admin.accounts.role.${r}`)}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {(needsCenter || centerId) && (
+          <Field label={t('admin.accounts.center')} required={needsCenter}>
+            <Select value={centerId} onChange={(e) => setCenterId(e.target.value)}>
+              <option value="">{t('admin.accounts.noCenter')}</option>
+              {centers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        <Field label={t('admin.accounts.roleReason')} required>
+          <Input value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+        {problem && <Notice tone="warn" className="text-xs">{problem}</Notice>}
+        <Notice tone="info" className="text-xs">{t('admin.accounts.rolesHint')}</Notice>
+      </div>
+    </Modal>
   )
 }

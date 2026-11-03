@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Headers, Inject, Patch, Post, Req, Res } from '@nestjs/common'
-import { Throttle } from '@nestjs/throttler'
 import type { Request, Response } from 'express'
-import { ClientInfo, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
+import { AuthThrottle, ClientInfo, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -16,7 +15,7 @@ export class AuthController {
 
   /** Student/Teacher self-registration with a login and password; opens a session on success. */
   @Public()
-  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  @AuthThrottle(10)
   @Post('register')
   async register(@CurrentTenantId() tenantId: string, @Body() dto: RegisterDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
     const result = await this.accounts.register(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
@@ -25,7 +24,7 @@ export class AuthController {
 
   /** Login + password. Wrong login and wrong password produce the same error; repeated failures lock the login. */
   @Public()
-  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  @AuthThrottle(10)
   @Post('login')
   async login(@CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
     const result = await this.accounts.loginWithPassword(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
@@ -34,7 +33,7 @@ export class AuthController {
 
   /** Google Sign-In with ID token or authorization code; opens a session on success. */
   @Public()
-  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  @AuthThrottle(10)
   @Post('google')
   async google(@CurrentTenantId() tenantId: string, @Body() dto: GoogleAuthDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
     const result = await this.auth.authenticateGoogle(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
@@ -42,14 +41,14 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ auth: { limit: 6, ttl: 60_000 } })
+  @AuthThrottle(6)
   @Post('otp/request')
   requestOtp(@CurrentTenantId() tenantId: string, @Body() dto: RequestOtpDto, @ClientInfo() ci: ClientInfoValue) {
     return this.auth.requestOtp(tenantId, dto.phone, dto.lang ?? 'uz', { ip: ci.ip })
   }
 
   @Public()
-  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  @AuthThrottle(10)
   @Post('otp/verify')
   async verifyOtp(@CurrentTenantId() tenantId: string, @Body() dto: VerifyOtpDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
     const result = await this.auth.verifyOtp(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
@@ -58,7 +57,7 @@ export class AuthController {
 
   /** Cookie-based: requires the custom header (browsers only add it from same-origin JavaScript) and an allowed Origin. */
   @Public()
-  @Throttle({ auth: { limit: 30, ttl: 60_000 } })
+  @AuthThrottle(30)
   @Post('refresh')
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Headers('x-requested-with') requestedWith: string | undefined, @ClientInfo() ci: ClientInfoValue) {
     this.assertSameSite(req, requestedWith)
