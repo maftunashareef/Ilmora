@@ -30,8 +30,8 @@ const AdmissionSchema = z.object({
 
 const httpsOrEmpty = (what: string) => z.string().max(500).refine((v) => v === '' || isSafeExternalUrl(v), `${what} must be a plain https link`)
 
-/** A study direction with the entrance subjects the university states for it. */
-const DirectionSchema = z.object({ id: z.string().min(1).max(60), name: L, subjects: z.array(L).max(8) })
+/** A study direction with the entrance subjects the university states for it (ids are derived from long official names). */
+const DirectionSchema = z.object({ id: z.string().min(1).max(80), name: L, subjects: z.array(L).max(8) })
 const FacultySchema = z.object({ id: z.string().min(1).max(60), name: L, directions: z.array(DirectionSchema).max(30) })
 
 /** A university that packages refer to. ILMORA is not affiliated with it; the record is plain data. */
@@ -55,7 +55,7 @@ const PresetSchema = z.object({
   universityId: z.string().min(1).max(60).optional(),
   university: z.string().trim().max(80).optional(),
   program: L.optional(),
-  directionIds: z.array(z.string().min(1).max(60)).max(30).optional(),
+  directionIds: z.array(z.string().min(1).max(80)).max(30).optional(),
   name: L,
   description: L,
   slots: z.array(z.object({ id: z.string().min(1).max(60), label: L, courseId: z.string().min(1).max(80).nullable(), optional: z.boolean().optional() })).min(1).max(8),
