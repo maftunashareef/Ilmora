@@ -20,7 +20,7 @@ services:
         value: production
       - key: APP_ROLE
         value: all
-      # Browser traffic arrives through the Vercel proxy and Render's load balancer (two hops).
+      # Browser traffic arrives through the web front's proxy and Render's load balancer (two hops).
       - key: TRUST_PROXY
         value: "2"
       - key: COOKIE_SECURE
