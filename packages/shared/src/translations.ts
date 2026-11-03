@@ -645,6 +645,8 @@ export const dict = {
   'centers.form.privacy': d('Şaxsiy ma’lumotlar faqat sörovni körib çiqiş uçun işlatiladi.', 'Личные данные используются только для рассмотрения заявки.', 'Personal data is used only to process your inquiry.'),
   'centers.form.another': d('Yana bir sörov', 'Ещё один запрос', 'Send another'),
   'centers.partners': d('Markazlar', 'Центры', 'Centers'),
+  'centers.viewCenter': d('Markazni köriş', 'Открыть центр', 'View center'),
+  'centers.showcase.subtitle': d('Har bir markazning kurslari, öqituvçilari va yönalişlari — bitta abonement bilan.', 'Курсы, преподаватели и направления каждого центра — по одному абонементу.', 'Every center’s courses, teachers and directions, on one subscription.'),
   'centers.partnersNote': d('Barça markazlar xayoliy. Haqiqiy hamkorlik mavjud emas.', 'Все центры вымышленные. Реальных партнёрств нет.', 'All centers are fictional. No real partnerships exist.'),
   'centers.formDisabled': d('Sörov formasi Super Admin tomonidan öçirilgan.', 'Форма запроса отключена Супер-админом.', 'The inquiry form is disabled by Super Admin.'),
 
