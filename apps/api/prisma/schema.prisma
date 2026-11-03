@@ -72,9 +72,24 @@ enum SubscriptionStatus {
   DRAFT
   PENDING_PAYMENT
   ACTIVE
+  /// Blocked: the period ended or the lessons are used up; seats are kept until graceEndsAt, a payment reactivates
   PAST_DUE
   CANCELLED
+  /// Blocked and the grace period passed: seats released, a new checkout is needed
   EXPIRED
+}
+
+/// What a payment buys: a period of days (PERIOD) or a number of attended lessons (LESSONS).
+enum SubscriptionKind {
+  PERIOD
+  LESSONS
+}
+
+/// Self-registered centers wait for the Super Admin's approval; blocked centers are hidden and their workspace is locked.
+enum CenterStatus {
+  PENDING
+  ACTIVE
+  BLOCKED
 }
 
 enum EnrollmentStatus {
@@ -99,7 +114,11 @@ enum AttendanceStatus {
 
 enum AttendanceMethod {
   QR
+  /// Scan of the center's standing QR code, validated against the lesson window (and the center's location when set)
+  CENTER_QR
   MANUAL
+  /// Absence recorded by the worker when the check-in window closed without a check-in
+  AUTO
 }
 
 enum PaymentProvider {
@@ -220,6 +239,7 @@ model Tenant {
   inquiries       CenterInquiry[]
   savedItems      SavedItem[]
   callbackLogs    ProviderCallbackLog[]
+  notifications   Notification[]
 }
 
 /// Template-driven site configuration (sections, theme, nav, features, permissions, media…) edited by Super Admin.
@@ -276,6 +296,7 @@ model User {
   savedItems      SavedItem[]
   auditEvents     AuditEvent[]
   ownedTenant     Tenant?   @relation("TenantOwner")
+  notifications   Notification[]
 
   @@unique([tenantId, phoneE164])
   @@unique([tenantId, login])
@@ -338,6 +359,22 @@ model Center {
   tone        String    @default("#163C35")
   address     String?
   phoneE164   String?
+  status      CenterStatus @default(ACTIVE)
+  /** Account that registered the center (its first administrator); null for centers created by the Super Admin. */
+  ownerUserId String?
+  approvedAt  DateTime?
+  blockedAt   DateTime?
+  blockReason String?
+  /** Opaque code inside the center's standing QR code (/attend/c/<code>); rotating it voids printed codes. */
+  checkInCode          String?   @unique
+  checkInCodeRotatedAt DateTime?
+  /** Location of the center and the radius (metres) a check-in must come from; null = no location check. */
+  lat         Float?
+  lng         Float?
+  geoRadiusM  Int?
+  /** Check-in opens this many minutes before a lesson starts and closes this many minutes after it; absences are marked when it closes. */
+  checkInBeforeMin Int  @default(15)
+  absenceAfterMin  Int  @default(20)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -348,6 +385,7 @@ model Center {
 
   @@unique([tenantId, slug])
   @@index([tenantId, deletedAt])
+  @@index([tenantId, status])
 }
 
 model Category {
@@ -528,6 +566,10 @@ model Package {
   description Json
   perks       Json
   maxCourses  Int
+  /** PERIOD: access for periodDays (null = one calendar month) per payment; LESSONS: lessonCount attended lessons per payment. */
+  accessKind  SubscriptionKind @default(PERIOD)
+  periodDays  Int?
+  lessonCount Int?
   enabled     Boolean  @default(true)
   highlight   Boolean  @default(false)
   sortOrder   Int      @default(0)
@@ -671,6 +713,17 @@ model Subscription {
   /** Monthly total = sum of the selected courses' prices, snapshotted at activation. */
   amountMinor    BigInt             @default(0)
   currency       String             @default("UZS")
+  /** Copied from the package at checkout; a custom selection is PERIOD. */
+  kind           SubscriptionKind   @default(PERIOD)
+  /** LESSONS kind: lessons bought for the current period and lessons already attended (PRESENT records, see AttendanceRecord.lessonCounted). */
+  lessonsTotal   Int?
+  lessonsUsed    Int                @default(0)
+  /** PAST_DUE keeps the seats until graceEndsAt; then EXPIRED releases them. */
+  graceEndsAt    DateTime?
+  blockedAt      DateTime?
+  blockReason    String?
+  /** When the "ending soon" reminder for the current period was sent (cleared on renewal). */
+  expiryReminderAt DateTime?
   startedAt      DateTime?
   currentPeriodStart DateTime?
   currentPeriodEnd   DateTime?
@@ -683,6 +736,7 @@ model Subscription {
 
   @@index([tenantId, studentId, status])
   @@index([tenantId, status, currentPeriodEnd])
+  @@index([tenantId, status, graceEndsAt])
 }
 
 model Enrollment {
@@ -733,6 +787,12 @@ model LessonSession {
   generatedBy              String?
   cancelledAt              DateTime?
   cancelledById            String?
+  /** Exceptions to the weekly pattern: a one-off lesson, or a lesson moved from another date (the original is cancelled and points here). */
+  isExtra                  Boolean       @default(false)
+  rescheduledFromId        String?
+  note                     String?
+  /** Set by the worker once absences were recorded for this lesson (null = not processed yet). */
+  absenceMarkedAt          DateTime?
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
 
@@ -742,6 +802,7 @@ model LessonSession {
   @@index([tenantId, date])
   @@index([tenantId, groupId, startsAt])
   @@index([tenantId, status, startsAt])
+  @@index([tenantId, absenceMarkedAt, startsAt])
 }
 
 model AttendanceRecord {
@@ -754,12 +815,15 @@ model AttendanceRecord {
   student        User             @relation("AttendanceStudent", fields: [studentId], references: [id])
   status         AttendanceStatus @default(PRESENT)
   method         AttendanceMethod @default(QR)
-  /** First successful check-in instant; never overwritten by repeated scans. */
+  /** First successful check-in instant (for AUTO absences: when the absence was recorded); never overwritten by repeated scans. */
   checkedInAt    DateTime
-  recordedById   String
-  recordedBy     User             @relation("AttendanceRecordedBy", fields: [recordedById], references: [id])
+  /** Null for records written by the worker (AUTO absences). */
+  recordedById   String?
+  recordedBy     User?            @relation("AttendanceRecordedBy", fields: [recordedById], references: [id])
   /** Required for MANUAL records and corrections. */
   reason         String?
+  /** True while this PRESENT record counts as one used lesson of a LESSONS subscription (given back on correction). */
+  lessonCounted  Boolean          @default(false)
   correctedAt    DateTime?
   correctedById  String?
   tokenVersion   Int?
@@ -989,6 +1053,24 @@ model SmsMessage {
 
   @@index([tenantId, createdAt])
   @@index([status, createdAt])
+}
+
+/// In-app notification. `type` selects the dictionary text (`notif.<type>`), `params` fills its placeholders in the reader's language.
+model Notification {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  params    Json
+  /** Stops the same event from producing two rows (e.g. one reminder per subscription period). */
+  dedupeKey String?   @unique
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId, userId, readAt, createdAt])
+  @@index([userId, createdAt])
 }
 
 model CenterInquiry {

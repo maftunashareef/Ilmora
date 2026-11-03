@@ -8,7 +8,7 @@ import { QUEUES } from '../../infra/queue/queues'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { SiteService } from '../site/site.service'
 import {
-  AvatarUploadUrlInput, CategoryInput, CenterInput, CourseDiscountBody, CourseInput, CoursePatch, GroupInput, GroupPatch, PackageInput, PackagePatch, PlaylistInput, PlaylistPatch, ResourceInput, ResourcePatch, StudentAdminInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput, VideoPatch,
+  AvatarUploadUrlInput, CategoryInput, CenterInput, CenterStatusInput, CourseDiscountBody, CourseInput, CoursePatch, DeleteUserInput, GroupInput, GroupPatch, PackageInput, PackagePatch, PlaylistInput, PlaylistPatch, ResourceInput, ResourcePatch, StudentAdminInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput, VideoPatch,
 } from './manage.schemas'
 import { ManageService } from './manage.service'
 
@@ -67,9 +67,12 @@ export class ManageController {
   /** Full site configuration for the Super Admin editor, including presets that are still disabled (internal). */
   @Roles('PLATFORM_ADMIN') @Get('admin/site') adminSite(@CurrentTenantId() t: string) { return this.site.get(t, true) }
   @Roles('PLATFORM_ADMIN') @Put('admin/site') updateSite(@CurrentTenantId() t: string, @Body(body(SiteDto)) dto: z.infer<typeof SiteDto>) { return this.site.update(t, dto.data, dto.version) }
+  @Roles('PLATFORM_ADMIN') @Get('admin/centers') listCenters(@CurrentTenantId() t: string) { return this.manage.listCenters(t) }
   @Roles('PLATFORM_ADMIN') @Post('admin/centers') createCenter(@CurrentTenantId() t: string, @Body(body(CenterInput)) dto: z.infer<typeof CenterInput>) { return this.manage.upsertCenter(t, dto) }
   @Roles('PLATFORM_ADMIN') @Put('admin/centers/:id') updateCenter(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(CenterInput)) dto: z.infer<typeof CenterInput>) { return this.manage.upsertCenter(t, dto, id) }
+  @Roles('PLATFORM_ADMIN') @Patch('admin/centers/:id/status') centerStatus(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(body(CenterStatusInput)) dto: CenterStatusInput) { return this.manage.setCenterStatus(t, a, id, dto) }
   @Roles('PLATFORM_ADMIN') @Delete('admin/centers/:id') deleteCenter(@CurrentTenantId() t: string, @Param('id') id: string) { return this.manage.deleteCenter(t, id) }
+  @Roles('PLATFORM_ADMIN') @Delete('admin/users/:id') deleteUser(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(body(DeleteUserInput)) dto: z.infer<typeof DeleteUserInput>) { return this.manage.deleteUser(t, a, id, dto.reason) }
   @Roles('PLATFORM_ADMIN') @Post('admin/categories') createCategory(@CurrentTenantId() t: string, @Body(body(CategoryInput)) dto: z.infer<typeof CategoryInput>) { return this.manage.upsertCategory(t, dto) }
   @Roles('PLATFORM_ADMIN') @Put('admin/categories/:id') updateCategory(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(CategoryInput)) dto: z.infer<typeof CategoryInput>) { return this.manage.upsertCategory(t, dto, id) }
   @Roles('PLATFORM_ADMIN') @Delete('admin/categories/:id') deleteCategory(@CurrentTenantId() t: string, @Param('id') id: string) { return this.manage.deleteCategory(t, id) }

@@ -6,6 +6,7 @@ import { AttendanceService } from '../src/modules/attendance/attendance.service'
 import { SessionsService } from '../src/modules/sessions/sessions.service'
 import { TenantsService } from '../src/modules/tenants/tenants.service'
 import { DB_AVAILABLE, TestContext } from './helpers'
+import { notificationsStub } from './stubs'
 
 /** Redis is not required for these tests: publishing is a no-op stub. */
 const events = { publish: async () => undefined } as unknown as AttendanceEvents
@@ -14,7 +15,7 @@ describe.skipIf(!DB_AVAILABLE)('attendance: sessions, tokens, check-in rules', (
   const ctx = new TestContext()
   const tenants = new TenantsService(ctx.prisma, ctx.env)
   const sessions = new SessionsService(ctx.prisma, tenants, ctx.env)
-  const attendance = new AttendanceService(ctx.prisma, ctx.audit, events, tenants, ctx.env)
+  const attendance = new AttendanceService(ctx.prisma, ctx.audit, events, tenants, ctx.subscriptions, notificationsStub, ctx.env)
   beforeAll(() => ctx.connect())
   afterAll(() => ctx.close())
 

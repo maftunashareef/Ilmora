@@ -35,6 +35,9 @@ export interface UploadMeta {
   previewUrl?: string
 }
 
+/** PENDING: registered by the center, waiting for approval (not public). ACTIVE: listed. BLOCKED: hidden, workspace locked. */
+export type CenterStatus = 'PENDING' | 'ACTIVE' | 'BLOCKED'
+
 export interface Center {
   id: string
   /** URL-friendly id (API); absent in local sample data */
@@ -43,6 +46,22 @@ export interface Center {
   district: L
   description: L
   tone: string // hex accent used in generated covers
+  /** Absent in sample data (every sample center is listed). */
+  status?: CenterStatus
+  address?: string | null
+  phone?: string | null
+}
+
+/** The center's own settings for offline attendance (center workspace and Super Admin only). */
+export interface CenterCheckInSettings {
+  /** Minutes before a lesson starts when check-in opens. */
+  checkInBeforeMin: number
+  /** Minutes after a lesson starts when check-in closes and absences are recorded. */
+  absenceAfterMin: number
+  lat: number | null
+  lng: number | null
+  /** Metres from the center a check-in may come from; null = no location check. */
+  geoRadiusM: number | null
 }
 
 export interface Category {
@@ -204,12 +223,27 @@ export interface PaymentConfig {
   methods: PaymentMethod[]
 }
 
+/** What a payment buys: a period (days or one calendar month) or a number of attended lessons. */
+export type SubscriptionKind = 'PERIOD' | 'LESSONS'
+/** Why a subscription is blocked: the period ended or the bought lessons are used up. */
+export type SubscriptionBlockReason = 'period_ended' | 'lessons_exhausted'
+
 export interface Subscription {
   packageId: string | null
   groupIds: string[]
+  /** 'active' includes a blocked (PAST_DUE) subscription whose seats are still held: see `blocked`. */
   status: 'none' | 'active'
   startedAt?: string
   renewsAt?: string
+  kind?: SubscriptionKind
+  /** LESSONS kind: lessons bought for the period and lessons attended so far. */
+  lessonsTotal?: number | null
+  lessonsUsed?: number
+  /** True while check-ins and course materials are refused (renewal reactivates instantly). */
+  blocked?: boolean
+  blockReason?: SubscriptionBlockReason | null
+  /** PAST_DUE only: when the seats are released unless a payment arrives. */
+  graceEndsAt?: string | null
   /** Amount billed per period in tiyin, exactly as charged at checkout (discounts included); absent in demo data. */
   amountMinor?: string
   /** Simulated payment record — the demo never collects or stores card numbers or CVVs */
@@ -248,14 +282,21 @@ export interface LessonSession {
   endsAt?: string
   openedAt?: string
   closedAt?: string
+  /** Exceptions to the weekly pattern: a one-off lesson, or a lesson moved here from another date. */
+  isExtra?: boolean
+  rescheduledFromId?: string | null
+  note?: string | null
 }
+
+/** qr: lesson QR shown by the teacher; center_qr: the center's standing QR; manual: teacher/center correction; auto: absence recorded by the worker. */
+export type AttendanceMethod = 'qr' | 'center_qr' | 'manual' | 'auto'
 
 export interface AttendanceRecord {
   id: string
   sessionId: string
   studentId: string
   checkedInAt: string
-  method: 'qr' | 'manual'
+  method: AttendanceMethod
   /** present (default) | absent | excused — set by teacher corrections */
   status?: string
 }
@@ -268,6 +309,21 @@ export interface Package {
   perks: L[]
   enabled: boolean
   highlight: boolean
+  /** Absent means PERIOD with one calendar month per payment (every package before access kinds existed). */
+  accessKind?: SubscriptionKind
+  /** PERIOD: days per payment; null = one calendar month. */
+  periodDays?: number | null
+  /** LESSONS: attended lessons per payment. */
+  lessonCount?: number | null
+}
+
+/** In-app notification; the text comes from the dictionary key `notif.<type>` filled with `params` in the reader's language. */
+export interface AppNotification {
+  id: string
+  type: string
+  params: Record<string, unknown>
+  readAt: string | null
+  createdAt: string
 }
 
 /**

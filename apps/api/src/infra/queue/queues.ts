@@ -12,9 +12,9 @@ export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]
 export const JOBS = {
   sms: { send: 'send' },
   notifications: { receipt: 'receipt', reminder: 'reminder' },
-  sessions: { generateDaily: 'generate-daily', generateGroup: 'generate-group' },
+  sessions: { generateDaily: 'generate-daily', generateGroup: 'generate-group', markAbsences: 'mark-absences' },
   outbox: { dispatch: 'dispatch' },
-  maintenance: { expirePayments: 'expire-payments' },
+  maintenance: { expirePayments: 'expire-payments', subscriptionLifecycle: 'subscription-lifecycle' },
 } as const
 
 export interface SmsJobData {

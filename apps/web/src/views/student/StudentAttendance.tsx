@@ -24,7 +24,8 @@ export function StudentAttendance() {
   const past = [...mine.filter((x) => isPastSession(x, now))].reverse()
   const upcoming = mine.filter((x) => !isPastSession(x, now))
   const records = attendance.filter((r) => r.studentId === student.id)
-  const presentIds = new Set(records.map((r) => r.sessionId))
+  // Only PRESENT records count; ABSENT (also the worker's automatic ones) and EXCUSED are shown as such.
+  const presentIds = new Set(records.filter((r) => (r.status ?? 'present') === 'present').map((r) => r.sessionId))
   const presentCount = past.filter((x) => presentIds.has(x.id)).length
   const courseOf = (courseId: string) => courses.find((c) => c.id === courseId)
   const groupOf = (groupId: string) => courses.flatMap((c) => c.groups).find((g) => g.id === groupId)
@@ -52,7 +53,10 @@ export function StudentAttendance() {
                       <li key={ses.id} className="card flex items-center gap-4 p-3">
                         <div className="w-20 shrink-0 text-center"><div className="text-[10px] uppercase tracking-wider text-charcoal/45">{formatDayMonth(ses.date, lang)}</div><div className="font-display text-xl text-charcoal">{ses.start}</div></div>
                         <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-charcoal">{tr(courseOf(ses.courseId)?.title)}</div><div className="text-xs text-charcoal/55">{groupOf(ses.groupId)?.name} · {ses.start}–{ses.end}</div></div>
-                        {r ? <Badge tone="sage"><Icon name="check" className="h-3 w-3" />{t('group.present')} · {formatTime(r.checkedInAt, lang)}</Badge> : <Badge tone="muted">{t('group.absent')}</Badge>}
+                        {r && (r.status ?? 'present') === 'present'
+                          ? <Badge tone="sage"><Icon name="check" className="h-3 w-3" />{t('group.present')} · {formatTime(r.checkedInAt, lang)}</Badge>
+                          : r?.status === 'excused' ? <Badge tone="champagne">{t('session.statusExcused')}</Badge>
+                          : <Badge tone={r ? 'danger' : 'muted'}>{t('group.absent')}</Badge>}
                       </li>
                     )
                   })}

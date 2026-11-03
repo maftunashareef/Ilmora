@@ -9,5 +9,6 @@ import { ManageService } from './manage.service'
   imports: [CatalogModule, SessionsModule, QueueModule.forFeature()],
   controllers: [ManageController],
   providers: [ManageService],
+  exports: [ManageService],
 })
 export class ManageModule {}

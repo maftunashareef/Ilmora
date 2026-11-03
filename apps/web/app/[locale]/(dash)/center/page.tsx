@@ -1,6 +1,6 @@
 'use client'
-import { CenterCourses } from '@/views/next/clients'
+import { CenterOverview } from '@/views/next/clients'
 
 export default function Page() {
-  return <CenterCourses />
+  return <CenterOverview />
 }

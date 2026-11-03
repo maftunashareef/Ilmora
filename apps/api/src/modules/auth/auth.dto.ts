@@ -1,4 +1,4 @@
-import { Equals, IsIn, IsOptional, IsString, Length, Matches } from 'class-validator'
+import { Equals, IsIn, IsOptional, IsString, Length, Matches, ValidateIf } from 'class-validator'
 
 export class RequestOtpDto {
   @IsString()
@@ -49,10 +49,16 @@ export class UpdateProfileDto {
   reminders?: boolean
 }
 
-/** Public registration: only the two self-service roles exist; anything else is rejected by validation. */
+/** Public registration: the three self-service roles (a center registers as its first administrator); anything else is rejected by validation. */
 export class RegisterDto {
-  @IsIn(['STUDENT', 'TEACHER'])
-  role!: 'STUDENT' | 'TEACHER'
+  @IsIn(['STUDENT', 'TEACHER', 'CENTER'])
+  role!: 'STUDENT' | 'TEACHER' | 'CENTER'
+
+  /** Educational Center only: the center's name (it starts as PENDING until the Super Admin approves it). */
+  @ValidateIf((o: RegisterDto) => o.role === 'CENTER')
+  @IsString()
+  @Length(2, 120)
+  centerName?: string
 
   @IsString()
   @Length(3, 32)

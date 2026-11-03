@@ -9,6 +9,7 @@ import { SubscriptionService } from '../src/modules/enrollment/subscription.serv
 import { LedgerService } from '../src/modules/payments/ledger.service'
 import { OutboxService } from '../src/modules/payments/outbox.service'
 import { PaymentsService } from '../src/modules/payments/payments.service'
+import { notificationsStub } from './stubs'
 
 /** Tests that need PostgreSQL run only when TEST_DATABASE_URL (or DATABASE_URL) is reachable; see test/setup.ts. */
 export const DB_AVAILABLE = !!process.env.TEST_DATABASE_URL || process.env.CI === 'true'
@@ -23,7 +24,7 @@ export class TestContext {
   readonly audit = new AuditService(this.prisma)
   readonly ledger = new LedgerService()
   readonly outbox = new OutboxService(this.prisma)
-  readonly subscriptions = new SubscriptionService(this.prisma, this.audit, this.env)
+  readonly subscriptions = new SubscriptionService(this.prisma, this.audit, notificationsStub, this.env)
   readonly payments = new PaymentsService(this.prisma, this.ledger, this.outbox, this.subscriptions, this.audit, this.env)
   readonly tokens = new TokenService(new JwtService({ secret: this.env.JWT_ACCESS_SECRET }), this.env, this.prisma)
 

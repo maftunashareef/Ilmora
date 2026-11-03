@@ -7,6 +7,7 @@ import { ENV, type Env } from '../../config/env'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { type GenerateDailyJobData, type GenerateGroupJobData, JOBS, QUEUES, type SmsJobData, jobId } from '../../infra/queue/queues'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
+import { AttendanceService } from '../attendance/attendance.service'
 import { SmsService } from '../sms/sms.service'
 import { TenantsService } from '../tenants/tenants.service'
 import { SessionsService } from './sessions.service'
@@ -16,6 +17,7 @@ import { SessionsService } from './sessions.service'
  *  - generate-daily: runs once per local date (job id + JobRun row make it exclusive across workers),
  *    materializes the horizon for every group and queues lesson reminders for tomorrow. It never creates attendance.
  *  - generate-group: targeted regeneration after a group's schedule changes.
+ *  - mark-absences: every few minutes, records absences for lessons whose check-in window closed.
  */
 @Processor(QUEUES.sessions, { concurrency: 1 })
 export class SessionsProcessor extends WorkerHost implements OnModuleInit {
@@ -27,16 +29,18 @@ export class SessionsProcessor extends WorkerHost implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly tenants: TenantsService,
     private readonly sms: SmsService,
+    private readonly attendance: AttendanceService,
     @InjectQueue(QUEUES.sessions) private readonly queue: Queue,
     @Inject(ENV) private readonly env: Env,
   ) {
     super()
   }
 
-  /** Repeatable schedule: 00:30 Asia/Tashkent every day (BullMQ job schedulers are upsert-safe across replicas). */
+  /** Repeatable schedules (BullMQ job schedulers are upsert-safe across replicas). */
   async onModuleInit() {
     await this.queue.upsertJobScheduler('sessions-daily', { pattern: '30 0 * * *', tz: this.env.SCHEDULE_TIMEZONE }, { name: JOBS.sessions.generateDaily, data: {} })
     await this.queue.upsertJobScheduler('sessions-reminders', { pattern: '0 18 * * *', tz: this.env.SCHEDULE_TIMEZONE }, { name: 'queue-reminders', data: {} })
+    await this.queue.upsertJobScheduler('sessions-absences', { every: this.env.ATTENDANCE_ABSENCE_SWEEP_MINUTES * 60_000 }, { name: JOBS.sessions.markAbsences, data: {} })
   }
 
   async process(job: Job): Promise<unknown> {
@@ -45,11 +49,24 @@ export class SessionsProcessor extends WorkerHost implements OnModuleInit {
         return this.runOnce('sessions', `daily-${(job.data as GenerateDailyJobData).forDate ?? this.sessions.todayLocal()}`, (date) => this.sessions.generateDaily(date, `job:${job.id}`))
       case JOBS.sessions.generateGroup:
         return this.generateGroup(job.data as GenerateGroupJobData, `job:${job.id}`)
+      case JOBS.sessions.markAbsences:
+        return this.markAbsences()
       case 'queue-reminders':
         return this.runOnce('reminders', `daily-${this.sessions.todayLocal()}`, () => this.queueReminders())
       default:
         throw new Error(`Unknown job ${job.name}`)
     }
+  }
+
+  /** Absence sweep for every tenant; each lesson is stamped once, so overlapping runs are harmless. */
+  private async markAbsences() {
+    const total = { sessions: 0, absent: 0 }
+    for (const tenantId of await this.tenants.listIds()) {
+      const r = await TenantContext.forTenant(tenantId, () => this.attendance.markAbsences(tenantId))
+      total.sessions += r.sessions
+      total.absent += r.absent
+    }
+    return total
   }
 
   /** Exclusive execution per (queue, key): the JobRun unique constraint decides who runs. */
