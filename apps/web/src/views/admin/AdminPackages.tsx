@@ -1,4 +1,4 @@
-import { Button, Card, cx, Field, Icon, Input, LField, Notice, PageTitle, Toggle } from '../../components/ui'
+import { Button, Card, cx, Field, Icon, Input, LField, Notice, PageTitle, Select, Toggle } from '../../components/ui'
 import { emptyL, useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
 import type { Package } from '../../types'
@@ -27,6 +27,17 @@ export function AdminPackages() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t('admin.packages.limit')}><Input type="number" min={1} max={6} value={p.maxCourses} onChange={(e) => up(p.id, { maxCourses: Math.max(1, Number(e.target.value)) })} /></Field>
                 <div className="flex items-end pb-2"><Toggle checked={p.highlight} onChange={(v) => up(p.id, { highlight: v })} label={t('admin.packages.highlight')} /></div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label={t('admin.packages.accessKind')}>
+                  <Select value={p.accessKind ?? 'PERIOD'} onChange={(e) => up(p.id, { accessKind: e.target.value as 'PERIOD' | 'LESSONS', ...(e.target.value === 'LESSONS' ? { lessonCount: p.lessonCount ?? 12 } : {}) })}>
+                    <option value="PERIOD">{t('student.sub.kind.PERIOD')}</option>
+                    <option value="LESSONS">{t('student.sub.kind.LESSONS')}</option>
+                  </Select>
+                </Field>
+                {(p.accessKind ?? 'PERIOD') === 'PERIOD'
+                  ? <Field label={t('admin.packages.periodDays')}><Input type="number" min={1} max={366} value={p.periodDays ?? ''} onChange={(e) => up(p.id, { periodDays: e.target.value === '' ? null : Math.max(1, Number(e.target.value)) })} /></Field>
+                  : <Field label={t('admin.packages.lessonCount')}><Input type="number" min={1} max={500} value={p.lessonCount ?? ''} onChange={(e) => up(p.id, { lessonCount: Math.max(1, Number(e.target.value) || 1) })} /></Field>}
               </div>
               <LField label={t('common.description')} value={p.description} onChange={(v) => up(p.id, { description: v })} />
               <div>

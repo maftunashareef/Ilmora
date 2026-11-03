@@ -74,7 +74,7 @@ export class SessionsService {
    * API shape of a session. `start`/`end` are wall-clock times in the group's timezone (the one the
    * timetable shows); pass the session with its `group` included to use a non-default timezone.
    */
-  static toDto(s: { id: string; groupId: string; courseId: string; date: Date; startsAt: Date; endsAt: Date; status: string; attendanceOpen: boolean; attendanceOpenedAt: Date | null; attendanceClosedAt: Date | null; tokenVersion: number; group?: { timezone?: string } | null }) {
+  static toDto(s: { id: string; groupId: string; courseId: string; date: Date; startsAt: Date; endsAt: Date; status: string; attendanceOpen: boolean; attendanceOpenedAt: Date | null; attendanceClosedAt: Date | null; tokenVersion: number; isExtra?: boolean; note?: string | null; rescheduledFromId?: string | null; group?: { timezone?: string } | null }) {
     const timezone = s.group?.timezone ?? DEFAULT_TIMEZONE
     return {
       id: s.id,
@@ -90,6 +90,9 @@ export class SessionsService {
       openedAt: s.attendanceOpenedAt?.toISOString(),
       closedAt: s.attendanceClosedAt?.toISOString(),
       tokenVersion: s.tokenVersion,
+      isExtra: s.isExtra ?? false,
+      note: s.note ?? undefined,
+      rescheduledFromId: s.rescheduledFromId ?? undefined,
     }
   }
 }

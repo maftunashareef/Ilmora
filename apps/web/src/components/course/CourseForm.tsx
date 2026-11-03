@@ -4,8 +4,8 @@ import { useT } from '../../i18n/useT'
 import { emptyL } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
 import { enrolledCount, validateCapacity } from '../../lib/enrollment'
-import type { Course, Group, L, Level, Student } from '../../types'
-import { finalizePublish, PublishFields, type PublishDraft } from '../PublishFields'
+import type { Course, Group, L, Level, Student, Teacher } from '../../types'
+import { finalizePublish, PublishFields, type PublishDraft, type PublishMode } from '../PublishFields'
 import { DiscountFields } from './DiscountFields'
 import { Badge, Button, cx, Field, Icon, Input, LField, Notice, Segmented, Select, Textarea } from '../ui'
 import { UploadField } from '../UploadField'
@@ -63,23 +63,28 @@ export function GroupsEditor({ groups, onChange, courseId, locked }: { groups: G
 
 const curriculumToText = (items: L[], lang: 'uz' | 'ru' | 'en') => items.map((i) => i[lang]).join('\n')
 
-export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { initial?: Course; teacherId?: string; mode: 'admin' | 'teacher'; onSave: (c: Course) => void; onCancel: () => void }) {
+/**
+ * Course editor. `mode` decides what may change: the Super Admin everything, a teacher what the teacher switches allow,
+ * a center (`mode: 'center'`) its own course with its own teachers (`teachers`, `center`), prices and discounts included.
+ */
+export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, center, onSave, onCancel }: { initial?: Course; teacherId?: string; mode: PublishMode; teachers?: Teacher[]; center?: { id: string; name: string }; onSave: (c: Course) => void; onCancel: () => void }) {
   const { t, tr } = useT()
   const centers = useStore((s) => s.centers)
   const categories = useStore((s) => s.categories)
-  const teachers = useStore((s) => s.teachers)
+  const catalogTeachers = useStore((s) => s.teachers)
   const subjects = useStore((s) => s.subjects)
   const perms = useStore((s) => s.site.permissions.teacher)
   const students = useStore((s) => s.students)
   const notify = useStore((s) => s.notify)
+  const teachers = teachersProp ?? catalogTeachers
   // The platform center/profile of online courses is not a real center or teacher: it is never offered for an offline course.
-  const offlineCenters = centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG)
+  const offlineCenters = center && !centers.some((c) => c.id === center.id) ? [{ id: center.id, name: center.name }, ...centers] : centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG)
   const offlineTeachers = teachers.filter((x) => x.slug !== ONLINE_PROVIDER_SLUG)
   const ownerId = initial?.teacherId ?? teacherId ?? offlineTeachers[0]?.id
   const owner = teachers.find((x) => x.id === ownerId)
 
   const [draft, setDraft] = useState<Course>(() => initial ?? {
-    id: uid('c'), title: emptyL(), summary: emptyL(), description: emptyL(), curriculum: [], categoryId: categories[0]?.id ?? '', centerId: owner?.centerId ?? offlineCenters[0]?.id ?? '', teacherId: ownerId ?? '',
+    id: uid('c'), title: emptyL(), summary: emptyL(), description: emptyL(), curriculum: [], categoryId: categories[0]?.id ?? '', centerId: center?.id ?? owner?.centerId ?? offlineCenters[0]?.id ?? '', teacherId: ownerId ?? '',
     level: 'beginner', durationMonths: 3, price: 500000, coverSeed: Math.floor(Math.random() * 60), groups: [],
     status: 'draft', visibility: 'public', audience: { studentIds: [], groupIds: [] }, featured: false, updatedAt: new Date().toISOString(),
   })
@@ -89,6 +94,7 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
   const [curr, setCurr] = useState<Record<'uz' | 'ru' | 'en', string>>({ uz: curriculumToText(draft.curriculum, 'uz'), ru: curriculumToText(draft.curriculum, 'ru'), en: curriculumToText(draft.curriculum, 'en') })
 
   const isTeacher = mode === 'teacher'
+  const isCenter = mode === 'center'
   const lockText = isTeacher && !perms.editCourses
   const lockPrice = isTeacher && !perms.editPrices
   const lockSchedule = isTeacher && !(perms.editSchedules && perms.manageGroups)
@@ -115,7 +121,7 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
     const r = finalizePublish(pub, mode, perms)
     if (!r.ok) { notify(t(r.error), 'warn'); return }
     let discount: Course['discount'] = draft.discount ?? null
-    if (mode === 'admin') {
+    if (mode === 'admin' || isCenter) {
       const parsed = discountFromDraft(disc)
       if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
       discount = parsed.discount
@@ -124,7 +130,7 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
     const uz = lines(curr.uz), ru = lines(curr.ru), en = lines(curr.en)
     const n = Math.max(uz.length, ru.length, en.length)
     const curriculum: L[] = Array.from({ length: n }, (_, i) => ({ uz: uz[i] ?? en[i] ?? ru[i] ?? '', ru: ru[i] ?? en[i] ?? uz[i] ?? '', en: en[i] ?? uz[i] ?? ru[i] ?? '' }))
-    onSave({ ...draft, ...(mode === 'admin' ? { discount } : {}), ...(online ? { price: 0, groups: [], discount: null } : {}), curriculum, ...r.patch })
+    onSave({ ...draft, ...(mode === 'admin' || isCenter ? { discount } : {}), ...(online ? { price: 0, groups: [], discount: null } : {}), curriculum, ...r.patch })
     if (r.note) notify(t(r.note), 'warn')
   }
 
@@ -153,7 +159,7 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
       </fieldset>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label={t('common.category')}><Select value={draft.categoryId} onChange={(e) => set('categoryId', e.target.value)}>{categories.map((c) => <option key={c.id} value={c.id}>{tr(c.name)}</option>)}</Select></Field>
-        {!online && <Field label={t('common.center')}><Select disabled={isTeacher} value={draft.centerId} onChange={(e) => set('centerId', e.target.value)}>{offlineCenters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>}
+        {!online && <Field label={t('common.center')}><Select disabled={isTeacher || isCenter} value={draft.centerId} onChange={(e) => set('centerId', e.target.value)}>{offlineCenters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>}
         {!online && <Field label={t('common.teacher')}><Select disabled={isTeacher} value={draft.teacherId} onChange={(e) => set('teacherId', e.target.value)}>{offlineTeachers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></Field>}
         {!online && <Field label={t('studio.subjects')}><Select value={draft.subjectId ?? ''} onChange={(e) => set('subjectId', e.target.value || undefined)}><option value="">{t('studio.noSubject')}</option>{subjects.filter((s) => s.teacherId === draft.teacherId).map((s) => <option key={s.id} value={s.id}>{tr(s.name)}</option>)}</Select></Field>}
         <Field label={t('common.level')}><Select value={draft.level} onChange={(e) => set('level', e.target.value as Level)}>{(['beginner', 'intermediate', 'advanced'] as Level[]).map((l) => <option key={l} value={l}>{t(`level.${l}`)}</option>)}</Select></Field>
@@ -171,7 +177,7 @@ export function CourseForm({ initial, teacherId, mode, onSave, onCancel }: { ini
           <div className="md:col-span-2"><LField label={t('admin.course.durationText')} value={draft.durationText ?? emptyL()} onChange={(v) => set('durationText', v)} /></div>
         </div>
       )}
-      {mode === 'admin' && !online && <DiscountFields value={disc} onChange={setDisc} price={draft.price} />}
+      {(mode === 'admin' || isCenter) && !online && <DiscountFields value={disc} onChange={setDisc} price={draft.price} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t('common.imageUrl')} hint={t('common.optional')}><Input placeholder="https://…" value={draft.imageUrl ?? ''} onChange={(e) => set('imageUrl', e.target.value || undefined)} /></Field>
         <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('common.image')} · {t('common.upload')}</div><UploadField kind="image" accept="image/*" value={draft.imageUpload} onChange={(v) => set('imageUpload', v)} /></div>

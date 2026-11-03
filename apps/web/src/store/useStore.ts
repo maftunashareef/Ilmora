@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { isOnlineCourse, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
@@ -37,7 +37,8 @@ export interface AuthUser {
 }
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad?: boolean; marketing?: boolean }
-export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER'; login: string; password: string; displayName?: string; phone?: string }
+/** CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center. */
+export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER' | 'CENTER'; login: string; password: string; displayName?: string; phone?: string; centerName?: string }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string
@@ -46,9 +47,20 @@ export interface PaymentSummary {
 export interface CheckInOutcome {
   ok: boolean
   alreadyRecorded?: boolean
-  reason?: 'invalid-link' | 'expired' | 'closed' | 'not-enrolled'
+  reason?: 'invalid-link' | 'expired' | 'closed' | 'not-enrolled' | 'blocked'
   record?: { checkedInAt: string }
   session?: { id: string; date: string; start?: string }
+}
+
+/** Result of a check-in with the center's standing QR code. */
+export interface CenterCheckInOutcome {
+  ok: boolean
+  alreadyRecorded?: boolean
+  reason?: CenterCheckInFailure
+  record?: { checkedInAt: string }
+  session?: { id: string; date: string; start?: string }
+  window?: { state: 'early' | 'open' | 'late'; opensAt: string; closesAt: string }
+  distanceM?: number | null
 }
 
 export interface InitialData {
@@ -125,6 +137,12 @@ interface Actions {
   toggleSavedTeacher: (studentId: string, teacherId: string) => void
   updateProfile: (studentId: string, patch: Partial<StudentProfile>) => Promise<void>
   checkIn: (input: { sessionId: string; token: string }) => Promise<CheckInOutcome>
+  centerCheckIn: (code: string, input: { sessionId: string; lat?: number; lng?: number; accuracyM?: number }) => Promise<CenterCheckInOutcome>
+
+  // Notifications (every signed-in account)
+  loadNotifications: () => Promise<void>
+  /** Marks the given notifications read, or all of them when no ids are passed. */
+  markNotificationsRead: (ids?: string[]) => Promise<void>
 
   // Lessons & attendance (teacher)
   generateGroupSessions: (groupId: string, days?: number) => Promise<number>
@@ -152,6 +170,9 @@ export interface StoreState extends DemoState, Actions {
   myPayments: PaymentSummary[]
   /** Latest QR token/url per session (teacher side, returned when attendance is opened). */
   sessionQr: Record<string, { token: string; url: string }>
+  /** The signed-in account's latest notifications and how many are unread. */
+  notifications: AppNotification[]
+  unreadCount: number
 }
 
 const upsertIn = <T extends { id: string }>(list: T[], item: T): T[] => (list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item])
@@ -233,7 +254,10 @@ const mapVideo = (v: Video & { source: { kind: string; url?: string; key?: strin
 
 type ApiOverview = {
   builder: { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
-  subscription: { id: string; packageId: string | null; status: string; groupIds: string[]; startedAt: string | null; currentPeriodStart: string | null; currentPeriodEnd: string | null; funding: { meyosGrant: boolean; courseIds: string[] }; amountMinor: string } | null
+  subscription: {
+    id: string; packageId: string | null; status: string; groupIds: string[]; startedAt: string | null; currentPeriodStart: string | null; currentPeriodEnd: string | null; funding: { meyosGrant: boolean; courseIds: string[] }; amountMinor: string
+    kind?: 'PERIOD' | 'LESSONS'; lessonsTotal?: number | null; lessonsUsed?: number; blocked?: boolean; blockReason?: 'period_ended' | 'lessons_exhausted' | null; graceEndsAt?: string | null
+  } | null
   payments: PaymentSummary[]
 }
 
@@ -404,6 +428,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       presetsLoaded: false,
       myPayments: [],
       sessionQr: {},
+      notifications: [],
+      unreadCount: 0,
 
       // ── UI ──
       setLang: (lang) => set({ lang }),
@@ -511,7 +537,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         await api('/auth/logout', { method: 'POST', credentials: true }).catch(() => undefined)
         session.set(null)
         applyAuth(null)
-        set({ sessions: [], attendance: [], myPayments: [] })
+        set({ sessions: [], attendance: [], myPayments: [], notifications: [], unreadCount: 0 })
       },
       ensureWorkspace: async () => {
         // The workspace (own courses, videos, people) exists for teachers and admins only.
@@ -561,7 +587,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         patchMe((st) => ({
           ...st,
           subscription: o.subscription
-            ? { packageId: o.subscription.packageId, groupIds: o.subscription.groupIds, status: o.subscription.status === 'ACTIVE' || o.subscription.status === 'PAST_DUE' ? 'active' : 'none', startedAt: o.subscription.startedAt ?? undefined, renewsAt: o.subscription.currentPeriodEnd ?? undefined, funding: o.subscription.funding, amountMinor: o.subscription.amountMinor }
+            ? {
+                packageId: o.subscription.packageId, groupIds: o.subscription.groupIds, status: o.subscription.status === 'ACTIVE' || o.subscription.status === 'PAST_DUE' ? 'active' : 'none', startedAt: o.subscription.startedAt ?? undefined, renewsAt: o.subscription.currentPeriodEnd ?? undefined, funding: o.subscription.funding, amountMinor: o.subscription.amountMinor,
+                kind: o.subscription.kind ?? 'PERIOD', lessonsTotal: o.subscription.lessonsTotal ?? null, lessonsUsed: o.subscription.lessonsUsed ?? 0, blocked: !!o.subscription.blocked, blockReason: o.subscription.blockReason ?? null, graceEndsAt: o.subscription.graceEndsAt ?? null,
+              }
             : { packageId: null, groupIds: [], status: 'none' },
           builder: builder ?? st.builder,
         }))
@@ -580,7 +609,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         }
       },
       loadGroupDetail: async (groupId) => {
-        const d = await guard(() => api<{ group: Course['groups'][number]; roster: { id: string; displayName: string; district: string | null; packageId: string | null; since: string }[]; sessions: (LessonSession & { records: { studentId: string; status: string; method: string; checkedInAt: string }[] })[] }>(`/manage/groups/${groupId}`))
+        // Center administrators read their groups through the center API; teachers and the Super Admin through the studio API.
+        const d = await guard(() => api<{ group: Course['groups'][number]; roster: { id: string; displayName: string; district: string | null; packageId: string | null; since: string }[]; sessions: (LessonSession & { records: { studentId: string; status: string; method: string; checkedInAt: string }[] })[] }>(`${get().role === 'center' ? '/center' : '/manage'}/groups/${groupId}`))
         publishSeatCounts([d.group])
         set((s) => {
           const roster: Student[] = d.roster.map((r) => {
@@ -592,7 +622,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           })
           const others = s.students.filter((x) => !roster.some((r) => r.id === x.id))
           const sessions = d.sessions.map(({ records: _r, ...ses }) => { void _r; return { ...ses, token: '' } as LessonSession })
-          const records: AttendanceRecord[] = d.sessions.flatMap((ses) => ses.records.map((r) => ({ id: `att-${ses.id}-${r.studentId}`, sessionId: ses.id, studentId: r.studentId, checkedInAt: r.checkedInAt, method: r.method as 'qr' | 'manual', status: r.status })))
+          const records: AttendanceRecord[] = d.sessions.flatMap((ses) => ses.records.map((r) => ({ id: `att-${ses.id}-${r.studentId}`, sessionId: ses.id, studentId: r.studentId, checkedInAt: r.checkedInAt, method: r.method as AttendanceRecord['method'], status: r.status })))
           return {
             students: [...others, ...roster],
             sessions: [...s.sessions.filter((x) => x.groupId !== groupId), ...sessions],
@@ -618,9 +648,9 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         packagePatches.set(id, { ...packagePatches.get(id), ...patch })
         clearTimeout(packageTimers.get(id))
         packageTimers.set(id, setTimeout(() => {
-          const { name, description, perks, maxCourses, enabled, highlight } = packagePatches.get(id) ?? {}
+          const { name, description, perks, maxCourses, enabled, highlight, accessKind, periodDays, lessonCount } = packagePatches.get(id) ?? {}
           packagePatches.delete(id)
-          api(`/admin/packages/${id}`, { method: 'PATCH', body: { name, description, perks, maxCourses, enabled, highlight } }).catch(toast)
+          api(`/admin/packages/${id}`, { method: 'PATCH', body: { name, description, perks, maxCourses, enabled, highlight, accessKind, periodDays, lessonCount } }).catch(toast)
         }, 700))
       },
       addPackage: async () => {
@@ -812,10 +842,22 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         set((s) => ({ auth: { ...s.auth, user }, students: s.students.map((x) => (x.id === studentId ? { ...x, profile: { ...x.profile, ...patch } } : x)) }))
       },
       checkIn: (input) => guard(() => api<CheckInOutcome>('/attendance/check-in', { method: 'POST', body: input })),
+      centerCheckIn: (code, input) => guard(() => api<CenterCheckInOutcome>(`/attendance/centers/${encodeURIComponent(code)}/check-in`, { method: 'POST', body: input })),
+
+      // ── notifications ──
+      loadNotifications: async () => {
+        const r = await api<{ items: AppNotification[]; unreadCount: number }>('/notifications?limit=30')
+        set({ notifications: r.items, unreadCount: r.unreadCount })
+      },
+      markNotificationsRead: async (ids) => {
+        const r = await guard(() => api<{ unreadCount: number }>('/notifications/read', { method: 'POST', body: ids ? { ids } : { all: true } }))
+        const at = new Date().toISOString()
+        set((s) => ({ unreadCount: r.unreadCount, notifications: s.notifications.map((n) => (!n.readAt && (!ids || ids.includes(n.id)) ? { ...n, readAt: at } : n)) }))
+      },
 
       // ── teacher attendance ──
       generateGroupSessions: async (groupId, days = 28) => {
-        const r = await guard(() => api<{ created: number }>(`/manage/groups/${groupId}/sessions/generate`, { method: 'POST', body: { days } }))
+        const r = await guard(() => api<{ created: number }>(`${get().role === 'center' ? '/center' : '/manage'}/groups/${groupId}/sessions/generate`, { method: 'POST', body: { days } }))
         await get().loadGroupDetail(groupId)
         return r.created
       },
@@ -848,7 +890,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       applyAttendanceEvent: (event) => {
         if (event.type === 'record' && event.record) {
           const r = event.record as { id: string; sessionId: string; studentId: string; status: string; method: string; checkedInAt: string }
-          set((s) => ({ attendance: upsertIn(s.attendance.filter((a) => !(a.sessionId === r.sessionId && a.studentId === r.studentId)), { id: `att-${r.sessionId}-${r.studentId}`, sessionId: r.sessionId, studentId: r.studentId, checkedInAt: r.checkedInAt, method: r.method as 'qr' | 'manual', status: r.status }) }))
+          set((s) => ({ attendance: upsertIn(s.attendance.filter((a) => !(a.sessionId === r.sessionId && a.studentId === r.studentId)), { id: `att-${r.sessionId}-${r.studentId}`, sessionId: r.sessionId, studentId: r.studentId, checkedInAt: r.checkedInAt, method: r.method as AttendanceRecord['method'], status: r.status }) }))
         }
         if (event.type === 'session' && event.session) {
           const ses = event.session as LessonSession

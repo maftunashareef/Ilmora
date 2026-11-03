@@ -7,6 +7,7 @@ import { ManageService } from '../src/modules/manage/manage.service'
 import type { SessionsService } from '../src/modules/sessions/sessions.service'
 import type { SiteService } from '../src/modules/site/site.service'
 import { DB_AVAILABLE, TestContext } from './helpers'
+import { notificationsStub } from './stubs'
 
 const L = (s: string) => ({ uz: s, ru: s, en: s })
 const admin: RequestActor = { id: 'u-admin', roles: ['PLATFORM_ADMIN'] }
@@ -22,6 +23,7 @@ describe.skipIf(!DB_AVAILABLE)('online courses against PostgreSQL', () => {
       ctx.audit,
       { generateForGroup: async () => 0, todayLocal: () => '2026-10-31' } as unknown as SessionsService,
       { get: async () => ({ permissions: { teacher: { editCourses: true, editPrices: true, publishDirectly: true, manageGroups: true, editSchedules: true } } }) } as unknown as SiteService,
+      notificationsStub,
       ctx.env,
     )
   const sample = ONLINE_COURSES[0]

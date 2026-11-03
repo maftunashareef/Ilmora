@@ -7,6 +7,7 @@ import type { PrismaService } from '../src/infra/prisma/prisma.service'
 import type { TokenService } from '../src/modules/auth/token.service'
 import type { AuditService } from '../src/modules/audit/audit.service'
 import type { RedisService } from '../src/infra/redis/redis.service'
+import { notificationsStub } from './stubs'
 
 describe('Auth extended unit tests (Google OAuth & Registration Security)', () => {
   const env = testEnv({
@@ -101,6 +102,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as TokenService,
         {} as unknown as AuditService,
         {} as unknown as RedisService,
+        notificationsStub,
         env,
       )
 
@@ -180,6 +182,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         mockTokens,
         mockAudit,
         {} as unknown as RedisService,
+        notificationsStub,
         env,
       )
 
@@ -202,6 +205,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as TokenService,
         {} as unknown as AuditService,
         {} as unknown as RedisService,
+        notificationsStub,
         env,
       )
 
@@ -228,6 +232,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as TokenService,
         {} as unknown as AuditService,
         {} as unknown as RedisService,
+        notificationsStub,
         env,
       )
 
@@ -251,6 +256,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as TokenService,
         {} as unknown as AuditService,
         {} as unknown as RedisService,
+        notificationsStub,
         env,
       )
 
@@ -277,6 +283,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as TokenService,
         {} as unknown as AuditService,
         {} as unknown as RedisService,
+        notificationsStub,
         env,
       )
 
@@ -306,6 +313,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as TokenService,
         {} as unknown as AuditService,
         {} as unknown as RedisService,
+        notificationsStub,
         env,
       )
 

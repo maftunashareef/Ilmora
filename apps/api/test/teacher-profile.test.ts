@@ -8,6 +8,7 @@ import { AvatarUploadUrlInput, TeacherPatch } from '../src/modules/manage/manage
 import { ManageService } from '../src/modules/manage/manage.service'
 import type { SessionsService } from '../src/modules/sessions/sessions.service'
 import type { SiteService } from '../src/modules/site/site.service'
+import { notificationsStub } from './stubs'
 
 describe('Teacher Profile Self-Service and Image Uploads', () => {
   const avatarPipe = new ZodValidationPipe(AvatarUploadUrlInput)
@@ -88,6 +89,7 @@ describe('Teacher Profile Self-Service and Image Uploads', () => {
       {} as unknown as AuditService,
       {} as unknown as SessionsService,
       (siteMock ?? {}) as unknown as SiteService,
+      notificationsStub,
       envMock as unknown as Env,
     )
   }

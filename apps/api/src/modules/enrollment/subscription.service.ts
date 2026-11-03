@@ -1,24 +1,34 @@
-import { Inject, Injectable } from '@nestjs/common'
-import { finalPriceMinor, MAX_CART_COURSES, overlaps } from '@ilmora/shared'
+import { Inject, Injectable, Logger } from '@nestjs/common'
+import { dueReminder, finalPriceMinor, MAX_CART_COURSES, nextLifecycleStep, overlaps, subscriptionAccess, type SubscriptionAccess } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addMonthsUtc } from '../../common/time'
 import { ENV, type Env } from '../../config/env'
 import type { PaymentProvider } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
+import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { discountWindow, toGroup } from '../catalog/catalog.service'
+import { NotificationsService } from '../notifications/notifications.service'
 
 export interface DraftInput { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
 
 type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; meyosGrant: boolean; status: string } }
+type Db = TransactionClient | PrismaService['client']
+type PackageAccess = { accessKind: 'PERIOD' | 'LESSONS'; periodDays: number | null; lessonCount: number | null } | null
+
+const DAY_MS = 86_400_000
 
 /**
- * Subscription lifecycle: draft (builder) → checkout (seat holds + pending payment) → active (on settlement).
- * Capacity is enforced inside a transaction that locks the group rows, so two students cannot take the last seat.
+ * Subscription lifecycle: draft (builder) → checkout (seat holds + pending payment) → active (on settlement) →
+ * blocked (PAST_DUE: period ended or lessons used up; seats held for a grace period) → expired (seats released).
+ * A settled payment reactivates instantly. Capacity is enforced inside a transaction that locks the group rows,
+ * so two students cannot take the last seat.
  */
 @Injectable()
 export class SubscriptionService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, @Inject(ENV) private readonly env: Env) {}
+  private readonly logger = new Logger(SubscriptionService.name)
+
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly notifications: NotificationsService, @Inject(ENV) private readonly env: Env) {}
 
   async overview(tenantId: string, studentId: string) {
     const [draft, active, payments] = await Promise.all([
@@ -30,6 +40,7 @@ export class SubscriptionService {
       }),
       this.prisma.client.payment.findMany({ where: { tenantId, studentId }, orderBy: { createdAt: 'desc' }, take: 12, include: { transactions: { orderBy: { createdAt: 'desc' }, take: 1 } } }),
     ])
+    const access = active ? subscriptionAccess(active) : null
     return {
       builder: draft ? { packageId: draft.packageId, groupIds: draft.draftGroupIds, meyosGrant: draft.meyosGrant } : { packageId: null, groupIds: [], meyosGrant: false },
       subscription: active
@@ -45,6 +56,15 @@ export class SubscriptionService {
             amountMinor: active.amountMinor.toString(),
             currency: active.currency,
             funding: { meyosGrant: active.meyosGrant, courseIds: active.grantCourseIds },
+            kind: active.kind,
+            lessonsTotal: active.lessonsTotal,
+            lessonsUsed: active.lessonsUsed,
+            blocked: access?.blocked ?? false,
+            blockReason: access?.reason ?? null,
+            blockedAt: active.blockedAt,
+            graceEndsAt: active.graceEndsAt,
+            remainingDays: access?.remainingDays ?? null,
+            remainingLessons: access?.remainingLessons ?? null,
           }
         : null,
       payments: payments.map((p) => ({
@@ -101,6 +121,17 @@ export class SubscriptionService {
     return groups
   }
 
+  /** End of a paid period: the package's periodDays, or one calendar month (custom selections and packages without periodDays). */
+  private periodEnd(start: Date, pkg: PackageAccess): Date {
+    return pkg?.periodDays ? new Date(start.getTime() + pkg.periodDays * DAY_MS) : addMonthsUtc(start, 1)
+  }
+
+  /** Access columns copied from the package when a subscription is created or renewed. */
+  private accessColumns(pkg: PackageAccess) {
+    const kind = pkg?.accessKind ?? 'PERIOD'
+    return { kind, lessonsTotal: kind === 'LESSONS' ? (pkg?.lessonCount ?? 0) : null, lessonsUsed: 0 }
+  }
+
   /**
    * Checkout: turns the draft into a PENDING_PAYMENT subscription with seat holds and creates the payment
    * the provider adapters will settle. Group rows are locked so capacity is re-checked atomically.
@@ -108,9 +139,9 @@ export class SubscriptionService {
   async checkout(tenantId: string, studentId: string, provider: PaymentProvider) {
     const draft = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: 'DRAFT' } })
     if (!draft) throw AppError.invalid('incomplete', 'Choose a package and your courses first')
+    const pkg = draft.packageId ? await this.prisma.client.package.findFirst({ where: { tenantId, id: draft.packageId } }) : null
     if (draft.packageId) {
       // Duo/Trio style package: the number of courses must match the package exactly.
-      const pkg = await this.prisma.client.package.findFirst({ where: { tenantId, id: draft.packageId } })
       if (!pkg || draft.draftGroupIds.length !== pkg.maxCourses) throw AppError.invalid('incomplete', `Select ${pkg?.maxCourses ?? ''} courses to continue`)
     } else if (draft.draftGroupIds.length === 0) {
       // Custom selection: any number of courses from one up to the cart limit, validated below.
@@ -120,6 +151,7 @@ export class SubscriptionService {
     if (open) throw AppError.conflict('subscription_exists', 'You already have an active or pending subscription')
 
     const now = new Date()
+    const periodEnd = this.periodEnd(now, pkg)
     const expiresAt = new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000)
     const result = await this.prisma.tx(async (tx) => {
       // Row locks serialize concurrent checkouts touching the same groups.
@@ -131,48 +163,171 @@ export class SubscriptionService {
       const amountMinor = groups.reduce((sum, g) => sum + finalPriceMinor(g.course.priceMinor, discountWindow(g.course), now), 0n)
       const sub = await tx.subscription.update({
         where: { id: draft.id },
-        data: { status: 'PENDING_PAYMENT', amountMinor, currency: 'UZS', currentPeriodStart: now, currentPeriodEnd: addMonthsUtc(now, 1) },
+        data: { status: 'PENDING_PAYMENT', amountMinor, currency: 'UZS', currentPeriodStart: now, currentPeriodEnd: periodEnd, ...this.accessColumns(pkg) },
       })
       await tx.enrollment.createMany({
         data: groups.map((g) => ({ tenantId, subscriptionId: sub.id, studentId, groupId: g.id, courseId: g.courseId, status: 'PENDING' as const })),
       })
       const payment = await tx.payment.create({
-        data: { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd: addMonthsUtc(now, 1), amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId },
+        data: { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd, amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId },
       })
-      await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider, amountMinor: amountMinor.toString(), listAmountMinor: listMinor.toString(), discountMinor: (listMinor - amountMinor).toString(), groupIds: draft.draftGroupIds, packageId: draft.packageId } })
+      await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider, amountMinor: amountMinor.toString(), listAmountMinor: listMinor.toString(), discountMinor: (listMinor - amountMinor).toString(), groupIds: draft.draftGroupIds, packageId: draft.packageId, kind: sub.kind, lessonsTotal: sub.lessonsTotal } })
       return { subscription: sub, payment }
     })
     return result
   }
 
-  /** Renewal payment for the next period of an active subscription (no new seat holds). */
+  /** Renewal payment for the next period of an active or blocked subscription (no new seat holds). */
   async renew(tenantId: string, studentId: string, provider: PaymentProvider) {
-    const sub = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE'] } } })
+    const sub = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE'] } }, include: { package: true } })
     if (!sub) throw AppError.notFound('Active subscription')
     const pending = await this.prisma.client.payment.findFirst({ where: { tenantId, subscriptionId: sub.id, state: 'PENDING' } })
     if (pending) return { subscription: sub, payment: pending }
-    const periodStart = sub.currentPeriodEnd ?? new Date()
+    const now = new Date()
+    // An early renewal continues after the current period; a renewal of a blocked subscription starts a fresh period now.
+    const periodStart = sub.status === 'ACTIVE' && sub.kind === 'PERIOD' && sub.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now
     const payment = await this.prisma.client.payment.create({
-      data: { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: addMonthsUtc(periodStart, 1), amountMinor: sub.amountMinor, currency: sub.currency, provider, expiresAt: new Date(Date.now() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId },
+      data: { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor: sub.amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId },
     })
     return { subscription: sub, payment }
   }
 
-  /** Called inside the settlement transaction by the payments module. Idempotent per payment. */
-  async applySettlement(tx: TransactionClient, payment: { id: string; tenantId: string; subscriptionId: string; periodStart: Date; periodEnd: Date }) {
-    const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId } })
+  /**
+   * Called inside the settlement transaction by the payments module. Idempotent per payment: activates (or reactivates)
+   * the subscription, confirms pending seats, resets a lesson balance, and notifies the student and the staff of newly
+   * joined groups.
+   */
+  async applySettlement(tx: TransactionClient, payment: { id: string; tenantId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor?: bigint }) {
+    const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId }, include: { package: true, student: { select: { displayName: true } } } })
     if (!sub) throw new Error(`Subscription ${payment.subscriptionId} missing for payment ${payment.id}`)
     const now = new Date()
+    const joining = await tx.enrollment.findMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, include: { group: { select: { id: true, name: true, course: { select: { id: true, title: true, teacherId: true, centerId: true } } } } } })
     await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, data: { status: 'ACTIVE', enrolledAt: now } })
+    const access = this.accessColumns(sub.package)
+    const periodEnd = sub.kind === 'LESSONS' || payment.periodEnd > (sub.currentPeriodEnd ?? new Date(0)) ? payment.periodEnd : sub.currentPeriodEnd
     await tx.subscription.update({
       where: { id: sub.id },
       data: {
         status: 'ACTIVE',
         startedAt: sub.startedAt ?? now,
         currentPeriodStart: payment.periodStart,
-        currentPeriodEnd: payment.periodEnd > (sub.currentPeriodEnd ?? new Date(0)) ? payment.periodEnd : sub.currentPeriodEnd,
+        currentPeriodEnd: periodEnd,
+        blockedAt: null,
+        blockReason: null,
+        graceEndsAt: null,
+        expiryReminderAt: null,
+        // A payment buys a fresh lesson balance (LESSONS) or a period (PERIOD); the kind follows the package.
+        kind: access.kind,
+        lessonsTotal: access.lessonsTotal,
+        lessonsUsed: 0,
       },
     })
+    await this.notifications.notify({ tenantId: payment.tenantId, userIds: [sub.studentId], type: 'payment.confirmed', params: { amountMinor: (payment.amountMinor ?? sub.amountMinor).toString(), periodEnd: periodEnd?.toISOString() ?? null, kind: access.kind, lessons: access.lessonsTotal }, dedupeKey: `payment-confirmed:${payment.id}` }, tx)
+    for (const e of joining) {
+      const staff = await this.notifications.courseStaffIds(payment.tenantId, e.group.course, tx)
+      await this.notifications.notify({ tenantId: payment.tenantId, userIds: staff, type: 'enrollment.new', params: { studentName: sub.student.displayName, studentId: sub.studentId, courseTitle: e.group.course.title, courseId: e.group.course.id, groupName: e.group.name, groupId: e.group.id }, dedupeKey: `enrollment-new:${e.id}` }, tx)
+    }
+  }
+
+  /** Access of the student's current subscription (used by check-ins and private materials). */
+  async accessFor(studentId: string, db: Db = this.prisma.client): Promise<SubscriptionAccess & { subscriptionId: string | null }> {
+    const sub = await db.subscription.findFirst({ where: { studentId, status: { in: ['ACTIVE', 'PAST_DUE'] } }, orderBy: { updatedAt: 'desc' } })
+    if (!sub) return { active: false, blocked: false, reason: null, remainingDays: null, remainingLessons: null, subscriptionId: null }
+    return { ...subscriptionAccess(sub), subscriptionId: sub.id }
+  }
+
+  /**
+   * A PRESENT record consumes one lesson of a LESSONS subscription; when the balance is used up the subscription is blocked
+   * on the spot. Counted at most once per record (AttendanceRecord.lessonCounted). PERIOD subscriptions are untouched.
+   */
+  async consumeLesson(db: Db, tenantId: string, studentId: string, recordId: string): Promise<{ counted: boolean; blocked: boolean }> {
+    const record = await db.attendanceRecord.findFirst({ where: { id: recordId }, select: { lessonCounted: true, status: true } })
+    if (!record || record.lessonCounted || record.status !== 'PRESENT') return { counted: false, blocked: false }
+    const sub = await db.subscription.findFirst({ where: { tenantId, studentId, status: 'ACTIVE', kind: 'LESSONS' } })
+    if (!sub) return { counted: false, blocked: false }
+    const updated = await db.subscription.update({ where: { id: sub.id }, data: { lessonsUsed: { increment: 1 } } })
+    await db.attendanceRecord.update({ where: { id: recordId }, data: { lessonCounted: true } })
+    if (updated.lessonsTotal != null && updated.lessonsUsed >= updated.lessonsTotal) {
+      await this.block(db, { id: sub.id, tenantId, studentId }, 'lessons_exhausted', new Date())
+      return { counted: true, blocked: true }
+    }
+    return { counted: true, blocked: false }
+  }
+
+  /** A correction away from PRESENT gives the lesson back; a subscription blocked only by the balance is unblocked. */
+  async releaseLesson(db: Db, tenantId: string, studentId: string, recordId: string): Promise<void> {
+    const record = await db.attendanceRecord.findFirst({ where: { id: recordId }, select: { lessonCounted: true } })
+    if (!record?.lessonCounted) return
+    await db.attendanceRecord.update({ where: { id: recordId }, data: { lessonCounted: false } })
+    const sub = await db.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE'] }, kind: 'LESSONS' } })
+    if (!sub) return
+    const used = Math.max(0, sub.lessonsUsed - 1)
+    const unblock = sub.status === 'PAST_DUE' && sub.blockReason === 'lessons_exhausted' && sub.lessonsTotal != null && used < sub.lessonsTotal
+    await db.subscription.update({ where: { id: sub.id }, data: { lessonsUsed: used, ...(unblock ? { status: 'ACTIVE', blockedAt: null, blockReason: null, graceEndsAt: null } : {}) } })
+  }
+
+  private async block(db: Db, sub: { id: string; tenantId: string; studentId: string }, reason: 'period_ended' | 'lessons_exhausted', now: Date) {
+    await db.subscription.update({ where: { id: sub.id }, data: { status: 'PAST_DUE', blockedAt: now, blockReason: reason, graceEndsAt: new Date(now.getTime() + this.env.SUBSCRIPTION_GRACE_DAYS * DAY_MS) } })
+    await this.audit.record({ tx: db as TransactionClient, tenantId: sub.tenantId, action: 'subscription.blocked', entityType: 'Subscription', entityId: sub.id, after: { reason } })
+    await this.notifications.notify({ tenantId: sub.tenantId, userIds: [sub.studentId], type: 'subscription.expired', params: { reason, graceDays: this.env.SUBSCRIPTION_GRACE_DAYS }, dedupeKey: `subscription-blocked:${sub.id}:${now.toISOString().slice(0, 10)}` }, db)
+  }
+
+  /**
+   * Lifecycle sweep for one tenant: blocks ended periods and used-up balances, expires blocked subscriptions after the
+   * grace period (seats released), and sends the "ending soon" reminders. Safe to run often; every step is idempotent.
+   */
+  async runLifecycle(tenantId: string, now = new Date()): Promise<{ blocked: number; expired: number; reminded: number }> {
+    const remindMs = this.env.SUBSCRIPTION_REMIND_DAYS * DAY_MS
+    const [active, blocked] = await Promise.all([
+      this.prisma.client.subscription.findMany({ where: { tenantId, status: 'ACTIVE', OR: [{ currentPeriodEnd: { lte: new Date(now.getTime() + remindMs) } }, { kind: 'LESSONS' }] } }),
+      this.prisma.client.subscription.findMany({ where: { tenantId, status: 'PAST_DUE', graceEndsAt: { lte: now } } }),
+    ])
+    const out = { blocked: 0, expired: 0, reminded: 0 }
+    for (const sub of active) {
+      const step = nextLifecycleStep(sub, now)
+      if (step === 'block_period' || step === 'block_lessons') {
+        await this.block(this.prisma.client, sub, step === 'block_period' ? 'period_ended' : 'lessons_exhausted', now)
+        out.blocked++
+        continue
+      }
+      const reminder = dueReminder(sub, now, this.env.SUBSCRIPTION_REMIND_DAYS)
+      if (!reminder) continue
+      const access = subscriptionAccess(sub, now)
+      const marker = sub.currentPeriodEnd?.toISOString().slice(0, 10) ?? now.toISOString().slice(0, 10)
+      await this.notifications.notify({
+        tenantId, userIds: [sub.studentId],
+        type: reminder === 'expiring' ? 'subscription.expiring' : 'subscription.lessonsLow',
+        params: reminder === 'expiring' ? { days: access.remainingDays ?? 0, periodEnd: sub.currentPeriodEnd?.toISOString() ?? null } : { lessons: access.remainingLessons ?? 0 },
+        dedupeKey: `subscription-${reminder}:${sub.id}:${marker}`,
+      })
+      await this.prisma.client.subscription.update({ where: { id: sub.id }, data: { expiryReminderAt: now } })
+      out.reminded++
+    }
+    for (const sub of blocked) {
+      if (nextLifecycleStep(sub, now) !== 'expire') continue
+      await this.prisma.tx(async (tx) => {
+        const locked = await tx.subscription.updateMany({ where: { id: sub.id, status: 'PAST_DUE' }, data: { status: 'EXPIRED' } })
+        if (locked.count !== 1) return
+        await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: now } })
+        await tx.payment.updateMany({ where: { subscriptionId: sub.id, state: 'PENDING' }, data: { state: 'CANCELLED', cancelledAt: now } })
+        await this.audit.record({ tx, tenantId, action: 'subscription.expired', entityType: 'Subscription', entityId: sub.id, after: { reason: sub.blockReason } })
+        await this.notifications.notify({ tenantId, userIds: [sub.studentId], type: 'subscription.ended', params: { reason: sub.blockReason }, dedupeKey: `subscription-ended:${sub.id}` }, tx)
+        out.expired++
+      })
+    }
+    if (out.blocked || out.expired || out.reminded) this.logger.log(`Subscription lifecycle for ${tenantId}: ${JSON.stringify(out)}`)
+    return out
+  }
+
+  /** Lifecycle sweep for every tenant (maintenance job). */
+  async runLifecycleAll(now = new Date()): Promise<{ blocked: number; expired: number; reminded: number }> {
+    const total = { blocked: 0, expired: 0, reminded: 0 }
+    const tenants = await TenantContext.system(() => this.prisma.client.tenant.findMany({ select: { id: true } }))
+    for (const t of tenants) {
+      const r = await TenantContext.forTenant(t.id, () => this.runLifecycle(t.id, now))
+      total.blocked += r.blocked; total.expired += r.expired; total.reminded += r.reminded
+    }
+    return total
   }
 
   /** Expire pending payments past their deadline and release the seat holds. */

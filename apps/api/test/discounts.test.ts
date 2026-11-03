@@ -12,6 +12,7 @@ import { ManageService } from '../src/modules/manage/manage.service'
 import type { SessionsService } from '../src/modules/sessions/sessions.service'
 import type { SiteService } from '../src/modules/site/site.service'
 import { DB_AVAILABLE, TestContext } from './helpers'
+import { notificationsStub } from './stubs'
 
 const WINDOW = { percent: 20, startsAt: '2026-11-01T00:00:00.000Z', endsAt: '2026-11-10T00:00:00.000Z' }
 
@@ -49,6 +50,7 @@ describe('who may set a discount (stubbed storage)', () => {
       { record: async () => undefined } as unknown as AuditService,
       {} as unknown as SessionsService,
       { get: async () => ({ permissions: { teacher: { editCourses: true, editPrices: false, publishDirectly: true } } }) } as unknown as SiteService,
+      notificationsStub,
       {} as unknown as Env,
     )
     const run = (actor: RequestActor, discount: typeof WINDOW | null) => service.updateCourse('t', actor, 'c1', { discount })
@@ -113,7 +115,7 @@ describe('center admin endpoints (stubbed storage)', () => {
       },
     }
     const site = { get: async () => ({ permissions: { teacher: { editCourses: true, editPrices: false, publishDirectly: true } } }) }
-    const service = new ManageService(prisma as unknown as PrismaService, { record } as unknown as AuditService, {} as unknown as SessionsService, site as unknown as SiteService, {} as unknown as Env)
+    const service = new ManageService(prisma as unknown as PrismaService, { record } as unknown as AuditService, {} as unknown as SessionsService, site as unknown as SiteService, notificationsStub, {} as unknown as Env)
     return { service, update, findMany, record }
   }
 
@@ -203,7 +205,7 @@ describe('admin user search (stubbed storage)', () => {
   function make() {
     const findMany = vi.fn(async (_args: unknown) => [] as never[])
     const prisma = { client: { user: { findMany, count: async () => 0 } } }
-    const service = new ManageService(prisma as unknown as PrismaService, {} as unknown as AuditService, {} as unknown as SessionsService, {} as unknown as SiteService, {} as unknown as Env)
+    const service = new ManageService(prisma as unknown as PrismaService, {} as unknown as AuditService, {} as unknown as SessionsService, {} as unknown as SiteService, notificationsStub, {} as unknown as Env)
     return { service, where: () => (findMany.mock.calls[0][0] as { where: { OR?: Record<string, unknown>[]; roles?: unknown } }).where }
   }
 
@@ -275,7 +277,7 @@ describe.skipIf(!DB_AVAILABLE)('checkout charges the list price minus the discou
     const t = await ctx.makeTenant('disc')
     const other = await TenantContext.system(() => ctx.prisma.client.center.create({ data: { tenantId: t.tenantId, slug: `other-${t.tenantId}`, name: 'Other', district: {}, description: {} } }))
     await TenantContext.system(() => ctx.prisma.client.course.update({ where: { id: t.course2.id }, data: { centerId: other.id } }))
-    const service = new ManageService(ctx.prisma, ctx.audit, {} as unknown as SessionsService, {} as unknown as SiteService, ctx.env)
+    const service = new ManageService(ctx.prisma, ctx.audit, {} as unknown as SessionsService, {} as unknown as SiteService, notificationsStub, ctx.env)
     const mine = await TenantContext.forTenant(t.tenantId, () => service.listCenterCourses(t.tenantId, { id: 'u', roles: ['CENTER_ADMIN'], centerId: t.center.id }))
     expect(mine.courses.map((c) => c.id)).toEqual([t.course.id])
   })

@@ -76,6 +76,12 @@ export const EnvSchema = z.object({
   SESSION_HORIZON_DAYS: z.coerce.number().int().positive().default(28),
   /** Attendance tokens expire this long after the session's scheduled end (minutes). */
   ATTENDANCE_TOKEN_GRACE_MINUTES: z.coerce.number().int().nonnegative().default(30),
+  /** How often the worker records absences for lessons whose check-in window closed. */
+  ATTENDANCE_ABSENCE_SWEEP_MINUTES: z.coerce.number().int().positive().default(5),
+  /** Days a blocked (PAST_DUE) subscription keeps its seats before it expires and releases them. */
+  SUBSCRIPTION_GRACE_DAYS: z.coerce.number().int().nonnegative().default(7),
+  /** Days before the period end when the "ending soon" reminder goes out. */
+  SUBSCRIPTION_REMIND_DAYS: z.coerce.number().int().positive().default(3),
 
   PAYME_MERCHANT_ID: z.string().optional(),
   PAYME_KEY: z.string().optional(),

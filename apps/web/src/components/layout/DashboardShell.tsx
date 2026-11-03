@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useLocation } from '@/lib/router'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
 import type { Role } from '../../types'
+import { NotificationBell } from '../NotificationBell'
 import { cx, Icon } from '../ui'
 import { LangSwitcher, RoleSwitcher } from './Switchers'
 
@@ -58,6 +59,7 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
           <div className="hidden text-sm text-charcoal/55 lg:block">{t('role.viewingAs')} <span className="font-medium text-charcoal">{t(`role.${role}`)}</span></div>
           <div className="flex items-center gap-2">
             <div className="hidden sm:block"><LangSwitcher compact /></div>
+            <NotificationBell />
             <RoleSwitcher />
           </div>
         </header>

@@ -105,6 +105,39 @@ export const ResourcePatch = ResourceInput.partial()
 
 export const SubjectInput = z.object({ teacherId: id.optional(), name: L, description: L }).strict()
 export const CenterInput = z.object({ name: z.string().min(1).max(120), district: L, description: L, tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), address: z.string().max(300).nullable().optional() }).strict()
+/** Super Admin: approval state of a center. */
+export const CenterStatusInput = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'BLOCKED', 'REJECTED']), reason: z.string().trim().max(300).optional() }).strict()
+export type CenterStatusInput = z.infer<typeof CenterStatusInput>
+export const DeleteUserInput = z.object({ reason: z.string().trim().min(3).max(300) }).strict()
+/** Center workspace: the center's own profile and check-in settings (all optional; only sent fields change). */
+export const CenterProfileInput = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  district: L.optional(),
+  description: L.optional(),
+  tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  address: z.string().trim().max(300).nullable().optional(),
+  phone: z.string().trim().min(7).max(20).nullable().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
+  /** Metres; null switches the location check off. */
+  geoRadiusM: z.number().int().min(20).max(5000).nullable().optional(),
+  checkInBeforeMin: z.number().int().min(0).max(180).optional(),
+  absenceAfterMin: z.number().int().min(0).max(240).optional(),
+}).strict()
+export type CenterProfileInput = z.infer<typeof CenterProfileInput>
+/** Center workspace: a teacher of the center; `login` links the registered account of that teacher. */
+export const CenterTeacherInput = z.object({
+  name: z.string().trim().min(1).max(120),
+  title: L.optional(),
+  bio: L.optional(),
+  tagline: L.optional(),
+  expertise: z.array(z.string().max(60)).max(20).optional(),
+  avatarUrl: z.string().max(500).nullable().optional(),
+  login: z.string().trim().min(3).max(32).optional(),
+}).strict()
+export const CenterTeacherPatch = CenterTeacherInput.omit({ login: true }).partial()
+export type CenterTeacherInput = z.infer<typeof CenterTeacherInput>
+export type CenterTeacherPatch = z.infer<typeof CenterTeacherPatch>
 export const CategoryInput = z.object({ name: L, glyph: z.string().max(8).optional(), sortOrder: z.number().int().optional() }).strict()
 export const SafeMediaUrl = z.string().max(500).refine((val) => {
   if (!val) return true
@@ -133,8 +166,19 @@ export const AvatarUploadUrlInput = z.object({
   contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
   fileSize: z.number().int().min(1).max(2 * 1024 * 1024), // max 2MB
 }).strict()
-export const PackageInput = z.object({ code: z.string().regex(/^[a-z0-9-]{2,30}$/), name: L, description: L, perks: z.array(L).max(12), maxCourses: z.number().int().min(1).max(6), enabled: z.boolean(), highlight: z.boolean(), sortOrder: z.number().int().optional() }).strict()
-export const PackagePatch = PackageInput.partial()
+export const PackageInput = z.object({
+  code: z.string().regex(/^[a-z0-9-]{2,30}$/), name: L, description: L, perks: z.array(L).max(12), maxCourses: z.number().int().min(1).max(6), enabled: z.boolean(), highlight: z.boolean(), sortOrder: z.number().int().optional(),
+  /** PERIOD: periodDays per payment (null = one calendar month); LESSONS: lessonCount attended lessons per payment. */
+  accessKind: z.enum(['PERIOD', 'LESSONS']).optional(),
+  periodDays: z.number().int().min(1).max(366).nullable().optional(),
+  lessonCount: z.number().int().min(1).max(500).nullable().optional(),
+}).strict().refine((p) => p.accessKind !== 'LESSONS' || (p.lessonCount ?? 0) > 0, { message: 'A lesson-based package needs a lesson count', path: ['lessonCount'] })
+export const PackagePatch = z.object({
+  code: z.string().regex(/^[a-z0-9-]{2,30}$/).optional(), name: L.optional(), description: L.optional(), perks: z.array(L).max(12).optional(), maxCourses: z.number().int().min(1).max(6).optional(), enabled: z.boolean().optional(), highlight: z.boolean().optional(), sortOrder: z.number().int().optional(),
+  accessKind: z.enum(['PERIOD', 'LESSONS']).optional(),
+  periodDays: z.number().int().min(1).max(366).nullable().optional(),
+  lessonCount: z.number().int().min(1).max(500).nullable().optional(),
+}).strict()
 export const UserRolesInput = z.object({
   /** PLATFORM_ADMIN (Super Admin) is deliberately absent: it exists only for the configured owner account. */
   roles: z.array(z.enum(['FINANCE_ADMIN', 'CENTER_ADMIN', 'TEACHER', 'STUDENT'])).min(1),

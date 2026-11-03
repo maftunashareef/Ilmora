@@ -238,7 +238,7 @@ export function CourseDetailPage() {
               <div className="flex items-start gap-3">
                 <span className="mt-1 h-9 w-1 rounded-full" style={{ background: center.tone }} />
                 <div>
-                  <div className="font-display text-xl text-charcoal">{center.name}</div>
+                  <Link to={`/centers/${center.slug ?? center.id}`} className="font-display text-xl text-charcoal hover:text-forest">{center.name}</Link>
                   <div className="text-xs text-charcoal/55">{tr(center.district)}</div>
                 </div>
               </div>

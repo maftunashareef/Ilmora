@@ -69,7 +69,7 @@ export function TeacherChannelPage() {
             <Avatar name={teacher.name} seed={teacher.avatarSeed} size={96} url={getTeacherAvatarUrl(teacher)} alt={teacher.name} className="-mt-12 ring-4 ring-ivory" />
             <div className="pb-1">
               <h1 className="font-display text-4xl text-charcoal md:text-5xl">{teacher.name}</h1>
-              <div className="mt-1 text-sm text-charcoal/65">{tr(teacher.title)}{center && <> · <span className="text-charcoal/50">{center.name}</span></>}</div>
+              <div className="mt-1 text-sm text-charcoal/65">{tr(teacher.title)}{center && <> · <Link to={`/centers/${center.slug ?? center.id}`} className="text-charcoal/50 hover:text-forest">{center.name}</Link></>}</div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 pb-1">
@@ -142,7 +142,7 @@ export function TeacherChannelPage() {
               </Card>
               <Card>
                 <Eyebrow className="mb-3">{t('teachers.affiliation')}</Eyebrow>
-                {center && (<><div className="font-display text-2xl text-charcoal">{center.name}</div><div className="text-sm text-charcoal/55">{tr(center.district)}</div><p className="mt-3 text-sm text-charcoal/65">{tr(center.description)}</p></>)}              </Card>
+                {center && (<><Link to={`/centers/${center.slug ?? center.id}`} className="font-display text-2xl text-charcoal hover:text-forest">{center.name}</Link><div className="text-sm text-charcoal/55">{tr(center.district)}</div><p className="mt-3 text-sm text-charcoal/65">{tr(center.description)}</p></>)}              </Card>
             </div>
           )}
         </div>
