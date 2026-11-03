@@ -52,8 +52,8 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
-  // Vercel builds its own output; the standalone bundle is for the Docker image.
-  output: process.env.VERCEL ? undefined : 'standalone',
+  // Standalone bundle for the Docker image (apps/web/Dockerfile).
+  output: 'standalone',
   outputFileTracingRoot: path.join(import.meta.dirname, '../../'),
   reactStrictMode: true,
   poweredByHeader: false,
