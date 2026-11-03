@@ -71,18 +71,17 @@ API test suites (`apps/api/test`) cover: Payme create/perform/cancel with concur
 
 See `docs/deployment.md` (single Tashkent VPS with Docker Compose, nginx, Let's Encrypt, backups, rollback, availability statement) and `infra/.env.prod.example` for every variable. Images are built by CI from `apps/api/Dockerfile` and `apps/web/Dockerfile`.
 
-## Deploy without Docker (Vercel + Render)
+## API on Render (without Docker)
 
-A demo or staging environment that needs no server of its own. The browser talks to the API through the Vercel origin (`/v1/*` is rewritten to Render), so the refresh cookie stays first-party and no CORS preflight is needed.
+A demo or staging API that needs no server of its own. The web app is deployed from its Docker image (`apps/web/Dockerfile`, see `docs/deployment.md`); in same-origin mode (`NEXT_PUBLIC_API_URL=/`, `API_INTERNAL_URL=<Render API URL>`) it proxies `/v1/*` to Render, so the refresh cookie stays first-party and no CORS preflight is needed.
 
 | Part | Host | Configuration |
 | --- | --- | --- |
-| Web (Next.js) | Vercel, root directory `apps/web` | `apps/web/vercel.json`; env `NEXT_PUBLIC_API_URL=/`, `API_INTERNAL_URL=<Render API URL>`, `NEXT_PUBLIC_SITE_URL=<Vercel URL>` |
 | API + worker | Render free web service (`APP_ROLE=all`) | `render.yaml` blueprint; `infra/render-start.sh` migrates, seeds while `SEED_ON_DEPLOY=true`, then serves |
 | Redis | Render Key Value, free, `noeviction` | wired by the blueprint |
 | PostgreSQL | Render Postgres free plan (1 GB, deleted after 30 days unless upgraded) or Neon | wired by the blueprint; for Neon replace `DATABASE_URL` with its connection string |
 
-Steps: (1) on Render choose *New → Blueprint*, pick this repository and apply — no values to type; (2) on Vercel import the repository with root directory `apps/web`, set the three web variables and deploy; (3) designate the owner once by adding `OWNER_LOGIN` and `OWNER_PASSWORD` to the Render service environment, redeploying, then deleting both variables; (4) after the first successful deploy set `SEED_ON_DEPLOY=false` so later deploys never overwrite catalog edits.
+Steps: (1) on Render choose *New → Blueprint*, pick this repository and apply; set `PUBLIC_WEB_URL` and `CORS_ORIGINS` in `render.yaml` to the web app's domain; (2) designate the owner once by adding `OWNER_LOGIN` and `OWNER_PASSWORD` to the Render service environment, redeploying, then deleting both variables; (3) after the first successful deploy set `SEED_ON_DEPLOY=false` so later deploys never overwrite catalog edits.
 
 Limits of this setup: the free Render service sleeps after 15 minutes without traffic and the next request can take up to a minute (an external uptime ping every 10 minutes keeps it warm); the free database expires after 30 days; SMS uses the console provider (`SMS_ALLOW_CONSOLE_IN_PRODUCTION=true`), so codes and receipts are logged, not sent; the hosts are outside Uzbekistan, which matters once real personal data is involved (see the compliance notes below).
 
