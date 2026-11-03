@@ -33,16 +33,15 @@ export class RolesGuard implements CanActivate {
 }
 
 /**
- * Throttler keyed by client IP for anonymous traffic and by actor id for authenticated traffic,
- * plus the normalized phone for OTP endpoints (so one IP cannot drain limits for many phones and vice versa).
+ * Throttler keyed by actor id for authenticated traffic and by client IP otherwise.
+ * Never key on request-body fields (e.g. phone): the client controls them, so each new value would get a fresh
+ * counter and one IP could send OTP SMS to any number of phones. Per-phone limits live in OtpService instead.
  */
 @Injectable()
 export class AppThrottlerGuard extends ThrottlerGuard {
   protected override async getTracker(req: Record<string, unknown>): Promise<string> {
-    const r = req as unknown as AuthenticatedRequest & { body?: { phone?: string } }
-    const ip = r.ip ?? 'unknown'
+    const r = req as unknown as AuthenticatedRequest
     if (r.actor?.id) return `u:${r.actor.id}`
-    const phone = typeof r.body?.phone === 'string' ? r.body.phone.replace(/\D/g, '') : ''
-    return phone ? `ip:${ip}|p:${phone}` : `ip:${ip}`
+    return `ip:${r.ip ?? 'unknown'}`
   }
 }

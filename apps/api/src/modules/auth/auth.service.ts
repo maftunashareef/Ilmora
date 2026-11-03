@@ -108,7 +108,11 @@ export class AuthService {
           throw AppError.unauthorized('Invalid Google token', 'invalid_google_token')
         }
         const payload = (await res.json()) as { sub?: string; email?: string; email_verified?: string | boolean; name?: string; aud?: string }
-        if (this.env.GOOGLE_CLIENT_ID && payload.aud && payload.aud !== this.env.GOOGLE_CLIENT_ID) {
+        // A token issued to any other Google app must not open a session here: the audience must be our client id.
+        if (!this.env.GOOGLE_CLIENT_ID) {
+          throw AppError.invalid('google_unconfigured', 'Google OAuth credentials not configured on server')
+        }
+        if (payload.aud !== this.env.GOOGLE_CLIENT_ID) {
           throw AppError.unauthorized('Google client mismatch', 'google_client_mismatch')
         }
         googleId = payload.sub ?? ''

@@ -91,6 +91,9 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   teacher_elsewhere: 'center.err.teacherElsewhere',
   // Super Admin
   owner_protected: 'admin.accounts.ownerProtected',
+  self_roles: 'admin.accounts.selfRoles',
+  center_admin_needs_center: 'admin.accounts.centerRequired',
+  center_not_found: 'admin.accounts.centerNotFound',
   self_delete: 'apiError.forbidden',
   lesson_count_required: 'admin.packages.lessonCount',
 }

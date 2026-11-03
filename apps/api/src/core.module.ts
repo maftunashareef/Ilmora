@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common'
 import { ThrottlerModule } from '@nestjs/throttler'
 import { randomUUID } from 'node:crypto'
 import { LoggerModule } from 'nestjs-pino'
+import { isAuthThrottled } from './common/decorators'
 import { AppConfigModule } from './config/config.module'
 import { ENV, type Env } from './config/env'
 import { PrismaModule } from './infra/prisma/prisma.module'
@@ -67,7 +68,8 @@ const REDACT_PATHS = [
         storage,
         throttlers: [
           { name: 'default', ttl: 60_000, limit: env.RATE_LIMIT_DEFAULT_PER_MINUTE },
-          { name: 'auth', ttl: 60_000, limit: env.RATE_LIMIT_AUTH_PER_MINUTE, blockDuration: 5 * 60_000 },
+          // Strict limit only for routes marked @AuthThrottle(); without skipIf it would count every request in the API.
+          { name: 'auth', ttl: 60_000, limit: env.RATE_LIMIT_AUTH_PER_MINUTE, blockDuration: 5 * 60_000, skipIf: (ctx) => !isAuthThrottled(ctx) },
         ],
         skipIf: (ctx) => (ctx.switchToHttp().getRequest<{ url?: string }>().url ?? '').startsWith('/health'),
       }),

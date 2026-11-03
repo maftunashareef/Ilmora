@@ -856,15 +856,38 @@ export class ManageService {
   }
 
   async setRoles(tenantId: string, actor: RequestActor, userId: string, input: z.infer<typeof UserRolesInput>) {
-    const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId } })
+    const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId }, include: { teacherProfile: { select: { id: true } } } })
     if (!user) throw AppError.notFound('User')
     // Super Admin belongs to the owner accounts only (owner-setup command) and is never granted or revoked here.
     if (user.isOwner) throw AppError.forbidden('The owner account cannot be changed here', { code: 'owner_protected' })
-    void actor
-    const updated = await this.prisma.client.user.update({ where: { id: userId }, data: { roles: input.roles, centerId: input.centerId === undefined ? user.centerId : input.centerId, isActive: input.isActive ?? user.isActive } })
+    if (user.id === actor.id) throw AppError.forbidden('You cannot change your own roles', { code: 'self_roles' })
+    const roles = [...new Set(input.roles)]
+    const centerId = input.centerId === undefined ? user.centerId : input.centerId
+    if (centerId && centerId !== user.centerId) {
+      const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { id: true } })
+      if (!center) throw AppError.invalid('center_not_found', 'Center not found')
+    }
+    // A center administrator without a center would see an empty workspace and could not be found on the center page.
+    if (roles.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
+    const isActive = input.isActive ?? user.isActive
+    const lostAccess = (!isActive && user.isActive) || user.roles.some((r) => !roles.includes(r as (typeof roles)[number]))
+
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive } })
+      // The teacher studio works through the public teacher profile; grant one with the role so the studio is usable.
+      if (roles.includes('TEACHER') && !user.teacherProfile) {
+        await tx.teacherProfile.create({
+          data: { tenantId, userId, slug: await this.uniqueSlug('teacher', tenantId, slugify(user.login || user.displayName)), name: user.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null } as Prisma.TeacherProfileUncheckedCreateInput,
+        })
+      }
+      // Removed roles or a block must not survive in open sessions until their refresh token expires.
+      if (lostAccess) await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: 'roles_changed' } })
+      return row
+    })
     await this.audit.record({ action: 'user.roles', entityType: 'User', entityId: userId, before: { roles: user.roles, centerId: user.centerId, isActive: user.isActive }, after: { roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive }, reason: input.reason })
     return { id: updated.id, roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive }
   }
+
 
   async updateStudent(tenantId: string, userId: string, input: z.infer<typeof import('./manage.schemas').StudentAdminInput>) {
     // Verify the user belongs to this tenant before updating; prevents cross-tenant writes.

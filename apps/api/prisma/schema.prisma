@@ -265,6 +265,8 @@ model User {
   login           String?
   /** argon2id hash. Null for accounts that have only ever signed in with a one-time code. */
   passwordHash    String?
+  /** Google account id (ID token "sub"); the only key Google Sign-In may match an account by. Unique per tenant. */
+  googleId        String?
   displayName     String
   district        String?
   preferredLang   Lang      @default(uz)
@@ -301,6 +303,7 @@ model User {
 
   @@unique([tenantId, phoneE164])
   @@unique([tenantId, login])
+  @@unique([tenantId, googleId])
   @@index([tenantId, createdAt])
   @@index([tenantId, centerId])
 }

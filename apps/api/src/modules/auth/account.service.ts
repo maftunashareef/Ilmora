@@ -229,59 +229,70 @@ export class AccountService {
     const loginCandidate = baseLogin.length >= 3 ? baseLogin : `${baseLogin}123`
     const preferredLang: Lang = profile.lang && ['uz', 'ru', 'en'].includes(profile.lang) ? profile.lang : 'uz'
 
-    // Look for existing user by primary username, email prefix, or Google ID pattern
-    let user = await this.prisma.client.user.findFirst({
-      where: { tenantId, login: { in: [loginCandidate, `g_${profile.googleId.slice(0, 16)}`, baseLogin] } },
-      include: USER_INCLUDE,
-    })
-
-    // Security: Do not automatically link to an existing account if it was registered with a password
-    // to prevent unauthorized account takeover via unverified username/email-prefix collision.
-    if (user && user.passwordHash) {
-      user = null
-    }
+    // The Google account id ("sub") is the only key: e-mail, its local part or the login never identify an account,
+    // otherwise another Google account with the same name before "@" would sign into someone else's account.
+    const googleId = profile.googleId.trim()
+    if (!googleId) throw AppError.invalid('incomplete_google_profile', 'Incomplete Google profile')
+    let user = await this.prisma.client.user.findUnique({ where: { tenantId_googleId: { tenantId, googleId } }, include: USER_INCLUDE })
 
     if (!user) {
       const role = profile.role ?? 'STUDENT'
       const roles = SELF_SERVICE_ROLES[role]
       const login = await this.freeUserLogin(tenantId, loginCandidate)
       const now = new Date()
-      user = await this.prisma.client.$transaction(async (tx) => {
-        const created = await tx.user.create({
-          data: {
-            tenantId,
-            login,
-            displayName: profile.displayName.trim() || email,
-            preferredLang,
-            roles,
-            lastLoginAt: now,
-            offerAcceptedAt: now,
-            offerVersion: OFFER_VERSION,
-            consentAt: now,
-          },
-          include: USER_INCLUDE,
-        })
-        if (role === 'TEACHER') {
-          const slug = await this.freeTeacherSlug(tx, tenantId, login)
-          const profileRow = await tx.teacherProfile.create({
-            data: { tenantId, userId: created.id, slug, name: created.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null },
-          })
-          return { ...created, teacherProfile: { id: profileRow.id } }
-        }
-        return created
-      })
-      await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'google', googleId: profile.googleId, email } })
-    } else {
-      if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
-      user = await this.prisma.client.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
+      let created: UserRow
+      try {
+        created = await this.createGoogleUser(tenantId, { googleId, login, displayName: profile.displayName.trim() || email, preferredLang, roles, role, now })
+      } catch (err) {
+        // Two first sign-ins of the same Google account at once: the other request created it — use that account.
+        if ((err as { code?: string }).code !== 'P2002') throw err
+        const winner = await this.prisma.client.user.findUnique({ where: { tenantId_googleId: { tenantId, googleId } }, include: USER_INCLUDE })
+        if (!winner) throw err
+        return this.finishGoogleLogin(winner, googleId, email, meta)
+      }
+      await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: created.id, after: { roles: created.roles, method: 'google', googleId, email } })
+      return this.openSession(created, meta)
+    }
+    return this.finishGoogleLogin(user, googleId, email, meta)
+  }
+
+  private async finishGoogleLogin(user: UserRow, googleId: string, email: string, meta: SessionMeta): Promise<LoginResult> {
+    if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+    const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
+    await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'google', googleId, email } })
+    return this.openSession(updated, meta)
+  }
+
+  private createGoogleUser(
+    tenantId: string,
+    input: { googleId: string; login: string; displayName: string; preferredLang: Lang; roles: Role[]; role: 'STUDENT' | 'TEACHER'; now: Date },
+  ): Promise<UserRow> {
+    const { googleId, login, preferredLang, roles, role, now } = input
+    return this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          tenantId,
+          googleId,
+          login,
+          displayName: input.displayName,
+          preferredLang,
+          roles,
+          lastLoginAt: now,
+          offerAcceptedAt: now,
+          offerVersion: OFFER_VERSION,
+          consentAt: now,
+        },
         include: USER_INCLUDE,
       })
-      await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'google', googleId: profile.googleId, email } })
-    }
-
-    return this.openSession(user, meta)
+      if (role === 'TEACHER') {
+        const slug = await this.freeTeacherSlug(tx, tenantId, login)
+        const profileRow = await tx.teacherProfile.create({
+          data: { tenantId, userId: created.id, slug, name: created.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null },
+        })
+        return { ...created, teacherProfile: { id: profileRow.id } }
+      }
+      return created
+    })
   }
 
   /** Records acceptance of the current offer edition and personal-data consent for an existing account. */
