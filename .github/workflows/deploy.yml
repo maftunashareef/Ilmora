@@ -210,3 +210,13 @@ jobs:
           curl -fsS -o /dev/null -w "catalog %{http_code}\n" "$site/v1/public/catalog"
           code=$(curl -s -o /dev/null -w "%{http_code}" "$site/v1/admin/finance/overview")
           [ "$code" = "404" ] && echo "admin API closed on the site domain (404)" || { echo "::error::/v1/admin answered $code on the site domain"; exit 1; }
+          # The pages must render the live site settings. When the web server's own call to the API fails it renders its
+          # built-in sample settings (version 1, no universities) with HTTP 200, so compare the settings version embedded
+          # in the page with the API's. Retried for 4 minutes: the page cache may lag a minute behind an admin's save.
+          api_version=$(curl -fsS "$site/v1/public/site" | jq -r '.version')
+          for i in $(seq 1 24); do
+            page_version=$(curl -fsS "$site/uz" | grep -oE 'version\\":[0-9]+[}],\\"catalog' | grep -oE '[0-9]+' | head -1 || true)
+            [ "$page_version" = "$api_version" ] && break
+            sleep 10
+          done
+          [ "$page_version" = "$api_version" ] && echo "site renders the live settings (version $api_version)" || { echo "::error::the site renders settings version ${page_version:-none}, the API has $api_version: the web server is using its built-in sample settings"; exit 1; }
