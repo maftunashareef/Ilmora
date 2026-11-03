@@ -600,13 +600,14 @@ export class ManageService {
         status: input.status,
         ...(input.status === 'ACTIVE' ? { approvedAt: center.approvedAt ?? now, blockedAt: null, blockReason: null } : {}),
         ...(input.status === 'BLOCKED' ? { blockedAt: now, blockReason: input.reason ?? null } : {}),
+        ...(input.status === 'REJECTED' ? { blockedAt: now, blockReason: input.reason ?? null, approvedAt: null } : {}),
         ...(input.status === 'PENDING' ? { blockedAt: null, blockReason: null } : {}),
       },
     })
     await this.audit.record({ action: 'center.status', entityType: 'Center', entityId: id, before: { status: center.status }, after: { status: updated.status }, reason: input.reason })
     await this.notifications.safely('center.status', async () => {
       const admins = await this.notifications.centerAdminIds(tenantId, id)
-      const type = input.status === 'ACTIVE' ? 'center.approved' : input.status === 'BLOCKED' ? 'center.blocked' : 'center.pending'
+      const type = input.status === 'ACTIVE' ? 'center.approved' : input.status === 'BLOCKED' ? 'center.blocked' : input.status === 'REJECTED' ? 'center.rejected' : 'center.pending'
       await this.notifications.notify({ tenantId, userIds: admins, type, params: { centerName: center.name, centerId: id, reason: input.reason ?? null }, dedupeKey: `center-${type}:${id}:${now.toISOString()}` })
     })
     void actor

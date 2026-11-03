@@ -8,13 +8,14 @@ import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { useStore } from '../../store/useStore'
 import type { L } from '../../types'
-import type { CenterTeacher } from './centerApi'
+import { useCenterScope, type CenterTeacher } from './centerApi'
 
 type Draft = { id?: string; name: string; title: L; bio: L; expertise: string; login: string }
 const blank = (): Draft => ({ name: '', title: emptyL(), bio: emptyL(), expertise: '', login: '' })
 
 /** Teachers of the center: profiles, linked accounts, courses; add (optionally linking a registered teacher), edit, remove. */
 export function CenterTeachers() {
+  const scope = useCenterScope()
   const { t, tr, lang } = useT()
   const notify = useStore((s) => s.notify)
   const [list, setList] = useState<CenterTeacher[] | null>(null)
@@ -22,7 +23,7 @@ export function CenterTeachers() {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
 
-  const load = () => api<CenterTeacher[]>('/center/teachers').then(setList).catch(() => setFailed(true))
+  const load = () => api<CenterTeacher[]>(`${scope.base}/teachers`).then(setList).catch(() => setFailed(true))
   useEffect(() => { void load() }, [])
 
   const fail = (err: unknown) => notify(isApiError(err) ? apiErrorText(err, lang) : t('center.loadError'), 'warn')
@@ -31,8 +32,8 @@ export function CenterTeachers() {
     setBusy(true)
     try {
       const body = { name: draft.name.trim(), title: draft.title, bio: draft.bio, expertise: draft.expertise.split(',').map((x) => x.trim()).filter(Boolean) }
-      if (draft.id) await api(`/center/teachers/${draft.id}`, { method: 'PATCH', body })
-      else await api('/center/teachers', { method: 'POST', body: { ...body, ...(draft.login.trim() ? { login: draft.login.trim() } : {}) } })
+      if (draft.id) await api(`${scope.base}/teachers/${draft.id}`, { method: 'PATCH', body })
+      else await api(`${scope.base}/teachers`, { method: 'POST', body: { ...body, ...(draft.login.trim() ? { login: draft.login.trim() } : {}) } })
       notify(t('common.saved'))
       setDraft(null)
       await load()
@@ -41,7 +42,7 @@ export function CenterTeachers() {
   const remove = async (id: string) => {
     if (!confirm(t('common.confirmDelete'))) return
     setBusy(true)
-    try { await api(`/center/teachers/${id}`, { method: 'DELETE' }); notify(t('common.saved')); await load() } catch (err) { fail(err) } finally { setBusy(false) }
+    try { await api(`${scope.base}/teachers/${id}`, { method: 'DELETE' }); notify(t('common.saved')); await load() } catch (err) { fail(err) } finally { setBusy(false) }
   }
 
   return (

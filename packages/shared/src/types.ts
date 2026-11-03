@@ -36,7 +36,7 @@ export interface UploadMeta {
 }
 
 /** PENDING: registered by the center, waiting for approval (not public). ACTIVE: listed. BLOCKED: hidden, workspace locked. */
-export type CenterStatus = 'PENDING' | 'ACTIVE' | 'BLOCKED'
+export type CenterStatus = 'PENDING' | 'ACTIVE' | 'BLOCKED' | 'REJECTED'
 
 export interface Center {
   id: string

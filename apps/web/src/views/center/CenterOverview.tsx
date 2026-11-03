@@ -7,19 +7,21 @@ import { api } from '../../lib/api'
 import { formatTime } from '../../lib/format'
 import { Link } from '../../lib/router'
 import { useStore } from '../../store/useStore'
-import type { CenterOverview as Overview, CenterQr } from './centerApi'
+import { useCenterScope, type CenterOverview as Overview, type CenterQr } from './centerApi'
 
-export function CenterStatusNotice({ status }: { status: Overview['center']['status'] }) {
+export function CenterStatusNotice({ status, reason }: { status: Overview['center']['status']; reason?: string | null }) {
   const { t } = useT()
   if (status === 'PENDING') return <Notice tone="warn" className="mb-6">{t('center.pendingNotice')}</Notice>
-  if (status === 'BLOCKED') return <Notice tone="warn" className="mb-6">{t('center.blockedNotice')}</Notice>
+  if (status === 'BLOCKED') return <Notice tone="warn" className="mb-6">{t('center.blockedNotice')}{reason ? ` ${t('center.rejectedReason', { reason })}` : ''}</Notice>
+  if (status === 'REJECTED') return <Notice tone="warn" className="mb-6">{t('center.rejectedNotice')}{reason ? ` ${t('center.rejectedReason', { reason })}` : ''}</Notice>
   return null
 }
 
 export function CenterOverview() {
   const { t, tr, lang } = useT()
   const user = useStore((s) => s.auth.user)
-  const linked = !!user?.roles.includes('CENTER_ADMIN') && !!user.centerId
+  const scope = useCenterScope()
+  const linked = scope.admin || (!!user?.roles.includes('CENTER_ADMIN') && !!user.centerId)
   const [data, setData] = useState<Overview | null>(null)
   const [qr, setQr] = useState<CenterQr | null>(null)
   const [failed, setFailed] = useState(false)
@@ -27,10 +29,10 @@ export function CenterOverview() {
   useEffect(() => {
     if (!linked) return
     let live = true
-    api<Overview>('/center/overview').then((d) => live && setData(d)).catch(() => live && setFailed(true))
-    api<CenterQr>('/center/qr').then((q) => live && setQr(q)).catch(() => undefined)
+    api<Overview>(`${scope.base}/overview`).then((d) => live && setData(d)).catch(() => live && setFailed(true))
+    api<CenterQr>(`${scope.base}/qr`).then((q) => live && setQr(q)).catch(() => undefined)
     return () => { live = false }
-  }, [linked])
+  }, [linked, scope.base])
 
   if (!linked) return <EmptyState icon={<Icon name="building" className="h-5 w-5" />} title={t('center.noCenter')} body={t('center.noCenterHint')} />
   if (failed) return <Notice tone="warn">{t('center.loadError')}</Notice>
@@ -40,7 +42,7 @@ export function CenterOverview() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.center')} title={c.name} subtitle={tr(c.district)} action={<Badge tone={c.status === 'ACTIVE' ? 'forest' : c.status === 'PENDING' ? 'champagne' : 'danger'}>{t(`center.status.${c.status}`)}</Badge>} />
-      <CenterStatusNotice status={c.status} />
+      <CenterStatusNotice status={c.status} reason={c.blockReason} />
       <div className="reveal-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label={t('center.teachers')} value={data.counts.teachers} />
         <Stat label={t('center.courses')} value={data.counts.courses} hint={`${data.counts.groups} ${t('common.groups').toLowerCase()}`} />
@@ -49,7 +51,7 @@ export function CenterOverview() {
       </div>
       <div className="mt-10 grid gap-8 lg:grid-cols-[1.3fr_1fr]">
         <section>
-          <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('center.todayLessons')}</Eyebrow><Link to="/center/attendance" className="text-xs font-medium text-forest underline">{t('center.attendance')}</Link></div>
+          <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('center.todayLessons')}</Eyebrow><Link to={scope.links('attendance')} className="text-xs font-medium text-forest underline">{t('center.attendance')}</Link></div>
           {data.today.length === 0 ? <EmptyState title={t('center.noLessonsToday')} /> : (
             <ul className="space-y-2">
               {data.today.map((l) => (
@@ -70,7 +72,7 @@ export function CenterOverview() {
           <Card className="flex flex-col items-center gap-3 p-6 text-center">
             {qr ? <QrCode value={qr.url} size={200} label={t('center.qrTitle')} /> : <div className="h-[200px] w-[200px] animate-pulse rounded-card bg-sage/60" />}
             <p className="text-xs leading-relaxed text-charcoal/60">{t('center.qrHint')}</p>
-            <LinkButton to="/center/settings" variant="secondary" size="sm"><Icon name="settings" className="h-3.5 w-3.5" />{t('center.settings')}</LinkButton>
+            <LinkButton to={scope.links('settings')} variant="secondary" size="sm"><Icon name="settings" className="h-3.5 w-3.5" />{t('center.settings')}</LinkButton>
           </Card>
         </section>
       </div>

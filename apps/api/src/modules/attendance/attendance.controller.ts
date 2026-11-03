@@ -83,58 +83,58 @@ export class AttendanceController {
   }
 
   // ── teacher and center administrator ──
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Get('teacher/sessions/:id')
   detail(@Param('id') id: string, @CurrentActor() actor: RequestActor) {
     return this.attendance.sessionDetail(id, actor)
   }
 
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Post('teacher/sessions/:id/open')
   open(@Param('id') id: string, @CurrentActor() actor: RequestActor) {
     return this.attendance.open(id, actor)
   }
 
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Post('teacher/sessions/:id/close')
   close(@Param('id') id: string, @CurrentActor() actor: RequestActor) {
     return this.attendance.close(id, actor)
   }
 
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Post('teacher/sessions/:id/qr')
   qr(@Param('id') id: string, @CurrentActor() actor: RequestActor) {
     return this.attendance.qr(id, actor)
   }
 
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Post('teacher/sessions/:id/records')
   correct(@Param('id') id: string, @CurrentActor() actor: RequestActor, @Body() dto: CorrectionDto) {
     return this.attendance.correct(id, actor, dto)
   }
 
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Patch('teacher/sessions/:id')
   status(@Param('id') id: string, @CurrentActor() actor: RequestActor, @Body() dto: SessionStatusDto) {
     return this.attendance.setStatus(id, dto.status, actor, dto.reason)
   }
 
   /** Schedule exception: move a lesson (same date = new times; another date = cancelled original + new lesson). */
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Patch('teacher/sessions/:id/time')
   reschedule(@Param('id') id: string, @CurrentActor() actor: RequestActor, @Body() dto: RescheduleDto) {
     return this.attendance.rescheduleSession(id, actor, dto)
   }
 
   /** Schedule exception: a one-off lesson for a group. */
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Post('teacher/groups/:id/sessions')
   extra(@Param('id') id: string, @CurrentActor() actor: RequestActor, @Body() dto: ExtraSessionDto) {
     return this.attendance.addExtraSession(id, actor, dto)
   }
 
   /** Server-sent events for one session (ownership checked before subscribing). Clients also poll as a fallback. */
-  @Roles('TEACHER', 'CENTER_ADMIN')
+  @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Sse('teacher/sessions/:id/stream')
   async stream(@Param('id') id: string, @CurrentActor() actor: RequestActor): Promise<Observable<MessageEvent>> {
     await this.attendance.sessionForTeacher(id, actor)

@@ -3,14 +3,15 @@ import { useEffect, useState } from 'react'
 import { Badge, EmptyState, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
-import type { CenterStudent } from './centerApi'
+import { useCenterScope, type CenterStudent } from './centerApi'
 
 /** Students enrolled at the center: groups, subscription state and attendance totals. */
 export function CenterStudents() {
+  const scope = useCenterScope()
   const { t, tr } = useT()
   const [list, setList] = useState<CenterStudent[] | null>(null)
   const [failed, setFailed] = useState(false)
-  useEffect(() => { api<CenterStudent[]>('/center/students').then(setList).catch(() => setFailed(true)) }, [])
+  useEffect(() => { api<CenterStudent[]>(`${scope.base}/students`).then(setList).catch(() => setFailed(true)) }, [])
 
   const subscriptionBadge = (s: CenterStudent['subscription']) => {
     if (!s) return <Badge tone="muted">{t('admin.people.noSub')}</Badge>

@@ -6,17 +6,20 @@ import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
 import { enrolledStudents } from '../../lib/enrollment'
 import { formatTime } from '../../lib/format'
-import { Link } from '../../lib/router'
+import { Link, useSearchParams } from '../../lib/router'
 import { useStore } from '../../store/useStore'
-import type { CenterCourses, CenterLesson } from './centerApi'
+import { useCenterScope, type CenterCourses, type CenterLesson } from './centerApi'
 
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
 /** Lessons of the center by day with check-in counts; each opens the live attendance panel (QR, roster, corrections, move). */
 export function CenterAttendance() {
+  const scope = useCenterScope()
   const { t, tr, lang } = useT()
   const s = useStore()
-  const [date, setDate] = useState(todayIso)
+  const [params] = useSearchParams()
+  // A notification about a lesson links here with its day; otherwise the page opens on today.
+  const [date, setDate] = useState(() => (/^\d{4}-\d{2}-\d{2}$/.test(params.get('date') ?? '') ? (params.get('date') as string) : todayIso()))
   const [lessons, setLessons] = useState<CenterLesson[] | null>(null)
   const [courses, setCourses] = useState<CenterCourses['courses']>([])
   const [failed, setFailed] = useState(false)
@@ -24,9 +27,9 @@ export function CenterAttendance() {
   const [extraGroup, setExtraGroup] = useState<string>('')
   const [adding, setAdding] = useState(false)
 
-  const load = (d: string) => api<{ date: string; sessions: CenterLesson[] }>(`/center/attendance?date=${encodeURIComponent(d)}`).then((r) => setLessons(r.sessions)).catch(() => setFailed(true))
+  const load = (d: string) => api<{ date: string; sessions: CenterLesson[] }>(`${scope.base}/attendance?date=${encodeURIComponent(d)}`).then((r) => setLessons(r.sessions)).catch(() => setFailed(true))
   useEffect(() => { void load(date) }, [date])
-  useEffect(() => { api<CenterCourses>('/center/courses').then((r) => setCourses(r.courses)).catch(() => undefined) }, [])
+  useEffect(() => { api<CenterCourses>(`${scope.base}/courses`).then((r) => setCourses(r.courses)).catch(() => undefined) }, [])
 
   const open = async (l: CenterLesson) => {
     setActive(l)
@@ -39,7 +42,7 @@ export function CenterAttendance() {
 
   return (
     <div>
-      <PageTitle eyebrow={t('dash.center')} title={t('center.attendance')} action={<Link to="/center/settings" className="text-xs font-medium text-forest underline">{t('center.qrTitle')}</Link>} />
+      <PageTitle eyebrow={t('dash.center')} title={t('center.attendance')} action={<Link to={scope.links('settings')} className="text-xs font-medium text-forest underline">{t('center.qrTitle')}</Link>} />
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Field label={t('session.date')}><Input type="date" value={date} onChange={(e) => setDate(e.target.value || todayIso())} /></Field>
         <Field label={t('session.extra')}>

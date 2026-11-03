@@ -1,7 +1,19 @@
 'use client'
+import { createContext, useContext } from 'react'
 import type { AttendanceMethod, CenterCheckInSettings, CenterStatus, Course, L, LessonSession, SubscriptionAccess, Teacher } from '@ilmora/shared'
 
 /** Shapes of the center workspace API (`/v1/center/*`). */
+
+export type CenterSection = 'overview' | 'courses' | 'teachers' | 'attendance' | 'students' | 'settings'
+
+/**
+ * Where the center views read and write. A center's own workspace uses `/center/*`; the Super Admin opens the same
+ * views for any center under `/admin/centers/:id/*` (`admin` then skips the center-account gate).
+ */
+export interface CenterScope { base: string; admin: boolean; links: (section: CenterSection) => string }
+export const CENTER_OWN_SCOPE: CenterScope = { base: '/center', admin: false, links: (s) => (s === 'overview' ? '/center' : `/center/${s}`) }
+export const CenterScopeContext = createContext<CenterScope>(CENTER_OWN_SCOPE)
+export const useCenterScope = () => useContext(CenterScopeContext)
 
 export interface CenterProfile {
   id: string

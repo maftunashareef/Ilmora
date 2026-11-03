@@ -7,7 +7,7 @@ import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate } from '../../lib/format'
 import { useStore } from '../../store/useStore'
-import type { CenterOverview, CenterProfile, CenterQr } from './centerApi'
+import { useCenterScope, type CenterOverview, type CenterProfile, type CenterQr } from './centerApi'
 import { CenterStatusNotice } from './CenterOverview'
 
 type Draft = { name: string; district: CenterProfile['district']; description: CenterProfile['description']; address: string; phone: string; lat: string; lng: string; geoRadiusM: string; checkInBeforeMin: string; absenceAfterMin: string }
@@ -20,6 +20,7 @@ const num = (s: string) => (s.trim() === '' ? null : Number(s))
 
 /** The center's own details, the check-in window and location rule, and the standing QR code. */
 export function CenterSettings() {
+  const scope = useCenterScope()
   const { t, lang } = useT()
   const notify = useStore((s) => s.notify)
   const [center, setCenter] = useState<CenterProfile | null>(null)
@@ -28,8 +29,8 @@ export function CenterSettings() {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api<CenterOverview>('/center/overview').then((o) => { setCenter(o.center); setDraft(toDraft(o.center)) }).catch(() => notify(t('center.loadError'), 'warn'))
-    api<CenterQr>('/center/qr').then(setQr).catch(() => undefined)
+    api<CenterOverview>(`${scope.base}/overview`).then((o) => { setCenter(o.center); setDraft(toDraft(o.center)) }).catch(() => notify(t('center.loadError'), 'warn'))
+    api<CenterQr>(`${scope.base}/qr`).then(setQr).catch(() => undefined)
   }, [notify, t])
 
   const fail = (err: unknown) => notify(isApiError(err) ? apiErrorText(err, lang) : t('center.loadError'), 'warn')
@@ -39,7 +40,7 @@ export function CenterSettings() {
     if ([lat, lng, geoRadiusM].some((v) => v != null && Number.isNaN(v))) { notify(t('apiError.validation'), 'warn'); return }
     setBusy(true)
     try {
-      const saved = await api<CenterProfile>('/center/profile', {
+      const saved = await api<CenterProfile>(`${scope.base}/profile`, {
         method: 'PATCH',
         body: { name: draft.name.trim(), district: draft.district, description: draft.description, address: draft.address.trim() || null, phone: draft.phone.trim() || null, lat, lng, geoRadiusM, checkInBeforeMin: Number(draft.checkInBeforeMin), absenceAfterMin: Number(draft.absenceAfterMin) },
       })
@@ -51,7 +52,7 @@ export function CenterSettings() {
   const rotate = async () => {
     if (!confirm(t('center.qrConfirm'))) return
     setBusy(true)
-    try { setQr(await api<CenterQr>('/center/qr/rotate', { method: 'POST', body: {} })); notify(t('center.qrRotated')) } catch (err) { fail(err) } finally { setBusy(false) }
+    try { setQr(await api<CenterQr>(`${scope.base}/qr/rotate`, { method: 'POST', body: {} })); notify(t('center.qrRotated')) } catch (err) { fail(err) } finally { setBusy(false) }
   }
 
   if (!center || !draft) return <div className="py-16 text-center text-sm text-charcoal/55">{t('common.loading')}</div>

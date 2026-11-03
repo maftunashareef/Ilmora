@@ -10,11 +10,12 @@ import { withBase } from '../../lib/url'
 import { useStore, type PageKey } from '../../store/useStore'
 import type { Section } from '../../types'
 import { CourseCard, CoursePrice, ScheduleChips } from '../../components/course/CourseCard'
-import { BackgroundVideo, CountUp, Marquee, SnapTrack, SplitWords } from '../../components/motion'
+import { BackgroundVideo, CountUp, SnapTrack, SplitWords } from '../../components/motion'
 import dynamic from 'next/dynamic'
 import { Avatar, Badge, Button, Card, cx, Eyebrow, Field, Icon, Input, LinkButton, Notice, SectionHeading, Textarea } from '../../components/ui'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { CourseFinderTeaser } from './CourseFinder'
+import { CentersShowcase } from '../../components/center/CentersShowcase'
 import { DiscountShowcase } from '../../components/course/DiscountShowcase'
 import { JourneySection as Journey } from '../../components/JourneySteps'
 
@@ -116,20 +117,19 @@ function JourneySection({ s }: { s: Section }) {
   return <Journey title={tr(s.title)} subtitle={tr(s.subtitle)} />
 }
 
-// ─── Marquee ticker of sample centers & categories ───────────────────────────
+// ─── Centers as cards, with the directions as chips (the section is still called "marquee" in page settings) ──
 function MarqueeSection({ s }: { s: Section }) {
-  const { tr } = useT()
+  const { t, tr } = useT()
   const centers = useStore((st) => st.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG))
   const categories = useStore((st) => st.categories)
-  const items = [
-    ...centers.map((c) => <span key={c.id} className="font-display text-2xl text-charcoal/80">{c.name}</span>),
-    ...categories.map((c) => <span key={c.id} className="text-[12px] font-medium uppercase tracking-[0.2em] text-forest/70">{tr(c.name)}</span>),
-  ]
   return (
-    <section className="border-y border-charcoal/10 bg-paper/70 py-5">
-      {tr(s.title) && <div className="container-x mb-3 text-center text-[10px] uppercase tracking-[0.24em] text-charcoal/40">{tr(s.title)}</div>}
-      <Marquee items={items} label={tr(s.title)} />
-    </section>
+    <CentersShowcase centers={centers} title={tr(s.title) || t('common.centers')} subtitle={tr(s.subtitle) || t('centers.showcase.subtitle')}>
+      {categories.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {categories.map((c) => <Link key={c.id} to={`/courses?cat=${c.id}`} className="rounded-full border border-charcoal/10 bg-paper px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-forest/80 transition hover:border-forest hover:text-forest">{c.glyph} {tr(c.name)}</Link>)}
+        </div>
+      )}
+    </CentersShowcase>
   )
 }
 
@@ -470,8 +470,8 @@ function CentersSection({ s }: { s: Section }) {
         <SectionHeading title={tr(s.title)} subtitle={tr(s.subtitle)} />
         <div className="reveal-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {centers.map((c) => (
-            <div key={c.id} className="reveal">
-              <Card className="flex h-full gap-4">
+            <Link key={c.id} to={`/centers/${c.slug ?? c.id}`} className="reveal block">
+              <Card className="flex h-full gap-4 transition hover:-translate-y-0.5 hover:shadow-md">
                 <span className="mt-1 h-10 w-1 shrink-0 rounded-full" style={{ background: c.tone }} />
                 <div>
                   <div className="font-display text-xl text-charcoal">{c.name}</div>
@@ -479,7 +479,7 @@ function CentersSection({ s }: { s: Section }) {
                   <p className="mt-2 text-sm text-charcoal/65">{tr(c.description)}</p>
                 </div>
               </Card>
-            </div>
+            </Link>
           ))}
         </div>
       </div>

@@ -23,6 +23,7 @@ export function AdminLayout() {
   return (
     <DashboardShell role="admin" title={t('dash.admin')} subtitle={t('admin.overview.hello')} items={[
       { id: 'overview', to: '/admin', end: true, label: t('dash.overview'), icon: 'grid' },
+      { id: 'notifications', to: '/admin/notifications', label: t('notif.title'), icon: 'bell' },
       { id: 'pages', to: '/admin/pages', label: t('admin.pages'), icon: 'layers' },
       { id: 'theme', to: '/admin/theme', label: t('admin.theme'), icon: 'palette' },
       { id: 'features', to: '/admin/features', label: t('admin.features'), icon: 'settings' },
