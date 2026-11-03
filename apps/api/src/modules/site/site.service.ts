@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { isSafeExternalUrl, presetPublishability, type Preset, type PresetCourse, type University } from '@ilmora/shared'
+import { isSafeExternalUrl, presetPublishability, universityDirections, unknownDirections, type Preset, type PresetCourse, type University } from '@ilmora/shared'
 import { z } from 'zod'
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
@@ -28,13 +28,24 @@ const AdmissionSchema = z.object({
   note: z.string().max(600),
 })
 
+const httpsOrEmpty = (what: string) => z.string().max(500).refine((v) => v === '' || isSafeExternalUrl(v), `${what} must be a plain https link`)
+
+/** A study direction with the entrance subjects the university states for it. */
+const DirectionSchema = z.object({ id: z.string().min(1).max(60), name: L, subjects: z.array(L).max(8) })
+const FacultySchema = z.object({ id: z.string().min(1).max(60), name: L, directions: z.array(DirectionSchema).max(30) })
+
 /** A university that packages refer to. ILMORA is not affiliated with it; the record is plain data. */
 const UniversitySchema = z.object({
   id: z.string().min(1).max(60),
   name: z.string().trim().min(1).max(120),
   shortName: z.string().trim().max(30).optional(),
   city: z.string().trim().max(60).optional(),
-  website: z.string().max(300).refine((v) => v === '' || isSafeExternalUrl(v), 'website must be a plain https link').optional(),
+  country: z.string().trim().max(60).optional(),
+  website: httpsOrEmpty('website').optional(),
+  // An uploaded logo (https, object storage) or an official logo file shipped with the site under /universities/.
+  logoUrl: z.string().max(500).refine((v) => v === '' || isSafeExternalUrl(v) || /^\/universities\/[a-z0-9-]+\.(svg|png|webp)$/.test(v), 'logoUrl must be a plain https link or a /universities/ file').optional(),
+  logoOnDark: z.boolean().optional(),
+  faculties: z.array(FacultySchema).max(20).optional(),
 })
 
 /** Ready-made course set; `courseId` must point at an existing course (checked in SiteService.assertPresetsUsable). */
@@ -43,9 +54,11 @@ const PresetSchema = z.object({
   universityId: z.string().min(1).max(60).optional(),
   university: z.string().trim().max(80).optional(),
   program: L.optional(),
+  directionIds: z.array(z.string().min(1).max(60)).max(30).optional(),
   name: L,
   description: L,
-  slots: z.array(z.object({ id: z.string().min(1).max(60), label: L, courseId: z.string().min(1).max(80).nullable() })).min(1).max(8),
+  slots: z.array(z.object({ id: z.string().min(1).max(60), label: L, courseId: z.string().min(1).max(80).nullable(), optional: z.boolean().optional() })).min(1).max(8),
+  durationMonths: z.number().int().min(1).max(36).optional(),
   admission: AdmissionSchema.optional(),
   enabled: z.boolean(),
 })
@@ -109,9 +122,13 @@ export class SiteService {
     const presets = parsed.data.presets
     const universities = parsed.data.universities ?? (Array.isArray(storedUniversities) ? (storedUniversities as University[]) : [])
     if (new Set(universities.map((u) => u.id)).size !== universities.length) throw AppError.invalid('duplicate_university', 'Two universities share the same id')
+    const directionIds = universities.flatMap((u) => universityDirections(u).map((d) => d.direction.id))
+    if (new Set(directionIds).size !== directionIds.length) throw AppError.invalid('duplicate_direction', 'Two directions share the same id')
     if (presets) {
       const unknown = presets.find((p) => p.universityId && !universities.some((u) => u.id === p.universityId))
       if (unknown) throw AppError.invalid('unknown_university', 'A package refers to a university that does not exist', { presetId: unknown.id })
+      const strayDirection = presets.find((p) => unknownDirections(p, universities).length > 0)
+      if (strayDirection) throw AppError.invalid('unknown_direction', 'A package refers to a direction its university does not have', { presetId: strayDirection.id })
       await this.assertPresetsUsable(presets, stored)
     }
     const data = { ...parsed.data, presets: presets ?? (Array.isArray(stored) ? (stored as Preset[]) : []), universities }

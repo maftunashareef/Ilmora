@@ -17,13 +17,15 @@ type Tab = 'home' | 'courses' | 'videos' | 'playlists' | 'resources' | 'about'
 const TABS: Tab[] = ['home', 'courses', 'videos', 'playlists', 'resources', 'about']
 
 export function TeacherChannelPage() {
-  const { id } = useParams()
+  const { id: param } = useParams()
   const { t, tr } = useT()
   const [params, setParams] = useSearchParams()
   const tab = (TABS.includes(params.get('tab') as Tab) ? params.get('tab') : 'home') as Tab
   const viewer = useViewer()
   const enabled = useStore((s) => s.site.features.teacherChannels)
-  const teacher = useStore((s) => s.teachers.find((x) => x.id === id))
+  // The address may carry the id or the slug (the canonical URL and the sitemap use the slug).
+  const teacher = useStore((s) => s.teachers.find((x) => x.id === param || x.slug === param))
+  const id = teacher?.id
   const center = useStore((s) => s.centers.find((x) => x.id === teacher?.centerId))
   const allCourses = useStore((s) => s.courses.filter((c) => c.teacherId === id))
   const allVideos = useStore((s) => s.videos.filter((v) => v.teacherId === id))

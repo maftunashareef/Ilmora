@@ -340,7 +340,8 @@ export function Avatar({
         role="img"
         aria-label={label}
         className={cx(
-          'group/avatar inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-sage/60 ring-1 ring-charcoal/10 transition-transform duration-300',
+          // relative + isolate: the circle paints above a banner it overlaps (negative margin) and clips its zoomed photo
+          'group/avatar relative isolate inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-sage/60 ring-1 ring-charcoal/10 transition-transform duration-300',
           className,
         )}
         style={{ width: size, height: size }}
@@ -362,7 +363,7 @@ export function Avatar({
       role="img"
       aria-label={label}
       className={cx(
-        'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-forest/15 bg-sage font-display font-medium text-forest transition-all duration-300',
+        'relative isolate inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-forest/15 bg-sage font-display font-medium text-forest transition-all duration-300',
         className,
       )}
       style={{

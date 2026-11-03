@@ -1,7 +1,7 @@
 import { isPublicListed } from './access.js'
 import { isSafeExternalUrl } from './catalog.js'
 import { finalPriceSom, type DiscountWindow } from './pricing.js'
-import type { AdmissionSource, Course, L, Preset, PresetSlot, University } from './types.js'
+import type { AdmissionSource, Course, L, Preset, PresetSlot, University, UniversityDirection, UniversityFaculty } from './types.js'
 
 const l = (uz: string, ru: string, en: string): L => ({ uz, ru, en })
 
@@ -17,13 +17,16 @@ export function newPreset(id: string, universityId?: string): Preset {
     name: l('', '', ''),
     description: l('', '', ''),
     slots: [{ id: `${id}-s1`, label: l('', '', ''), courseId: null }],
+    directionIds: [],
     admission: emptyAdmission(),
     enabled: false,
   }
 }
 
 /** A new university record to fill in. */
-export const newUniversity = (id: string): University => ({ id, name: '', shortName: '', city: '', website: '' })
+export const newUniversity = (id: string): University => ({ id, name: '', shortName: '', city: '', country: '', website: '', logoUrl: '', faculties: [] })
+export const newFaculty = (id: string): UniversityFaculty => ({ id, name: l('', '', ''), directions: [] })
+export const newDirection = (id: string): UniversityDirection => ({ id, name: l('', '', ''), subjects: [] })
 
 /** The part of a course a preset needs to decide availability; groups are the course's non-deleted groups. */
 export type PresetCourse = Pick<Course, 'id' | 'status' | 'visibility'> & { groups: { id: string }[] }
@@ -57,10 +60,17 @@ export function presetReadiness(preset: Pick<Preset, 'slots'>, courses: PresetCo
   return { ready: preset.slots.length > 0 && issues.length === 0, issues }
 }
 
+/**
+ * The slots a purchase includes: every required slot, plus the optional ones the student chose. Without a choice
+ * (`chosenOptional` undefined) every slot counts, which is how readiness and older callers see a package.
+ */
+export const chosenSlots = (preset: Pick<Preset, 'slots'>, chosenOptional?: string[]): PresetSlot[] =>
+  preset.slots.filter((s) => !s.optional || !chosenOptional || chosenOptional.includes(s.id))
+
 /** The preset's courses in slot order, once each; slots without a (known) course are skipped. */
-export function presetCourses<T extends { id: string }>(preset: Pick<Preset, 'slots'>, courses: T[]): T[] {
+export function presetCourses<T extends { id: string }>(preset: Pick<Preset, 'slots'>, courses: T[], chosenOptional?: string[]): T[] {
   const out: T[] = []
-  for (const slot of preset.slots) {
+  for (const slot of chosenSlots(preset, chosenOptional)) {
     const course = slot.courseId ? courses.find((c) => c.id === slot.courseId) : undefined
     if (course && !out.includes(course)) out.push(course)
   }
@@ -71,11 +81,35 @@ export function presetCourses<T extends { id: string }>(preset: Pick<Preset, 'sl
  * Splits a preset's courses into those still to add and those the cart already holds (in any group), so adding a
  * preset never duplicates a course or replaces a group the student already chose.
  */
-export function presetCartPlan<T extends { id: string; groups: { id: string }[] }>(preset: Pick<Preset, 'slots'>, courses: T[], cartGroupIds: string[]): { toAdd: T[]; inCart: T[] } {
+export function presetCartPlan<T extends { id: string; groups: { id: string }[] }>(preset: Pick<Preset, 'slots'>, courses: T[], cartGroupIds: string[], chosenOptional?: string[]): { toAdd: T[]; inCart: T[] } {
   const toAdd: T[] = []
   const inCart: T[] = []
-  for (const course of presetCourses(preset, courses)) (course.groups.some((g) => cartGroupIds.includes(g.id)) ? inCart : toAdd).push(course)
+  for (const course of presetCourses(preset, courses, chosenOptional)) (course.groups.some((g) => cartGroupIds.includes(g.id)) ? inCart : toAdd).push(course)
   return { toAdd, inCart }
+}
+
+/** Preparation length in months: the Super Admin's value, otherwise the longest included course (null without courses). */
+export function presetDurationMonths(preset: Pick<Preset, 'slots' | 'durationMonths'>, courses: { id: string; durationMonths: number }[], chosenOptional?: string[]): number | null {
+  if (preset.durationMonths) return preset.durationMonths
+  const months = presetCourses(preset, courses, chosenOptional).map((c) => c.durationMonths)
+  return months.length ? Math.max(...months) : null
+}
+
+/** Every direction of a university with its faculty, in the order the Super Admin entered them. */
+export const universityDirections = (u: Pick<University, 'faculties'>): { faculty: UniversityFaculty; direction: UniversityDirection }[] =>
+  (u.faculties ?? []).flatMap((faculty) => faculty.directions.map((direction) => ({ faculty, direction })))
+
+/** The packages that prepare for one direction. */
+export const presetsForDirection = <P extends Pick<Preset, 'directionIds'>>(presets: P[], directionId: string): P[] =>
+  presets.filter((p) => p.directionIds?.includes(directionId))
+
+/** Direction ids a package names that its university does not have (a package without a university may name none). */
+export function unknownDirections(preset: Pick<Preset, 'universityId' | 'directionIds'>, universities: Pick<University, 'id' | 'faculties'>[]): string[] {
+  const ids = preset.directionIds ?? []
+  if (ids.length === 0) return []
+  const u = preset.universityId ? universities.find((x) => x.id === preset.universityId) : undefined
+  const known = new Set(u ? universityDirections(u).map((d) => d.direction.id) : [])
+  return ids.filter((id) => !known.has(id))
 }
 
 /**

@@ -14,11 +14,13 @@ import { useCanSaveCourses, useCurrentStudent, useHydrated, useViewer } from '..
 import { useStore } from '../../store/useStore'
 
 export function CourseDetailPage() {
-  const { id } = useParams()
+  const { id: param } = useParams()
   const { t, tr } = useT()
   const nav = useNavigate()
   const viewer = useViewer()
-  const course = useStore((s) => s.courses.find((c) => c.id === id))
+  // The address may carry the id or the slug (the canonical URL and the sitemap use the slug).
+  const course = useStore((s) => s.courses.find((c) => c.id === param || c.slug === param))
+  const id = course?.id
   const teacher = useStore((s) => s.teachers.find((x) => x.id === course?.teacherId))
   const center = useStore((s) => s.centers.find((x) => x.id === course?.centerId))
   const category = useStore((s) => s.categories.find((x) => x.id === course?.categoryId))

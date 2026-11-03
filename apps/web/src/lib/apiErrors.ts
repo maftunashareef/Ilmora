@@ -69,6 +69,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   invalid_preset_course: 'apiError.presetData',
   unknown_university: 'apiError.presetData',
   duplicate_university: 'apiError.duplicateUniversity',
+  unknown_direction: 'apiError.unknownDirection',
+  duplicate_direction: 'apiError.duplicateDirection',
   preset_not_ready: 'admin.uni.publishBlocked',
   preset_not_verified: 'admin.uni.publishBlocked',
   published_preset_removed: 'admin.uni.deletePublished',

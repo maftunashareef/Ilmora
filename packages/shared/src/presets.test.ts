@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { admissionIssues, emptyAdmission, groupByUniversity, isUniversityPreset, newPreset, presetCartPlan, presetCourses, presetMissingSubjects, presetPublishability, presetReadiness, presetTotal, universityOf, type PresetCourse } from './presets.js'
+import { admissionIssues, chosenSlots, emptyAdmission, groupByUniversity, isUniversityPreset, newPreset, presetCartPlan, presetCourses, presetDurationMonths, presetMissingSubjects, presetPublishability, presetReadiness, presetsForDirection, presetTotal, universityDirections, universityOf, unknownDirections, type PresetCourse } from './presets.js'
 import type { AdmissionSource, Preset, University } from './types.js'
 
 const course = (id: string, over: Partial<PresetCourse> = {}, groups = 1): PresetCourse => ({
@@ -141,5 +141,43 @@ describe('browsing by university', () => {
     const legacy = { ...preset(['math']), id: 'old', university: 'INHA' }
     expect(universityOf(legacy, UNIS)).toEqual({ id: 'legacy:INHA', name: 'INHA' })
     expect(groupByUniversity([legacy], UNIS).map((g) => g.university.name)).toEqual(['INHA'])
+  })
+})
+
+describe('optional extras, duration and directions', () => {
+  const withExtra: Preset = {
+    ...newPreset('px', 'uni-1'),
+    slots: [
+      { id: 'math', label: { uz: '', ru: '', en: '' }, courseId: 'c-math' },
+      { id: 'ielts', label: { uz: '', ru: '', en: '' }, courseId: 'c-ielts', optional: true },
+    ],
+  }
+  const catalog = [{ ...course('c-math'), durationMonths: 4 }, { ...course('c-ielts'), durationMonths: 3 }]
+
+  it('includes an optional course only when it was chosen, and every course when nothing was chosen', () => {
+    expect(chosenSlots(withExtra, []).map((s) => s.id)).toEqual(['math'])
+    expect(chosenSlots(withExtra, ['ielts']).map((s) => s.id)).toEqual(['math', 'ielts'])
+    expect(chosenSlots(withExtra).map((s) => s.id)).toEqual(['math', 'ielts'])
+    expect(presetCartPlan(withExtra, catalog, [], []).toAdd.map((c) => c.id)).toEqual(['c-math'])
+    expect(presetCartPlan(withExtra, catalog, [], ['ielts']).toAdd.map((c) => c.id)).toEqual(['c-math', 'c-ielts'])
+  })
+
+  it('takes the duration from the Super Admin, otherwise from the longest chosen course', () => {
+    expect(presetDurationMonths(withExtra, catalog, [])).toBe(4)
+    expect(presetDurationMonths({ ...withExtra, durationMonths: 6 }, catalog, [])).toBe(6)
+    expect(presetDurationMonths({ ...withExtra, slots: [] }, catalog)).toBeNull()
+  })
+
+  it('lists directions by faculty and rejects a package that names a direction its university does not have', () => {
+    const uni: University = { id: 'uni-1', name: 'U', faculties: [{ id: 'f', name: { uz: 'F', ru: 'F', en: 'F' }, directions: [{ id: 'd1', name: { uz: 'D', ru: 'D', en: 'D' }, subjects: [] }, { id: 'd2', name: { uz: 'E', ru: 'E', en: 'E' }, subjects: [] }] }] }
+    expect(universityDirections(uni).map((d) => `${d.faculty.id}/${d.direction.id}`)).toEqual(['f/d1', 'f/d2'])
+    expect(unknownDirections({ ...withExtra, directionIds: ['d2'] }, [uni])).toEqual([])
+    expect(unknownDirections({ ...withExtra, directionIds: ['d2', 'x'] }, [uni])).toEqual(['x'])
+    expect(presetsForDirection([{ ...withExtra, directionIds: ['d1', 'd2'] }, { ...withExtra, id: 'other', directionIds: ['d1'] }], 'd2').map((p) => p.directionIds)).toEqual([['d1', 'd2']])
+  })
+
+  it('still needs an optional course to be available before the package can be published', () => {
+    expect(presetReadiness(withExtra, [course('c-math')]).ready).toBe(false)
+    expect(presetReadiness(withExtra, catalog).ready).toBe(true)
   })
 })

@@ -68,12 +68,12 @@ function DiscountCard({ course, copy }: { course: Course; copy?: boolean }) {
 /**
  * "Special Offers" on the homepage: the courses whose discount is active now (carouselCourses), introduced by two
  * golden badges (the biggest discount and how many courses are on sale). The row scrolls on its own with a CSS transform, a second, inert copy of the cards making the loop seamless.
- * It pauses while hovered or focused, while off screen and with the pause button; with reduced motion it is a still row
- * the visitor scrolls. "View all discounts" opens the catalog filtered to every active discount.
+ * It rests only while hovered or focused and while off screen (there is no pause control); with reduced motion it is a
+ * still row the visitor scrolls. "View all courses" opens the whole catalog, "View all discounts" the catalog filtered to
+ * every active discount.
  */
 export function DiscountShowcase({ courses, title, subtitle }: { courses: Course[]; title: string; subtitle: string }) {
   const { t } = useT()
-  const [paused, setPaused] = useState(false)
   const [offscreen, setOffscreen] = useState(false)
   const marquee = useRef<HTMLDivElement>(null)
   const rotating = courses.length >= MIN_ROTATING
@@ -108,12 +108,7 @@ export function DiscountShowcase({ courses, title, subtitle }: { courses: Course
             {subtitle && <p className="mt-3 text-[15px] leading-relaxed text-charcoal/65">{subtitle}</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {rotating && (
-              <button type="button" onClick={() => setPaused((p) => !p)} aria-pressed={paused} className="discount-toggle inline-flex items-center gap-1.5 rounded-full border border-charcoal/15 bg-paper px-3.5 py-2 text-xs font-medium text-charcoal/75 transition hover:border-forest/40 hover:text-forest">
-                {paused ? <Icon name="play" className="h-3 w-3" /> : <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12" rx="1" fill="currentColor" /><rect x="9.5" y="2" width="3.5" height="12" rx="1" fill="currentColor" /></svg>}
-                {paused ? t('discounts.play') : t('discounts.pause')}
-              </button>
-            )}
+            <LinkButton to="/courses" variant="secondary">{t('offers.viewAllCourses')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
             <LinkButton to="/courses?sale=1">{t('offers.viewAll')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
           </div>
         </div>
@@ -124,7 +119,7 @@ export function DiscountShowcase({ courses, title, subtitle }: { courses: Course
         aria-label={title}
         className="discount-marquee"
         data-static={rotating ? undefined : 'true'}
-        data-paused={paused || offscreen ? 'true' : undefined}
+        data-paused={offscreen ? 'true' : undefined}
         style={{ '--discount-duration': `${courses.length * 7}s` } as CSSProperties}
       >
         <div className="discount-track">

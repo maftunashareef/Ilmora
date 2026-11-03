@@ -125,3 +125,30 @@ describe('universities (stubbed storage)', () => {
     expect((await make({}).get('t')).universities).toEqual([])
   })
 })
+
+describe('faculties, directions, logos and optional extras', () => {
+  const dir = (id: string) => ({ id, name: label, subjects: [label] })
+  const UNI_F: University = { ...UNI_A, country: 'Uzbekistan', logoUrl: 'https://cdn.example.uz/logo.png', faculties: [{ id: 'f1', name: label, directions: [dir('d1'), dir('d2')] }] }
+
+  it('accepts faculties with directions and entrance subjects, an https logo, directions on a package and an optional slot', () => {
+    const p = pkg('p1', { directionIds: ['d1', 'd2'], durationMonths: 6, slots: [{ id: 's1', label, courseId: 'a' }, { id: 's2', label, courseId: 'b', optional: true }] })
+    expect(SiteConfigSchema.safeParse(body({ universities: [UNI_F], presets: [p] })).success).toBe(true)
+  })
+
+  it('refuses a logo that is not a plain https link and a duration outside 1–36 months', () => {
+    expect(SiteConfigSchema.safeParse(body({ universities: [{ ...UNI_F, logoUrl: 'http://cdn.example.uz/logo.png' }] })).success).toBe(false)
+    expect(SiteConfigSchema.safeParse(body({ universities: [{ ...UNI_F, logoUrl: 'javascript:alert(1)' }] })).success).toBe(false)
+    // a logo file shipped with the site is accepted, any other relative path is not
+    expect(SiteConfigSchema.safeParse(body({ universities: [{ ...UNI_F, logoUrl: '/universities/uni-inha.svg' }] })).success).toBe(true)
+    expect(SiteConfigSchema.safeParse(body({ universities: [{ ...UNI_F, logoUrl: '/universities/uni-wiut.png', logoOnDark: true }] })).success).toBe(true)
+    expect(SiteConfigSchema.safeParse(body({ universities: [{ ...UNI_F, logoUrl: '/media/../secret.svg' }] })).success).toBe(false)
+    expect(SiteConfigSchema.safeParse(body({ universities: [UNI_F], presets: [pkg('p1', { durationMonths: 0 })] })).success).toBe(false)
+  })
+
+  it('refuses a package that names a direction its university does not have, and duplicate direction ids', async () => {
+    await expect(make({ presets: [], universities: [UNI_F] }).update('t', body({ universities: [UNI_F], presets: [pkg('p1', { directionIds: ['d9'] })] }), 3)).rejects.toMatchObject({ code: 'unknown_direction' })
+    const twice = { ...UNI_F, faculties: [{ id: 'f1', name: label, directions: [dir('d1')] }, { id: 'f2', name: label, directions: [dir('d1')] }] }
+    await expect(make({ presets: [], universities: [] }).update('t', body({ universities: [twice] }), 3)).rejects.toMatchObject({ code: 'duplicate_direction' })
+    await expect(make({ presets: [], universities: [UNI_F] }).update('t', body({ universities: [UNI_F], presets: [pkg('p1', { directionIds: ['d2'] })] }), 3)).resolves.toEqual({ version: 4 })
+  })
+})

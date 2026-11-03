@@ -640,4 +640,22 @@ describe('Teacher Profile Self-Service and Image Uploads', () => {
     expect(result.key).toMatch(/^avatars\/tenant-1\/tp-101-\d+\.webp$/)
     expect(result.publicUrl).toMatch(/^https:\/\/cdn\.ilmora\.uz\/avatars\/tenant-1\/tp-101-\d+\.webp$/)
   })
+
+  it('gives the Super Admin an upload address for a university logo under its own prefix, and reports missing storage', async () => {
+    const configured = makeService(makeMockPrisma({}), {
+      S3_ENDPOINT: 'https://s3.tashkent.ilmora.uz',
+      S3_BUCKET: 'ilmora-assets',
+      S3_ACCESS_KEY_ID: 'test-access-key',
+      S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      S3_REGION: 'us-east-1',
+      S3_FORCE_PATH_STYLE: true,
+      S3_PUBLIC_BASE_URL: 'https://cdn.ilmora.uz',
+    })
+    const result = await configured.generateUniversityLogoUploadUrl('tenant-1', { fileName: 'inha.png', contentType: 'image/png', fileSize: 1024 * 40 })
+    expect(result.key).toMatch(/^universities\/tenant-1\/logo-\d+\.png$/)
+    expect(result.publicUrl).toMatch(/^https:\/\/cdn\.ilmora\.uz\/universities\/tenant-1\/logo-\d+\.png$/)
+
+    const missing = makeService(makeMockPrisma({}), { S3_ENDPOINT: undefined, S3_BUCKET: undefined, S3_ACCESS_KEY_ID: undefined, S3_SECRET_ACCESS_KEY: undefined })
+    await expect(missing.generateUniversityLogoUploadUrl('tenant-1', { fileName: 'inha.png', contentType: 'image/png', fileSize: 1024 })).rejects.toMatchObject({ code: 'storage_not_configured' })
+  })
 })

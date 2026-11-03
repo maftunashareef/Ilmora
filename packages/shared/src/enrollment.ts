@@ -41,10 +41,11 @@ export const migratedCapacity = (previousSeats: unknown, enrolled: number): numb
 }
 
 /**
- * Upper bound on courses in one purchase when no package is chosen ("custom selection"). It is a technical
- * limit shared by the web cart and the draft endpoint; the business limit has not been decided yet.
+ * A custom selection (no package) may hold any number of courses (decided 2026-11-03); only the weekly schedule limits
+ * it, since groups may not overlap. This bound is technical, not a business rule: it caps one request (web cart and
+ * draft endpoint) far above the catalog's offline courses, and the interface never presents it as a limit.
  */
-export const MAX_CART_COURSES = 6
+export const MAX_CART_COURSES = 30
 
 export type CartDropReason = 'unknown' | 'duplicate' | 'full' | 'limit' | 'conflict'
 export interface CartMergeResult {

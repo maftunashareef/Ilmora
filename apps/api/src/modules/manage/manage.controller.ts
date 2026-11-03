@@ -67,6 +67,7 @@ export class ManageController {
   /** Full site configuration for the Super Admin editor, including presets that are still disabled (internal). */
   @Roles('PLATFORM_ADMIN') @Get('admin/site') adminSite(@CurrentTenantId() t: string) { return this.site.get(t, true) }
   @Roles('PLATFORM_ADMIN') @Put('admin/site') updateSite(@CurrentTenantId() t: string, @Body(body(SiteDto)) dto: z.infer<typeof SiteDto>) { return this.site.update(t, dto.data, dto.version) }
+  @Roles('PLATFORM_ADMIN') @Post('admin/site/university-logo/upload-url') universityLogoUploadUrl(@CurrentTenantId() t: string, @Body(body(AvatarUploadUrlInput)) dto: z.infer<typeof AvatarUploadUrlInput>) { return this.manage.generateUniversityLogoUploadUrl(t, dto) }
   @Roles('PLATFORM_ADMIN') @Post('admin/centers') createCenter(@CurrentTenantId() t: string, @Body(body(CenterInput)) dto: z.infer<typeof CenterInput>) { return this.manage.upsertCenter(t, dto) }
   @Roles('PLATFORM_ADMIN') @Put('admin/centers/:id') updateCenter(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(CenterInput)) dto: z.infer<typeof CenterInput>) { return this.manage.upsertCenter(t, dto, id) }
   @Roles('PLATFORM_ADMIN') @Delete('admin/centers/:id') deleteCenter(@CurrentTenantId() t: string, @Param('id') id: string) { return this.manage.deleteCenter(t, id) }

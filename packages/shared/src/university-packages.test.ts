@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isSafeExternalUrl } from './catalog.js'
-import { presetMissingSubjects, presetPublishability, presetTotal, presetCourses, type PresetCourse } from './presets.js'
+import { presetMissingSubjects, presetPublishability, presetTotal, presetCourses, universityDirections, type PresetCourse } from './presets.js'
 import * as sampleData from './sample-data.js'
 import type { Preset } from './types.js'
 import { UNIVERSITIES, UNIVERSITY_PACKAGES } from './university-packages.js'
@@ -108,5 +108,75 @@ describe('researched university packages', () => {
       expect(p.description.ru, p.id).toMatch(/официально не связан/)
       expect(p.description.uz, p.id).toMatch(/rasmiy boğliq emas/)
     }
+  })
+})
+
+describe('faculties, directions and the INHA and Narxoz data', () => {
+  const directionsOf = (universityId: string) => universityDirections(UNIVERSITIES.find((u) => u.id === universityId) ?? { faculties: [] }).map((d) => d.direction.id)
+
+  it('points every package only at directions its own university has, with unique direction ids', () => {
+    const all = UNIVERSITIES.flatMap((u) => directionsOf(u.id))
+    expect(new Set(all).size).toBe(all.length)
+    for (const p of UNIVERSITY_PACKAGES) for (const d of p.directionIds ?? []) expect(directionsOf(p.universityId), `${p.id} → ${d}`).toContain(d)
+  })
+
+  it('separates INHA Business Administration and Logistics Management as directions served by one package', () => {
+    expect(directionsOf('uni-inha')).toEqual(expect.arrayContaining(['inha-socie-cse-ice', 'inha-sbl-ba', 'inha-sbl-lm']))
+    const sbl = UNIVERSITY_PACKAGES.filter((p) => p.directionIds?.includes('inha-sbl-ba'))
+    expect(sbl.map((p) => p.id)).toEqual(['uni-inha-business'])
+    expect(sbl[0].directionIds).toEqual(['inha-sbl-ba', 'inha-sbl-lm'])
+  })
+
+  it('offers IELTS at INHA as an optional extra next to the verified exam subjects', () => {
+    const socie = UNIVERSITY_PACKAGES.find((p) => p.id === 'uni-inha-socie')!
+    expect(socie.subjects.filter((s) => !s.optional).map((s) => s.label.en)).toEqual(['Mathematics', 'Physics'])
+    expect(socie.subjects.filter((s) => s.optional).map((s) => s.course)).toEqual(['c-ielts'])
+    expect(socie.admission).toMatchObject({ status: 'verified', academicYear: '2026-2027', checkedOn: '2026-11-03' })
+    const business = UNIVERSITY_PACKAGES.find((p) => p.id === 'uni-inha-business')!
+    expect(business.subjects.filter((s) => !s.optional).map((s) => s.label.en)).toEqual(['Mathematics'])
+  })
+
+  it('keeps every Narxoz pair an unverified draft: one package per pair, never one universal package', () => {
+    const narxoz = UNIVERSITY_PACKAGES.filter((p) => p.universityId === 'uni-narxoz')
+    expect(narxoz).toHaveLength(6)
+    for (const p of narxoz) {
+      expect(p.admission.status, p.id).toBe('needs_review')
+      expect(p.subjects, p.id).toHaveLength(2)
+      expect(p.directionIds, p.id).toHaveLength(1)
+      expect(presetPublishability(toPreset(p), OFFLINE).ok, p.id).toBe(false)
+    }
+  })
+})
+
+describe('the seven universities of the preparation catalogue', () => {
+  const ids = ['uni-inha', 'uni-narxoz', 'uni-tuit', 'uni-kiut', 'uni-mdis', 'uni-millat-umidi', 'uni-wiut']
+  const packagesOf = (id: string) => UNIVERSITY_PACKAGES.filter((p) => p.universityId === id)
+
+  it('each has its official name and an https website on its own domain', () => {
+    for (const id of ids) {
+      const u = UNIVERSITIES.find((x) => x.id === id)
+      expect(u, id).toBeDefined()
+      expect(u!.website && isSafeExternalUrl(u!.website), id).toBe(true)
+      expect(u!.country, id).toBeTruthy()
+    }
+  })
+
+  it('publishes only what an official 2026 page states: INHA and WIUT verified, the others to be verified', () => {
+    for (const id of ['uni-inha', 'uni-wiut']) for (const p of packagesOf(id)) expect(p.admission, p.id).toMatchObject({ status: 'verified', academicYear: '2026-2027' })
+    for (const id of ['uni-narxoz', 'uni-tuit', 'uni-kiut', 'uni-mdis']) {
+      expect(packagesOf(id).length, id).toBeGreaterThan(0)
+      for (const p of packagesOf(id)) expect(presetPublishability(toPreset(p), OFFLINE).ok, p.id).toBe(false)
+    }
+    expect(packagesOf('uni-millat-umidi')).toEqual([]) // nothing could be read on its official site
+  })
+
+  it('maps WIUT programmes to packages by their stated requirements, and leaves Business Information Systems without one', () => {
+    const served = (dir: string) => UNIVERSITY_PACKAGES.filter((p) => p.directionIds?.includes(dir)).map((p) => p.id)
+    expect(served('wiut-cs')).toEqual(['uni-wiut-cs'])
+    expect(served('wiut-finance')).toEqual(['uni-wiut-business'])
+    expect(served('wiut-commercial-law')).toEqual(['uni-wiut-law'])
+    expect(served('wiut-bis')).toEqual([])
+    const law = UNIVERSITY_PACKAGES.find((p) => p.id === 'uni-wiut-law')!
+    expect(law.subjects.map((s) => !!s.optional)).toEqual([false]) // English is its only requirement
   })
 })

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { countLabel, isOnlineCourse, isPublicListed, newPreset, newUniversity, NOUNS, presetCourses, presetMissingSubjects, presetPublishability, presetTotal, universityOf, type AdmissionStatus } from '@ilmora/shared'
+import { countLabel, isOnlineCourse, isPublicListed, newPreset, newUniversity, NOUNS, presetCourses, presetDurationMonths, presetMissingSubjects, presetPublishability, presetTotal, universityDirections, universityOf, type AdmissionStatus } from '@ilmora/shared'
 import { FormatBadge, PriceNow, ScheduleChips } from '../../components/course/CourseCard'
 import { Badge, Button, Card, cx, Eyebrow, Field, Icon, Input, LField, Notice, Select, Textarea } from '../../components/ui'
 import { emptyL, useT } from '../../i18n/useT'
@@ -7,6 +7,7 @@ import type { TKey } from '../../i18n/translations'
 import { formatSom } from '../../lib/format'
 import { uid, useStore } from '../../store/useStore'
 import type { Preset, University } from '../../types'
+import { FacultiesEditor, LogoField } from './UniversityFaculties'
 
 const MAX_SUBJECTS = 8
 type StatusFilter = 'all' | 'draft' | 'published' | 'review'
@@ -30,9 +31,11 @@ export function UniversityPackagesAdmin() {
   const [status, setStatus] = useState<StatusFilter>('all')
   const [uniFilter, setUniFilter] = useState('')
   const [editUnis, setEditUnis] = useState(false)
+  const [openFaculties, setOpenFaculties] = useState<string | null>(null)
 
   const list = presets ?? []
   const unis = universities ?? []
+  const usedDirectionIds = new Set(list.flatMap((p) => p.directionIds ?? []))
   const setPresets = (next: Preset[]) => patchSite((s) => ({ ...s, presets: next }))
   const setUnis = (next: University[]) => patchSite((s) => ({ ...s, universities: next }))
   const up = (id: string, patch: Partial<Preset>) => setPresets(list.map((p) => (p.id === id ? { ...p, ...patch } : p)))
@@ -95,15 +98,32 @@ export function UniversityPackagesAdmin() {
             {unis.map((u) => {
               const n = usedBy(u.id)
               const patch = (v: Partial<University>) => setUnis(unis.map((x) => (x.id === u.id ? { ...x, ...v } : x)))
+              const directions = universityDirections(u).length
               return (
-                <li key={u.id} className="grid gap-3 rounded-card border border-charcoal/10 bg-ivory/50 p-3 sm:grid-cols-[1.6fr_0.7fr_0.8fr_1.4fr_auto]">
-                  <Field label={t('admin.uni.universityName')}><Input value={u.name} maxLength={120} onChange={(e) => patch({ name: e.target.value })} /></Field>
-                  <Field label={t('admin.uni.shortName')}><Input value={u.shortName ?? ''} maxLength={30} onChange={(e) => patch({ shortName: e.target.value })} /></Field>
-                  <Field label={t('admin.uni.city')}><Input value={u.city ?? ''} maxLength={60} onChange={(e) => patch({ city: e.target.value })} /></Field>
-                  <Field label={t('admin.uni.website')}><Input type="url" placeholder="https://…" value={u.website ?? ''} onChange={(e) => patch({ website: e.target.value.trim() })} /></Field>
-                  <div className="flex items-end pb-1">
-                    <Button size="sm" variant="danger" aria-label={t('common.delete')} disabled={n > 0} title={n > 0 ? t('admin.uni.deleteBlocked') : undefined} onClick={() => { if (confirm(t('common.confirmDelete'))) setUnis(unis.filter((x) => x.id !== u.id)) }}><Icon name="trash" className="h-4 w-4" /></Button>
+                <li key={u.id} className="rounded-card border border-charcoal/10 bg-ivory/50 p-3">
+                  <div className="grid gap-3 sm:grid-cols-[1.6fr_0.7fr_0.8fr_0.8fr_1.4fr_auto]">
+                    <Field label={t('admin.uni.universityName')}><Input value={u.name} maxLength={120} onChange={(e) => patch({ name: e.target.value })} /></Field>
+                    <Field label={t('admin.uni.shortName')}><Input value={u.shortName ?? ''} maxLength={30} onChange={(e) => patch({ shortName: e.target.value })} /></Field>
+                    <Field label={t('admin.uni.city')}><Input value={u.city ?? ''} maxLength={60} onChange={(e) => patch({ city: e.target.value })} /></Field>
+                    <Field label={t('admin.uni.country')}><Input value={u.country ?? ''} maxLength={60} onChange={(e) => patch({ country: e.target.value })} /></Field>
+                    <Field label={t('admin.uni.website')}><Input type="url" placeholder="https://…" value={u.website ?? ''} onChange={(e) => patch({ website: e.target.value.trim() })} /></Field>
+                    <div className="flex items-end pb-1">
+                      <Button size="sm" variant="danger" aria-label={t('common.delete')} disabled={n > 0} title={n > 0 ? t('admin.uni.deleteBlocked') : undefined} onClick={() => { if (confirm(t('common.confirmDelete'))) setUnis(unis.filter((x) => x.id !== u.id)) }}><Icon name="trash" className="h-4 w-4" /></Button>
+                    </div>
                   </div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    <LogoField university={u} onChange={(logoUrl) => patch({ logoUrl })} onDarkChange={(logoOnDark) => patch({ logoOnDark: logoOnDark || undefined })} />
+                    <div className="flex items-start lg:justify-end">
+                      <Button size="sm" variant="secondary" aria-expanded={openFaculties === u.id} onClick={() => setOpenFaculties(openFaculties === u.id ? null : u.id)}>
+                        <Icon name="layers" className="h-4 w-4" />{t('admin.uni.faculties')} · {(u.faculties ?? []).length} / {directions}
+                      </Button>
+                    </div>
+                  </div>
+                  {openFaculties === u.id && (
+                    <div className="mt-3 border-t border-charcoal/10 pt-3">
+                      <FacultiesEditor faculties={u.faculties ?? []} onChange={(faculties) => patch({ faculties })} usedDirectionIds={usedDirectionIds} />
+                    </div>
+                  )}
                 </li>
               )
             })}
@@ -169,6 +189,27 @@ export function UniversityPackagesAdmin() {
                           </div>
                           <LField label={t('common.description')} multiline value={p.description} onChange={(v) => up(p.id, { description: v })} />
 
+                          <div className="rounded-card border border-charcoal/10 p-4">
+                            <div className="text-sm font-medium text-charcoal">{t('admin.uni.directions')}</div>
+                            <p className="mb-3 text-xs text-charcoal/55">{t('admin.uni.directionsHint')}</p>
+                            {(() => {
+                              const options = uni && !uni.id.startsWith('legacy:') ? universityDirections(uni) : []
+                              if (options.length === 0) return <p className="text-xs text-charcoal/55">{t('admin.uni.noDirections')}</p>
+                              const chosen = p.directionIds ?? []
+                              const toggle = (id: string) => up(p.id, { directionIds: chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id] })
+                              return (
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  {options.map(({ faculty, direction }) => (
+                                    <label key={direction.id} className={cx('flex cursor-pointer items-start gap-2 rounded-control border p-2.5 text-sm transition', chosen.includes(direction.id) ? 'border-forest/40 bg-sage/40' : 'border-charcoal/10 hover:bg-ivory')}>
+                                      <input type="checkbox" className="mt-0.5 h-4 w-4 accent-forest" checked={chosen.includes(direction.id)} onChange={() => toggle(direction.id)} />
+                                      <span><span className="block font-medium text-charcoal">{tr(direction.name) || '—'}</span><span className="text-[11px] text-charcoal/50">{tr(faculty.name)}</span></span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )
+                            })()}
+                          </div>
+
                           <div>
                             <div className="mb-2 text-sm font-medium text-charcoal">{t('admin.uni.subjects')}</div>
                             <ul className="space-y-3">
@@ -193,6 +234,10 @@ export function UniversityPackagesAdmin() {
                                       </Select>
                                       {p.slots.length > 1 && <Button size="sm" variant="ghost" aria-label={t('common.delete')} onClick={() => up(p.id, { slots: p.slots.filter((x) => x.id !== slot.id) })}><Icon name="x" className="h-3.5 w-3.5" /></Button>}
                                     </div>
+                                    <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs text-charcoal/70">
+                                      <input type="checkbox" className="h-4 w-4 accent-forest" checked={!!slot.optional} onChange={(e) => setSlot({ optional: e.target.checked || undefined })} />
+                                      {t('admin.uni.optionalSlot')}
+                                    </label>
                                     {picked ? (
                                       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-charcoal/55">
                                         <FormatBadge course={picked} />
@@ -209,6 +254,19 @@ export function UniversityPackagesAdmin() {
                               })}
                             </ul>
                             {p.slots.length < MAX_SUBJECTS && <Button size="sm" variant="ghost" className="mt-2" onClick={() => up(p.id, { slots: [...p.slots, { id: uid('slot'), label: emptyL(), courseId: null }] })}><Icon name="plus" className="h-4 w-4" />{t('admin.uni.addSubject')}</Button>}
+                          </div>
+
+                          <div className="grid gap-4 rounded-card border border-charcoal/10 p-4 md:grid-cols-2">
+                            <Field label={t('admin.uni.duration')}>
+                              <Input type="number" min={1} max={36} placeholder={String(presetDurationMonths({ ...p, durationMonths: undefined }, courses, []) ?? '')} value={p.durationMonths ?? ''}
+                                onChange={(e) => { const v = Math.round(Number(e.target.value)); up(p.id, { durationMonths: e.target.value === '' || !(v >= 1 && v <= 36) ? undefined : v }) }} />
+                              <span className="mt-1 block text-[11px] text-charcoal/50">{t('admin.uni.durationHint')}</span>
+                            </Field>
+                            <div>
+                              <div className="text-sm font-medium text-charcoal">{t('admin.uni.price')}</div>
+                              <div className="mt-1 font-display text-2xl text-charcoal">{presetCourses(p, courses, []).length ? formatSom(presetTotal(presetCourses(p, courses, [])), lang) : '—'}</div>
+                              <p className="mt-1 text-[11px] text-charcoal/55">{t('admin.uni.priceNote')}</p>
+                            </div>
                           </div>
 
                           <div className="rounded-card border border-charcoal/10 p-4">

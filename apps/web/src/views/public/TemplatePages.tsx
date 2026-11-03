@@ -15,6 +15,7 @@ import dynamic from 'next/dynamic'
 import { Avatar, Badge, Button, Card, cx, Eyebrow, Field, Icon, Input, LinkButton, Notice, SectionHeading, Textarea } from '../../components/ui'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { CourseFinderTeaser } from './CourseFinder'
+import { UniversitiesSection } from './Universities'
 import { DiscountShowcase } from '../../components/course/DiscountShowcase'
 import { JourneySection as Journey } from '../../components/JourneySteps'
 
@@ -52,6 +53,7 @@ export function SectionRenderer({ section }: { section: Section }) {
     case 'inquiryForm': return <InquiryForm s={section} />
     case 'courseFinder': return <CourseFinderTeaser s={section} />
     case 'journey': return <JourneySection s={section} />
+    case 'universities': return <UniversitiesSection s={section} />
     default: return null
   }
 }
@@ -68,7 +70,7 @@ function Hero() {
   const nCats = useStore((s) => s.categories.length)
   return (
     <section className="relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-charcoal text-ivory">
-      <BackgroundVideo src={withBase(media.heroVideoUrl)} poster={withBase(media.heroPosterUrl)} pauseLabel={t('home.pauseVideo')} playLabel={t('home.playVideo')} note={t('home.heroVideoNote')} />
+      <BackgroundVideo src={withBase(media.heroVideoUrl)} poster={withBase(media.heroPosterUrl)} note={t('home.heroVideoNote')} />
       {/* Semi-transparent dark-green overlay over the film so the text and buttons stay readable, then a soft hand-off into the ivory page */}
       <div className="pointer-events-none absolute inset-0" style={{ background: 'rgba(0, 30, 20, 0.6)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-ivory via-ivory/40 to-transparent" aria-hidden="true" />

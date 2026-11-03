@@ -16,15 +16,22 @@ export interface UniversityPackageSeed {
   id: string
   universityId: string
   program: L
+  /** The directions of the university (see UNIVERSITIES[].faculties) this package prepares for. */
+  directionIds?: string[]
   name: L
   description: L
-  /** Required subjects in the university's own terms; `course` is the ILMORA course that prepares for it, or null when none exists. */
-  subjects: { label: L; course: string | null }[]
+  /**
+   * Subjects in the university's own terms; `course` is the ILMORA course that prepares for it, or null when none exists.
+   * `optional` marks an extra the student may leave out (for example IELTS when the certificate is submitted after the exam).
+   */
+  subjects: { label: L; course: string | null; optional?: boolean }[]
   admission: AdmissionSource
 }
 
 const l = (uz: string, ru: string, en: string): L => ({ uz, ru, en })
 const CHECKED = '2026-10-30'
+/** INHA's 2026-2027 Korean-programme guideline was read again on this date (subjects, majors and English minimums). */
+const INHA_CHECKED = '2026-11-03'
 
 /** ILMORA offline courses (sample catalog ids) used for the mapping. */
 const COURSE = { math: 'c-algebra', english: 'c-general-english', ielts: 'c-ielts', physics: 'c-physics', chemistry: 'c-chemistry' } as const
@@ -59,7 +66,7 @@ const describe = (uni: L, program: L): L =>
 
 const un = (short: string, full: string): L => l(short || full, short || full, short || full)
 
-type Subject = { label: L; course: string | null }
+type Subject = { label: L; course: string | null; optional?: boolean }
 const MATH_TWICE = l('Matematika (majburiy fan va yönaliş fani)', 'Математика (обязательный и профильный предмет)', 'Mathematics (mandatory and direction subject)')
 
 /**
@@ -81,24 +88,156 @@ const CHEMISTRY: Subject = { label: SUBJECT.chemistry, course: COURSE.chemistry 
 const BIOLOGY: Subject = { label: SUBJECT.biology, course: null }
 const FOREIGN: Subject = { label: SUBJECT.foreign, course: COURSE.english }
 
-const pack = (id: string, universityId: string, uniShort: string, program: L, subjects: { label: L; course: string | null }[], admission: Omit<AdmissionSource, 'checkedOn'>): UniversityPackageSeed => ({
-  id, universityId, program, name: title(uniShort, program), description: describe(un(uniShort, uniShort), program), subjects,
-  admission: { ...admission, checkedOn: CHECKED },
+const pack = (id: string, universityId: string, uniShort: string, program: L, subjects: Subject[], admission: Omit<AdmissionSource, 'checkedOn'> & { checkedOn?: string }, directionIds?: string[]): UniversityPackageSeed => ({
+  id, universityId, program, directionIds, name: title(uniShort, program), description: describe(un(uniShort, uniShort), program), subjects,
+  admission: { ...admission, checkedOn: admission.checkedOn ?? CHECKED },
 })
 
+/** IELTS preparation offered as an optional extra: INHA asks for the certificate after the exam, it is not an exam subject. */
+const ieltsExtra = (band: string, toefl: string): Subject => ({
+  label: l(`Ingliz tili (IELTS ${band} yoki TOEFL iBT ${toefl}; sertifikat bölsa şart emas)`, `Английский язык (IELTS ${band} или TOEFL iBT ${toefl}; не нужен при наличии сертификата)`, `English (IELTS ${band} or TOEFL iBT ${toefl}; not needed with a certificate)`),
+  course: COURSE.ielts,
+  optional: true,
+})
+
+/** Narxoz University (Almaty): the bachelor page could not be reached on 2026-11-03, so its combinations stay unverified drafts. */
+const NARXOZ_SOURCE = {
+  url: 'https://narxoz.edu.kz', academicYear: '', checkedOn: '2026-11-03', status: 'needs_review' as const,
+  note: 'To be verified: the official site (narxoz.edu.kz; the older narxozedu.kz address no longer answers) builds its pages with JavaScript, so on 2026-11-03 neither the programmes nor their UNT profile-subject pairs could be read. The pair was supplied for planning only; verify it on the site before publishing.',
+}
+const narxozSubject = {
+  math: l('Matematika', 'Математика', 'Mathematics'),
+  informatics: l('Informatika', 'Информатика', 'Informatics'),
+  geography: l('Geografiya', 'География', 'Geography'),
+  physics: l('Fizika', 'Физика', 'Physics'),
+  english: l('Ingliz tili', 'Английский язык', 'English'),
+  worldHistory: l('Jahon tarixi', 'Всемирная история', 'World History'),
+  law: l('Huquq asoslari', 'Основы права', 'Fundamentals of Law'),
+}
+const narxozPair = (key: string, a: Subject, b: Subject): UniversityPackageSeed => {
+  const program = l(`${a.label.uz} + ${b.label.uz}`, `${a.label.ru} + ${b.label.ru}`, `${a.label.en} + ${b.label.en}`)
+  return pack(`uni-narxoz-${key}`, 'uni-narxoz', 'Narxoz', program, [a, b], NARXOZ_SOURCE, [`narxoz-${key}`])
+}
+
+/** A programme or faculty name as the university writes it (English-taught or English-named), the same in every language. */
+const official = (name: string): L => l(name, name, name)
+const WIUT_MATH = l('Matematika (Westminster tasdiqlagan matematika testi yoki unga teng)', 'Математика (тест, утверждённый University of Westminster, или эквивалент)', 'Mathematics (maths test approved by the University of Westminster, or equivalent)')
+const MOTHER_TONGUE_LIT = l('Ona tili va adabiyot', 'Родной язык и литература', 'Mother tongue and literature')
+const CREATIVE_EXAM = l('Ijodiy imtihon', 'Творческий экзамен', 'Creative exam')
+const FOREIGN_CERTIFICATE = l('Çet tili sertifikati (yetarli ball) yoki suhbat', 'Сертификат по иностранному языку (достаточный балл) или собеседование', 'Foreign-language certificate (sufficient score) or interview')
+const kiutId = (name: string) => `kiut-${name.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '')}`
+const kiutDirection = (name: string, subjects: L[]) => ({ id: kiutId(name), name: official(name), subjects })
+
 export const UNIVERSITIES: University[] = [
-  { id: 'uni-inha', name: 'Inha University in Tashkent', shortName: 'INHA', city: 'Tashkent', website: 'https://inha.uz' },
-  { id: 'uni-wiut', name: 'Westminster International University in Tashkent', shortName: 'WIUT', city: 'Tashkent', website: 'https://wiut.uz' },
+  {
+    id: 'uni-inha', name: 'Inha University in Tashkent', shortName: 'INHA', city: 'Tashkent', country: 'Uzbekistan', website: 'https://inha.uz', logoUrl: '/universities/uni-inha.svg',
+    // Schools and majors as the 2026-2027 guidelines name them; SOCIE students are assigned to CSE or ICE after the first year.
+    faculties: [
+      { id: 'inha-socie', name: l('Kompyuter va axborot injiniringi maktabi (SOCIE)', 'Школа компьютерной и информационной инженерии (SOCIE)', 'School of Computer and Information Engineering (SOCIE)'), directions: [
+        { id: 'inha-socie-cse-ice', name: l('Kompyuter fanlari / Axborot va kommunikatsiya injiniringi (CSE, ICE)', 'Компьютерные науки / Информационно-коммуникационная инженерия (CSE, ICE)', 'Computer Science / Information and Communication Engineering (CSE, ICE)'), subjects: [l('Matematika', 'Математика', 'Mathematics'), l('Fizika', 'Физика', 'Physics')] },
+      ] },
+      { id: 'inha-sbl', name: l('Biznes va logistika maktabi (SBL)', 'Школа бизнеса и логистики (SBL)', 'School of Business and Logistics (SBL)'), directions: [
+        { id: 'inha-sbl-ba', name: l('Biznes boşqaruvi (Business Administration)', 'Управление бизнесом (Business Administration)', 'Business Administration'), subjects: [l('Matematika', 'Математика', 'Mathematics')] },
+        { id: 'inha-sbl-lm', name: l('Logistika menejmenti (Logistics Management)', 'Логистический менеджмент (Logistics Management)', 'Logistics Management'), subjects: [l('Matematika', 'Математика', 'Mathematics')] },
+      ] },
+      { id: 'inha-uk', name: l('Buyuk Britaniya dasturlari', 'Британские программы', 'UK programmes'), directions: [
+        { id: 'inha-uk-it', name: l('Axborot texnologiyalari', 'Информационные технологии', 'Information Technology'), subjects: [l('Matematika', 'Математика', 'Mathematics')] },
+        { id: 'inha-uk-bm', name: l('Biznes va menejment', 'Бизнес и менеджмент', 'Business and Management'), subjects: [l('Matematika', 'Математика', 'Mathematics')] },
+      ] },
+      { id: 'inha-italy', name: l('Italiya dasturi', 'Итальянская программа', 'Italy programme'), directions: [
+        { id: 'inha-italy-ceds', name: l('Kompyuter injiniringi va ma’lumotlar fani', 'Компьютерная инженерия и наука о данных', 'Computer Engineering and Data Science'), subjects: [l('Matematika', 'Математика', 'Mathematics')] },
+      ] },
+    ],
+  },
+  {
+    id: 'uni-narxoz', name: 'Narxoz University', shortName: 'Narxoz', city: 'Almaty', country: 'Kazakhstan', website: 'https://narxoz.edu.kz',
+    // Directions are the profile-subject pairs to verify; the programmes behind each pair are not confirmed yet.
+    faculties: [
+      { id: 'narxoz-bachelor', name: l('Bakalavriat: profil fanlar juftligi (tasdiqlanmagan)', 'Бакалавриат: пары профильных предметов (не подтверждено)', 'Bachelor: profile-subject pairs (unverified)'), directions: [
+        { id: 'narxoz-math-informatics', name: l('Matematika + Informatika', 'Математика + Информатика', 'Mathematics + Informatics'), subjects: [narxozSubject.math, narxozSubject.informatics] },
+        { id: 'narxoz-math-geography', name: l('Matematika + Geografiya', 'Математика + География', 'Mathematics + Geography'), subjects: [narxozSubject.math, narxozSubject.geography] },
+        { id: 'narxoz-math-physics', name: l('Matematika + Fizika', 'Математика + Физика', 'Mathematics + Physics'), subjects: [narxozSubject.math, narxozSubject.physics] },
+        { id: 'narxoz-english-geography', name: l('Ingliz tili + Geografiya', 'Английский язык + География', 'English + Geography'), subjects: [narxozSubject.english, narxozSubject.geography] },
+        { id: 'narxoz-english-history', name: l('Ingliz tili + Jahon tarixi', 'Английский язык + Всемирная история', 'English + World History'), subjects: [narxozSubject.english, narxozSubject.worldHistory] },
+        { id: 'narxoz-law-history', name: l('Huquq asoslari + Jahon tarixi', 'Основы права + Всемирная история', 'Fundamentals of Law + World History'), subjects: [narxozSubject.law, narxozSubject.worldHistory] },
+      ] },
+    ],
+  },
+  {
+    id: 'uni-wiut', name: 'Westminster International University in Tashkent', shortName: 'WIUT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://wiut.uz', logoUrl: '/universities/uni-wiut.png', logoOnDark: true,
+    // Faculty labels from each programme page (the undergraduate menu has no school headings); read 2026-11-03.
+    faculties: [
+      { id: 'wiut-fsas', name: official('Faculty of Social and Applied Sciences (FSAS)'), directions: [
+        { id: 'wiut-cs', name: official('BSc (Hons) in Computer Science'), subjects: [WIUT_MATH, SUBJECT.ielts('6.5')] },
+        { id: 'wiut-bis', name: official('BSc (Hons) in Business Information Systems'), subjects: [] },
+        { id: 'wiut-commercial-law', name: official('BA (Hons) in Commercial Law'), subjects: [SUBJECT.ielts('6.5')] },
+        { id: 'wiut-ir-law', name: official('BA (Hons) in International Relations and Law'), subjects: [SUBJECT.ielts('6.5')] },
+      ] },
+      { id: 'wiut-business-school', name: official('WIUT Business School'), directions: [
+        { id: 'wiut-economics', name: official('BSc (Hons) in Economics (with Finance, with Data Science)'), subjects: [WIUT_MATH, SUBJECT.ielts('6.5')] },
+        { id: 'wiut-finance', name: official('BSc (Hons) in Finance'), subjects: [WIUT_MATH, SUBJECT.ielts('6.5')] },
+        { id: 'wiut-business-management', name: official('BA (Hons) in Business Management (with Finance, with Marketing)'), subjects: [WIUT_MATH, SUBJECT.ielts('6.5')] },
+      ] },
+      { id: 'wiut-foundation-programme', name: official('International Foundation'), directions: [
+        { id: 'wiut-foundation', name: official('Certificate in International Foundation Studies'), subjects: [l('Matematika (WIUT kiriş matematika imtihoni)', 'Математика (вступительный экзамен WIUT по математике)', 'Mathematics (WIUT Mathematics Entrance Exam)'), SUBJECT.ielts('6.0')] },
+      ] },
+    ],
+  },
   { id: 'uni-ttpu', name: 'Turin Polytechnic University in Tashkent', shortName: 'TTPU', city: 'Tashkent', website: 'https://turin.uz' },
   { id: 'uni-newuu', name: 'New Uzbekistan University', shortName: 'NewUU', city: 'Tashkent', website: 'https://newuu.uz' },
   { id: 'uni-amity', name: 'Amity University Tashkent', shortName: 'Amity', city: 'Tashkent', website: 'https://amity.uz' },
-  { id: 'uni-mdis', name: 'MDIS Tashkent', shortName: 'MDIS', city: 'Tashkent', website: 'https://mdis.uz' },
+  {
+    id: 'uni-mdis', name: 'Management Development Institute of Singapore in Tashkent', shortName: 'MDIS', city: 'Tashkent', country: 'Uzbekistan', website: 'https://mdis.uz', logoUrl: '/universities/uni-mdis.svg',
+    // Bachelor degrees are entered through the Foundation Year (or transfer); the programme list is on /en/menu/under-graduate-programmes-of-mdis-tashkent.
+    faculties: [
+      { id: 'mdis-foundation-year', name: official('Foundation Year'), directions: [
+        { id: 'mdis-foundation', name: official('Foundation Year (route to the bachelor degrees)'), subjects: [l('Ingliz tili (IELTS yoki MDIS English Test 5.5+)', 'Английский язык (IELTS или MDIS English Test 5.5+)', 'English (IELTS or MDIS English Test 5.5+)')] },
+      ] },
+      { id: 'mdis-sunderland', name: official('University of Sunderland (UK) bachelor programmes'), directions: [
+        'BA (Hons) Accounting and Finance', 'BA (Hons) Business and Financial Management', 'BA (Hons) Business and Management', 'BA (Hons) Business and Marketing Management', 'BA (Hons) Fashion Product and Promotion', 'BSc (Hons) International Tourism and Hospitality Management',
+      ].map((name, i) => ({ id: `mdis-sunderland-${i + 1}`, name: official(name), subjects: [] })) },
+      { id: 'mdis-teesside', name: official('Teesside University (UK) bachelor programmes'), directions: [
+        'BA (Hons) Graphic Design & International Marketing', 'BA (Hons) Airline and Airport Management (Top-up)', 'BSc (Hons) Finance, Investment and Banking', 'BSc (Hons) Business Economics',
+      ].map((name, i) => ({ id: `mdis-teesside-${i + 1}`, name: official(name), subjects: [] })) },
+    ],
+  },
   { id: 'uni-uwed', name: 'University of World Economy and Diplomacy', shortName: 'UWED', city: 'Tashkent', website: 'https://uwed.uz' },
   { id: 'uni-webster', name: 'Webster University in Tashkent', shortName: 'Webster', city: 'Tashkent', website: 'https://www.webstertashkent.uz' },
-  { id: 'uni-kiut', name: 'Kimyo International University in Tashkent', shortName: 'KIUT', city: 'Tashkent', website: 'https://kiut.uz' },
+  {
+    id: 'uni-kiut', name: 'Kimyo International University in Tashkent', shortName: 'KIUT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://kiut.uz', logoUrl: '/universities/uni-kiut.svg',
+    // Schools and programmes from the 2026/2027 admission table (kiut.uz/en/admissions/tashkent-admission/, read 2026-11-03). The table
+    // names only the exam type; subjects come from the programme pages, which state no year. Empty subjects: not stated on the pages read.
+    faculties: [
+      { id: 'kiut-business', name: official('School of Business and Finance'), directions: [
+        ...['Business Management', 'International Economic Relations', 'International Marketing', 'Accounting', 'Banking', 'Finance'].map((name) => kiutDirection(name, [SUBJECT.math, SUBJECT.english])),
+        kiutDirection('Tourism', []), kiutDirection('International Relations', []),
+      ] },
+      { id: 'kiut-engineering', name: official('School of Engineering'), directions: [
+        ...['Civil Engineering', 'Renewable Energy', 'Lift Engineering', 'Information Systems Engineering', 'Electrical Engineering', 'Mechatronics', 'Mechanical Engineering', 'Traffic Management'].map((name) => kiutDirection(name, [SUBJECT.math, SUBJECT.physics])),
+        ...['Space Technologies', 'Applied Mathematics', 'Engineering Communications Construction and Installation', 'Information Systems and Technologies', 'Sustainable Transport', 'Biotechnology', 'Software Engineering', 'Computer Engineering', 'Industrial Engineering and Management', 'Artificial Intelligence'].map((name) => kiutDirection(name, [])),
+        kiutDirection('Architecture and Urban Design', [CREATIVE_EXAM]),
+      ] },
+      { id: 'kiut-medicine', name: official('School of Medicine'), directions: [
+        kiutDirection('General Medicine', [SUBJECT.biology, SUBJECT.chemistry, MOTHER_TONGUE_LIT]),
+        kiutDirection('Dentistry', [SUBJECT.biology, SUBJECT.chemistry, MOTHER_TONGUE_LIT]),
+        kiutDirection('Pediatrics', [SUBJECT.chemistry, SUBJECT.biology]),
+        kiutDirection('Nursing', []), kiutDirection('Cosmetology', []),
+      ] },
+      { id: 'kiut-education', name: official('School of Education'), directions: [
+        ...['Korean Philology', 'English Education', 'Translation Studies (Chinese, English Languages)', 'Philology and Language Teaching (Russian Language)', 'Uzbek Language and Literature', 'Translation Theory and Practice (Turkish Language)', 'Philology and Language Teaching (Japanese Language)'].map((name) => kiutDirection(name, [FOREIGN_CERTIFICATE])),
+        ...['Preschool Education', 'Primary Education', 'History', 'Special Pedagogy', 'Psychology', 'Physical Culture'].map((name) => kiutDirection(name, [])),
+      ] },
+      { id: 'kiut-arts', name: official('School of Arts'), directions: [
+        kiutDirection('Fashion Design', [l('Ijodiy imtihon: rasm va kompozitsiya', 'Творческий экзамен: рисунок и композиция', 'Creative exam: drawing and composition')]),
+        kiutDirection('Painting', [CREATIVE_EXAM]), kiutDirection('Interior Design', [CREATIVE_EXAM]),
+      ] },
+    ],
+  },
+  { id: 'uni-millat-umidi', name: 'Millat Umidi University', shortName: 'MU', city: 'Tashkent', country: 'Uzbekistan', website: 'https://millatumidi.uz' },
   { id: 'uni-cau', name: 'Central Asian University (formerly AKFA University)', shortName: 'CAU', city: 'Tashkent', website: 'https://centralasian.uz' },
   { id: 'uni-nuuz', name: 'National University of Uzbekistan named after Mirzo Ulugbek', shortName: 'NUUz', city: 'Tashkent', website: 'https://nuu.uz' },
-  { id: 'uni-tuit', name: 'Tashkent University of Information Technologies named after Muhammad al-Khwarizmi', shortName: 'TUIT', city: 'Tashkent', website: 'https://tuit.uz' },
+  // TUIT: its own sites state 2026/2027 admission but no faculties and no subjects per direction (only a 2023/2024 direction list).
+  { id: 'uni-tuit', name: 'Tashkent University of Information Technologies named after Muhammad al-Khwarizmi', shortName: 'TUIT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://tuit.uz', logoUrl: '/universities/uni-tuit.png' },
   { id: 'uni-tsue', name: 'Tashkent State University of Economics', shortName: 'TSUE', city: 'Tashkent', website: 'https://tsue.uz' },
   { id: 'uni-tsul', name: 'Tashkent State University of Law', shortName: 'TSUL', city: 'Tashkent', website: 'https://tsul.uz' },
   { id: 'uni-tsmu', name: 'Tashkent State Medical University', shortName: 'TSMU', city: 'Tashkent', website: 'https://tashmeduni.uz' },
@@ -107,34 +246,56 @@ export const UNIVERSITIES: University[] = [
 export const UNIVERSITY_PACKAGES: UniversityPackageSeed[] = [
   // ── INHA Tashkent: own on-site exam (not DTM), run by Inha University in Korea; 2026-2027 guideline pages ──────────
   pack('uni-inha-socie', 'uni-inha', 'INHA', l('Kompyuter va axborot injiniringi (SOCIE: CSE, ICE)', 'Компьютерная и информационная инженерия (SOCIE: CSE, ICE)', 'Computer and Information Engineering (SOCIE: CSE, ICE)'),
-    [{ label: SUBJECT.math, course: COURSE.math }, { label: SUBJECT.physics, course: COURSE.physics }, { label: l('Ingliz tili (IELTS 5.0 yoki TOEFL iBT 50)', 'Английский язык (IELTS 5.0 или TOEFL iBT 50)', 'English (IELTS 5.0 or TOEFL iBT 50)'), course: COURSE.ielts }],
-    { url: 'https://inha.uz/prospective-students/admissions/application-guideline/', academicYear: '2026-2027', status: 'verified', note: 'Own exam: 30 multiple-choice questions (21 Mathematics, 9 Physics), 60 minutes. English is not an exam subject: the certificate is submitted after passing. The Russian page gives a different points split; the subjects are the same on every page.' }),
+    [MATH, PHYSICS, ieltsExtra('5.0', '50')],
+    { url: 'https://inha.uz/prospective-students/admissions/application-guideline/', academicYear: '2026-2027', checkedOn: INHA_CHECKED, status: 'verified', note: 'Application Guideline 2026-2027 (Korean programme): entrance exam of 30 multiple-choice questions, 21 Mathematics and 9 Physics, 60 minutes (Math 70 / Physics 30 points). English is not an exam subject: IELTS 5.0 or TOEFL iBT 50 is required after passing. Students are assigned to CSE or ICE after the first year. The 2026 exam dates have passed; the next intake is not published yet.' },
+    ['inha-socie-cse-ice']),
   pack('uni-inha-business', 'uni-inha', 'INHA', l('Biznes va logistika (Business Administration, Logistics Management)', 'Бизнес и логистика (Business Administration, Logistics Management)', 'Business and Logistics (Business Administration, Logistics Management)'),
-    [{ label: SUBJECT.math, course: COURSE.math }, { label: l('Ingliz tili (IELTS 5.5 yoki TOEFL iBT 71)', 'Английский язык (IELTS 5.5 или TOEFL iBT 71)', 'English (IELTS 5.5 or TOEFL iBT 71)'), course: COURSE.ielts }],
-    { url: 'https://inha.uz/prospective-students/admissions/application-guideline/', academicYear: '2026-2027', status: 'verified', note: 'School of Business and Logistics: own exam of 30 multiple-choice Mathematics questions, 60 minutes; English certificate submitted after passing.' }),
+    [MATH, ieltsExtra('5.5', '71')],
+    { url: 'https://inha.uz/prospective-students/admissions/application-guideline/', academicYear: '2026-2027', checkedOn: INHA_CHECKED, status: 'verified', note: 'Application Guideline 2026-2027: School of Business and Logistics exam of 30 multiple-choice Mathematics questions, 60 minutes. Applicants choose Business Administration or Logistics Management at application (125 places each, not both). IELTS 5.5 or TOEFL iBT 71 is required after passing.' },
+    ['inha-sbl-ba', 'inha-sbl-lm']),
   pack('uni-inha-uk-it', 'uni-inha', 'INHA', l('Axborot texnologiyalari (Buyuk Britaniya yönalişi)', 'Информационные технологии (британский трек)', 'Information Technology (UK track)'),
-    [{ label: SUBJECT.math, course: COURSE.math }, { label: l('Ingliz tili (IELTS 5.0 yoki TOEFL iBT 50)', 'Английский язык (IELTS 5.0 или TOEFL iBT 50)', 'English (IELTS 5.0 or TOEFL iBT 50)'), course: COURSE.ielts }],
-    { url: 'https://inha.uz/admissions-2026-guideline-for-uk-and-italy-programs/', academicYear: '2026-2027', status: 'verified', note: 'Own exam: 30 multiple-choice Mathematics questions, 60 minutes. An official SAT (1300+ total, 680+ Math) with an interview can replace the exam. The page states no degree title or language of instruction.' }),
+    [MATH, ieltsExtra('5.0', '50')],
+    { url: 'https://inha.uz/admissions-2026-guideline-for-uk-and-italy-programs/', academicYear: '2026-2027', status: 'verified', note: 'Own exam: 30 multiple-choice Mathematics questions, 60 minutes. An official SAT (1300+ total, 680+ Math) with an interview can replace the exam. The page states no degree title or language of instruction.' },
+    ['inha-uk-it']),
   pack('uni-inha-uk-bm', 'uni-inha', 'INHA', l('Biznes va menejment (Buyuk Britaniya yönalişi)', 'Бизнес и менеджмент (британский трек)', 'Business and Management (UK track)'),
-    [{ label: SUBJECT.math, course: COURSE.math }, { label: l('Ingliz tili (IELTS 5.5 yoki TOEFL iBT 71)', 'Английский язык (IELTS 5.5 или TOEFL iBT 71)', 'English (IELTS 5.5 or TOEFL iBT 71)'), course: COURSE.ielts }],
-    { url: 'https://inha.uz/admissions-2026-guideline-for-uk-and-italy-programs/', academicYear: '2026-2027', status: 'verified', note: 'Same Mathematics exam as the UK-track IT programme with a higher English threshold. SAT option as above.' }),
+    [MATH, ieltsExtra('5.5', '71')],
+    { url: 'https://inha.uz/admissions-2026-guideline-for-uk-and-italy-programs/', academicYear: '2026-2027', status: 'verified', note: 'Same Mathematics exam as the UK-track IT programme with a higher English threshold. SAT option as above.' },
+    ['inha-uk-bm']),
   pack('uni-inha-italy', 'uni-inha', 'INHA', l('Kompyuter injiniringi va ma’lumotlar fani (Italiya yönalişi)', 'Компьютерная инженерия и наука о данных (итальянский трек)', 'Computer Engineering and Data Science (Italy track)'),
-    [{ label: SUBJECT.math, course: COURSE.math }, { label: l('Ingliz tili (IELTS 5.0 yoki TOEFL iBT 50)', 'Английский язык (IELTS 5.0 или TOEFL iBT 50)', 'English (IELTS 5.0 or TOEFL iBT 50)'), course: COURSE.ielts }],
-    { url: 'https://inha.uz/application-guideline-2026-italy/', academicYear: '2026-2027', status: 'verified', note: 'Own exam: 30 multiple-choice Mathematics questions, 60 minutes; SAT option as on the UK track.' }),
+    [MATH, ieltsExtra('5.0', '50')],
+    { url: 'https://inha.uz/application-guideline-2026-italy/', academicYear: '2026-2027', status: 'verified', note: 'Own exam: 30 multiple-choice Mathematics questions, 60 minutes; SAT option as on the UK track.' },
+    ['inha-italy-ceds']),
+
+  // ── Narxoz University (Almaty): one package per profile-subject pair, all unverified drafts (see NARXOZ_SOURCE) ─────
+  // Informatics, Geography, World History and Fundamentals of Law have no ILMORA course yet, so those pairs cannot be published.
+  narxozPair('math-informatics', { label: narxozSubject.math, course: COURSE.math }, { label: narxozSubject.informatics, course: null }),
+  narxozPair('math-geography', { label: narxozSubject.math, course: COURSE.math }, { label: narxozSubject.geography, course: null }),
+  narxozPair('math-physics', { label: narxozSubject.math, course: COURSE.math }, { label: narxozSubject.physics, course: COURSE.physics }),
+  narxozPair('english-geography', { label: narxozSubject.english, course: COURSE.english }, { label: narxozSubject.geography, course: null }),
+  narxozPair('english-history', { label: narxozSubject.english, course: COURSE.english }, { label: narxozSubject.worldHistory, course: null }),
+  narxozPair('law-history', { label: narxozSubject.law, course: null }, { label: narxozSubject.worldHistory, course: null }),
 
   // ── WIUT: document-based entry (maths proof + English); per-programme 2026-2027 pages ──────────────────────────────
+  // Requirements re-read on every programme page on 2026-11-03 ("2026-2027 Academic Year" above each Entry Requirements block).
+  // English proof is required, but a student who already holds IELTS needs no preparation for it, so IELTS is an optional extra
+  // wherever the package has another subject; the law package has only the English requirement.
   pack('uni-wiut-cs', 'uni-wiut', 'WIUT', l('Kompyuter fanlari', 'Компьютерные науки', 'Computer Science'),
-    [{ label: l('Matematika (WIUT kiriş matematika testi yoki unga teng)', 'Математика (вступительный тест WIUT по математике или эквивалент)', 'Mathematics (WIUT entrance maths test or equivalent)'), course: COURSE.math }, { label: SUBJECT.ielts('6.5'), course: COURSE.ielts }],
-    { url: 'https://wiut.uz/bsc-hons-in-computer-science', academicYear: '2026-2027', status: 'verified', note: 'Programme page: maths competence proof and IELTS 6.5 (Writing 6.0). No subject exam; no DTM mentioned.' }),
+    [{ label: WIUT_MATH, course: COURSE.math }, { label: SUBJECT.ielts('6.5'), course: COURSE.ielts, optional: true }],
+    { url: 'https://wiut.uz/bsc-hons-in-computer-science', academicYear: '2026-2027', checkedOn: '2026-11-03', status: 'verified', note: 'BSc (Hons) in Computer Science, 2026-2027: Mathematics competence (a pass in a maths test approved by the University of Westminster, GCSE/O-level Mathematics grade C, SAT Mathematics 570, or a Foundation Quantitative Methods pass) and English (IELTS 6.5 with Writing 6.0, or TOEFL iBT 85 with Writing 22). No other entrance subject.' },
+    ['wiut-cs']),
   pack('uni-wiut-business', 'uni-wiut', 'WIUT', l('Biznes, moliya va iqtisodiyot', 'Бизнес, финансы и экономика', 'Business, Finance and Economics'),
-    [{ label: l('Matematika (WIUT kiriş matematika testi yoki unga teng)', 'Математика (вступительный тест WIUT по математике или эквивалент)', 'Mathematics (WIUT entrance maths test or equivalent)'), course: COURSE.math }, { label: SUBJECT.ielts('6.5'), course: COURSE.ielts }],
-    { url: 'https://wiut.uz/finance', academicYear: '2026-2027', status: 'verified', note: 'Finance page; the Economics and Business Management pages state the same 2026-2027 maths and English requirements.' }),
+    [{ label: WIUT_MATH, course: COURSE.math }, { label: SUBJECT.ielts('6.5'), course: COURSE.ielts, optional: true }],
+    { url: 'https://wiut.uz/finance', academicYear: '2026-2027', checkedOn: '2026-11-03', status: 'verified', note: 'Finance, Economics and Business Management pages, 2026-2027: the same Mathematics competence options and English (IELTS 6.5 with Writing 6.0, or TOEFL iBT 85 with Writing 22).' },
+    ['wiut-finance', 'wiut-economics', 'wiut-business-management']),
   pack('uni-wiut-law', 'uni-wiut', 'WIUT', l('Huquq va xalqaro munosabatlar', 'Право и международные отношения', 'Law and International Relations'),
     [{ label: SUBJECT.ielts('6.5'), course: COURSE.ielts }],
-    { url: 'https://wiut.uz/commercial-law', academicYear: '2026-2027', status: 'verified', note: 'Commercial Law and International Relations and Law pages: English requirement only (IELTS 6.5, Writing 6.0); no maths requirement listed.' }),
+    { url: 'https://wiut.uz/commercial-law', academicYear: '2026-2027', checkedOn: '2026-11-03', status: 'verified', note: 'Commercial Law and International Relations and Law pages, 2026-2027: English only (IELTS 6.5 with Writing 6.0, or TOEFL iBT 88 with Writing 21); no Mathematics requirement.' },
+    ['wiut-commercial-law', 'wiut-ir-law']),
   pack('uni-wiut-foundation', 'uni-wiut', 'WIUT', l('Xalqaro Foundation sertifikati', 'Международный Foundation-сертификат', 'International Foundation Studies'),
-    [{ label: l('Matematika (WIUT kiriş matematika imtihoni)', 'Математика (вступительный экзамен WIUT по математике)', 'Mathematics (WIUT entrance maths exam)'), course: COURSE.math }, { label: SUBJECT.ielts('6.0'), course: COURSE.ielts }],
-    { url: 'https://wiut.uz/certificate-international-foundation-studies', academicYear: '2026-2027', status: 'verified', note: 'Foundation page: Entrance Maths exam (or equivalent proof) and IELTS 6.0 with Writing 5.0.' }),
+    [{ label: l('Matematika (WIUT kiriş matematika imtihoni)', 'Математика (вступительный экзамен WIUT по математике)', 'Mathematics (WIUT Mathematics Entrance Exam)'), course: COURSE.math }, { label: SUBJECT.ielts('6.0'), course: COURSE.ielts, optional: true }],
+    { url: 'https://wiut.uz/certificate-international-foundation-studies', academicYear: '2026-2027', checkedOn: '2026-11-03', status: 'verified', note: 'Certificate in International Foundation Studies, 2026-2027: WIUT Mathematics Entrance Exam (or GCSE/O-level grade C, SAT Mathematics 570, Pre-Foundation or Academic Lyceum routes) and English (IELTS 6.0 with Writing 5.0, or TOEFL iBT 78 with Writing 17).' },
+    ['wiut-foundation']),
+  // Business Information Systems: the programme page states no entry requirements, so it has no package.
 
   // ── Turin Polytechnic (TTPU): own computer-based exam; 2026/2027 regulation lists subjects for some programmes only ──
   pack('uni-ttpu-engineering', 'uni-ttpu', 'Turin', l('Muhandislik (mexanika, quriliş, kompyuter) — 2-kursga kiriş', 'Инженерия (механика, строительство, компьютерная) — поступление на 2 курс', 'Engineering (Mechanical, Civil, Computer) — Year 2 entry'),
@@ -171,8 +332,9 @@ export const UNIVERSITY_PACKAGES: UniversityPackageSeed[] = [
 
   // ── MDIS Tashkent: English-score selection only; the newest admission pages found are for 2025 ─────────────────────
   pack('uni-mdis-foundation', 'uni-mdis', 'MDIS', l('Foundation yili (biznes bakalavr dasturlariga yöl)', 'Foundation-год (путь к бакалаврским программам по бизнесу)', 'Foundation Year (route to business bachelor programmes)'),
-    [{ label: SUBJECT.ielts('5.5'), course: COURSE.ielts }],
-    { url: 'https://mdis.uz/en/menu/foundation-year', academicYear: '2025', status: 'needs_review', note: 'No subject exam: selection by English score (IELTS/EET 5.5, 6.0 first). Pages are for 2025, and the English and Russian pages differ on component minimums.' }),
+    [{ label: l('Ingliz tili (IELTS yoki MDIS English Test 5.5+)', 'Английский язык (IELTS или MDIS English Test 5.5+)', 'English (IELTS or MDIS English Test 5.5+)'), course: COURSE.ielts }],
+    { url: 'https://mdis.uz/en/menu/foundation-year', academicYear: '2025', checkedOn: '2026-11-03', status: 'needs_review', note: 'To be verified: the Foundation Year page (read 2026-11-03) still gives the 2025 registration window (1 March to 15 August 2025). No subject exam: IELTS or MDIS English Test 5.5 (TOEFL iBT 46-59), with 6.0 and above placed first; bachelor degrees are entered through the Foundation Year or transfer. No 2026 intake is stated.' },
+    ['mdis-foundation']),
 
   // ── UWED: state exam (DTM) with three mandatory subjects plus two direction subjects; 2026/2027 bachelor page ─────────
   // Mother tongue, History of Uzbekistan, History and Legal sciences have no ILMORA course, so these stay drafts.
@@ -194,13 +356,20 @@ export const UNIVERSITY_PACKAGES: UniversityPackageSeed[] = [
   // ── KIUT: own entrance tests; subjects come from programme pages that state no academic year ──────────────────────
   pack('uni-kiut-business', 'uni-kiut', 'KIUT', l('Biznes, moliya va iqtisodiyot', 'Бизнес, финансы и экономика', 'Business, Finance and Economics'),
     [{ label: SUBJECT.math, course: COURSE.math }, { label: l('Ingliz tili (IELTS 5.5 bölsa, ingliz tili testidan ozod)', 'Английский язык (при IELTS 5.5 тест по английскому не требуется)', 'English (IELTS 5.5 exempts from the English test)'), course: COURSE.english }],
-    { url: 'https://kiut.uz/en/programs/bachelors-programs/faculty-directions/Business-Management/', academicYear: '', status: 'needs_review', note: 'Business Management, Finance, International Economic Relations, Accounting, Banking and International Marketing pages list Mathematics and English; none states an academic year. The 2026/2027 admission page gives only generic exam labels.' }),
+    { url: 'https://kiut.uz/en/admissions/tashkent-admission/', academicYear: '', checkedOn: '2026-11-03', status: 'needs_review', note: 'To be verified: the 2026/2027 admission table lists these programmes with "Test in the relevant subject" but names no subjects; Mathematics and English (IELTS 5.5 exempts from English) come from the programme pages (Finance re-read 2026-11-03), which state no year.' },
+    ['Business Management', 'International Economic Relations', 'International Marketing', 'Accounting', 'Banking', 'Finance'].map(kiutId)),
   pack('uni-kiut-engineering', 'uni-kiut', 'KIUT', l('Muhandislik va axborot tizimlari', 'Инженерия и информационные системы', 'Engineering and Information Systems'),
     [{ label: SUBJECT.math, course: COURSE.math }, { label: SUBJECT.physics, course: COURSE.physics }],
-    { url: 'https://kiut.uz/en/programs/bachelors-programs/faculty-directions/information-system-engineering/', academicYear: '', status: 'needs_review', note: 'Information System, Mechatronics, Mechanical, Electrical, Renewable Energy, Lift, Traffic and Civil Engineering pages list Mathematics and Physics; none states an academic year (the Lift Engineering file is named 2023-2024).' }),
+    { url: 'https://kiut.uz/en/admissions/tashkent-admission/', academicYear: '', checkedOn: '2026-11-03', status: 'needs_review', note: 'To be verified: the 2026/2027 admission table names no subjects; Mathematics and Physics come from the Information System, Mechatronics, Mechanical, Electrical, Renewable Energy, Lift, Traffic and Civil Engineering programme pages, which state no year.' },
+    ['Civil Engineering', 'Renewable Energy', 'Lift Engineering', 'Information Systems Engineering', 'Electrical Engineering', 'Mechatronics', 'Mechanical Engineering', 'Traffic Management'].map(kiutId)),
   pack('uni-kiut-medicine', 'uni-kiut', 'KIUT', l('Davolaş işi va stomatologiya', 'Лечебное дело и стоматология', 'General Medicine and Dentistry'),
-    [{ label: SUBJECT.biology, course: null }, { label: SUBJECT.chemistry, course: COURSE.chemistry }, { label: SUBJECT.motherTongue, course: null }],
-    { url: 'https://kiut.uz/en/programs/bachelors-programs/faculty-directions/General-Medicine/', academicYear: '', status: 'needs_review', note: 'General Medicine and Dentistry pages list Biology, Chemistry and Mother Tongue and Literature; the Pediatrics page lists only Chemistry and Biology. No academic year is stated.' }),
+    [{ label: SUBJECT.biology, course: null }, { label: SUBJECT.chemistry, course: COURSE.chemistry }, { label: MOTHER_TONGUE_LIT, course: null }],
+    { url: 'https://kiut.uz/en/programs/bachelors-programs/faculty-directions/General-Medicine/', academicYear: '', checkedOn: '2026-11-03', status: 'needs_review', note: 'To be verified: the General Medicine page (re-read 2026-11-03) and the Dentistry page list Biology, Chemistry and Mother Tongue and Literature; neither states a year, and the 2026/2027 admission table names no subjects.' },
+    ['General Medicine', 'Dentistry'].map(kiutId)),
+  pack('uni-kiut-pediatrics', 'uni-kiut', 'KIUT', l('Pediatriya', 'Педиатрия', 'Pediatrics'),
+    [CHEMISTRY, BIOLOGY],
+    { url: 'https://kiut.uz/en/admissions/tashkent-admission/', academicYear: '', checkedOn: '2026-11-03', status: 'needs_review', note: 'To be verified: the Pediatrics programme page lists Chemistry and Biology and states no year; the 2026/2027 admission table names no subjects.' },
+    [kiutId('Pediatrics')]),
 
   // ── Central Asian University (formerly AKFA): own online/offline exams, English-taught; regulations page states 2027-2028 ──
   pack('uni-cau-business-engineering', 'uni-cau', 'CAU', l('Kompyuter fanlari, muhandislik, biznes va iqtisodiyot', 'Компьютерные науки, инженерия, бизнес и экономика', 'Computer Science, Engineering, Business and Economics'),
@@ -225,10 +394,10 @@ export const UNIVERSITY_PACKAGES: UniversityPackageSeed[] = [
     { url: 'https://my.uzbmb.uz/university-about-direction/314', academicYear: '', status: 'needs_review', note: 'Directory lists Chemistry and Mathematics; no admission year.' }),
   pack('uni-tuit-it', 'uni-tuit', 'TUIT', l('Dasturiy injiniring, sun’iy intellekt, kiberxavfsizlik, kompyuter injiniringi', 'Программная инженерия, ИИ, кибербезопасность, компьютерная инженерия', 'Software Engineering, AI, Cybersecurity, Computer Engineering'),
     stateTest([MATH, PHYSICS]),
-    { url: 'https://my.uzbmb.uz/university-about-direction/380', academicYear: '', status: 'needs_review', note: 'State testing agency directory lists Mathematics and Physics for these directions; TUIT’s own pages name no subjects and the directory states no admission year.' }),
+    { url: 'https://admission.tuit.uz', academicYear: '', checkedOn: '2026-11-03', status: 'needs_review', note: 'To be verified: TUIT’s own sites (admission.tuit.uz, tuit.uz) announce 2026/2027 admission but list no faculties and no subjects per direction (the only direction list is for 2023/2024, and the directions page returns 404). Mathematics and Physics come from the State Testing Centre directory, which states no year.' }),
   pack('uni-tuit-business', 'uni-tuit', 'TUIT', l('Iqtisodiyot, biznesni boşqariş, marketing, logistika', 'Экономика, управление бизнесом, маркетинг, логистика', 'Economics, Business Management, Marketing, Logistics'),
     stateTest([MATH, FOREIGN]),
-    { url: 'https://my.uzbmb.uz/university-about-direction/380', academicYear: '', status: 'needs_review', note: 'Directory lists Mathematics and a foreign language; no admission year.' }),
+    { url: 'https://admission.tuit.uz', academicYear: '', checkedOn: '2026-11-03', status: 'needs_review', note: 'To be verified: TUIT’s own sites name no subjects for 2026/2027; Mathematics and a foreign language come from the State Testing Centre directory, which states no year.' }),
   pack('uni-tsue-economics', 'uni-tsue', 'TSUE', l('Iqtisodiyot, moliya, buxgalteriya, menejment, marketing', 'Экономика, финансы, бухгалтерия, менеджмент, маркетинг', 'Economics, Finance, Accounting, Management, Marketing'),
     stateTest([MATH, FOREIGN]),
     { url: 'https://my.uzbmb.uz/university-about-direction/324', academicYear: '', status: 'needs_review', note: 'Directory lists Mathematics and a foreign language; no admission year. TSUE’s 2026 subject-set PDF was not read.' }),

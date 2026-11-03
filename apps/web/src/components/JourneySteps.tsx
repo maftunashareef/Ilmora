@@ -206,20 +206,19 @@ function DemoScreen({ step, data }: { step: number; data: ReturnType<typeof useD
 
 /**
  * "How ILMORA works" (section type `journey`, home and How It Works pages): six steps beside a browser frame that shows
- * each step with the real catalog, packages, prices, cart and student cabinet. The tour plays by itself while on screen,
- * pauses on hover, focus or the pause button, and every step can be opened directly; with reduced motion it never plays
- * by itself and the screens appear without animation.
+ * each step with the real catalog, packages, prices, cart and student cabinet. The tour plays by itself while on screen
+ * (there is no pause control; it only rests while hovered or focused), and every step can be opened directly; with
+ * reduced motion it never plays by itself and the screens appear without animation.
  */
 export function JourneySection({ title, subtitle }: { title?: string; subtitle?: string }) {
   const { t } = useT()
   const data = useDemoData()
   const [step, setStep] = useState(0)
-  const [paused, setPaused] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [inView, setInView] = useState(false)
   const reduced = useReducedMotion()
   const root = useRef<HTMLElement>(null)
-  const playing = inView && !paused && !hovered && !reduced
+  const playing = inView && !hovered && !reduced
 
   useEffect(() => {
     const el = root.current
@@ -285,10 +284,8 @@ export function JourneySection({ title, subtitle }: { title?: string; subtitle?:
               <div className="flex items-center gap-2 border-b border-charcoal/10 bg-paper px-3 py-2">
                 <span className="flex gap-1" aria-hidden="true"><span className="h-2.5 w-2.5 rounded-full bg-charcoal/15" /><span className="h-2.5 w-2.5 rounded-full bg-charcoal/15" /><span className="h-2.5 w-2.5 rounded-full bg-charcoal/15" /></span>
                 <span className="mx-auto truncate rounded-md bg-ivory px-3 py-0.5 text-[11px] text-charcoal/55">ilmoraa.uz{STEPS[step].path}</span>
-                <button type="button" onClick={() => setPaused((p) => !p)} aria-pressed={paused} className="journey-toggle inline-flex items-center gap-1 rounded-full border border-charcoal/12 px-2 py-0.5 text-[10px] font-medium text-charcoal/60 hover:text-forest">
-                  {paused ? <Icon name="play" className="h-3 w-3" /> : <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12" rx="1" fill="currentColor" /><rect x="9.5" y="2" width="3.5" height="12" rx="1" fill="currentColor" /></svg>}
-                  <span className="hidden sm:inline">{paused ? t('journey.play') : t('journey.pause')}</span>
-                </button>
+                {/* Same width as the three dots, so the address stays centred */}
+                <span className="w-[38px] shrink-0" aria-hidden="true" />
               </div>
               <div key={step} className="journey-screen min-h-[17rem] bg-gradient-to-b from-ivory to-paper" aria-live="polite">
                 <span className="sr-only">{t('journey.step', { n: step + 1 })}: {t(key(step, 'title'))}. {t(key(step, 'body'), { n: MAX_CART_COURSES })}</span>

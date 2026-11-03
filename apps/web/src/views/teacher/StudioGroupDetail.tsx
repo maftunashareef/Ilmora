@@ -84,7 +84,7 @@ export function StudioGroupDetail() {
           <Eyebrow className="mb-3">{t('group.roster')} · {roster.length}</Eyebrow>
           {roster.length === 0 ? <EmptyState title={t('group.noStudents')} /> : (
             <>
-              <div className="card hidden overflow-hidden p-0 md:block">
+              <div className="card hidden overflow-x-auto p-0 md:block">
                 <table className="w-full text-sm">
                   <thead className="bg-ivory/70 text-left text-[11px] uppercase tracking-wider text-charcoal/50"><tr><th className="px-4 py-3">{t('common.student')}</th><th className="px-3 py-3">{t('student.profile.district')}</th><th className="px-3 py-3">{t('student.sub.package')}</th><th className="px-3 py-3">{t('group.since')}</th><th className="px-3 py-3 text-right">{t('group.attendanceRate')}</th></tr></thead>
                   <tbody className="divide-y divide-charcoal/8">

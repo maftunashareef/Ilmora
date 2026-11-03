@@ -93,9 +93,10 @@ export function BuilderPage() {
   }
 
   // Adds the courses of a ready-made preset to the same cart: regular validation, no duplicates, nothing added half-way.
-  const startPreset = (preset: Preset) => {
+  // `chosenOptional` lists the optional extras the student kept (from the university page); without it every course counts.
+  const startPreset = (preset: Preset, chosenOptional?: string[]) => {
     if (!student) return
-    const plan = presetCartPlan(preset, courses, student.builder.groupIds)
+    const plan = presetCartPlan(preset, courses, student.builder.groupIds, chosenOptional)
     if (plan.toAdd.length === 0) { notify(t('preset.allInCart')); return }
     if (selectedGroups.length + plan.toAdd.length > maxSelectable) { notify(pkg ? t('builder.limitReached') : t('builder.customLimit', { n: MAX_CART_COURSES }), 'warn'); return }
     // Courses with a single group can be checked up front; if one would clash or is full, nothing is added.
@@ -109,6 +110,18 @@ export function BuilderPage() {
     if (plan.inCart.length > 0) notify(t('preset.skipped'))
     if (pending.length > 0) { setQueue(pending.slice(1)); setPicker(pending[0]) } else notify(t('preset.added'))
   }
+
+  // /builder?preset=<id>&extra=<slotIds> (Enroll on a university page) adds that published package once, with the chosen extras.
+  const handledPreset = useRef<string | null>(null)
+  useEffect(() => {
+    const id = params.get('preset')
+    const key = `${id}|${params.get('extra') ?? ''}`
+    if (!id || !student || !guestHydrated || handledPreset.current === key) return
+    const preset = (presets ?? []).find((p) => p.id === id && p.enabled)
+    if (!preset) return
+    handledPreset.current = key
+    startPreset(preset, (params.get('extra') ?? '').split(',').filter(Boolean))
+  }, [params, student, presets, guestHydrated, startPreset]) // startPreset is new every render; handledPreset makes this run once per link
 
   // /builder?add=<courseId> (from the saved courses page) adds that course once, opening the group picker when it has several.
   const handledAdd = useRef<string | null>(null)

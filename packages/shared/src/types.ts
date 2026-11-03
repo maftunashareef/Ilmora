@@ -279,6 +279,26 @@ export interface PresetSlot {
   id: string
   label: L
   courseId: string | null
+  /**
+   * An extra the student may leave out (for example IELTS preparation when an English certificate is required after the
+   * exam): offered with the package but not part of its admission subjects. Still has to map to an available course.
+   */
+  optional?: boolean
+}
+
+/** A study direction (programme or major) as the university names it, with the entrance subjects it states for it. */
+export interface UniversityDirection {
+  id: string
+  name: L
+  /** Entrance subjects in the university's own terms; empty when the official page names none. */
+  subjects: L[]
+}
+
+/** A faculty or school of a university and its directions. */
+export interface UniversityFaculty {
+  id: string
+  name: L
+  directions: UniversityDirection[]
 }
 
 /** A university that has preparation packages. Plain data entered by the Super Admin; ILMORA is not affiliated with it. */
@@ -288,8 +308,15 @@ export interface University {
   /** Short form shown on small cards, for example "WIUT". */
   shortName?: string
   city?: string
+  country?: string
   /** The university's official website (https). */
   website?: string
+  /** The official logo (an upload, or a file shipped under /universities/); cards show the short name until there is one. */
+  logoUrl?: string
+  /** The logo is light, made for dark backgrounds (for example a white word mark): it is shown on a dark green tile. */
+  logoOnDark?: boolean
+  /** Faculties and their directions; a university without them lists its packages directly. */
+  faculties?: UniversityFaculty[]
 }
 
 /** needs_review: the requirement could not be confirmed from an official page (or no source is recorded yet). */
@@ -321,11 +348,15 @@ export interface Preset {
   university?: string
   /** The faculty or program this package prepares for. */
   program?: L
+  /** The directions of its university this package prepares for (one package may serve several with the same subjects). */
+  directionIds?: string[]
   /** Package title. */
   name: L
   description: L
   /** The required subjects, each mapped to an ILMORA course. */
   slots: PresetSlot[]
+  /** How long the preparation takes, in months, as set by the Super Admin; otherwise the longest included course. */
+  durationMonths?: number
   /** Official source of the required subjects and their verification state. */
   admission?: AdmissionSource
   /** Published (shown on the site) when true, otherwise a draft. */
@@ -354,6 +385,8 @@ export type SectionType =
   | 'courseFinder'
   /** "How ILMORA works": the five-step journey from choosing courses to the first lesson (texts from the dictionary). */
   | 'journey'
+  /** University preparation: cards of the universities that have a published package, linking to /universities. */
+  | 'universities'
 
 export interface Section {
   id: string

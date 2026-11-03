@@ -6,7 +6,7 @@ import { uid, useStore, type PageKey } from '../../store/useStore'
 import type { Section, SectionType } from '../../types'
 
 const PAGE_PATH: Record<PageKey, string> = { home: '/', howItWorks: '/how-it-works', centers: '/centers' }
-const TYPES: SectionType[] = ['hero', 'discounts', 'marquee', 'packages', 'featuredCourses', 'categories', 'howItWorks', 'steps', 'studio3d', 'furnitureStory', 'teachers', 'centers', 'faq', 'centerCta', 'announcement', 'richText', 'inquiryForm', 'courseFinder', 'journey']
+const TYPES: SectionType[] = ['hero', 'discounts', 'marquee', 'packages', 'featuredCourses', 'categories', 'howItWorks', 'steps', 'studio3d', 'furnitureStory', 'teachers', 'centers', 'faq', 'centerCta', 'announcement', 'richText', 'inquiryForm', 'courseFinder', 'journey', 'universities']
 const HAS_ITEMS: SectionType[] = ['howItWorks', 'steps']
 const HAS_COUNT: SectionType[] = ['featuredCourses', 'discounts', 'teachers', 'faq']
 const HAS_BODY: SectionType[] = ['richText']

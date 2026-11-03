@@ -9,6 +9,7 @@ import { checkAccess } from '../../lib/access'
 import { useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import { CourseFinderPrompt } from './CourseFinder'
+import { UniversitiesBand } from './Universities'
 
 type Sort = 'featured' | 'priceAsc' | 'priceDesc' | 'title'
 
@@ -120,7 +121,8 @@ export function CoursesPage() {
         </div>
       </div>
 
-      <CourseFinderPrompt className="mb-6" />
+      <CourseFinderPrompt className="mb-4" />
+      {!sale && <UniversitiesBand className="mb-6" />}
 
       {/* Learning format: all / offline / online (kept in the URL as ?format=offline|online) */}
       <div className="mb-4 grid grid-cols-3 gap-1 rounded-2xl border border-charcoal/12 bg-paper p-1 sm:inline-grid sm:w-auto" role="group" aria-label={t('format.label')}>

@@ -94,12 +94,16 @@ describe('flexible cart (custom selection)', () => {
     expect(JSON.parse(memory.get(DRAFT_KEY) ?? '{}').groupIds).toEqual(['g1'])
   })
 
-  it('stops at the cart limit without a package, and a package keeps its own size', () => {
-    const store = createIlmoraStore(initialMock)
-    const ids = ['g1', 'g2', 'g4', 'g5', 'g6', 'g7']
-    expect(ids).toHaveLength(MAX_CART_COURSES)
-    for (const id of ids) expect(store.getState().addBuilderGroup(GUEST_STUDENT_ID, id)).toEqual({ ok: true })
-    expect(store.getState().addBuilderGroup(GUEST_STUDENT_ID, 'g3')).toMatchObject({ ok: false, reason: 'limit' })
+  it('lets a custom selection hold any number of non-overlapping courses, while a package keeps its own size', () => {
+    // Ten courses at different times, more than the former limit of six: all accepted without a package.
+    const many = Array.from({ length: 10 }, (_, i) => {
+      const hour = String(8 + Math.floor(i / 7) * 3).padStart(2, '0')
+      return course(`m${i}`, [group(`mg${i}`, `m${i}`, i % 7, `${hour}:00`, `${hour}:50`)])
+    })
+    const store = createIlmoraStore({ ...initialMock, catalog: { ...initialMock.catalog, courses: many as never } })
+    for (let i = 0; i < many.length; i++) expect(store.getState().addBuilderGroup(GUEST_STUDENT_ID, `mg${i}`)).toEqual({ ok: true })
+    expect(store.getState().students[0].builder.groupIds).toHaveLength(many.length)
+    expect(MAX_CART_COURSES).toBeGreaterThan(many.length) // a technical bound only, never reached by the catalog
 
     const duo = createIlmoraStore(initialMock)
     duo.getState().setBuilderPackage(GUEST_STUDENT_ID, 'pkg-duo')

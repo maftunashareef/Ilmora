@@ -565,6 +565,17 @@ export class ManageService {
         throw AppError.forbidden('Teacher profile customization is disabled in this workspace')
       }
     }
+    const profileId = actor.teacherProfileId ?? 'admin'
+    return this.presignImageUpload(`avatars/${tenantId}/${profileId}`, input)
+  }
+
+  /** Super Admin: upload address for a university's official logo (same image types and size limit as avatars). */
+  async generateUniversityLogoUploadUrl(tenantId: string, input: z.infer<typeof AvatarUploadUrlInput>) {
+    return this.presignImageUpload(`universities/${tenantId}/logo`, input)
+  }
+
+  /** A presigned PUT for one image under `<prefix>-<time>.<ext>` and the public address it will have. */
+  private async presignImageUpload(prefix: string, input: z.infer<typeof AvatarUploadUrlInput>) {
     if (!s3Configured(this.env)) {
       throw AppError.invalid('storage_not_configured', 'Object storage (S3) is not configured in this environment.')
     }
@@ -578,8 +589,7 @@ export class ManageService {
       forcePathStyle: this.env.S3_FORCE_PATH_STYLE,
     })
     const ext = input.contentType === 'image/webp' ? 'webp' : input.contentType === 'image/png' ? 'png' : 'jpg'
-    const profileId = actor.teacherProfileId ?? 'admin'
-    const key = `avatars/${tenantId}/${profileId}-${Date.now()}.${ext}`
+    const key = `${prefix}-${Date.now()}.${ext}`
     const command = new PutObjectCommand({
       Bucket: this.env.S3_BUCKET,
       Key: key,
