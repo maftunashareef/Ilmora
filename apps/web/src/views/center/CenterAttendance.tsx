@@ -6,7 +6,7 @@ import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
 import { enrolledStudents } from '../../lib/enrollment'
 import { formatTime } from '../../lib/format'
-import { Link } from '../../lib/router'
+import { Link, useSearchParams } from '../../lib/router'
 import { useStore } from '../../store/useStore'
 import { useCenterScope, type CenterCourses, type CenterLesson } from './centerApi'
 
@@ -17,7 +17,9 @@ export function CenterAttendance() {
   const scope = useCenterScope()
   const { t, tr, lang } = useT()
   const s = useStore()
-  const [date, setDate] = useState(todayIso)
+  const [params] = useSearchParams()
+  // A notification about a lesson links here with its day; otherwise the page opens on today.
+  const [date, setDate] = useState(() => (/^\d{4}-\d{2}-\d{2}$/.test(params.get('date') ?? '') ? (params.get('date') as string) : todayIso()))
   const [lessons, setLessons] = useState<CenterLesson[] | null>(null)
   const [courses, setCourses] = useState<CenterCourses['courses']>([])
   const [failed, setFailed] = useState(false)

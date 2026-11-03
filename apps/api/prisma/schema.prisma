@@ -90,6 +90,7 @@ enum CenterStatus {
   PENDING
   ACTIVE
   BLOCKED
+  REJECTED
 }
 
 enum EnrollmentStatus {

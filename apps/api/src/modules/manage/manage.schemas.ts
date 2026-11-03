@@ -106,7 +106,7 @@ export const ResourcePatch = ResourceInput.partial()
 export const SubjectInput = z.object({ teacherId: id.optional(), name: L, description: L }).strict()
 export const CenterInput = z.object({ name: z.string().min(1).max(120), district: L, description: L, tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), address: z.string().max(300).nullable().optional() }).strict()
 /** Super Admin: approval state of a center. */
-export const CenterStatusInput = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'BLOCKED']), reason: z.string().trim().max(300).optional() }).strict()
+export const CenterStatusInput = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'BLOCKED', 'REJECTED']), reason: z.string().trim().max(300).optional() }).strict()
 export type CenterStatusInput = z.infer<typeof CenterStatusInput>
 export const DeleteUserInput = z.object({ reason: z.string().trim().min(3).max(300) }).strict()
 /** Center workspace: the center's own profile and check-in settings (all optional; only sent fields change). */

@@ -9,10 +9,11 @@ import { Link } from '../../lib/router'
 import { useStore } from '../../store/useStore'
 import { useCenterScope, type CenterOverview as Overview, type CenterQr } from './centerApi'
 
-export function CenterStatusNotice({ status }: { status: Overview['center']['status'] }) {
+export function CenterStatusNotice({ status, reason }: { status: Overview['center']['status']; reason?: string | null }) {
   const { t } = useT()
   if (status === 'PENDING') return <Notice tone="warn" className="mb-6">{t('center.pendingNotice')}</Notice>
-  if (status === 'BLOCKED') return <Notice tone="warn" className="mb-6">{t('center.blockedNotice')}</Notice>
+  if (status === 'BLOCKED') return <Notice tone="warn" className="mb-6">{t('center.blockedNotice')}{reason ? ` ${t('center.rejectedReason', { reason })}` : ''}</Notice>
+  if (status === 'REJECTED') return <Notice tone="warn" className="mb-6">{t('center.rejectedNotice')}{reason ? ` ${t('center.rejectedReason', { reason })}` : ''}</Notice>
   return null
 }
 
@@ -41,7 +42,7 @@ export function CenterOverview() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.center')} title={c.name} subtitle={tr(c.district)} action={<Badge tone={c.status === 'ACTIVE' ? 'forest' : c.status === 'PENDING' ? 'champagne' : 'danger'}>{t(`center.status.${c.status}`)}</Badge>} />
-      <CenterStatusNotice status={c.status} />
+      <CenterStatusNotice status={c.status} reason={c.blockReason} />
       <div className="reveal-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label={t('center.teachers')} value={data.counts.teachers} />
         <Stat label={t('center.courses')} value={data.counts.courses} hint={`${data.counts.groups} ${t('common.groups').toLowerCase()}`} />

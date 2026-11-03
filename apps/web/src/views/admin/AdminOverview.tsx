@@ -3,10 +3,12 @@ import { Card, Eyebrow, Icon, Notice, PageTitle, Stat } from '../../components/u
 import { countLabel, NOUNS } from '@ilmora/shared'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
+import { PendingCentersPanel, useAdminCenters } from './PendingCenters'
 
 export function AdminOverview() {
   const { t, tr, lang } = useT()
   const s = useStore()
+  const centers = useAdminCenters()
   const all = [...s.courses, ...s.videos, ...s.playlists, ...s.resources]
   const drafts = all.filter((x) => x.status === 'draft').length
   const privateItems = all.filter((x) => x.visibility === 'private' && x.status === 'published').length
@@ -34,6 +36,7 @@ export function AdminOverview() {
           <Link to="/admin/content" className="font-medium underline">{t('common.open')}</Link>
         </Notice>
       )}
+      <div className="mt-10"><PendingCentersPanel list={centers.list} busy={centers.busy} setStatus={centers.setStatus} linkToAll /></div>
       <div className="mt-10 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
         <section>
           <Eyebrow className="mb-4">{t('admin.overview.quick')}</Eyebrow>

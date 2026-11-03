@@ -37,9 +37,9 @@ export class CenterService {
     return center
   }
 
-  /** Writes are refused while the center is blocked (reads still work so the administrator sees why). */
+  /** Writes are refused while the center is blocked or rejected (reads still work so the administrator sees why). */
   private assertWritable(center: { status: string }) {
-    if (center.status === 'BLOCKED') throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
+    if (center.status === 'BLOCKED' || center.status === 'REJECTED') throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
   }
 
   private profile(c: { id: string; slug: string; name: string; district: unknown; description: unknown; tone: string; address: string | null; phoneE164: string | null; status: string; approvedAt: Date | null; blockedAt: Date | null; blockReason: string | null; lat: number | null; lng: number | null; geoRadiusM: number | null; checkInBeforeMin: number; absenceAfterMin: number; createdAt: Date }) {

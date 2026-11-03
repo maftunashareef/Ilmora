@@ -229,7 +229,7 @@ export class AttendanceService {
   /** Public look-up of a scanned center code: enough to show the student which center it is, nothing personal. */
   async describeCenterCode(code: string) {
     const center = await this.centerByCode(code)
-    if (!center || center.status === 'BLOCKED') return null
+    if (!center || center.status === 'BLOCKED' || center.status === 'REJECTED') return null
     return { center: { id: center.id, name: center.name, address: center.address }, requiresLocation: requiresLocation(center), window: { beforeMin: center.checkInBeforeMin, afterMin: center.absenceAfterMin } }
   }
 
@@ -237,7 +237,7 @@ export class AttendanceService {
   async centerOptions(code: string, studentId: string, now = new Date()) {
     const center = await this.centerByCode(code)
     if (!center) throw AppError.notFound('Center')
-    if (center.status === 'BLOCKED') throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
+    if (center.status === 'BLOCKED' || center.status === 'REJECTED') throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
     const [access, enrollments] = await Promise.all([this.subscriptions.accessFor(studentId), this.prisma.client.enrollment.findMany({ where: { studentId, status: 'ACTIVE', course: { centerId: center.id } }, select: { groupId: true } })])
     const groupIds = enrollments.map((e) => e.groupId)
     const today = localDate(now, this.env.SCHEDULE_TIMEZONE)
@@ -264,7 +264,7 @@ export class AttendanceService {
   async centerCheckIn(code: string, studentId: string, input: { sessionId: string } & GeoInput, meta: { ip?: string; userAgent?: string }, now = new Date()): Promise<CenterCheckInOutcome> {
     const center = await this.centerByCode(code)
     if (!center) return { ok: false, reason: 'invalid-code' }
-    if (center.status === 'BLOCKED') return { ok: false, reason: 'center-blocked' }
+    if (center.status === 'BLOCKED' || center.status === 'REJECTED') return { ok: false, reason: 'center-blocked' }
     const session = await this.prisma.client.lessonSession.findFirst({ where: { id: input.sessionId }, include: SESSION_INCLUDE })
     if (!session || session.course.centerId !== center.id) return { ok: false, reason: 'wrong-center' }
     const dto = SessionsService.toDto(session)
@@ -320,8 +320,9 @@ export class AttendanceService {
     }
   }
 
-  private lessonParams(session: { date: Date; startsAt: Date; course: { id: string; title: unknown }; group: { id?: string; name: string; timezone: string } }) {
-    return { courseTitle: session.course.title, courseId: session.course.id, groupName: session.group.name, date: dateColumnToIso(session.date), start: localTime(session.startsAt, session.group.timezone) }
+  /** What every lesson notification carries: enough to render the text and to open the lesson's group or day. */
+  private lessonParams(session: { id?: string; date: Date; startsAt: Date; course: { id: string; title: unknown }; group: { id?: string; name: string; timezone: string } }) {
+    return { courseTitle: session.course.title, courseId: session.course.id, groupName: session.group.name, groupId: session.group.id ?? null, sessionId: session.id ?? null, date: dateColumnToIso(session.date), start: localTime(session.startsAt, session.group.timezone) }
   }
 
   private async notifyCheckIn(session: { tenantId: string; course: { id: string; title: unknown; teacherId: string }; group: { name: string; timezone: string }; date: Date; startsAt: Date }, studentId: string, record: RecordDto) {

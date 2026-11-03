@@ -11,6 +11,7 @@ export function TeacherLayout() {
   const modules = useStore((s) => s.site.dashboards.teacher)
   const all: DashNavItem[] = [
     { id: 'overview', to: '/teacher', end: true, label: t('dash.overview'), icon: 'grid' },
+    { id: 'notifications', to: '/teacher/notifications', label: t('notif.title'), icon: 'bell' },
     { id: 'subjects', to: '/teacher/subjects', label: t('studio.subjects'), icon: 'book' },
     { id: 'videos', to: '/teacher/videos', label: t('studio.videos'), icon: 'video' },
     { id: 'playlists', to: '/teacher/playlists', label: t('studio.playlists'), icon: 'list' },
