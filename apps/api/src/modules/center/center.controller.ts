@@ -8,7 +8,7 @@ import { ManageService } from '../manage/manage.service'
 import { CenterService } from './center.service'
 
 const body = <T>(schema: z.ZodType<T>) => new ZodValidationPipe(schema)
-const GenerateDto = z.object({ days: z.number().int().min(1).max(90).default(28) }).strict()
+export const GenerateDto = z.object({ days: z.number().int().min(1).max(90).default(28) }).strict()
 
 /**
  * Educational Center workspace API. Every route is restricted to the administrator's own center (`actor.centerId`);

@@ -122,7 +122,7 @@ function MarqueeSection({ s }: { s: Section }) {
   const centers = useStore((st) => st.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG))
   const categories = useStore((st) => st.categories)
   const items = [
-    ...centers.map((c) => <span key={c.id} className="font-display text-2xl text-charcoal/80">{c.name}</span>),
+    ...centers.map((c) => <Link key={c.id} to={`/centers/${c.slug ?? c.id}`} className="font-display text-2xl text-charcoal/80 transition hover:text-forest">{c.name}</Link>),
     ...categories.map((c) => <span key={c.id} className="text-[12px] font-medium uppercase tracking-[0.2em] text-forest/70">{tr(c.name)}</span>),
   ]
   return (
@@ -470,8 +470,8 @@ function CentersSection({ s }: { s: Section }) {
         <SectionHeading title={tr(s.title)} subtitle={tr(s.subtitle)} />
         <div className="reveal-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {centers.map((c) => (
-            <div key={c.id} className="reveal">
-              <Card className="flex h-full gap-4">
+            <Link key={c.id} to={`/centers/${c.slug ?? c.id}`} className="reveal block">
+              <Card className="flex h-full gap-4 transition hover:-translate-y-0.5 hover:shadow-md">
                 <span className="mt-1 h-10 w-1 shrink-0 rounded-full" style={{ background: c.tone }} />
                 <div>
                   <div className="font-display text-xl text-charcoal">{c.name}</div>
@@ -479,7 +479,7 @@ function CentersSection({ s }: { s: Section }) {
                   <p className="mt-2 text-sm text-charcoal/65">{tr(c.description)}</p>
                 </div>
               </Card>
-            </div>
+            </Link>
           ))}
         </div>
       </div>

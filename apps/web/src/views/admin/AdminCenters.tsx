@@ -1,10 +1,11 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, Modal, Notice, PageTitle } from '../../components/ui'
+import { Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, LinkButton, Modal, Notice, PageTitle } from '../../components/ui'
 import { countLabel, NOUNS, type CenterStatus } from '@ilmora/shared'
 import { emptyL, useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
+import { Link } from '../../lib/router'
 import { uid, useStore } from '../../store/useStore'
 import { CenterAdminsModal } from './CenterAdmins'
 import type { Category, Center } from '../../types'
@@ -63,10 +64,11 @@ export function AdminCenters() {
                 <div className="flex items-center gap-3">
                   <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: c.tone }} />
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{c.name}</span><Badge tone={tone(c.status)}>{t(`center.status.${c.status}`)}</Badge></div>
+                    <div className="flex flex-wrap items-center gap-2"><Link to={`/admin/centers/${c.id}`} className="truncate text-sm font-medium text-charcoal hover:text-forest">{c.name}</Link><Badge tone={tone(c.status)}>{t(`center.status.${c.status}`)}</Badge></div>
                     <div className="truncate text-xs text-charcoal/55">{tr(c.district)} · {countLabel(lang, c.counts.courses, NOUNS.course)} · {countLabel(lang, c.counts.teachers, NOUNS.teacher)}{c.owner ? ` · ${t('admin.centers.registeredBy', { name: c.owner.login ? `@${c.owner.login}` : c.owner.displayName })}` : ''}</div>
                     {c.blockReason && <div className="text-xs text-red-700">{c.blockReason}</div>}
                   </div>
+                  <LinkButton size="sm" variant="secondary" to={`/admin/centers/${c.id}`}><Icon name="external" className="h-3.5 w-3.5" />{t('admin.centers.openDashboard')}</LinkButton>
                   <Button size="sm" variant="secondary" title={t('admin.centerAdmins')} aria-label={t('admin.centerAdmins')} onClick={() => setAdminsFor(c)}><Icon name="users" className="h-3.5 w-3.5" /></Button>
                   <Button size="sm" variant="secondary" onClick={() => setCenter(c)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
                   <Button size="sm" variant="danger" disabled={busy === c.id || c.counts.courses + c.counts.teachers > 0} title={c.counts.courses + c.counts.teachers > 0 ? t('admin.centers.inUse') : undefined} onClick={() => void removeCenter(c)}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
