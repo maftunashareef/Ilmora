@@ -125,7 +125,7 @@ export function UniversitiesPage() {
   )
 }
 
-/** Homepage section `universities`: up to three university cards and a link to all of them. Hidden while none is shown. */
+/** Homepage section `universities`: a band leading to the page, up to three university cards and a link to all of them. Hidden while none is shown. */
 export function UniversitiesSection({ s }: { s: Section }) {
   const { t, tr } = useT()
   const groups = useListedUniversities()
@@ -140,6 +140,7 @@ export function UniversitiesSection({ s }: { s: Section }) {
           subtitle={tr(s.subtitle) || undefined}
           action={<LinkButton to="/universities" variant="secondary">{t('uni.allUniversities')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>}
         />
+        <UniversitiesBand prominent className="reveal mb-6" />
         <div className="reveal-stagger grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {groups.slice(0, 3).map((g) => <UniversityCard key={g.university.id} group={g} courses={courses} />)}
         </div>
@@ -148,21 +149,28 @@ export function UniversitiesSection({ s }: { s: Section }) {
   )
 }
 
-/** Course catalog: a band that leads to the university packages. Hidden while none is shown. */
-export function UniversitiesBand({ className }: { className?: string }) {
+/**
+ * A band that leads to the university pages (course catalog; `prominent` on the homepage: more logos and a button
+ * instead of the text link, the section heading above already names it). Hidden while none is shown.
+ */
+export function UniversitiesBand({ className, prominent }: { className?: string; prominent?: boolean }) {
   const { t } = useT()
   const groups = useListedUniversities()
   if (groups.length === 0) return null
   return (
-    <Link to="/universities" className={cx('group flex flex-col gap-4 rounded-card border border-champagne/60 bg-gradient-to-r from-ivory via-paper to-champagne/25 p-5 transition hover:shadow-lift sm:flex-row sm:items-center', className)}>
+    <Link to="/universities" className={cx('group flex flex-col gap-4 rounded-card border border-champagne/60 bg-gradient-to-r from-ivory via-paper to-champagne/25 p-5 transition hover:shadow-lift sm:flex-row sm:items-center', prominent && 'gap-5 shadow-soft sm:p-7', className)}>
       <div className="flex -space-x-3">
-        {groups.slice(0, 4).map((g) => <UniversityLogo key={g.university.id} university={g.university} size={44} square className="ring-2 ring-paper" />)}
+        {groups.slice(0, prominent ? 6 : 4).map((g) => <UniversityLogo key={g.university.id} university={g.university} size={prominent ? 52 : 44} square className="ring-2 ring-paper" />)}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="font-display text-xl text-charcoal">{t('uni.page.title')}</div>
-        <p className="text-sm text-charcoal/65">{t('uni.catalogBand')}</p>
+        {!prominent && <div className="font-display text-xl text-charcoal">{t('uni.page.title')}</div>}
+        <p className={prominent ? 'text-[15px] leading-relaxed text-charcoal/75' : 'text-sm text-charcoal/65'}>{t('uni.catalogBand')}</p>
       </div>
-      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-forest">{t('uni.allUniversities')} <Icon name="arrowRight" className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
+      {prominent ? (
+        <span className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-control bg-forest px-5 py-2.5 text-sm font-semibold text-ivory shadow-sm transition group-hover:bg-forest/90">{t('uni.choose')} <Icon name="arrowRight" className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-forest">{t('uni.allUniversities')} <Icon name="arrowRight" className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
+      )}
     </Link>
   )
 }

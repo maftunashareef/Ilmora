@@ -131,7 +131,8 @@ export function PublicShell() {
           isHome && '-mb-[68px]',
         )}
       >
-        <div ref={row} className="container-x relative flex h-[68px] items-center justify-between gap-4">
+        {/* Tight spacing on wide screens so the eight-item menu (with Universities) stays on one row in Uzbek and Russian. */}
+        <div ref={row} className="container-x relative flex h-[68px] items-center justify-between gap-4 xl:gap-3">
           <Link
             to="/"
             className="relative flex h-11 shrink-0 items-center rounded-control focus:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 sm:h-[52px]"
@@ -141,14 +142,14 @@ export function PublicShell() {
             <Image src="/brand/ilmora-logo-mark.png" alt={site.brand.name} width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-0' : 'opacity-100')} />
             <Image src="/brand/ilmora-logo-mark-light.png" alt="" aria-hidden width={925} height={432} priority sizes="(min-width: 640px) 112px, 96px" className={cx('absolute inset-y-0 left-0 h-11 w-auto transition-opacity duration-500 sm:h-[52px]', overlay ? 'opacity-100' : 'opacity-0')} />
           </Link>
-          <nav className={cx('hidden items-center gap-1', fits && 'xl:flex')} aria-label={t('nav.primary')}>
+          <nav className={cx('hidden items-center gap-0.5', fits && 'xl:flex')} aria-label={t('nav.primary')}>
             {nav.map((n) => (
               <NavLink
                 key={n.id}
                 to={n.path}
                 className={({ isActive }) =>
                   cx(
-                    'whitespace-nowrap rounded-control px-2 py-2 text-[13px] font-medium transition-colors duration-300',
+                    'whitespace-nowrap rounded-control px-1.5 py-2 text-[13px] font-medium transition-colors duration-300',
                     overlay ? (isActive ? 'text-champagne' : 'text-ivory/80 hover:text-ivory') : isActive ? 'text-forest font-semibold' : 'text-charcoal/70 hover:text-charcoal'
                   )
                 }
@@ -159,12 +160,12 @@ export function PublicShell() {
           </nav>
           {/* Invisible copy of the menu, measured to decide whether the full menu fits (see useMenuFits). */}
           <div aria-hidden="true" className="pointer-events-none invisible absolute inset-0 overflow-hidden">
-            <div ref={probe} className="flex w-max gap-1 whitespace-nowrap">
-              {nav.map((n) => <span key={n.id} className="px-2 py-2 text-[13px] font-semibold">{tr(n.label)}</span>)}
+            <div ref={probe} className="flex w-max gap-0.5 whitespace-nowrap">
+              {nav.map((n) => <span key={n.id} className="px-1.5 py-2 text-[13px] font-semibold">{tr(n.label)}</span>)}
             </div>
             <span ref={nameProbe} className="absolute left-0 top-0 whitespace-nowrap text-xs font-medium">{accountName}</span>
           </div>
-          <div ref={right} className="flex shrink-0 items-center gap-2.5">
+          <div ref={right} className="flex shrink-0 items-center gap-2.5 xl:gap-2">
             <div className="hidden md:block"><LangSwitcher /></div>
             <HeaderShortcuts overlay={overlay} />
             <RoleSwitcher showNameOnWide={showName} />
