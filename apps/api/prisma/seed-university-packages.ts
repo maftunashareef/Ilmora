@@ -8,7 +8,8 @@
  *
  * Safe for repeated runs and for production: it only ADDS universities and packages that are not there yet (by id) and
  * never changes or deletes anything an admin edited. Records imported earlier only get the newer fields (country,
- * faculties and directions, a package's directions, an optional extra such as IELTS) filled in where they are still empty. Each subject is mapped to an existing ILMORA offline course by the
+ * faculties and directions, whether the university is shown on the site, a package's directions, an optional extra such as
+ * IELTS) filled in where they are still empty. Each subject is mapped to an existing ILMORA offline course by the
  * course id or slug named in the data file; a subject with no such course is left unmapped and reported, never filled with
  * a made-up course. A package is published only when presetPublishability allows it (every subject mapped to an available
  * course AND its admission requirements verified against an official page); everything else stays an unpublished draft.
@@ -71,6 +72,7 @@ async function main() {
     const next = { ...stored }
     if (!next.country && seed.country) next.country = seed.country
     if (!next.faculties?.length && seed.faculties?.length) next.faculties = seed.faculties
+    if (next.published === undefined && seed.published !== undefined) next.published = seed.published
     if (JSON.stringify(next) !== JSON.stringify(stored)) completed++
     return next
   })

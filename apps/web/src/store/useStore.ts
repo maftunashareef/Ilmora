@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
@@ -211,11 +211,10 @@ const publishableInput = (p: Partial<Publishable>) => ({
   ...(p.status ? { status: p.status } : {}), ...(p.visibility ? { visibility: p.visibility } : {}), ...(p.audience ? { audience: p.audience } : {}),
   ...(p.featured !== undefined ? { featured: p.featured } : {}), ...(p.reviewRequested !== undefined ? { reviewRequested: p.reviewRequested } : {}),
 })
-/** What a visitor may see of the packages: published ones, and only the universities that have one. */
+/** What a visitor may see of the packages: published ones, and the universities marked published or with one. */
 const publicSite = (site: SiteConfig): SiteConfig => {
   const presets = (site.presets ?? []).filter((p) => p.enabled)
-  const used = new Set(presets.map((p) => p.universityId))
-  return { ...site, presets, universities: (site.universities ?? []).filter((u) => used.has(u.id)) }
+  return { ...site, presets, universities: (site.universities ?? []).filter((u) => isUniversityListed(u, presets)) }
 }
 const courseInput = (c: Course, withDiscount = false) => ({
   title: c.title, categoryId: c.categoryId, subjectId: c.subjectId ?? null, summary: c.summary, description: c.description, curriculum: c.curriculum,

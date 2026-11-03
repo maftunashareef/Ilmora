@@ -163,6 +163,13 @@ export function universityOf(preset: Pick<Preset, 'universityId' | 'university'>
   return name ? { id: `legacy:${name}`, name } : undefined
 }
 
+/**
+ * Whether visitors see the university: the admin marked it published, or one of its packages is published. A university
+ * whose packages are still being verified can be shown this way; its unpublished packages stay out of the public site.
+ */
+export const isUniversityListed = (university: Pick<University, 'id' | 'published'>, presets: Pick<Preset, 'enabled' | 'universityId'>[]): boolean =>
+  university.published === true || presets.some((p) => p.enabled && p.universityId === university.id)
+
 /** Packages grouped by university (alphabetical); packages without a university and empty universities are left out. */
 export function groupByUniversity(presets: Preset[], universities: University[]): UniversityGroup[] {
   const groups = new Map<string, UniversityGroup>()

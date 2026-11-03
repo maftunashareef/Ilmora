@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { admissionIssues, chosenSlots, emptyAdmission, groupByUniversity, isUniversityPreset, newPreset, presetCartPlan, presetCourses, presetDurationMonths, presetMissingSubjects, presetPublishability, presetReadiness, presetsForDirection, presetTotal, universityDirections, universityOf, unknownDirections, type PresetCourse } from './presets.js'
+import { admissionIssues, chosenSlots, emptyAdmission, groupByUniversity, isUniversityListed, isUniversityPreset, newPreset, presetCartPlan, presetCourses, presetDurationMonths, presetMissingSubjects, presetPublishability, presetReadiness, presetsForDirection, presetTotal, universityDirections, universityOf, unknownDirections, type PresetCourse } from './presets.js'
 import type { AdmissionSource, Preset, University } from './types.js'
 
 const course = (id: string, over: Partial<PresetCourse> = {}, groups = 1): PresetCourse => ({
@@ -141,6 +141,15 @@ describe('browsing by university', () => {
     const legacy = { ...preset(['math']), id: 'old', university: 'INHA' }
     expect(universityOf(legacy, UNIS)).toEqual({ id: 'legacy:INHA', name: 'INHA' })
     expect(groupByUniversity([legacy], UNIS).map((g) => g.university.name)).toEqual(['INHA'])
+  })
+
+  it('shows a university the admin published, or one with a published package; a draft package alone does not', () => {
+    const draft = uniPreset({ id: 'd1', enabled: false })
+    const live = uniPreset({ id: 'l1', enabled: true })
+    expect(isUniversityListed({ id: 'u-a' }, [draft])).toBe(false)
+    expect(isUniversityListed({ id: 'u-a' }, [draft, live])).toBe(true)
+    expect(isUniversityListed({ id: 'u-a', published: true }, [])).toBe(true)
+    expect(isUniversityListed({ id: 'u-b' }, [live])).toBe(false)
   })
 })
 

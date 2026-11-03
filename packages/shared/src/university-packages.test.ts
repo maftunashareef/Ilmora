@@ -170,6 +170,10 @@ describe('the seven universities of the preparation catalogue', () => {
     expect(packagesOf('uni-millat-umidi')).toEqual([]) // nothing could be read on its official site
   })
 
+  it('are all shown on the University preparation page (with CAU, already shown), while their unverified packages stay drafts', () => {
+    expect(UNIVERSITIES.filter((u) => u.published).map((u) => u.id).sort()).toEqual([...ids, 'uni-cau'].sort())
+  })
+
   it('maps WIUT programmes to packages by their stated requirements, and leaves Business Information Systems without one', () => {
     const served = (dir: string) => UNIVERSITY_PACKAGES.filter((p) => p.directionIds?.includes(dir)).map((p) => p.id)
     expect(served('wiut-cs')).toEqual(['uni-wiut-cs'])

@@ -1,4 +1,4 @@
-import { presetCourses, presetDurationMonths, presetsForDirection, presetTotal, priceTotals, universityDirections } from '@ilmora/shared'
+import { isUniversityListed, presetCourses, presetDurationMonths, presetsForDirection, presetTotal, priceTotals, universityDirections } from '@ilmora/shared'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from '@/lib/router'
 import { NotFound } from '../../components/AccessGate'
@@ -11,9 +11,10 @@ import type { AdmissionSource, Course, Preset, PresetSlot, Section, University, 
 
 /**
  * University preparation: university → faculty → direction → package → cart. Only published packages are shown (the
- * public site configuration carries no drafts), and a university appears once it has at least one. Prices are the
- * included courses' own monthly prices with their active discounts; "Enroll" hands the package to the regular cart
- * (/builder?preset=…), so groups, schedule checks and payment stay the existing ones.
+ * public site configuration carries no drafts). A university appears when the admin marked it published or once it has
+ * a published package; one whose packages are still being verified shows its faculties and directions without a package.
+ * Prices are the included courses' own monthly prices with their active discounts; "Enroll" hands the package to the
+ * regular cart (/builder?preset=…), so groups, schedule checks and payment stay the existing ones.
  */
 
 interface UniversityGroup {
@@ -21,16 +22,16 @@ interface UniversityGroup {
   presets: Preset[]
 }
 
-/** Universities with at least one published package, each with those packages, alphabetical. */
-function usePublishedUniversities(): UniversityGroup[] {
+/** The universities visitors see, each with its published packages: those with a package first, then alphabetical. */
+function useListedUniversities(): UniversityGroup[] {
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
   return useMemo(() => {
     const live = (presets ?? []).filter((p) => p.enabled && p.universityId)
     return (universities ?? [])
+      .filter((university) => isUniversityListed(university, live))
       .map((university) => ({ university, presets: live.filter((p) => p.universityId === university.id) }))
-      .filter((g) => g.presets.length > 0)
-      .sort((a, b) => a.university.name.localeCompare(b.university.name))
+      .sort((a, b) => Number(b.presets.length > 0) - Number(a.presets.length > 0) || a.university.name.localeCompare(b.university.name))
   }, [presets, universities])
 }
 
@@ -77,7 +78,9 @@ function UniversityCard({ group, courses }: { group: UniversityGroup; courses: C
       </div>
       <div className="mt-5 flex flex-wrap gap-2 text-[11px] font-medium text-charcoal/70">
         {directions > 0 && <span className="rounded-full bg-sage/60 px-2.5 py-1">{t('uni.directionsCount', { n: directions })}</span>}
-        <span className="rounded-full bg-sage/60 px-2.5 py-1">{t('uni.packagesCount', { n: presets.length })}</span>
+        {presets.length > 0
+          ? <span className="rounded-full bg-sage/60 px-2.5 py-1">{t('uni.packagesCount', { n: presets.length })}</span>
+          : <span className="rounded-full bg-champagne/40 px-2.5 py-1 text-forest">{t('uni.packagesSoon')}</span>}
       </div>
       <div className="mt-auto flex items-end justify-between gap-3 pt-6">
         {from > 0 ? (
@@ -108,7 +111,7 @@ function MoreSoonCard() {
 
 export function UniversitiesPage() {
   const { t } = useT()
-  const groups = usePublishedUniversities()
+  const groups = useListedUniversities()
   const courses = useStore((s) => s.courses)
   return (
     <div className="container-x py-12 lg:py-16">
@@ -122,10 +125,10 @@ export function UniversitiesPage() {
   )
 }
 
-/** Homepage section `universities`: up to three university cards and a link to all of them. Hidden while none is published. */
+/** Homepage section `universities`: up to three university cards and a link to all of them. Hidden while none is shown. */
 export function UniversitiesSection({ s }: { s: Section }) {
   const { t, tr } = useT()
-  const groups = usePublishedUniversities()
+  const groups = useListedUniversities()
   const courses = useStore((st) => st.courses)
   if (groups.length === 0) return null
   return (
@@ -145,10 +148,10 @@ export function UniversitiesSection({ s }: { s: Section }) {
   )
 }
 
-/** Course catalog: a band that leads to the university packages. Hidden while none is published. */
+/** Course catalog: a band that leads to the university packages. Hidden while none is shown. */
 export function UniversitiesBand({ className }: { className?: string }) {
   const { t } = useT()
-  const groups = usePublishedUniversities()
+  const groups = useListedUniversities()
   if (groups.length === 0) return null
   return (
     <Link to="/universities" className={cx('group flex flex-col gap-4 rounded-card border border-champagne/60 bg-gradient-to-r from-ivory via-paper to-champagne/25 p-5 transition hover:shadow-lift sm:flex-row sm:items-center', className)}>
@@ -282,7 +285,7 @@ function StepLabel({ n, label, active }: { n: number; label: string; active?: bo
 export function UniversityPage() {
   const { id } = useParams()
   const { t, tr } = useT()
-  const groups = usePublishedUniversities()
+  const groups = useListedUniversities()
   const courses = useStore((s) => s.courses)
   const [facultyId, setFacultyId] = useState<string | null>(null)
   const [directionId, setDirectionId] = useState<string | null>(null)
@@ -362,6 +365,10 @@ export function UniversityPage() {
             )}
           </section>
         </div>
+      )}
+
+      {faculties.length === 0 && presets.length === 0 && (
+        <p className="mt-10 rounded-card border border-dashed border-charcoal/15 bg-ivory/50 p-6 text-sm text-charcoal/60">{t('uni.noPackagesYet')}</p>
       )}
 
       {unassigned.length > 0 && (

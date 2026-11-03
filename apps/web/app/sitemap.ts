@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next'
+import { isUniversityListed } from '@ilmora/shared'
 import { getCatalog, getSite, SITE_URL } from '@/lib/server-api'
 
 const LOCALES = ['uz', 'ru', 'en'] as const
@@ -8,8 +9,8 @@ export const revalidate = 3600
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [catalog, site] = await Promise.all([getCatalog().catch(() => null), getSite()])
-  // A university has a public page once one of its packages is published.
-  const universityIds = [...new Set((site.presets ?? []).filter((p) => p.enabled && p.universityId).map((p) => p.universityId as string))]
+  // A university has a public page once it is shown on the University Preparation page.
+  const universityIds = (site.universities ?? []).filter((u) => isUniversityListed(u, site.presets ?? [])).map((u) => u.id)
   const entry = (path: string, lastModified?: string | Date, priority = 0.6): MetadataRoute.Sitemap =>
     LOCALES.map((l) => ({
       url: `${SITE_URL}/${l}${path}`,

@@ -128,9 +128,11 @@ const FOREIGN_CERTIFICATE = l('Çet tili sertifikati (yetarli ball) yoki suhbat'
 const kiutId = (name: string) => `kiut-${name.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '')}`
 const kiutDirection = (name: string, subjects: L[]) => ({ id: kiutId(name), name: official(name), subjects })
 
+// `published`: shown on the University Preparation page while their packages are still being verified (INHA, Narxoz, TUIT, KIUT,
+// MDIS, Millat Umidi, WIUT, and CAU that was already shown); the others appear once one of their packages is published.
 export const UNIVERSITIES: University[] = [
   {
-    id: 'uni-inha', name: 'Inha University in Tashkent', shortName: 'INHA', city: 'Tashkent', country: 'Uzbekistan', website: 'https://inha.uz', logoUrl: '/universities/uni-inha.svg',
+    id: 'uni-inha', name: 'Inha University in Tashkent', shortName: 'INHA', city: 'Tashkent', country: 'Uzbekistan', website: 'https://inha.uz', logoUrl: '/universities/uni-inha.svg', published: true,
     // Schools and majors as the 2026-2027 guidelines name them; SOCIE students are assigned to CSE or ICE after the first year.
     faculties: [
       { id: 'inha-socie', name: l('Kompyuter va axborot injiniringi maktabi (SOCIE)', 'Школа компьютерной и информационной инженерии (SOCIE)', 'School of Computer and Information Engineering (SOCIE)'), directions: [
@@ -150,7 +152,7 @@ export const UNIVERSITIES: University[] = [
     ],
   },
   {
-    id: 'uni-narxoz', name: 'Narxoz University', shortName: 'Narxoz', city: 'Almaty', country: 'Kazakhstan', website: 'https://narxoz.edu.kz',
+    id: 'uni-narxoz', name: 'Narxoz University', shortName: 'Narxoz', city: 'Almaty', country: 'Kazakhstan', website: 'https://narxoz.edu.kz', published: true,
     // Directions are the profile-subject pairs to verify; the programmes behind each pair are not confirmed yet.
     faculties: [
       { id: 'narxoz-bachelor', name: l('Bakalavriat: profil fanlar juftligi (tasdiqlanmagan)', 'Бакалавриат: пары профильных предметов (не подтверждено)', 'Bachelor: profile-subject pairs (unverified)'), directions: [
@@ -164,7 +166,7 @@ export const UNIVERSITIES: University[] = [
     ],
   },
   {
-    id: 'uni-wiut', name: 'Westminster International University in Tashkent', shortName: 'WIUT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://wiut.uz', logoUrl: '/universities/uni-wiut.png', logoOnDark: true,
+    id: 'uni-wiut', name: 'Westminster International University in Tashkent', shortName: 'WIUT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://wiut.uz', logoUrl: '/universities/uni-wiut.png', logoOnDark: true, published: true,
     // Faculty labels from each programme page (the undergraduate menu has no school headings); read 2026-11-03.
     faculties: [
       { id: 'wiut-fsas', name: official('Faculty of Social and Applied Sciences (FSAS)'), directions: [
@@ -187,7 +189,7 @@ export const UNIVERSITIES: University[] = [
   { id: 'uni-newuu', name: 'New Uzbekistan University', shortName: 'NewUU', city: 'Tashkent', website: 'https://newuu.uz' },
   { id: 'uni-amity', name: 'Amity University Tashkent', shortName: 'Amity', city: 'Tashkent', website: 'https://amity.uz' },
   {
-    id: 'uni-mdis', name: 'Management Development Institute of Singapore in Tashkent', shortName: 'MDIS', city: 'Tashkent', country: 'Uzbekistan', website: 'https://mdis.uz', logoUrl: '/universities/uni-mdis.svg',
+    id: 'uni-mdis', name: 'Management Development Institute of Singapore in Tashkent', shortName: 'MDIS', city: 'Tashkent', country: 'Uzbekistan', website: 'https://mdis.uz', logoUrl: '/universities/uni-mdis.svg', published: true,
     // Bachelor degrees are entered through the Foundation Year (or transfer); the programme list is on /en/menu/under-graduate-programmes-of-mdis-tashkent.
     faculties: [
       { id: 'mdis-foundation-year', name: official('Foundation Year'), directions: [
@@ -204,7 +206,7 @@ export const UNIVERSITIES: University[] = [
   { id: 'uni-uwed', name: 'University of World Economy and Diplomacy', shortName: 'UWED', city: 'Tashkent', website: 'https://uwed.uz' },
   { id: 'uni-webster', name: 'Webster University in Tashkent', shortName: 'Webster', city: 'Tashkent', website: 'https://www.webstertashkent.uz' },
   {
-    id: 'uni-kiut', name: 'Kimyo International University in Tashkent', shortName: 'KIUT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://kiut.uz', logoUrl: '/universities/uni-kiut.svg',
+    id: 'uni-kiut', name: 'Kimyo International University in Tashkent', shortName: 'KIUT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://kiut.uz', logoUrl: '/universities/uni-kiut.svg', published: true,
     // Schools and programmes from the 2026/2027 admission table (kiut.uz/en/admissions/tashkent-admission/, read 2026-11-03). The table
     // names only the exam type; subjects come from the programme pages, which state no year. Empty subjects: not stated on the pages read.
     faculties: [
@@ -233,11 +235,11 @@ export const UNIVERSITIES: University[] = [
       ] },
     ],
   },
-  { id: 'uni-millat-umidi', name: 'Millat Umidi University', shortName: 'MU', city: 'Tashkent', country: 'Uzbekistan', website: 'https://millatumidi.uz' },
-  { id: 'uni-cau', name: 'Central Asian University (formerly AKFA University)', shortName: 'CAU', city: 'Tashkent', website: 'https://centralasian.uz' },
+  { id: 'uni-millat-umidi', name: 'Millat Umidi University', shortName: 'MU', city: 'Tashkent', country: 'Uzbekistan', website: 'https://millatumidi.uz', published: true },
+  { id: 'uni-cau', name: 'Central Asian University (formerly AKFA University)', shortName: 'CAU', city: 'Tashkent', website: 'https://centralasian.uz', published: true },
   { id: 'uni-nuuz', name: 'National University of Uzbekistan named after Mirzo Ulugbek', shortName: 'NUUz', city: 'Tashkent', website: 'https://nuu.uz' },
   // TUIT: its own sites state 2026/2027 admission but no faculties and no subjects per direction (only a 2023/2024 direction list).
-  { id: 'uni-tuit', name: 'Tashkent University of Information Technologies named after Muhammad al-Khwarizmi', shortName: 'TUIT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://tuit.uz', logoUrl: '/universities/uni-tuit.png' },
+  { id: 'uni-tuit', name: 'Tashkent University of Information Technologies named after Muhammad al-Khwarizmi', shortName: 'TUIT', city: 'Tashkent', country: 'Uzbekistan', website: 'https://tuit.uz', logoUrl: '/universities/uni-tuit.png', published: true },
   { id: 'uni-tsue', name: 'Tashkent State University of Economics', shortName: 'TSUE', city: 'Tashkent', website: 'https://tsue.uz' },
   { id: 'uni-tsul', name: 'Tashkent State University of Law', shortName: 'TSUL', city: 'Tashkent', website: 'https://tsul.uz' },
   { id: 'uni-tsmu', name: 'Tashkent State Medical University', shortName: 'TSMU', city: 'Tashkent', website: 'https://tashmeduni.uz' },

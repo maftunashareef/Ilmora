@@ -124,6 +124,13 @@ describe('universities (stubbed storage)', () => {
     expect((await site.get('t', true)).presets?.map((p) => p.id)).toEqual(['p1', 'p2'])
     expect((await make({}).get('t')).universities).toEqual([])
   })
+
+  it('the public read also lists a university marked published, without its draft packages', async () => {
+    const site = make({ presets: [pkg('p2', { universityId: 'u-b' })], universities: [UNI_A, { ...UNI_B, published: true }] })
+    expect((await site.get('t')).universities?.map((u) => u.id)).toEqual(['u-b'])
+    expect((await site.get('t')).presets).toEqual([])
+    expect(SiteConfigSchema.safeParse(body({ universities: [{ ...UNI_B, published: true }] })).success).toBe(true)
+  })
 })
 
 describe('faculties, directions, logos and optional extras', () => {

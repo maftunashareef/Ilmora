@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { isSafeExternalUrl, presetPublishability, universityDirections, unknownDirections, type Preset, type PresetCourse, type University } from '@ilmora/shared'
+import { isSafeExternalUrl, isUniversityListed, presetPublishability, universityDirections, unknownDirections, type Preset, type PresetCourse, type University } from '@ilmora/shared'
 import { z } from 'zod'
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
@@ -46,6 +46,7 @@ const UniversitySchema = z.object({
   logoUrl: z.string().max(500).refine((v) => v === '' || isSafeExternalUrl(v) || /^\/universities\/[a-z0-9-]+\.(svg|png|webp)$/.test(v), 'logoUrl must be a plain https link or a /universities/ file').optional(),
   logoOnDark: z.boolean().optional(),
   faculties: z.array(FacultySchema).max(20).optional(),
+  published: z.boolean().optional(),
 })
 
 /** Ready-made course set; `courseId` must point at an existing course (checked in SiteService.assertPresetsUsable). */
@@ -104,9 +105,8 @@ export class SiteService {
     if (!row) throw AppError.notFound('Site configuration')
     const data = row.data as SiteConfigData
     const presets = (data.presets ?? []).filter((p) => includeDisabledPresets || p.enabled)
-    // The public site lists only universities that have a published package; the Super Admin sees them all.
-    const used = new Set(presets.map((p) => p.universityId))
-    const universities = (data.universities ?? []).filter((u) => includeDisabledPresets || used.has(u.id))
+    // The public site lists the universities marked published or with a published package; the Super Admin sees them all.
+    const universities = (data.universities ?? []).filter((u) => includeDisabledPresets || isUniversityListed(u, presets))
     return { ...data, presets, universities, version: row.version, packages: packages.map(toPackageDto) }
   }
 

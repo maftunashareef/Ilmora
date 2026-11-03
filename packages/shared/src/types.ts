@@ -373,6 +373,11 @@ export interface University {
   logoOnDark?: boolean
   /** Faculties and their directions; a university without them lists its packages directly. */
   faculties?: UniversityFaculty[]
+  /**
+   * Shown on the University Preparation page even while none of its packages is published (its packages stay drafts
+   * until verified). Without it, a university is shown once one of its packages is published (see isUniversityListed).
+   */
+  published?: boolean
 }
 
 /** needs_review: the requirement could not be confirmed from an official page (or no source is recorded yet). */

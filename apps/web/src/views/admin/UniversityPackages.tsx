@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { countLabel, isOnlineCourse, isPublicListed, newPreset, newUniversity, NOUNS, presetCourses, presetDurationMonths, presetMissingSubjects, presetPublishability, presetTotal, universityDirections, universityOf, type AdmissionStatus } from '@ilmora/shared'
+import { countLabel, isOnlineCourse, isPublicListed, isUniversityListed, newPreset, newUniversity, NOUNS, presetCourses, presetDurationMonths, presetMissingSubjects, presetPublishability, presetTotal, universityDirections, universityOf, type AdmissionStatus } from '@ilmora/shared'
 import { FormatBadge, PriceNow, ScheduleChips } from '../../components/course/CourseCard'
 import { Badge, Button, Card, cx, Eyebrow, Field, Icon, Input, LField, Notice, Select, Textarea } from '../../components/ui'
 import { emptyL, useT } from '../../i18n/useT'
@@ -99,8 +99,18 @@ export function UniversityPackagesAdmin() {
               const n = usedBy(u.id)
               const patch = (v: Partial<University>) => setUnis(unis.map((x) => (x.id === u.id ? { ...x, ...v } : x)))
               const directions = universityDirections(u).length
+              const listed = isUniversityListed(u, list)
+              const byPackage = list.some((p) => p.enabled && p.universityId === u.id)
               return (
                 <li key={u.id} className="rounded-card border border-charcoal/10 bg-ivory/50 p-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <Badge tone={listed ? 'forest' : 'muted'}>{listed ? t('admin.uni.published') : t('admin.uni.draft')}</Badge>
+                    <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-charcoal/70">
+                      <input type="checkbox" className="h-4 w-4 accent-forest" checked={listed} disabled={byPackage} onChange={(e) => patch({ published: e.target.checked || undefined })} />
+                      {t('admin.uni.showOnSite')}
+                    </label>
+                    <span className="text-[11px] text-charcoal/50">{byPackage ? t('admin.uni.shownByPackage') : t('admin.uni.showOnSiteHint')}</span>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-[1.6fr_0.7fr_0.8fr_0.8fr_1.4fr_auto]">
                     <Field label={t('admin.uni.universityName')}><Input value={u.name} maxLength={120} onChange={(e) => patch({ name: e.target.value })} /></Field>
                     <Field label={t('admin.uni.shortName')}><Input value={u.shortName ?? ''} maxLength={30} onChange={(e) => patch({ shortName: e.target.value })} /></Field>
