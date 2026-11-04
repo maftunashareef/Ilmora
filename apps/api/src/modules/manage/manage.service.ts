@@ -194,11 +194,18 @@ export class ManageService {
       if (!input.centerId) throw AppError.invalid('center_required', 'centerId is required for an offline course')
       if (this.sendsOnlineFields(input)) throw AppError.invalid('online_fields_on_offline_course', 'A link, provider or certificate belongs to an online course')
       centerId = input.centerId
-      // A center creates courses for itself only, taught by its own teachers.
-      if (this.isCenterAdmin(actor) && !this.isAdmin(actor)) {
-        if (centerId !== actor.centerId) throw AppError.forbidden('A center can only create courses for itself', { code: 'wrong_center' })
-        const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
-        if (!teacher || teacher.centerId !== centerId) throw AppError.invalid('teacher_not_in_center', 'Choose a teacher of your center')
+      if (!this.isAdmin(actor)) {
+        if (this.isCenterAdmin(actor)) {
+          // A center creates courses for itself only, taught by its own teachers.
+          if (centerId !== actor.centerId) throw AppError.forbidden('A center can only create courses for itself', { code: 'wrong_center' })
+          const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
+          if (!teacher || teacher.centerId !== centerId) throw AppError.invalid('teacher_not_in_center', 'Choose a teacher of your center')
+        } else {
+          // A teacher may only create a course at the center their own profile belongs to — never in a foreign center.
+          const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
+          if (!teacher) throw AppError.notFound('TeacherProfile')
+          if (!teacher.centerId || teacher.centerId !== centerId) throw AppError.forbidden('You can only create courses for your own center', { code: 'wrong_center' })
+        }
       }
     }
     const perms = await this.permsFor(tenantId, actor, centerId)
@@ -855,13 +862,26 @@ export class ManageService {
     return { page, pageSize, total, items: rows.map((u) => ({ id: u.id, phoneMasked: u.phoneE164 ? u.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null, login: u.login, displayName: u.displayName, district: u.district, preferredLang: u.preferredLang, roles: u.roles, centerId: u.centerId, isActive: u.isActive, teacherProfileId: u.teacherProfile?.id ?? null, subscription: u.subscriptions[0] ?? null, groupIds: u.enrollments.map((e) => e.groupId), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt })) }
   }
 
+  /** Counts for the admin overview. Computed in the database so they stay correct past the paginated user list. */
+  async adminStats(tenantId: string) {
+    const [students, activeSubscriptions, teachers] = await Promise.all([
+      this.prisma.client.user.count({ where: { tenantId, roles: { has: 'STUDENT' } } }),
+      this.prisma.client.subscription.count({ where: { tenantId, status: 'ACTIVE' } }),
+      this.prisma.client.teacherProfile.count({ where: { tenantId } }),
+    ])
+    return { students, activeSubscriptions, teachers }
+  }
+
   async setRoles(tenantId: string, actor: RequestActor, userId: string, input: z.infer<typeof UserRolesInput>) {
     const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId }, include: { teacherProfile: { select: { id: true } } } })
     if (!user) throw AppError.notFound('User')
-    // Super Admin belongs to the owner accounts only (owner-setup command) and is never granted or revoked here.
-    if (user.isOwner) throw AppError.forbidden('The owner account cannot be changed here', { code: 'owner_protected' })
+    // You cannot change your own account here: it prevents locking yourself out of Super Admin by mistake.
     if (user.id === actor.id) throw AppError.forbidden('You cannot change your own roles', { code: 'self_roles' })
-    const roles = [...new Set(input.roles)]
+    const selected = [...new Set(input.roles)]
+    // Super Admin is the owner flag (isOwner), from which the access token derives PLATFORM_ADMIN + FINANCE_ADMIN.
+    // Granting it stores the privileged pair like owner-setup; revoking it drops PLATFORM_ADMIN from the column.
+    const wantsOwner = selected.includes('PLATFORM_ADMIN')
+    const roles = (wantsOwner ? [...new Set([...selected, 'FINANCE_ADMIN' as const])] : selected.filter((r) => r !== 'PLATFORM_ADMIN')) as typeof selected
     const centerId = input.centerId === undefined ? user.centerId : input.centerId
     if (centerId && centerId !== user.centerId) {
       const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { id: true } })
@@ -870,10 +890,17 @@ export class ManageService {
     // A center administrator without a center would see an empty workspace and could not be found on the center page.
     if (roles.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
     const isActive = input.isActive ?? user.isActive
-    const lostAccess = (!isActive && user.isActive) || user.roles.some((r) => !roles.includes(r as (typeof roles)[number]))
+    const isOwner = wantsOwner
+    // Losing the owner flag, a role, or being blocked ends the user's open sessions immediately.
+    const lostAccess = (!isActive && user.isActive) || (user.isOwner && !isOwner) || user.roles.some((r) => !roles.includes(r as (typeof roles)[number]))
 
     const updated = await this.prisma.client.$transaction(async (tx) => {
-      const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive } })
+      // Never remove the last Super Admin: the platform would have no owner and no one could grant it again from here.
+      if (user.isOwner && !isOwner) {
+        const owners = await tx.user.count({ where: { tenantId, isOwner: true } })
+        if (owners <= 1) throw AppError.invalid('last_owner', 'At least one Super Admin must remain')
+      }
+      const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive, isOwner } })
       // The teacher studio works through the public teacher profile; grant one with the role so the studio is usable.
       if (roles.includes('TEACHER') && !user.teacherProfile) {
         await tx.teacherProfile.create({
@@ -884,7 +911,7 @@ export class ManageService {
       if (lostAccess) await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: 'roles_changed' } })
       return row
     })
-    await this.audit.record({ action: 'user.roles', entityType: 'User', entityId: userId, before: { roles: user.roles, centerId: user.centerId, isActive: user.isActive }, after: { roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive }, reason: input.reason })
+    await this.audit.record({ action: 'user.roles', entityType: 'User', entityId: userId, before: { roles: user.roles, centerId: user.centerId, isActive: user.isActive, isOwner: user.isOwner }, after: { roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive, isOwner: updated.isOwner }, reason: input.reason })
     return { id: updated.id, roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive }
   }
 

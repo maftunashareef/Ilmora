@@ -341,34 +341,38 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
       })
     })
 
-    it('rejects registration when phone number is already registered', async () => {
-      const mockPrisma = {
-        client: {
-          user: {
-            findUnique: vi.fn().mockResolvedValue(null),
-            findFirst: vi.fn().mockResolvedValue({ id: 'existing-phone-user-id' }),
-          },
+    it('never binds a self-asserted phone to the account at password registration', async () => {
+      // The phone typed on the sign-up form is not proven to belong to the registrant (no SMS code), so it must not land
+      // on the account's unique phoneE164 — otherwise anyone could squat a victim's number and capture their SMS sign-in.
+      const created: Record<string, unknown> = {}
+      const client: Record<string, unknown> = {
+        user: {
+          findUnique: vi.fn().mockResolvedValue(null), // login is free
+          create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+            Object.assign(created, data)
+            return { id: 'u1', tenantId: 'tenant-1', roles: ['STUDENT'], centerId: null, teacherProfile: null, isOwner: false, ...data }
+          }),
         },
+        $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(client)),
       }
 
       const accountService = new AccountService(
-        mockPrisma as unknown as PrismaService,
-        {} as unknown as TokenService,
-        {} as unknown as AuditService,
+        { client } as unknown as PrismaService,
+        { signAccess: async () => 'access', issueRefresh: async () => ({ raw: 'r', expiresAt: new Date(Date.now() + 86400000) }) } as unknown as TokenService,
+        { record: vi.fn(async () => undefined) } as unknown as AuditService,
         {} as unknown as RedisService,
         notificationsStub,
         env,
       )
 
-      await expect(
-        accountService.register(
-          'tenant-1',
-          { role: 'STUDENT', login: 'newuser123', password: 'securepassword123', phone: '+998901234567' },
-          {},
-        ),
-      ).rejects.toMatchObject({
-        code: 'phone_taken',
-      })
+      const result = await accountService.register(
+        'tenant-1',
+        { role: 'STUDENT', login: 'newuser123', password: 'securepassword123', phone: '+998901234567' },
+        {},
+      )
+
+      expect(result.accessToken).toBeDefined()
+      expect(created.phoneE164).toBeNull() // the unverified phone is dropped, not stored on the user
     })
   })
 })

@@ -65,7 +65,9 @@ describe('online courses (stubbed storage)', () => {
           create: vi.fn(async () => { const c = { id: 'center-online', deletedAt: null as null }; centers.push(c); return c }),
         },
         teacherProfile: {
-          findFirst: vi.fn(async () => profiles[0] ?? null),
+          // Looked up by id for the teacher↔center check (teacher-1 belongs to center-a, matching OFFLINE_BODY),
+          // and by slug when ensuring the online provider profile.
+          findFirst: vi.fn(async (args: { where: { id?: string; slug?: string } }) => (args.where.id ? { id: args.where.id, centerId: 'center-a', deletedAt: null } : profiles[0] ?? null)),
           create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { created.push({ profile: data }); const p = { id: 'teacher-online', deletedAt: null as null }; profiles.push(p); return p }),
         },
         group: { count: vi.fn(async () => groupCount), create: vi.fn() },
@@ -120,6 +122,13 @@ describe('online courses (stubbed storage)', () => {
     await expect(service.createCourse('t', teacher, { ...OFFLINE_BODY, providerName: 'Someone' })).rejects.toThrow(/online course/)
     await service.createCourse('t', teacher, OFFLINE_BODY)
     expect(created[0]).toMatchObject({ learningFormat: 'OFFLINE', centerId: 'center-a', teacherId: 'teacher-1', priceMinor: 50_000_000n })
+  })
+
+  it('refuses a teacher creating a course in a center their profile does not belong to', async () => {
+    const { service, created } = setup()
+    // teacher-1's profile belongs to center-a (stub); creating at center-b must be rejected, not silently published there.
+    await expect(service.createCourse('t', teacher, { ...OFFLINE_BODY, centerId: 'center-b' })).rejects.toMatchObject({ code: 'forbidden' })
+    expect(created).toHaveLength(0)
   })
 
   it('teachers cannot switch a course to online, send online fields, or edit an online course', async () => {

@@ -11,7 +11,7 @@ type Account = { id: string; login: string | null; phoneMasked: string | null; d
 type Page = { page: number; pageSize: number; total: number; items: Account[] }
 const ROLES = ['', 'STUDENT', 'TEACHER', 'CENTER_ADMIN', 'FINANCE_ADMIN'] as const
 /** Every role the Super Admin may grant; PLATFORM_ADMIN is owner-only (owner-setup on the server). */
-const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'FINANCE_ADMIN'] as const
+const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'FINANCE_ADMIN', 'PLATFORM_ADMIN'] as const
 type AssignableRole = (typeof ASSIGNABLE)[number]
 
 /** Super Admin: every account on the platform with search, blocking and deletion (live API, not the demo people list). */
@@ -67,11 +67,16 @@ export function AdminAccounts() {
                 <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{a.displayName}</span>{a.roles.map((r) => <Badge key={r} tone={r === 'PLATFORM_ADMIN' ? 'champagne' : 'neutral'}>{roleLabel(r)}</Badge>)}{!a.isActive && <Badge tone="danger">{t('admin.accounts.blocked')}</Badge>}</div>
                 <div className="truncate text-xs text-charcoal/55">{[a.login ? `@${a.login}` : null, a.phoneMasked, a.centerId ? centers.find((c) => c.id === a.centerId)?.name ?? a.centerId : null, `${t('group.since')} ${formatDate(a.createdAt, lang)}`].filter(Boolean).join(' · ')}</div>
               </div>
-              {a.id !== me && !a.roles.includes('PLATFORM_ADMIN') && (
+              {a.id !== me && (
                 <>
                   <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => setEditing(a)}><Icon name="user" className="h-3.5 w-3.5" />{t('admin.accounts.roles')}</Button>
-                  <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void toggleActive(a)}><Icon name={a.isActive ? 'lock' : 'check'} className="h-3.5 w-3.5" />{a.isActive ? t('admin.accounts.block') : t('admin.accounts.unblock')}</Button>
-                  <Button size="sm" variant="danger" disabled={busy === a.id} onClick={() => void remove(a)}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                  {/* Block and delete stay off Super Admin accounts; change them through the Roles dialog instead. */}
+                  {!a.roles.includes('PLATFORM_ADMIN') && (
+                    <>
+                      <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void toggleActive(a)}><Icon name={a.isActive ? 'lock' : 'check'} className="h-3.5 w-3.5" />{a.isActive ? t('admin.accounts.block') : t('admin.accounts.unblock')}</Button>
+                      <Button size="sm" variant="danger" disabled={busy === a.id} onClick={() => void remove(a)}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                    </>
+                  )}
                 </>
               )}
             </li>
@@ -137,6 +142,7 @@ function RolesEditor({ account, centers, roleLabel, onClose, onSave }: { account
             </label>
           ))}
         </fieldset>
+        {roles.includes('PLATFORM_ADMIN') && <Notice tone="warn" className="text-xs">{t('admin.accounts.superAdminWarn')}</Notice>}
         {(needsCenter || centerId) && (
           <Field label={t('admin.accounts.center')} required={needsCenter}>
             <Select value={centerId} onChange={(e) => setCenterId(e.target.value)}>

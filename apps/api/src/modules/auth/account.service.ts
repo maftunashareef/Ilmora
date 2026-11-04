@@ -114,13 +114,15 @@ export class AccountService {
     const taken = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, select: { id: true } })
     if (taken) throw AppError.conflict('login_taken', 'This login is already in use')
 
-    let phoneE164: string | null = null
+    // A phone given here is NOT proven to belong to the registrant (no SMS code is checked), so it must never occupy the
+    // account's authoritative phoneE164 — that field is unique per tenant and is what OTP sign-in and phone-login match on.
+    // Binding an unverified number there would let anyone squat a victim's phone and capture their later SMS sign-in.
+    // We keep it only as the center's contact number; the account's phone stays empty until verified through OTP sign-in.
+    let contactPhone: string | null = null
     if (input.phone && input.phone.trim()) {
       const parsed = normalizeUzPhone(input.phone)
       if (!parsed.ok) throw AppError.invalid('invalid_phone', 'Invalid phone number format (+998...)')
-      const phoneTaken = await this.prisma.client.user.findFirst({ where: { tenantId, phoneE164: parsed.e164 }, select: { id: true } })
-      if (phoneTaken) throw AppError.conflict('phone_taken', 'This phone number is already registered')
-      phoneE164 = parsed.e164
+      contactPhone = parsed.e164
     }
 
     const passwordHash = await argon2.hash(input.password, PASSWORD_HASH)
@@ -133,7 +135,7 @@ export class AccountService {
           data: {
             tenantId,
             login,
-            phoneE164,
+            phoneE164: null,
             passwordHash,
             displayName,
             preferredLang: input.lang ?? 'uz',
@@ -153,7 +155,7 @@ export class AccountService {
         if (input.role === 'CENTER') {
           const slug = await this.freeCenterSlug(tx, tenantId, slugify(centerName))
           const center = await tx.center.create({
-            data: { tenantId, slug, name: centerName, district: EMPTY_L, description: EMPTY_L, status: 'PENDING', ownerUserId: created.id, phoneE164, checkInCode: randomToken(16), checkInCodeRotatedAt: now },
+            data: { tenantId, slug, name: centerName, district: EMPTY_L, description: EMPTY_L, status: 'PENDING', ownerUserId: created.id, phoneE164: contactPhone, checkInCode: randomToken(16), checkInCodeRotatedAt: now },
           })
           return tx.user.update({ where: { id: created.id }, data: { centerId: center.id }, include: USER_INCLUDE })
         }

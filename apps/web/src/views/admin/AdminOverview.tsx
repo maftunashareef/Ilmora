@@ -1,14 +1,21 @@
+import { useEffect, useState } from 'react'
 import { Link } from '@/lib/router'
 import { Card, Eyebrow, Icon, Notice, PageTitle, Stat } from '../../components/ui'
 import { countLabel, NOUNS } from '@ilmora/shared'
+import { api } from '../../lib/api'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
 import { PendingCentersPanel, useAdminCenters } from './PendingCenters'
+
+type AdminStats = { students: number; activeSubscriptions: number; teachers: number }
 
 export function AdminOverview() {
   const { t, tr, lang } = useT()
   const s = useStore()
   const centers = useAdminCenters()
+  // Totals come from the server so they stay correct beyond the paginated user list loaded into the store.
+  const [stats, setStats] = useState<AdminStats | null>(null)
+  useEffect(() => { let on = true; api<AdminStats>('/admin/stats').then((r) => { if (on) setStats(r) }).catch(() => undefined); return () => { on = false } }, [])
   const all = [...s.courses, ...s.videos, ...s.playlists, ...s.resources]
   const drafts = all.filter((x) => x.status === 'draft').length
   const privateItems = all.filter((x) => x.visibility === 'private' && x.status === 'published').length
@@ -28,7 +35,7 @@ export function AdminOverview() {
         <Stat label={t('admin.overview.published')} value={s.courses.filter((c) => c.status === 'published').length} hint={countLabel(lang, s.courses.length, NOUNS.course)} />
         <Stat label={t('admin.overview.drafts')} value={drafts} hint={review ? `${review} · ${t('admin.reviewQueue')}` : undefined} />
         <Stat label={t('admin.overview.privateItems')} value={privateItems} />
-        <Stat label={t('admin.overview.activeSubs')} value={s.students.filter((x) => x.subscription.status === 'active').length} hint={countLabel(lang, s.students.length, NOUNS.student)} />
+        <Stat label={t('admin.overview.activeSubs')} value={stats ? stats.activeSubscriptions : s.students.filter((x) => x.subscription.status === 'active').length} hint={countLabel(lang, stats ? stats.students : s.students.length, NOUNS.student)} />
       </div>
       {review > 0 && (
         <Notice tone="warn" className="mt-6 flex items-center justify-between gap-3">

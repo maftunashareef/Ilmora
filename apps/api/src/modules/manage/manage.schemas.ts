@@ -180,8 +180,8 @@ export const PackagePatch = z.object({
   lessonCount: z.number().int().min(1).max(500).nullable().optional(),
 }).strict()
 export const UserRolesInput = z.object({
-  /** PLATFORM_ADMIN (Super Admin) is deliberately absent: it exists only for the configured owner account. */
-  roles: z.array(z.enum(['FINANCE_ADMIN', 'CENTER_ADMIN', 'TEACHER', 'STUDENT'])).min(1),
+  /** PLATFORM_ADMIN (Super Admin) sets the owner flag; the route is open only to existing owners. */
+  roles: z.array(z.enum(['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'CENTER_ADMIN', 'TEACHER', 'STUDENT'])).min(1),
   centerId: id.nullable().optional(),
   isActive: z.boolean().optional(),
   reason: z.string().min(3).max(300),
