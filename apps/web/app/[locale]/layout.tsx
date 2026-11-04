@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next'
-import { Cormorant_Garamond, Inter, Manrope, Playfair_Display } from 'next/font/google'
 import { notFound } from 'next/navigation'
 import type { ReactNode } from 'react'
 import { isLang, pick } from '@ilmora/shared'
@@ -7,11 +6,18 @@ import { AppProviders } from '@/components/AppProviders'
 import { getCatalog, getSite } from '@/lib/server-api'
 import { organizationJsonLd, pageMetadata } from '@/lib/seo'
 import '../globals.css'
-
-const cormorant = Cormorant_Garamond({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['400', '500', '600'], style: ['normal', 'italic'], variable: '--font-cormorant', display: 'swap' })
-const playfair = Playfair_Display({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['400', '500', '600'], variable: '--font-playfair', display: 'swap' })
-const inter = Inter({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['300', '400', '500', '600'], variable: '--font-inter', display: 'swap' })
-const manrope = Manrope({ subsets: ['latin', 'latin-ext', 'cyrillic'], weight: ['300', '400', '500', '600'], variable: '--font-manrope', display: 'swap' })
+// Fonts are self-hosted via @fontsource (woff2 shipped in node_modules), not fetched from Google at build time.
+// next/font/google downloaded these during `next build`, which made the Docker image build flaky (network to Google
+// Fonts). These imports register the same families; the --font-* CSS variables are set in globals.css.
+import '@fontsource/cormorant-garamond/400.css'
+import '@fontsource/cormorant-garamond/400-italic.css'
+import '@fontsource/cormorant-garamond/500.css'
+import '@fontsource/cormorant-garamond/500-italic.css'
+import '@fontsource/cormorant-garamond/600.css'
+import '@fontsource/cormorant-garamond/600-italic.css'
+import '@fontsource-variable/playfair-display'
+import '@fontsource-variable/inter'
+import '@fontsource-variable/manrope'
 
 export const viewport: Viewport = { themeColor: '#163C35', width: 'device-width', initialScale: 1 }
 
@@ -42,7 +48,7 @@ export default async function LocaleLayout({ children, params }: { children: Rea
   const { version, ...siteData } = site
   const jsonLd = organizationJsonLd(site.brand.name, locale)
   return (
-    <html lang={locale} className={`${cormorant.variable} ${playfair.variable} ${inter.variable} ${manrope.variable}`}>
+    <html lang={locale}>
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
         <AppProviders initial={{ lang: locale, site: { ...siteData, version }, catalog }}>{children}</AppProviders>
