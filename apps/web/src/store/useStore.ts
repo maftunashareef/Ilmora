@@ -375,7 +375,12 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       return r.user
     }
     const refreshWorkspace = async () => {
-      const mine = await api<{ teacher: Teacher | null; courses: Course[]; videos: Video[]; playlists: Playlist[]; resources: Resource[]; subjects: Subject[] }>('/manage/mine')
+      const isAdmin = get().role === 'admin'
+      // Fire presets alongside /manage/mine so the workspace is gated by the slowest request, not their sum.
+      // The admin roster is no longer loaded here: the People screen fetches it paginated, overview totals come from /admin/stats.
+      const minePromise = api<{ teacher: Teacher | null; courses: Course[]; videos: Video[]; playlists: Playlist[]; resources: Resource[]; subjects: Subject[] }>('/manage/mine')
+      const presetsPromise = isAdmin ? get().loadAdminPresets().catch(() => undefined) : undefined
+      const mine = await minePromise
       publishSeatCounts(mine.courses.flatMap((c) => c.groups))
       set((s) => ({
         teachers: mine.teacher ? upsertIn(s.teachers, mine.teacher) : s.teachers,
@@ -385,22 +390,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         resources: mine.resources,
         subjects: get().role === 'admin' ? mine.subjects : [...s.subjects.filter((x) => !mine.subjects.some((m) => m.id === x.id)), ...mine.subjects],
       }))
-      if (get().role === 'admin') {
-        // Not fatal: without it the preset editor keeps waiting and site saves leave presets alone.
-        await get().loadAdminPresets().catch(() => undefined)
-        const users = await api<{ items: { id: string; displayName: string; district: string | null; preferredLang: Lang; roles: string[]; subscription: { packageId: string | null; status: string; startedAt: string | null; currentPeriodEnd: string | null } | null; groupIds: string[] }[] }>('/admin/users?pageSize=200')
-        set((s) => ({
-          students: [
-            ...s.students.filter((x) => x.id === s.currentStudentId && !users.items.some((u) => u.id === x.id)),
-            ...users.items.map((u) => ({
-              id: u.id,
-              profile: { displayName: u.displayName, district: u.district ?? '', preferredLang: u.preferredLang, reminders: true },
-              subscription: { packageId: u.subscription?.packageId ?? null, groupIds: u.groupIds, status: (u.subscription?.status === 'ACTIVE' ? 'active' : 'none') as 'active' | 'none', startedAt: u.subscription?.startedAt ?? undefined, renewsAt: u.subscription?.currentPeriodEnd ?? undefined },
-              savedCourseIds: [], savedTeacherIds: [], builder: { packageId: null, groupIds: [], meyosGrant: false },
-            })),
-          ],
-        }))
-      }
+      // Presets were started above (not fatal: without them the preset editor keeps waiting and site saves leave presets alone).
+      if (isAdmin) await presetsPromise
       set({ workspaceLoaded: true })
     }
 

@@ -1,12 +1,23 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from '@/lib/router'
 import { Avatar, Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, Modal, Notice, PageTitle, Select, Toggle } from '../../components/ui'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { countLabel, NOUNS } from '@ilmora/shared'
+import { api } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { emptyL, useT } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
-import type { Student, Teacher } from '../../types'
+import type { Lang, Student, Teacher } from '../../types'
+
+/** One row of the paginated admin user list (students only here). */
+type StudentRow = { id: string; displayName: string; district: string | null; preferredLang: Lang; subscription: { packageId: string | null; status: string; startedAt: string | null; currentPeriodEnd: string | null } | null; groupIds: string[] }
+const toStudent = (u: StudentRow): Student => ({
+  id: u.id,
+  profile: { displayName: u.displayName, district: u.district ?? '', preferredLang: u.preferredLang, reminders: true },
+  subscription: { packageId: u.subscription?.packageId ?? null, groupIds: u.groupIds ?? [], status: u.subscription?.status === 'ACTIVE' ? 'active' : 'none', startedAt: u.subscription?.startedAt ?? undefined, renewsAt: u.subscription?.currentPeriodEnd ?? undefined },
+  savedCourseIds: [], savedTeacherIds: [], builder: { packageId: null, groupIds: [], meyosGrant: false },
+})
 
 export function AdminPeople() {
   const { t, tr, lang } = useT()
@@ -16,8 +27,22 @@ export function AdminPeople() {
   const [student, setStudent] = useState<Student | null>(null)
   const groups = s.courses.flatMap((c) => c.groups.map((g) => ({ ...g, course: tr(c.title) })))
 
+  // Students are loaded paginated from the server (not the shared store), so the screen scales past a few hundred accounts.
+  const [rows, setRows] = useState<StudentRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [query, setQuery] = useState('')
+  const notify = s.notify
+  const loadStudents = useCallback(async (p = 1) => {
+    const qs = new URLSearchParams({ role: 'STUDENT', page: String(p), pageSize: '50', ...(query.trim() ? { search: query.trim() } : {}) })
+    try {
+      const r = await api<{ items: StudentRow[]; total: number; page: number }>(`/admin/users?${qs.toString()}`)
+      setRows(r.items); setTotal(r.total); setPage(r.page)
+    } catch (err) { notify(apiErrorText(err, lang), 'warn') }
+  }, [query, lang, notify])
+  useEffect(() => { void loadStudents(1) }, [loadStudents])
+
   const newTeacher = (): Teacher => ({ id: uid('t'), name: '', title: emptyL(), bio: emptyL(), expertise: [], centerId: s.centers[0]?.id ?? '', avatarSeed: Math.floor(Math.random() * 60), bannerTone: '#163C35', tagline: emptyL(), channelActive: false })
-  const newStudent = (): Student => ({ id: uid('s'), profile: { displayName: '', district: '', preferredLang: 'uz', reminders: true }, subscription: { packageId: null, groupIds: [], status: 'none' }, savedCourseIds: [], savedTeacherIds: [], builder: { packageId: null, groupIds: [], meyosGrant: false } })
   // Impersonation is not available in production; admins open the public channel instead.
   const actAs = (role: 'teacher' | 'student', id: string) => { if (role === 'teacher') nav(`/teachers/${id}`) }
 
@@ -43,9 +68,13 @@ export function AdminPeople() {
           </ul>
         </section>
         <section>
-          <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('admin.people.students')} · {s.students.length}</Eyebrow><Button size="sm" onClick={() => setStudent(newStudent())}><Icon name="plus" className="h-3.5 w-3.5" />{t('admin.people.addStudent')}</Button></div>
+          <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('admin.people.students')} · {total}</Eyebrow></div>
+          <form className="mb-3" onSubmit={(e) => { e.preventDefault(); void loadStudents(1) }}>
+            <Input aria-label={t('admin.accounts.search')} placeholder={t('admin.accounts.search')} value={query} onChange={(e) => setQuery(e.target.value)} />
+          </form>
           <ul className="space-y-2">
-            {s.students.map((st) => {
+            {rows.map((row) => {
+              const st = toStudent(row)
               const pkg = s.site.packages.find((p) => p.id === st.subscription.packageId)
               return (
                 <li key={st.id} className="card flex items-center gap-3 p-3">
@@ -55,11 +84,18 @@ export function AdminPeople() {
                     <div className="truncate text-xs text-charcoal/55">{st.profile.district} · {st.subscription.groupIds.map((gid) => groups.find((g) => g.id === gid)?.course).filter(Boolean).join(', ') || '—'}</div>
                   </div>
                   <Button size="sm" variant="secondary" onClick={() => setStudent(st)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
-                  <Button size="sm" variant="danger" onClick={() => { if (confirm(t('common.confirmDelete'))) s.removeStudent(st.id) }}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="danger" onClick={async () => { if (confirm(t('common.confirmDelete'))) { await s.removeStudent(st.id); void loadStudents(page) } }}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
                 </li>
               )
             })}
           </ul>
+          {rows.length === 0 && <p className="py-6 text-center text-sm text-charcoal/50">{t('admin.accounts.noResults')}</p>}
+          {total > 50 && (
+            <div className="mt-4 flex items-center justify-between text-xs text-charcoal/55">
+              <span>{total}</span>
+              <div className="flex gap-2"><Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => void loadStudents(page - 1)}>{t('common.back')}</Button><Button size="sm" variant="ghost" disabled={page * 50 >= total} onClick={() => void loadStudents(page + 1)}>{t('common.next')}</Button></div>
+            </div>
+          )}
           <Notice tone="info" className="mt-4 text-xs">{t('admin.people.privacy')}</Notice>
         </section>
       </div>
@@ -78,7 +114,7 @@ export function AdminPeople() {
           </div>
         )}
       </Modal>
-      <Modal open={!!student} onClose={() => setStudent(null)} title={student?.profile.displayName || t('admin.people.addStudent')} footer={<><Button variant="ghost" onClick={() => setStudent(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (student?.profile.displayName.trim()) { s.upsertStudent(student); setStudent(null); s.notify(t('common.saved')) } }}>{t('common.save')}</Button></>}>
+      <Modal open={!!student} onClose={() => setStudent(null)} title={student?.profile.displayName || t('admin.people.students')} footer={<><Button variant="ghost" onClick={() => setStudent(null)}>{t('common.cancel')}</Button><Button onClick={async () => { if (student?.profile.displayName.trim()) { await s.upsertStudent(student); setStudent(null); s.notify(t('common.saved')); void loadStudents(page) } }}>{t('common.save')}</Button></>}>
         {student && (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -97,9 +133,9 @@ export function AdminPeople() {
                   <div className="grid max-h-48 gap-1 overflow-y-auto pr-1 sm:grid-cols-2">
                     {groups.map((g) => {
                       const inGroup = student.subscription.groupIds.includes(g.id)
-                      const full = !inGroup && isGroupFull(g, s.students, student.id)
+                      const full = !inGroup && isGroupFull(g, [student], student.id)
                       return (
-                      <label key={g.id} className={`flex items-center gap-2 rounded-control border border-charcoal/10 bg-paper px-2.5 py-1.5 text-xs ${full ? 'opacity-50' : ''}`} title={full ? t('capacity.full') : undefined}><input type="checkbox" className="accent-forest" disabled={full} checked={inGroup} onChange={() => setStudent({ ...student, subscription: { ...student.subscription, groupIds: inGroup ? student.subscription.groupIds.filter((x) => x !== g.id) : [...student.subscription.groupIds, g.id] } })} /><span className="truncate">{g.course} · {g.name}</span><span className="ml-auto shrink-0 text-charcoal/45">{enrolledCount(s.students, g.id, student.id)}/{g.capacity}</span></label>
+                      <label key={g.id} className={`flex items-center gap-2 rounded-control border border-charcoal/10 bg-paper px-2.5 py-1.5 text-xs ${full ? 'opacity-50' : ''}`} title={full ? t('capacity.full') : undefined}><input type="checkbox" className="accent-forest" disabled={full} checked={inGroup} onChange={() => setStudent({ ...student, subscription: { ...student.subscription, groupIds: inGroup ? student.subscription.groupIds.filter((x) => x !== g.id) : [...student.subscription.groupIds, g.id] } })} /><span className="truncate">{g.course} · {g.name}</span><span className="ml-auto shrink-0 text-charcoal/45">{enrolledCount([student], g.id, student.id)}/{g.capacity}</span></label>
                       )
                     })}
                   </div>
