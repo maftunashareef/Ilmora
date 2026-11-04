@@ -1,5 +1,6 @@
 'use client'
 import { useEffect } from 'react'
+import { Link } from '@/lib/router'
 import { applyTheme } from '../lib/theme'
 import { useStore } from '../store/useStore'
 import { cx, Icon } from './ui'
@@ -83,17 +84,30 @@ export function Toasts() {
   if (!toasts.length) return null
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-5 z-[90] flex flex-col items-center gap-2 px-4" role="status" aria-live="polite">
-      {toasts.map((t) => (
-        <button
-          key={t.id}
-          type="button"
-          onClick={() => dismiss(t.id)}
-          className={cx('pointer-events-auto animate-rise inline-flex max-w-md items-center gap-2 rounded-full px-4 py-2.5 text-sm shadow-lift', t.tone === 'warn' ? 'bg-amber-100 text-amber-900' : 'bg-forest text-ivory')}
-        >
-          <Icon name={t.tone === 'warn' ? 'warn' : 'check'} className="h-4 w-4" />
-          {t.text}
-        </button>
-      ))}
+      {toasts.map((t) =>
+        t.link ? (
+          // A toast with a next step (e.g. "Go to cart"): the whole pill is the link.
+          <Link
+            key={t.id}
+            to={t.link.to}
+            onClick={() => dismiss(t.id)}
+            className={cx('pointer-events-auto animate-rise inline-flex max-w-md flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-full py-2.5 pl-4 pr-2 text-sm shadow-lift', t.tone === 'warn' ? 'bg-amber-100 text-amber-900' : 'bg-forest text-ivory')}
+          >
+            <span className="inline-flex min-w-0 items-center gap-2"><Icon name={t.tone === 'warn' ? 'warn' : 'check'} className="h-4 w-4 shrink-0" />{t.text}</span>
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-champagne px-3 py-1 text-xs font-semibold text-forest">{t.link.label}<Icon name="arrowRight" className="h-3.5 w-3.5" /></span>
+          </Link>
+        ) : (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => dismiss(t.id)}
+            className={cx('pointer-events-auto animate-rise inline-flex max-w-md items-center gap-2 rounded-full px-4 py-2.5 text-sm shadow-lift', t.tone === 'warn' ? 'bg-amber-100 text-amber-900' : 'bg-forest text-ivory')}
+          >
+            <Icon name={t.tone === 'warn' ? 'warn' : 'check'} className="h-4 w-4" />
+            {t.text}
+          </button>
+        ),
+      )}
     </div>
   )
 }

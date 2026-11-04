@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
@@ -15,8 +15,17 @@ import type {
 
 export type PageKey = keyof SiteConfig['pages']
 export type ContentKind = 'course' | 'video' | 'playlist' | 'resource'
-export interface Toast { id: number; text: string; tone?: 'ok' | 'warn' }
+export interface Toast { id: number; text: string; tone?: 'ok' | 'warn'; link?: { to: string; label: string } }
 export type BuilderResult = { ok: true } | { ok: false; reason: 'no-package' | 'limit' | 'duplicate' | 'conflict' | 'disabled' | 'full'; conflictWith?: string }
+/**
+ * A ready-made package (university preparation) added to the cart as a whole, so the cart can show its courses together
+ * under the university, direction and package name, and remove them together. Display only: the cart itself is still
+ * the builder's group list, and the server never sees this. Kept on this device.
+ */
+export interface CartBundle { presetId: string; directionId?: string; courseIds: string[] }
+export type PresetCartResult =
+  | { ok: true; added: number; /** The Flex/Winx package the cart left for a custom selection, if it did. */ switchedFrom: string | null }
+  | { ok: false; reason: 'unavailable' | 'limit' | 'full' | 'conflict'; courseId?: string; conflictWith?: string }
 export type PaymentProviderId = 'PAYME' | 'CLICK'
 
 export interface AuthUser {
@@ -74,7 +83,7 @@ interface Actions {
   setLang: (lang: Lang) => void
   setCurrentTeacher: (id: string) => void
   setCurrentStudent: (id: string) => void
-  notify: (text: string, tone?: Toast['tone']) => void
+  notify: (text: string, tone?: Toast['tone'], link?: Toast['link']) => void
   dismissToast: (id: number) => void
   bootstrap: () => Promise<void>
   register: (input: RegisterInput) => Promise<AuthUser>
@@ -130,7 +139,15 @@ interface Actions {
   setBuilderGrant: (studentId: string, meyosGrant: boolean) => void
   addBuilderGroup: (studentId: string, groupId: string) => BuilderResult
   removeBuilderCourse: (studentId: string, courseId: string) => void
-  checkout: (provider: PaymentProviderId) => Promise<{ url: string; paymentId: string }>
+  /**
+   * Adds every course of a ready-made package in one step: one free, clash-free group per course, chosen automatically;
+   * courses already in the cart are kept as they are. A Flex or Winx selection that no longer has exactly its number of
+   * courses becomes a custom one. Nothing is added when a course cannot be placed.
+   */
+  addPresetToCart: (studentId: string, preset: Preset, opts?: { chosenOptional?: string[]; directionId?: string }) => PresetCartResult
+  /** Removes a package's courses from the cart (those another package in the cart also includes stay). */
+  removeCartBundle: (studentId: string, presetId: string) => void
+  checkout:(provider: PaymentProviderId) => Promise<{ url: string; paymentId: string }>
   renewSubscription: (studentId: string, provider?: PaymentProviderId) => Promise<void>
   cancelSubscription: (studentId: string) => Promise<void>
   toggleSavedCourse: (studentId: string, courseId: string) => void
@@ -168,6 +185,8 @@ export interface StoreState extends DemoState, Actions {
   /** Super Admin only: the full preset list (including disabled ones) has been loaded into `site.presets`. */
   presetsLoaded: boolean
   myPayments: PaymentSummary[]
+  /** Ready-made packages in the cart, read from this device after mount. */
+  cartBundles: CartBundle[]
   /** Latest QR token/url per session (teacher side, returned when attendance is opened). */
   sessionQr: Record<string, { token: string; url: string }>
   /** The signed-in account's latest notifications and how many are unread. */
@@ -182,6 +201,8 @@ export const toMin = sharedToMin
 const DRAFT_KEY = 'ilmora-builder-draft'
 /** Courses a visitor saved while signed out; merged into the account's favorites after login. */
 const GUEST_SAVED_KEY = 'ilmora-guest-saved-courses'
+/** Ready-made packages in the cart (CartBundle); for visitors and signed-in students alike, on this device only. */
+const CART_BUNDLES_KEY = 'ilmora-cart-bundles'
 let toastSeq = 1
 
 /** The workspace an account lands in. Teacher comes before center admin so accounts that are both keep the Teacher Studio; /center stays reachable from the account menu. */
@@ -299,6 +320,25 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
     try {
       if (ids.length) localStorage.setItem(GUEST_SAVED_KEY, JSON.stringify(ids))
       else localStorage.removeItem(GUEST_SAVED_KEY)
+    } catch {
+      /* private mode */
+    }
+  }
+  const readBundles = (): CartBundle[] => {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CART_BUNDLES_KEY) : null
+      const list: unknown = raw ? JSON.parse(raw) : []
+      return Array.isArray(list)
+        ? list.filter((b): b is CartBundle => !!b && typeof b.presetId === 'string' && Array.isArray(b.courseIds)).map((b) => ({ presetId: b.presetId, directionId: typeof b.directionId === 'string' ? b.directionId : undefined, courseIds: b.courseIds.filter((id): id is string => typeof id === 'string') }))
+        : []
+    } catch {
+      return []
+    }
+  }
+  const writeBundles = (bundles: CartBundle[]) => {
+    try {
+      if (bundles.length) localStorage.setItem(CART_BUNDLES_KEY, JSON.stringify(bundles))
+      else localStorage.removeItem(CART_BUNDLES_KEY)
     } catch {
       /* private mode */
     }
@@ -426,6 +466,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       guestHydrated: false,
       presetsLoaded: false,
       myPayments: [],
+      cartBundles: [],
       sessionQr: {},
       notifications: [],
       unreadCount: 0,
@@ -434,10 +475,11 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       setLang: (lang) => set({ lang }),
       setCurrentTeacher: (id) => set({ currentTeacherId: id }),
       setCurrentStudent: (id) => set({ currentStudentId: id }),
-      notify: (text, tone = 'ok') => {
+      notify: (text, tone = 'ok', link) => {
         const id = toastSeq++
-        set((s) => ({ toasts: [...s.toasts, { id, text, tone }] }))
-        setTimeout(() => get().dismissToast(id), 3600)
+        set((s) => ({ toasts: [...s.toasts, { id, text, tone, link }] }))
+        // A toast with a link stays a little longer, so there is time to follow it.
+        setTimeout(() => get().dismissToast(id), link ? 6500 : 3600)
       },
       dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
@@ -536,7 +578,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         await api('/auth/logout', { method: 'POST', credentials: true }).catch(() => undefined)
         session.set(null)
         applyAuth(null)
-        set({ sessions: [], attendance: [], myPayments: [], notifications: [], unreadCount: 0 })
+        writeBundles([])
+        set({ sessions: [], attendance: [], myPayments: [], notifications: [], unreadCount: 0, cartBundles: [] })
       },
       ensureWorkspace: async () => {
         // The workspace (own courses, videos, people) exists for teachers and admins only.
@@ -544,6 +587,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         await guard(refreshWorkspace)
       },
       hydrateGuest: () => {
+        set({ cartBundles: readBundles() })
         if (get().auth.status === 'authenticated') return set({ guestHydrated: true })
         const draft = readDraft()
         const saved = readGuestSaved()
@@ -807,6 +851,51 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       removeBuilderCourse: (studentId, courseId) => {
         const allGroups = get().courses.flatMap((c) => c.groups)
         set((s) => ({ students: s.students.map((st) => (st.id === studentId ? { ...st, builder: { ...st.builder, groupIds: st.builder.groupIds.filter((id) => allGroups.find((g) => g.id === id)?.courseId !== courseId) } } : st)) }))
+        // A package whose last course left the cart is gone from it as well.
+        const inCart = new Set(get().students.find((x) => x.id === studentId)?.builder.groupIds.map((id) => allGroups.find((g) => g.id === id)?.courseId))
+        const bundles = get().cartBundles.filter((b) => b.courseIds.some((id) => inCart.has(id)))
+        if (bundles.length !== get().cartBundles.length) { set({ cartBundles: bundles }); writeBundles(bundles) }
+        syncDraft()
+      },
+      addPresetToCart: (studentId, preset, opts = {}) => {
+        const s = get()
+        const st = s.students.find((x) => x.id === studentId)
+        if (!st) return { ok: false, reason: 'unavailable' }
+        const { toAdd, inCart } = presetCartPlan(preset, s.courses, st.builder.groupIds, opts.chosenOptional)
+        if (toAdd.length + inCart.length === 0) return { ok: false, reason: 'unavailable' }
+        const allGroups = s.courses.flatMap((c) => c.groups)
+        const current = st.builder.groupIds.map((id) => allGroups.find((g) => g.id === id)).filter((g): g is (typeof allGroups)[number] => !!g)
+        const total = current.length + toAdd.length
+        if (total > MAX_CART_COURSES) return { ok: false, reason: 'limit' }
+        const pick = pickPresetGroups(toAdd, current, (g) => enrolledCount(s.students, g.id, studentId) >= g.capacity)
+        if (!pick.ok) return { ok: false, reason: pick.reason, courseId: pick.courseId, conflictWith: pick.conflictWith }
+        // Flex and Winx take an exact number of courses. When the cart no longer matches it, the selection becomes a custom
+        // one, so the package can go to checkout right away (the price is the courses' own either way).
+        const pkg = s.site.packages.find((p) => p.id === st.builder.packageId)
+        const switchedFrom = st.builder.packageId && (!pkg?.enabled || total !== pkg.maxCourses) ? st.builder.packageId : null
+        const bundle: CartBundle = { presetId: preset.id, directionId: opts.directionId, courseIds: [...inCart, ...toAdd].map((c) => c.id) }
+        const bundles = [...s.cartBundles.filter((b) => b.presetId !== preset.id), bundle]
+        set((state) => ({
+          cartBundles: bundles,
+          students: state.students.map((x) => (x.id === studentId ? { ...x, builder: { ...x.builder, packageId: switchedFrom ? null : x.builder.packageId, groupIds: [...x.builder.groupIds, ...pick.groups.map((g) => g.id)] } } : x)),
+        }))
+        writeBundles(bundles)
+        syncDraft()
+        return { ok: true, added: toAdd.length, switchedFrom }
+      },
+      removeCartBundle: (studentId, presetId) => {
+        const s = get()
+        const bundle = s.cartBundles.find((b) => b.presetId === presetId)
+        if (!bundle) return
+        const others = s.cartBundles.filter((b) => b !== bundle)
+        const keep = new Set(others.flatMap((b) => b.courseIds))
+        const drop = new Set(bundle.courseIds.filter((id) => !keep.has(id)))
+        const allGroups = s.courses.flatMap((c) => c.groups)
+        set((state) => ({
+          cartBundles: others,
+          students: state.students.map((x) => (x.id === studentId ? { ...x, builder: { ...x.builder, groupIds: x.builder.groupIds.filter((id) => !drop.has(allGroups.find((g) => g.id === id)?.courseId ?? '')) } } : x)),
+        }))
+        writeBundles(others)
         syncDraft()
       },
       checkout: async (provider) => {

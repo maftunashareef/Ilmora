@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { isUniversityListed, translate, type Lang } from '@ilmora/shared'
+import { isUniversityListed, translate, universityName, type Lang } from '@ilmora/shared'
 import { pageMetadata } from '@/lib/seo'
 import { getSite } from '@/lib/server-api'
 
@@ -11,7 +11,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   // Only universities shown on the University Preparation page have a public page.
   const university = (site.universities ?? []).find((u) => u.id === id && isUniversityListed(u, site.presets ?? []))
   if (!university) return { title: 'ILMORA', robots: { index: false } }
-  return pageMetadata({ locale, path: `/universities/${university.id}`, title: `${university.name} — ${translate(locale, 'uni.page.title')}`, description: translate(locale, 'uni.page.meta') })
+  return pageMetadata({ locale, path: `/universities/${university.id}`, title: `${universityName(university, locale)} — ${translate(locale, 'uni.page.title')}`, description: translate(locale, 'uni.page.meta') })
 }
 
 import { UniversityPage } from '@/views/next/clients'

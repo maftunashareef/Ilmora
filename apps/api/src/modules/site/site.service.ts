@@ -38,10 +38,13 @@ const FacultySchema = z.object({ id: z.string().min(1).max(60), name: L, directi
 const UniversitySchema = z.object({
   id: z.string().min(1).max(60),
   name: z.string().trim().min(1).max(120),
+  localName: L.optional(),
+  kind: z.enum(['track']).optional(),
   shortName: z.string().trim().max(30).optional(),
   city: z.string().trim().max(60).optional(),
   country: z.string().trim().max(60).optional(),
   website: httpsOrEmpty('website').optional(),
+  description: L.optional(),
   // An uploaded logo (https, object storage) or an official logo file shipped with the site under /universities/.
   logoUrl: z.string().max(500).refine((v) => v === '' || isSafeExternalUrl(v) || /^\/universities\/[a-z0-9-]+\.(svg|png|webp)$/.test(v), 'logoUrl must be a plain https link or a /universities/ file').optional(),
   logoOnDark: z.boolean().optional(),
@@ -142,8 +145,8 @@ export class SiteService {
 
   /**
    * Presets may only reference existing courses. A package may only be switched on (or have its courses or its admission
-   * source changed while on) when every subject maps to an available course and, for a university package, its
-   * requirements are verified against an official page (presetPublishability). A published package cannot be deleted:
+   * source changed while on) when presetPublishability allows it: its courses are available and, for a university
+   * package, an official source page is recorded (unverified requirements are shown as such). A published package cannot be deleted:
    * unpublish it first. Presets that did not change are not re-checked, so a course that later becomes unavailable never
    * blocks unrelated site edits; the public page then shows that preset as unavailable.
    */
@@ -173,10 +176,10 @@ export class SiteService {
       const unknown = preset.slots.find((s) => s.courseId && !known.has(s.courseId))
       if (unknown) throw AppError.invalid('invalid_preset_course', 'A preset refers to a course that does not exist', { presetId: preset.id, slotId: unknown.id })
       if (!preset.enabled) continue
-      const { ok, ready, issues, admission } = presetPublishability(preset, courses)
+      const { ok, issues, admission } = presetPublishability(preset, courses)
       if (ok) continue
-      if (!ready) throw AppError.invalid('preset_not_ready', 'Every subject of a package must map to an available course before it can be published', { presetId: preset.id, issues })
-      throw AppError.invalid('preset_not_verified', 'A university package can only be published once its admission requirements are verified against an official page', { presetId: preset.id, admission })
+      if (admission.includes('no-source')) throw AppError.invalid('preset_not_verified', 'A university package can only be published with the official page its admission requirements come from', { presetId: preset.id, admission })
+      throw AppError.invalid('preset_not_ready', 'The subjects of a package must map to available courses (a university package needs at least one) before it can be published', { presetId: preset.id, issues })
     }
   }
 }

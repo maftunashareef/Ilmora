@@ -361,12 +361,21 @@ export interface UniversityFaculty {
 export interface University {
   id: string
   name: string
+  /** The name in each language, when it has official translations or is a preparation track (see universityName). */
+  localName?: L
+  /**
+   * 'track': general preparation for a kind of university (medical, law), not one university. Shown in its own section
+   * and never presented as a degree programme of any university.
+   */
+  kind?: 'track'
   /** Short form shown on small cards, for example "WIUT". */
   shortName?: string
   city?: string
   country?: string
   /** The university's official website (https). */
   website?: string
+  /** One or two factual sentences from the university's own website (founding, partner university, language). */
+  description?: L
   /** The official logo (an upload, or a file shipped under /universities/); cards show the short name until there is one. */
   logoUrl?: string
   /** The logo is light, made for dark backgrounds (for example a white word mark): it is shown on a dark green tile. */

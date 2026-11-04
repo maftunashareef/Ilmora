@@ -84,9 +84,12 @@ describe('adding a university package to the cart', () => {
     expect(trio.getState().students[0].builder.groupIds).toEqual(['math-g', 'eng-g', 'extra-g'])
   })
 
-  it('a package with a subject that has no course, or an unavailable one, is not publishable', () => {
-    expect(presetPublishability(pkg(['math', null]), COURSES).ok).toBe(false)
+  it('a subject without a course is listed as not covered, but an unavailable course or no covered subject blocks the package', () => {
+    expect(presetPublishability(pkg(['math', null]), COURSES).ok).toBe(true)
+    expect(presetCartPlan(pkg(['math', null]), COURSES, []).toAdd.map((c) => c.id)).toEqual(['math'])
+    expect(presetPublishability(pkg([null]), COURSES).ok).toBe(false)
     expect(presetPublishability(pkg(['math', 'gone']), COURSES).ok).toBe(false)
-    expect(presetPublishability({ ...pkg(['math']), admission: { ...pkg([]).admission!, status: 'needs_review' } }, COURSES).ok).toBe(false)
+    // unverified requirements are published marked "requires confirmation"
+    expect(presetPublishability({ ...pkg(['math']), admission: { ...pkg([]).admission!, status: 'needs_review' } }, COURSES).ok).toBe(true)
   })
 })

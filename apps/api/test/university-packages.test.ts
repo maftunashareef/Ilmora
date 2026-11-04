@@ -74,26 +74,25 @@ describe('publishing university packages (stubbed storage)', () => {
     expect(saved.at(-1)?.presets?.[0].enabled).toBe(true)
   })
 
-  it('a package that needs verification stays unpublished: the server refuses to publish it', async () => {
-    const review = { ...VERIFIED, status: 'needs_review' as const }
-    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true, admission: review })] }), 3)).rejects.toMatchObject({ code: 'preset_not_verified' })
+  it('a package whose requirements are not verified yet can be published (it is shown as requiring confirmation), but never without an official page', async () => {
+    const review = { ...VERIFIED, status: 'needs_review' as const, academicYear: '', checkedOn: '' }
+    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true, admission: review })] }), 3)).resolves.toEqual({ version: 4 })
     await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true, admission: { ...VERIFIED, url: '' } })] }), 3)).rejects.toMatchObject({ code: 'preset_not_verified' })
     await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true, admission: undefined })] }), 3)).rejects.toMatchObject({ code: 'preset_not_verified' })
-    // the same package is fine as a draft
-    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: false, admission: review })] }), 3)).resolves.toEqual({ version: 4 })
   })
 
-  it('a package with a subject that has no ILMORA course cannot be published, even when verified', async () => {
-    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true }, ['a', null])] }), 3)).rejects.toMatchObject({ code: 'preset_not_ready' })
+  it('a subject without an ILMORA course is allowed, a course that cannot be booked or a package with no covered subject is not', async () => {
+    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true }, ['a', null])] }), 3)).resolves.toEqual({ version: 4 })
+    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true }, [null, null])] }), 3)).rejects.toMatchObject({ code: 'preset_not_ready' })
     await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true }, ['a', 'draft'])] }), 3)).rejects.toMatchObject({ code: 'preset_not_ready' })
-    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: false }, ['a', null])] }), 3)).resolves.toEqual({ version: 4 })
+    await expect(make({ presets: [], universities: [UNI_A] }).update('t', body({ presets: [pkg('p1', { enabled: true }, ['a', 'empty'])] }), 3)).rejects.toMatchObject({ code: 'preset_not_ready' })
   })
 
-  it('downgrading the verification of a published package is refused until it is unpublished', async () => {
+  it('removing the official page of a published package is refused until it is unpublished', async () => {
     const published = pkg('p1', { enabled: true })
     const stored = { presets: [published], universities: [UNI_A] }
-    await expect(make(stored).update('t', body({ presets: [{ ...published, admission: { ...VERIFIED, status: 'needs_review' } }] }), 3)).rejects.toMatchObject({ code: 'preset_not_verified' })
-    await expect(make(stored).update('t', body({ presets: [{ ...published, enabled: false, admission: { ...VERIFIED, status: 'needs_review' } }] }), 3)).resolves.toEqual({ version: 4 })
+    await expect(make(stored).update('t', body({ presets: [{ ...published, admission: { ...VERIFIED, url: '' } }] }), 3)).rejects.toMatchObject({ code: 'preset_not_verified' })
+    await expect(make(stored).update('t', body({ presets: [{ ...published, enabled: false, admission: { ...VERIFIED, url: '' } }] }), 3)).resolves.toEqual({ version: 4 })
   })
 
   it('editing the title or description of a published package does not re-run the checks', async () => {

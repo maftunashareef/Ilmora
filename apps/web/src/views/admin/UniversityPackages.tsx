@@ -122,6 +122,10 @@ export function UniversityPackagesAdmin() {
                     </div>
                   </div>
                   <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    <LField label={t('admin.uni.localName')} value={u.localName ?? emptyL()} onChange={(v) => patch({ localName: v })} />
+                    <LField label={t('admin.uni.description')} value={u.description ?? emptyL()} onChange={(v) => patch({ description: v })} />
+                  </div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
                     <LogoField university={u} onChange={(logoUrl) => patch({ logoUrl })} onDarkChange={(logoOnDark) => patch({ logoOnDark: logoOnDark || undefined })} />
                     <div className="flex items-start lg:justify-end">
                       <Button size="sm" variant="secondary" aria-expanded={openFaculties === u.id} onClick={() => setOpenFaculties(openFaculties === u.id ? null : u.id)}>
@@ -163,7 +167,7 @@ export function UniversityPackagesAdmin() {
                 const result = presetPublishability(p, courses)
                 const missing = presetMissingSubjects(p)
                 const isOpen = open === p.id
-                const total = result.ready ? presetTotal(presetCourses(p, courses)) : null
+                const total = result.ready || result.ok ? presetTotal(presetCourses(p, courses)) : null
                 const uni = universityOf(p, unis)
                 return (
                   <li key={p.id}>
@@ -309,7 +313,8 @@ export function UniversityPackagesAdmin() {
                               ) : (
                                 <p className="text-xs text-charcoal/55">{t('admin.uni.publishBlocked')}</p>
                               )}
-                              {!result.ok && result.admission.length > 0 && (p.universityId || p.university) && <ul className="mt-1 text-[11px] text-red-700">{result.admission.map((a) => <li key={a}>{t(`admin.uni.issue.${a}` as TKey)}</li>)}</ul>}
+                              {/* Only a missing official page blocks publishing; the other gaps are published marked "requires confirmation". */}
+                              {result.admission.length > 0 && (p.universityId || p.university) && <ul className="mt-1 text-[11px]">{result.admission.map((a) => <li key={a} className={a === 'no-source' ? 'text-red-700' : 'text-amber-800'}>{t(`admin.uni.issue.${a}` as TKey)}</li>)}</ul>}
                               <p className="mt-1 text-[11px] text-amber-800">{t('preset.provisional')}</p>
                             </div>
                             <div className="flex flex-wrap gap-2">

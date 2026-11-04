@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { countLabel, NOUNS } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useT } from '../../i18n/useT'
@@ -50,13 +50,12 @@ function CenterCard({ center, courses, seed }: { center: Center; courses: Course
 
 /**
  * The centers on the home page, as cards like the discounted courses: the row scrolls on its own (a second, inert copy
- * of the cards makes the loop seamless), pauses while hovered, focused, off screen or with the pause button, and is a
- * still row with reduced motion or with fewer than four centers. The shared `discount-*` styles drive the motion.
+ * of the cards makes the loop seamless), pauses while hovered, focused or off screen, and is a still row with reduced
+ * motion or with fewer than four centers. The shared `discount-*` styles drive the motion.
  */
-export function CentersShowcase({ centers, title, subtitle, children }: { centers: Center[]; title: string; subtitle?: string; children?: ReactNode }) {
+export function CentersShowcase({ centers, title, subtitle }: { centers: Center[]; title: string; subtitle?: string }) {
   const { t } = useT()
   const courses = useStore((s) => s.courses.filter(isPublicListed))
-  const [paused, setPaused] = useState(false)
   const [offscreen, setOffscreen] = useState(false)
   const marquee = useRef<HTMLDivElement>(null)
   const rotating = centers.length >= MIN_ROTATING
@@ -81,15 +80,8 @@ export function CentersShowcase({ centers, title, subtitle, children }: { center
             <Eyebrow>{t('common.centers')} · {centers.length}</Eyebrow>
             <h2 className="mt-3 font-display text-4xl leading-tight text-charcoal md:text-5xl">{title}</h2>
             {subtitle && <p className="mt-3 text-[15px] leading-relaxed text-charcoal/65">{subtitle}</p>}
-            {children}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {rotating && (
-              <button type="button" onClick={() => setPaused((p) => !p)} aria-pressed={paused} className="discount-toggle inline-flex items-center gap-1.5 rounded-full border border-charcoal/15 bg-paper px-3.5 py-2 text-xs font-medium text-charcoal/70 transition hover:border-forest hover:text-forest">
-                {paused ? <Icon name="play" className="h-3 w-3" /> : <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12" rx="1" fill="currentColor" /><rect x="9.5" y="2" width="3.5" height="12" rx="1" fill="currentColor" /></svg>}
-                {paused ? t('discounts.play') : t('discounts.pause')}
-              </button>
-            )}
             <LinkButton to="/centers">{t('center.page.allCenters')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
           </div>
         </div>
@@ -100,7 +92,7 @@ export function CentersShowcase({ centers, title, subtitle, children }: { center
         aria-label={title}
         className="discount-marquee"
         data-static={rotating ? undefined : 'true'}
-        data-paused={paused || offscreen ? 'true' : undefined}
+        data-paused={offscreen ? 'true' : undefined}
         style={{ '--discount-duration': `${centers.length * 8}s` } as CSSProperties}
       >
         <div className="discount-track">

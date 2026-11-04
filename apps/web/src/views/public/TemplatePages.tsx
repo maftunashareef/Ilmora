@@ -119,20 +119,11 @@ function JourneySection({ s }: { s: Section }) {
   return <Journey title={tr(s.title)} subtitle={tr(s.subtitle)} />
 }
 
-// ─── Centers as cards, with the directions as chips (the section is still called "marquee" in page settings) ──
+// ─── Centers as cards (the section is still called "marquee" in page settings) ──
 function MarqueeSection({ s }: { s: Section }) {
   const { t, tr } = useT()
   const centers = useStore((st) => st.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG))
-  const categories = useStore((st) => st.categories)
-  return (
-    <CentersShowcase centers={centers} title={tr(s.title) || t('common.centers')} subtitle={tr(s.subtitle) || t('centers.showcase.subtitle')}>
-      {categories.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {categories.map((c) => <Link key={c.id} to={`/courses?cat=${c.id}`} className="rounded-full border border-charcoal/10 bg-paper px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-forest/80 transition hover:border-forest hover:text-forest">{c.glyph} {tr(c.name)}</Link>)}
-        </div>
-      )}
-    </CentersShowcase>
-  )
+  return <CentersShowcase centers={centers} title={tr(s.title) || t('common.centers')} subtitle={tr(s.subtitle) || t('centers.showcase.subtitle')} />
 }
 
 // ─── Packages: Flex, Winx (database packages) and Build Your Own (no package) ─

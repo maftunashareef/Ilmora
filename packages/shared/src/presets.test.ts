@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { admissionIssues, chosenSlots, emptyAdmission, groupByUniversity, isUniversityListed, isUniversityPreset, newPreset, presetCartPlan, presetCourses, presetDurationMonths, presetMissingSubjects, presetPublishability, presetReadiness, presetsForDirection, presetTotal, universityDirections, universityOf, unknownDirections, type PresetCourse } from './presets.js'
+import { admissionIssues, chosenSlots, emptyAdmission, groupByUniversity, isUniversityListed, isUniversityPreset, newPreset, presetCartPlan, presetCourses, presetDurationMonths, presetMissingSubjects, presetNeedsConfirmation, presetPublishability, presetReadiness, presetsForDirection, presetTotal, universityDirections, universityOf, unknownDirections, type PresetCourse } from './presets.js'
 import type { AdmissionSource, Preset, University } from './types.js'
 
 const course = (id: string, over: Partial<PresetCourse> = {}, groups = 1): PresetCourse => ({
@@ -100,12 +100,25 @@ describe('admission verification', () => {
 describe('who can be published', () => {
   const courses = [course('math'), course('eng'), course('hist', {}, 0)]
 
-  it('a university package needs every subject mapped to an available course AND verified admission requirements', () => {
+  it('a university package needs an official source and available courses; unverified requirements are published marked for confirmation', () => {
     expect(presetPublishability(uniPreset(), courses)).toMatchObject({ ok: true, ready: true, issues: [], admission: [] })
-    expect(presetPublishability(uniPreset({ admission: { ...VERIFIED, status: 'needs_review' } }), courses)).toMatchObject({ ok: false, ready: true, admission: ['not-verified'] })
-    expect(presetPublishability(uniPreset({}, ['math', null]), courses)).toMatchObject({ ok: false, ready: false, admission: [] })
-    expect(presetPublishability(uniPreset({}, ['math', 'hist']), courses).ok).toBe(false)
+    const review = uniPreset({ admission: { ...VERIFIED, status: 'needs_review' } })
+    expect(presetPublishability(review, courses)).toMatchObject({ ok: true, ready: true, admission: ['not-verified'] })
+    expect(presetNeedsConfirmation(review)).toBe(true)
+    expect(presetNeedsConfirmation(uniPreset())).toBe(false)
+    // no official page: never published
     expect(presetPublishability(uniPreset({ admission: undefined }), courses).ok).toBe(false)
+    expect(presetPublishability(uniPreset({ admission: { ...VERIFIED, url: '' } }), courses).ok).toBe(false)
+    // a course that exists but cannot be booked (no group) still blocks
+    expect(presetPublishability(uniPreset({}, ['math', 'hist']), courses).ok).toBe(false)
+  })
+
+  it('a subject ILMORA has no course for is listed as not covered, but a package needs at least one covered required subject', () => {
+    expect(presetPublishability(uniPreset({}, ['math', null]), courses)).toMatchObject({ ok: true, ready: false })
+    expect(presetCourses(uniPreset({}, ['math', null]), courses).map((c) => c.id)).toEqual(['math'])
+    expect(presetPublishability(uniPreset({}, [null, null]), courses).ok).toBe(false)
+    const onlyOptional: Preset = { ...uniPreset({}, [null, 'eng']), slots: [{ id: 's1', label: { uz: '', ru: '', en: '' }, courseId: null }, { id: 's2', label: { uz: '', ru: '', en: '' }, courseId: 'eng', optional: true }] }
+    expect(presetPublishability(onlyOptional, courses).ok).toBe(false)
   })
 
   it('a package that is not about a university only needs its courses', () => {
