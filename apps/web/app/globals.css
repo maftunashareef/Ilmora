@@ -8,6 +8,11 @@
   --c-champagne: #C8AD7F;
   --c-sage: #E3EBE5;
   --c-white: #FFFFFF;
+  /* Self-hosted @fontsource family names (imported in app/[locale]/layout.tsx); previously set by next/font. */
+  --font-cormorant: "Cormorant Garamond";
+  --font-playfair: "Playfair Display Variable";
+  --font-inter: "Inter Variable";
+  --font-manrope: "Manrope Variable";
   --f-display: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
   --f-body: var(--font-inter), "Inter", system-ui, sans-serif;
   --r-card: 1.25rem;
