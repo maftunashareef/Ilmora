@@ -81,6 +81,19 @@ export class ManageService {
     throw AppError.forbidden('You can only manage your own content')
   }
 
+  /**
+   * A teacher may link a video or resource only to a course they teach; a center admin only to a course of their
+   * own center. Without this a teacher could attach their content to any course in the tenant (Ж10).
+   */
+  private async assertCourseLinkable(tenantId: string, actor: RequestActor, teacherId: string, courseId: string | null | undefined) {
+    if (!courseId || this.isAdmin(actor)) return
+    const course = await this.prisma.client.course.findFirst({ where: { tenantId, id: courseId }, select: { teacherId: true, centerId: true } })
+    if (!course) throw AppError.invalid('invalid_course', 'Unknown course')
+    const ownsCourse = course.teacherId === teacherId
+    const centerCourse = this.isCenterAdmin(actor) && !!actor.centerId && course.centerId === actor.centerId
+    if (!ownsCourse && !centerCourse) throw AppError.forbidden('You can only attach content to your own courses', { code: 'wrong_course' })
+  }
+
   private async teacherPermissions(tenantId: string) {
     if (!this.site || typeof this.site.get !== 'function') {
       return { customizeChannel: true, editCourses: true, editPrices: false, editSchedules: true, manageGroups: true, publishDirectly: true, uploadResources: true }
@@ -322,6 +335,9 @@ export class ManageService {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id }, include: { groups: { where: { deletedAt: null }, select: { id: true } } } })
     if (!course) throw AppError.notFound('Course')
     this.assertTeacherScope(actor, course)
+    // Deleting is an edit: respect the same permission switch as create/update, which a bare delete bypassed (Ж19).
+    const perms = await this.permsFor(tenantId, actor, course.centerId)
+    if (!this.isAdmin(actor) && !perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
     const enrolled = await this.prisma.client.enrollment.count({ where: { tenantId, groupId: { in: course.groups.map((g) => g.id) }, status: { in: ['PENDING', 'ACTIVE'] } } })
     if (enrolled > 0) throw AppError.conflict('has_enrollments', 'Archive the course instead: students are enrolled in its groups')
     await this.prisma.client.course.update({ where: { id }, data: { deletedAt: new Date(), status: 'ARCHIVED' } })
@@ -390,6 +406,9 @@ export class ManageService {
     const group = await this.prisma.client.group.findFirst({ where: { tenantId, id }, include: { course: true } })
     if (!group) throw AppError.notFound('Group')
     this.assertTeacherScope(actor, group.course)
+    // Same as createGroup/updateGroup: deleting a group needs the manageGroups switch, which a bare delete bypassed (Ж19).
+    const perms = await this.permsFor(tenantId, actor, group.course.centerId)
+    if (!this.isAdmin(actor) && !perms.manageGroups) throw AppError.forbidden('Group management is disabled for teachers')
     const enrolled = await this.prisma.client.enrollment.count({ where: { tenantId, groupId: id, status: { in: ['PENDING', 'ACTIVE'] } } })
     if (enrolled > 0) throw AppError.conflict('has_enrollments', 'A group with enrolled students cannot be deleted')
     await this.prisma.client.group.update({ where: { id }, data: { deletedAt: new Date() } })
@@ -433,6 +452,7 @@ export class ManageService {
   // ───────── videos / playlists / resources / subjects ─────────
   async createVideo(tenantId: string, actor: RequestActor, input: z.infer<typeof VideoInput>) {
     const teacherId = this.resolveTeacherId(actor, input.teacherId)
+    await this.assertCourseLinkable(tenantId, actor, teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     const v = await this.prisma.client.video.create({
       data: {
@@ -447,6 +467,7 @@ export class ManageService {
     const v = await this.prisma.client.video.findFirst({ where: { tenantId, id } })
     if (!v) throw AppError.notFound('Video')
     this.assertTeacherScope(actor, v)
+    if (input.courseId !== undefined) await this.assertCourseLinkable(tenantId, actor, v.teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     const data: Record<string, unknown> = this.publishableData(input, actor, !!perms.publishDirectly)
     if (input.title) data.title = input.title as Json
@@ -503,6 +524,7 @@ export class ManageService {
 
   async createResource(tenantId: string, actor: RequestActor, input: z.infer<typeof ResourceInput>) {
     const teacherId = this.resolveTeacherId(actor, input.teacherId)
+    await this.assertCourseLinkable(tenantId, actor, teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     if (!this.isAdmin(actor) && !perms.uploadResources) throw AppError.forbidden('Resource uploads are disabled for teachers')
     const r = await this.prisma.client.resource.create({
@@ -518,6 +540,7 @@ export class ManageService {
     const r = await this.prisma.client.resource.findFirst({ where: { tenantId, id } })
     if (!r) throw AppError.notFound('Resource')
     this.assertTeacherScope(actor, r)
+    if (input.courseId !== undefined) await this.assertCourseLinkable(tenantId, actor, r.teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     const data: Record<string, unknown> = this.publishableData(input, actor, !!perms.publishDirectly)
     if (input.title) data.title = input.title as Json

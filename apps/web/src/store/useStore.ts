@@ -4,7 +4,7 @@ import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
-import { api, isApiError, refreshSession, session } from '../lib/api'
+import { api, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
@@ -509,7 +509,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           return user
         } catch (err) {
           const curr = get().auth.user
-          if (curr && (curr.id.startsWith('s-') || curr.id.startsWith('t-') || curr.id.startsWith('demo-') || !isApiError(err))) {
+          // Only offline demo accounts (no backend) may record consent locally. A real account must get the server's
+          // confirmation: if /auth/consent failed, re-throw so the gate shows the error and consent is NOT falsely
+          // marked as given when the server never stored it (Ж11).
+          if (curr && (curr.id.startsWith('s-') || curr.id.startsWith('t-') || curr.id.startsWith('demo-'))) {
             const updated: AuthUser = {
               ...curr,
               offerAcceptedAt: new Date().toISOString(),

@@ -17,7 +17,8 @@ export class AuthController {
   @Public()
   @AuthThrottle(10)
   @Post('register')
-  async register(@CurrentTenantId() tenantId: string, @Body() dto: RegisterDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async register(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: RegisterDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.accounts.register(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }
@@ -26,7 +27,8 @@ export class AuthController {
   @Public()
   @AuthThrottle(10)
   @Post('login')
-  async login(@CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async login(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.accounts.loginWithPassword(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }
@@ -35,7 +37,8 @@ export class AuthController {
   @Public()
   @AuthThrottle(10)
   @Post('google')
-  async google(@CurrentTenantId() tenantId: string, @Body() dto: GoogleAuthDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async google(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: GoogleAuthDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.auth.authenticateGoogle(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }
@@ -43,14 +46,16 @@ export class AuthController {
   @Public()
   @AuthThrottle(6)
   @Post('otp/request')
-  requestOtp(@CurrentTenantId() tenantId: string, @Body() dto: RequestOtpDto, @ClientInfo() ci: ClientInfoValue) {
+  requestOtp(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: RequestOtpDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined) {
+    this.assertSameSite(req, requestedWith)
     return this.auth.requestOtp(tenantId, dto.phone, dto.lang ?? 'uz', { ip: ci.ip })
   }
 
   @Public()
   @AuthThrottle(10)
   @Post('otp/verify')
-  async verifyOtp(@CurrentTenantId() tenantId: string, @Body() dto: VerifyOtpDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async verifyOtp(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: VerifyOtpDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.auth.verifyOtp(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }

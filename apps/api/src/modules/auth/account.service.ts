@@ -186,11 +186,14 @@ export class AccountService {
   async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult> {
     const raw = input.login.trim()
     const login = raw.normalize('NFKC').toLowerCase()
-    const key = `login:fail:${tenantId}:${login}`
+    // Lock on the canonical identity, not the raw text: a phone typed in different styles (+998…, 998…, 90…, with
+    // spaces) must map to ONE lock bucket, otherwise the 10-failure lock is bypassed by varying the spelling (Ж7).
+    const phoneParsed = normalizeUzPhone(raw)
+    const identity = phoneParsed.ok ? `phone:${phoneParsed.e164}` : `login:${login}`
+    const key = `login:fail:${tenantId}:${identity}`
     await this.assertNotLocked(key)
 
     // Lookup user by normalized phone number or by unique login username
-    const phoneParsed = normalizeUzPhone(raw)
     let user: UserRow | null = null
     if (phoneParsed.ok) {
       user = await this.prisma.client.user.findFirst({ where: { tenantId, phoneE164: phoneParsed.e164 }, include: USER_INCLUDE })
@@ -207,7 +210,8 @@ export class AccountService {
       await this.recordFailure(key)
       throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     }
-    if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+    // Do not reveal that the password was correct for a disabled account: answer exactly as for a wrong password (Ж15).
+    if (!user.isActive) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     await this.clearFailures(key)
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'password' } })
@@ -280,9 +284,9 @@ export class AccountService {
           preferredLang,
           roles,
           lastLoginAt: now,
-          offerAcceptedAt: now,
-          offerVersion: OFFER_VERSION,
-          consentAt: now,
+          // Google sign-in shows no offer/consent checkboxes, so consent must NOT be stamped here — recording it
+          // would be recording a consent the user never gave (Ж11). Left null, the client's ConsentGate
+          // (needsConsent) requires the two marks before the workspace opens, via /auth/consent.
         },
         include: USER_INCLUDE,
       })

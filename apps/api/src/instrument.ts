@@ -36,7 +36,13 @@ if (process.env.SENTRY_DSN) {
       return event
     },
     beforeBreadcrumb(crumb) {
-      if (crumb.data) crumb.data = scrub(crumb.data) as typeof crumb.data
+      // Outgoing-HTTP breadcrumbs carry the full request URL; the Google `tokeninfo` call puts the id_token in the
+      // query string, and key-based scrubbing can't catch a token that lives in the URL value — so drop every
+      // breadcrumb query string outright (Ж16).
+      if (crumb.data) {
+        if (typeof crumb.data.url === 'string') crumb.data.url = crumb.data.url.split('?')[0]
+        crumb.data = scrub(crumb.data) as typeof crumb.data
+      }
       return crumb
     },
   })

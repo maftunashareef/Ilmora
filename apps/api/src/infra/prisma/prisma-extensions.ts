@@ -29,8 +29,10 @@ function withTenantWhere(args: AnyArgs, tenantId: string): AnyArgs {
 }
 
 function withTenantData(data: unknown, tenantId: string): unknown {
-  if (Array.isArray(data)) return data.map((d) => ({ tenantId, ...(d as object) }))
-  if (data && typeof data === 'object') return { tenantId, ...(data as object) }
+  // The context tenant must come LAST so it always wins: if it were first, a caller-supplied `tenantId` in the
+  // payload would override it via the spread and write the row into another organization (Ж12 — fail closed).
+  if (Array.isArray(data)) return data.map((d) => ({ ...(d as object), tenantId }))
+  if (data && typeof data === 'object') return { ...(data as object), tenantId }
   return data
 }
 
