@@ -42,6 +42,9 @@ const securityHeaders = [
       `img-src 'self' data: blob: ${remotePatterns.map((p) => `${p.protocol}://${p.hostname}${p.port ? `:${p.port}` : ''}`).join(' ')}`.trim(),
       "font-src 'self' data:",
       "media-src 'self' blob:",
+      // Lesson videos are embedded from YouTube (privacy-enhanced no-cookie host) and Vimeo; without frame-src these
+      // iframes fall back to default-src 'self' and never load. Kept to the exact player origins used in embedFor().
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com",
       `connect-src 'self' ${apiOrigin}`.trim(),
       "worker-src 'self' blob:",
       "frame-ancestors 'none'",

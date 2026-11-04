@@ -194,11 +194,18 @@ export class ManageService {
       if (!input.centerId) throw AppError.invalid('center_required', 'centerId is required for an offline course')
       if (this.sendsOnlineFields(input)) throw AppError.invalid('online_fields_on_offline_course', 'A link, provider or certificate belongs to an online course')
       centerId = input.centerId
-      // A center creates courses for itself only, taught by its own teachers.
-      if (this.isCenterAdmin(actor) && !this.isAdmin(actor)) {
-        if (centerId !== actor.centerId) throw AppError.forbidden('A center can only create courses for itself', { code: 'wrong_center' })
-        const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
-        if (!teacher || teacher.centerId !== centerId) throw AppError.invalid('teacher_not_in_center', 'Choose a teacher of your center')
+      if (!this.isAdmin(actor)) {
+        if (this.isCenterAdmin(actor)) {
+          // A center creates courses for itself only, taught by its own teachers.
+          if (centerId !== actor.centerId) throw AppError.forbidden('A center can only create courses for itself', { code: 'wrong_center' })
+          const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
+          if (!teacher || teacher.centerId !== centerId) throw AppError.invalid('teacher_not_in_center', 'Choose a teacher of your center')
+        } else {
+          // A teacher may only create a course at the center their own profile belongs to — never in a foreign center.
+          const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
+          if (!teacher) throw AppError.notFound('TeacherProfile')
+          if (!teacher.centerId || teacher.centerId !== centerId) throw AppError.forbidden('You can only create courses for your own center', { code: 'wrong_center' })
+        }
       }
     }
     const perms = await this.permsFor(tenantId, actor, centerId)
