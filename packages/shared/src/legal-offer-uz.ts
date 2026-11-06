@@ -72,7 +72,7 @@ export const OFFER_UZ: LegalBlock[] = [
 },
 {
 "t": "clause",
-"text": "1.11. Toʻlov provayderi — bank kartasi yoki boshqa usulda toʻlovni qabul qiladigan tashkilot: ______________, ______________."
+"text": "1.11. Toʻlov provayderi — bank kartasi yoki boshqa usulda toʻlovni qabul qiladigan tashkilot: Payme, Click."
 },
 {
 "t": "clause",
@@ -256,7 +256,7 @@ export const OFFER_UZ: LegalBlock[] = [
 },
 {
 "t": "clause",
-"text": "5.4. Toʻlov tartibi. Toʻlov — Davr boshlanishidan oldin soʻmda 100% oldindan toʻlov. Usullari: bank kartasi (Uzcard, Humo [va boshqalar: ____]) va Toʻlov provayderlari ______________ orqali boshqa usullar. Karta maʼlumotlari Toʻlov provayderi sahifasida kiritiladi, Operator ularni saqlamaydi."
+"text": "5.4. Toʻlov tartibi. Toʻlov — Davr boshlanishidan oldin soʻmda 100% oldindan toʻlov. Usullari: bank kartasi (Uzcard, Humo) va Toʻlov provayderlari Payme va Click orqali boshqa usullar. Karta maʼlumotlari Toʻlov provayderi sahifasida kiritiladi, Operator ularni saqlamaydi."
 },
 {
 "t": "clause",
@@ -746,12 +746,12 @@ export const OFFER_UZ: LegalBlock[] = [
 {
 "t": "kv",
 "label": "H/r (elektron tijorat hisob-kitoblari uchun)",
-"value": "20208000507335080001 [agar qonun boʻyicha elektron tijorat uchun alohida hisob kerak boʻlsa — uni koʻrsatish: ____]"
+"value": "20208000107335080002"
 },
 {
 "t": "kv",
 "label": "Bank, MFO",
-"value": "«IPAK YOʻLI» AIT Banki Bosh ofisi, Toshkent sh.; MFO 00444"
+"value": "________________________ (bank); MFO 00401"
 },
 {
 "t": "kv",
