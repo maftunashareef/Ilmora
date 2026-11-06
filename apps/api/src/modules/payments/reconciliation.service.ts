@@ -29,12 +29,18 @@ export class ReconciliationService {
       this.prisma.client.paymentTransaction.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { payment: { select: { id: true, state: true, amountMinor: true, currency: true, paidAt: true, studentId: true } } } }),
       this.prisma.client.paymentTransaction.count({ where }),
     ])
+    const paymentIds = rows.map((r) => r.paymentId)
+    // A reversal journal carries "<paymentId>:reversal:<journalId>" as its own reference, so it is found through the
+    // journal it reverses and filed under that payment; matching on referenceId alone made every refund look unposted.
     const journals = await this.prisma.client.ledgerJournal.findMany({
-      where: { tenantId, referenceType: 'Payment', referenceId: { in: rows.map((r) => r.paymentId) }, kind: { in: ['PAYMENT_SETTLED', 'PAYMENT_REFUNDED', 'REVERSAL'] } },
-      select: { id: true, referenceId: true, kind: true, createdAt: true },
+      where: { tenantId, referenceType: 'Payment', kind: { in: ['PAYMENT_SETTLED', 'PAYMENT_REFUNDED', 'REVERSAL'] }, OR: [{ referenceId: { in: paymentIds } }, { reversalOf: { referenceId: { in: paymentIds } } }] },
+      select: { id: true, referenceId: true, kind: true, createdAt: true, reversalOf: { select: { referenceId: true } } },
     })
     const byPayment = new Map<string, typeof journals>()
-    for (const j of journals) byPayment.set(j.referenceId, [...(byPayment.get(j.referenceId) ?? []), j])
+    for (const j of journals) {
+      const paymentId = j.reversalOf?.referenceId ?? j.referenceId
+      byPayment.set(paymentId, [...(byPayment.get(paymentId) ?? []), j])
+    }
 
     return {
       page,

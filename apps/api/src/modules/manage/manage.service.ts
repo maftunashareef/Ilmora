@@ -93,11 +93,19 @@ export class ManageService {
     }
   }
 
-  private resolveTeacherId(actor: RequestActor, requested?: string): string {
-    if (this.isAdmin(actor) || this.isCenterAdmin(actor)) {
+  private async resolveTeacherId(tenantId: string, actor: RequestActor, requested?: string): Promise<string> {
+    if (this.isAdmin(actor)) {
       if (requested) return requested
       if (actor.teacherProfileId) return actor.teacherProfileId
       throw AppError.invalid('teacher_required', 'teacherId is required')
+    }
+    if (this.isCenterAdmin(actor)) {
+      // A center acts for its own teachers only, even when the administrator also teaches somewhere else.
+      const id = requested ?? actor.teacherProfileId
+      if (!id) throw AppError.invalid('teacher_required', 'teacherId is required')
+      const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id }, select: { centerId: true } })
+      if (!teacher || !actor.centerId || teacher.centerId !== actor.centerId) throw AppError.forbidden('Choose a teacher of your center', { code: 'teacher_not_in_center' })
+      return id
     }
     if (!actor.teacherProfileId) throw AppError.forbidden('No teacher profile linked to this account')
     if (requested && requested !== actor.teacherProfileId) throw AppError.forbidden('Cannot create content for another teacher')
@@ -190,7 +198,7 @@ export class ManageService {
       this.assertOnlineIsFree(input.price, input.discount)
       ;({ centerId, teacherId } = await this.ensureOnlineProvider(tenantId))
     } else {
-      teacherId = this.resolveTeacherId(actor, input.teacherId)
+      teacherId = await this.resolveTeacherId(tenantId, actor, input.teacherId)
       if (!input.centerId) throw AppError.invalid('center_required', 'centerId is required for an offline course')
       if (this.sendsOnlineFields(input)) throw AppError.invalid('online_fields_on_offline_course', 'A link, provider or certificate belongs to an online course')
       centerId = input.centerId
@@ -263,7 +271,11 @@ export class ManageService {
     const perms = await this.permsFor(tenantId, actor, course.centerId)
     if (!this.isAdmin(actor)) {
       if (!perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
-      if (input.price !== undefined && !perms.editPrices) throw AppError.forbidden('Price changes require Super Admin')
+      if (input.price !== undefined && !perms.editPrices) {
+        // The form always sends the price; only a different figure is a change this role may not make.
+        if (somToTiyin(input.price) !== course.priceMinor) throw AppError.forbidden('Price changes require Super Admin')
+        delete input.price
+      }
       if (input.meyosGrant !== undefined) delete input.meyosGrant
       // A center may hand a course to another of its teachers; teachers never reassign.
       if (input.teacherId && input.teacherId !== course.teacherId) {
@@ -443,7 +455,7 @@ export class ManageService {
 
   // ───────── videos / playlists / resources / subjects ─────────
   async createVideo(tenantId: string, actor: RequestActor, input: z.infer<typeof VideoInput>) {
-    const teacherId = this.resolveTeacherId(actor, input.teacherId)
+    const teacherId = await this.resolveTeacherId(tenantId, actor, input.teacherId)
     const perms = await this.teacherPermissions(tenantId)
     const v = await this.prisma.client.video.create({
       data: {
@@ -478,7 +490,7 @@ export class ManageService {
   }
 
   async createPlaylist(tenantId: string, actor: RequestActor, input: z.infer<typeof PlaylistInput>) {
-    const teacherId = this.resolveTeacherId(actor, input.teacherId)
+    const teacherId = await this.resolveTeacherId(tenantId, actor, input.teacherId)
     const perms = await this.teacherPermissions(tenantId)
     const p = await this.prisma.client.playlist.create({
       data: { tenantId, teacherId, title: input.title as Json, description: input.description as Json, coverSeed: input.coverSeed ?? Math.floor(Math.random() * 1000), ...this.publishableData(input, actor, !!perms.publishDirectly), items: { create: input.videoIds.map((videoId, position) => ({ videoId, position })) } } as Prisma.PlaylistUncheckedCreateInput,
@@ -513,7 +525,7 @@ export class ManageService {
   }
 
   async createResource(tenantId: string, actor: RequestActor, input: z.infer<typeof ResourceInput>) {
-    const teacherId = this.resolveTeacherId(actor, input.teacherId)
+    const teacherId = await this.resolveTeacherId(tenantId, actor, input.teacherId)
     const perms = await this.teacherPermissions(tenantId)
     if (!this.isAdmin(actor) && !perms.uploadResources) throw AppError.forbidden('Resource uploads are disabled for teachers')
     const r = await this.prisma.client.resource.create({
@@ -550,7 +562,7 @@ export class ManageService {
   }
 
   async upsertSubject(tenantId: string, actor: RequestActor, input: z.infer<typeof SubjectInput>, id?: string) {
-    const teacherId = this.resolveTeacherId(actor, input.teacherId)
+    const teacherId = await this.resolveTeacherId(tenantId, actor, input.teacherId)
     if (id) {
       const s = await this.prisma.client.subject.findFirst({ where: { tenantId, id } })
       if (!s) throw AppError.notFound('Subject')

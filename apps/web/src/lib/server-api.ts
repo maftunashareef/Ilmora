@@ -23,32 +23,24 @@ const fallbackCatalog: Catalog = {
 export const getSite = () =>
   api<SiteData>('/public/site', { auth: false, next: { revalidate: 60, tags: ['site'] } }).catch(() => fallbackSite)
 
-const mergeById = <T extends { id: string }>(live: T[] | undefined, fallback: T[]): T[] => {
-  if (!live || live.length === 0) return fallback
-  const ids = new Set(live.map((item) => item.id))
-  return [...live, ...fallback.filter((item) => !ids.has(item.id))]
-}
+/** Demo content stands in only while developing without an API; the live site never mixes it with real data. */
+const DEMO_FALLBACK = process.env.NODE_ENV !== 'production'
+const emptyCatalog: Catalog = { centers: [], categories: [], teachers: [], subjects: [], courses: [] }
 
 /** Public catalog (published + public items only), cached for a minute. */
 export const getCatalog = () =>
   api<Catalog>('/public/catalog', { auth: false, next: { revalidate: 60, tags: ['catalog'] } })
-    .then((catalog) => ({
-      centers: mergeById(catalog?.centers, fallbackCatalog.centers),
-      categories: mergeById(catalog?.categories, fallbackCatalog.categories),
-      teachers: mergeById(catalog?.teachers, fallbackCatalog.teachers),
-      subjects: mergeById(catalog?.subjects, fallbackCatalog.subjects),
-      courses: mergeById(catalog?.courses, fallbackCatalog.courses),
-    }))
-    .catch(() => fallbackCatalog)
+    .then((catalog) => (catalog ? { centers: catalog.centers ?? [], categories: catalog.categories ?? [], teachers: catalog.teachers ?? [], subjects: catalog.subjects ?? [], courses: catalog.courses ?? [] } : DEMO_FALLBACK ? fallbackCatalog : emptyCatalog))
+    .catch(() => (DEMO_FALLBACK ? fallbackCatalog : emptyCatalog))
 
 export const getCourse = (key: string) =>
   api<Course>(`/public/courses/${encodeURIComponent(key)}`, { auth: false, next: { revalidate: 60, tags: ['catalog'] } }).catch(
-    () => (sampleData.courses.find((c) => c.id === key || c.slug === key) as unknown as Course) ?? null,
+    () => (DEMO_FALLBACK ? ((sampleData.courses.find((c) => c.id === key || c.slug === key) as unknown as Course) ?? null) : null),
   )
 
 export const getTeacher = (key: string) =>
   api<{ teacher: Teacher; courses: Course[] }>(`/public/teachers/${encodeURIComponent(key)}`, { auth: false, next: { revalidate: 60, tags: ['catalog'] } }).catch(() => {
-    const teacher = sampleData.teachers.find((t) => t.id === key || t.slug === key) as unknown as Teacher | undefined
+    const teacher = DEMO_FALLBACK ? (sampleData.teachers.find((t) => t.id === key || t.slug === key) as unknown as Teacher | undefined) : undefined
     if (!teacher) return null
     const courses = (sampleData.courses.filter((c) => c.teacherId === teacher.id) as unknown as Course[]) ?? []
     return { teacher, courses }

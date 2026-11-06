@@ -94,8 +94,8 @@ Measure with `docker image inspect <image> --format '{{.Size}}'` (uncompressed b
 
 ## 9. Provider configuration (Payme / Click)
 
-* Payme Business: create a web cash register, set the Endpoint URL to `https://api.ilmora.uz/payments/payme`, copy the merchant id and the production key into `PAYME_MERCHANT_ID` / `PAYME_KEY`. Use `PAYME_TEST_KEY` only on staging (`NODE_ENV!=production`). Restrict source IPs with `PAYME_ALLOWED_IPS` (the documented 185.234.113.1–15).
-* Click: register the service, set Prepare URL `https://api.ilmora.uz/payments/click/prepare` and Complete URL `https://api.ilmora.uz/payments/click/complete`, fill `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_MERCHANT_USER_ID`, `CLICK_SECRET_KEY`.
+* Payme Business: create a web cash register, set the Endpoint URL to `https://ilmoraa.uz/payments/payme` (the public host; Caddy passes `/payments/*` to the API outside the `/v1` prefix), copy the merchant id and the production key into `PAYME_MERCHANT_ID` / `PAYME_KEY`. Use `PAYME_TEST_KEY` only on staging (`NODE_ENV!=production`). Restrict source IPs with `PAYME_ALLOWED_IPS` (the documented 185.234.113.1–15).
+* Click: register the service, set Prepare URL `https://ilmoraa.uz/payments/click/prepare` and Complete URL `https://ilmoraa.uz/payments/click/complete`, fill `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_MERCHANT_USER_ID`, `CLICK_SECRET_KEY`.
 * Until these are set the checkout screen shows both providers as "not connected"; nothing can be charged.
 
 Protocol references used by the adapters: `docs/payments/payme-merchant-api.md`, `docs/payments/click-shop-api.md`.

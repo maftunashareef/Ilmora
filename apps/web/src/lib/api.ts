@@ -49,26 +49,65 @@ export interface RequestOptions {
 
 let refreshing: Promise<boolean> | null = null
 
+/** Cross-tab lock name and the timestamp the last successful refresh wrote (both tabs share the cookie jar). */
+const REFRESH_LOCK = 'ilmora-refresh'
+const REFRESHED_AT_KEY = 'ilmora:refreshed-at'
+const readRefreshedAt = (): number => {
+  try {
+    return Number(localStorage.getItem(REFRESHED_AT_KEY)) || 0
+  } catch {
+    return 0
+  }
+}
+const writeRefreshedAt = () => {
+  try {
+    localStorage.setItem(REFRESHED_AT_KEY, String(Date.now()))
+  } catch {
+    /* private mode */
+  }
+}
+
+/** One POST /auth/refresh. Resolves 'ok', 'denied' (the API rejected the cookie) or 'failed' (network). */
+async function postRefresh(): Promise<'ok' | 'denied' | 'failed'> {
+  try {
+    const res = await fetch(`${apiBase()}${PREFIX}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'X-Requested-With': 'ilmora' } })
+    if (!res.ok) return 'denied'
+    const data = (await res.json()) as { accessToken: string }
+    session.set(data.accessToken)
+    writeRefreshedAt()
+    return 'ok'
+  } catch {
+    return 'failed'
+  }
+}
+
+/**
+ * The refresh cookie rotates on every call and the API revokes the whole session family when an old cookie is replayed,
+ * so two tabs refreshing at once sign both out. Tabs therefore take turns through the Web Locks API; a tab that waited
+ * sends the cookie the winner just received. Without Web Locks, a refresh rejected while another tab refreshed is
+ * retried once with the new cookie.
+ */
+async function refreshExclusive(): Promise<boolean> {
+  const startedAt = Date.now()
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
+  if (locks) {
+    const outcome = await locks.request(REFRESH_LOCK, postRefresh)
+    if (outcome === 'denied') session.set(null)
+    return outcome === 'ok'
+  }
+  let outcome = await postRefresh()
+  if (outcome === 'denied' && readRefreshedAt() >= startedAt) outcome = await postRefresh()
+  if (outcome === 'denied') session.set(null)
+  return outcome === 'ok'
+}
+
 /** Exchange the refresh cookie for a new access token. Resolves false when there is no valid session. */
 export async function refreshSession(): Promise<boolean> {
   if (typeof window === 'undefined') return false
   if (!refreshing) {
-    refreshing = (async () => {
-      try {
-        const res = await fetch(`${apiBase()}${PREFIX}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'X-Requested-With': 'ilmora' } })
-        if (!res.ok) {
-          session.set(null)
-          return false
-        }
-        const data = (await res.json()) as { accessToken: string }
-        session.set(data.accessToken)
-        return true
-      } catch {
-        return false
-      } finally {
-        setTimeout(() => (refreshing = null), 0)
-      }
-    })()
+    refreshing = refreshExclusive().finally(() => {
+      setTimeout(() => (refreshing = null), 0)
+    })
   }
   return refreshing
 }

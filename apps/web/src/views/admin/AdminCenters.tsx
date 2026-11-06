@@ -94,7 +94,7 @@ export function AdminCenters() {
           </div>
         )}
       </Modal>
-      <Modal open={!!cat} onClose={() => setCat(null)} title={cat ? tr(cat.name) || t('admin.centers.addCategory') : ''} footer={<><Button variant="ghost" onClick={() => setCat(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (cat && (cat.name.uz || cat.name.en || cat.name.ru)) { s.upsertCategory(cat); setCat(null); s.notify(t('common.saved')) } }}>{t('common.save')}</Button></>}>
+      <Modal open={!!cat} onClose={() => setCat(null)} title={cat ? tr(cat.name) || t('admin.centers.addCategory') : ''} footer={<><Button variant="ghost" onClick={() => setCat(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (cat && (cat.name.uz || cat.name.en || cat.name.ru)) { void s.upsertCategory(cat).then(() => { setCat(null); s.notify(t('common.saved')) }).catch(() => undefined) } }}>{t('common.save')}</Button></>}>
         {cat && (
           <div className="space-y-4">
             <LField label={t('common.name')} required value={cat.name} onChange={(v) => setCat({ ...cat, name: v })} />

@@ -36,7 +36,7 @@ export function AdminContent() {
                 <Badge tone="muted">{KIND_LABEL[r.kind]}</Badge>
                 <a href={siteHref(lang, r.href)} className="min-w-0 flex-1 truncate text-sm font-medium text-charcoal hover:text-forest">{r.title}</a>
                 <span className="text-xs text-charcoal/55">{s.teachers.find((x) => x.id === r.teacherId)?.name}</span>
-                <Button size="sm" onClick={() => { s.setPublishable(r.kind, r.id, { status: 'published', reviewRequested: false }); s.notify(t('common.saved')) }}><Icon name="check" className="h-3.5 w-3.5" />{t('admin.approve')}</Button>
+                <Button size="sm" onClick={() => { void s.setPublishable(r.kind, r.id, { status: 'published', reviewRequested: false }).then(() => s.notify(t('common.saved'))).catch(() => undefined) }}><Icon name="check" className="h-3.5 w-3.5" />{t('admin.approve')}</Button>
                 <Button size="sm" variant="ghost" onClick={() => s.setPublishable(r.kind, r.id, { reviewRequested: false })}>{t('common.cancel')}</Button>
               </li>
             ))}

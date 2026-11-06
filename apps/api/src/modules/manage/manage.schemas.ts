@@ -187,3 +187,29 @@ export const UserRolesInput = z.object({
   reason: z.string().min(3).max(300),
 }).strict()
 export const StudentAdminInput = z.object({ displayName: z.string().min(2).max(60).optional(), district: z.string().max(60).nullable().optional(), preferredLang: z.enum(['uz', 'ru', 'en']).optional() }).strict()
+
+// ───────── studio file uploads (UploadsController) ─────────
+/** The browser's file name: kept for the audit trail only, never used as part of the object key. */
+const uploadFileName = z.string().min(1).max(160).regex(/^[^\\/:*?"<>|]+$/, 'Invalid file name').refine((name) => !Array.from(name).some((c) => c.charCodeAt(0) < 32), { message: 'Control characters not allowed in file name' })
+export const IMAGE_UPLOAD_MAX_BYTES = 8 * 1024 * 1024
+export const RESOURCE_FILE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+/** Resource files: documents and archives only; never html, svg or scripts, which a browser would run from the public URL. */
+export const RESOURCE_FILE_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/zip',
+  'application/x-zip-compressed',
+] as const
+/** Course images, video thumbnails and channel banners. */
+export const ImageUploadUrlInput = z.object({
+  fileName: uploadFileName,
+  contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  fileSize: z.number().int().min(1).max(IMAGE_UPLOAD_MAX_BYTES),
+}).strict()
+export const ResourceFileUploadUrlInput = z.object({
+  fileName: uploadFileName,
+  contentType: z.enum(RESOURCE_FILE_TYPES),
+  fileSize: z.number().int().min(1).max(RESOURCE_FILE_UPLOAD_MAX_BYTES),
+}).strict()

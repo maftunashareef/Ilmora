@@ -8,7 +8,7 @@ import type { Course, Group, L, Level, Student, Teacher } from '../../types'
 import { finalizePublish, PublishFields, type PublishDraft, type PublishMode } from '../PublishFields'
 import { DiscountFields } from './DiscountFields'
 import { Badge, Button, cx, Field, Icon, Input, LField, Notice, Segmented, Select, Textarea } from '../ui'
-import { UploadField } from '../UploadField'
+import { StorageUploadField } from '../StorageUploadField'
 
 const DAYS = [0, 1, 2, 3, 4, 5, 6]
 
@@ -181,7 +181,8 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
       {(mode === 'admin' || isCenter) && !online && <DiscountFields value={disc} onChange={setDisc} price={draft.price} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t('common.imageUrl')} hint={t('common.optional')}><Input placeholder="https://…" value={draft.imageUrl ?? ''} onChange={(e) => set('imageUrl', e.target.value || undefined)} /></Field>
-        <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('common.image')} · {t('common.upload')}</div><UploadField kind="image" accept="image/*" value={draft.imageUpload} onChange={(v) => set('imageUpload', v)} /></div>
+        {/* The uploaded cover lands in object storage and its address becomes the image URL (no browser-only preview is ever saved). */}
+        <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('common.image')} · {t('common.upload')}</div><StorageUploadField kind="course-image" url={draft.imageUrl} onUploaded={(r) => setDraft((d) => ({ ...d, imageUrl: r.publicUrl, imageUpload: undefined }))} onRemove={() => setDraft((d) => ({ ...d, imageUrl: undefined, imageUpload: undefined }))} /></div>
       </div>
       {!online && (
         <div>

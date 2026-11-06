@@ -27,7 +27,7 @@ export function AdminCourses() {
   const counts = formatCounts(filterCourses(courses, { q }, searchable))
   const list = filterCourses(courses, { q, format }, searchable)
   // Publish / unpublish from the list; the full editor (visibility, audience) stays in the form.
-  const togglePublished = (c: Course) => { upsertCourse({ ...c, status: c.status === 'published' ? 'draft' : 'published' }); notify(t('common.saved')) }
+  const togglePublished = (c: Course) => { void upsertCourse({ ...c, status: c.status === 'published' ? 'draft' : 'published' }).then(() => notify(t('common.saved'))).catch(() => undefined) }
   const setTpl = (patch: Partial<CourseCardTemplate>) => patchSite((s) => ({ ...s, courseCard: { ...s.courseCard, ...patch } }))
 
   return (
@@ -77,14 +77,14 @@ export function AdminCourses() {
               <div className="flex gap-1">
                 {c.status !== 'archived' && <Button size="sm" variant="ghost" onClick={() => togglePublished(c)}>{c.status === 'published' ? t('common.unpublish') : t('common.publish')}</Button>}
                 <Button size="sm" variant="secondary" onClick={() => setEditing(c)}><Icon name="edit" className="h-3.5 w-3.5" />{t('common.edit')}</Button>
-                <Button size="sm" variant="danger" aria-label={t('common.delete')} onClick={() => { if (confirm(t('common.confirmDelete'))) { removeCourse(c.id); notify(t('common.saved')) } }}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="danger" aria-label={t('common.delete')} onClick={() => { if (confirm(t('common.confirmDelete'))) { void removeCourse(c.id).then(() => notify(t('common.saved'))).catch(() => undefined) } }}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
               </div>
             </li>
           )
         })}
       </ul>
       <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('admin.courses.newCourse') : editing ? tr(editing.title) : ''}>
-        {editing && <CourseForm mode="admin" initial={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSave={(c) => { upsertCourse(c); setEditing(null); notify(t('common.saved')) }} />}
+        {editing && <CourseForm mode="admin" initial={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSave={(c) => { void upsertCourse(c).then(() => { setEditing(null); notify(t('common.saved')) }).catch(() => undefined) }} />}
       </Modal>
     </div>
   )

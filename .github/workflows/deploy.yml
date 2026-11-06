@@ -20,6 +20,10 @@ on:
         description: "Only copy infra files to the servers (first install), no build and no rollout"
         type: boolean
         default: false
+      allow_red_ci:
+        description: "Emergency only: release even though CI has not passed on this commit"
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -40,7 +44,15 @@ jobs:
   authorize:
     name: Check who is releasing
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
     steps:
+      - name: Main branch only
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Releases run from main only (this one was started from ${{ github.ref }})"
+          exit 1
       - name: Release actors only
         env:
           ACTOR: ${{ github.actor }}
@@ -52,6 +64,15 @@ jobs:
             *",$actor,"*) echo "release started by $ACTOR" ;;
             *) echo "::error::$ACTOR is not listed in the RELEASE_ACTORS repository variable"; exit 1 ;;
           esac
+      - name: CI must have passed on this commit
+        if: ${{ !inputs.files_only && !inputs.allow_red_ci }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "Typecheck, lint, test, build")] | sort_by(.completed_at) | last | .conclusion // "pending"')
+          echo "CI on ${GITHUB_SHA}: ${state}"
+          [ "$state" = "success" ] || { echo "::error::The CI workflow has not passed on this commit (${state}): wait for it or re-run it first"; exit 1; }
 
   build-push:
     name: Build and push images

@@ -6,6 +6,7 @@ import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
+import { fetchStorageStatus, storableUrl } from '../services/uploads'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
 import type {
@@ -99,6 +100,11 @@ interface Actions {
   loadGroupDetail: (groupId: string) => Promise<void>
   loadMyAttendance: () => Promise<void>
   loadStudentOverview: () => Promise<void>
+  /** Visitors and students: the videos, playlists and resources they may open (teachers and admins get theirs with the workspace). */
+  loadPublicContent: () => Promise<void>
+  /** Whether files can be uploaded in this environment; asked once, null until known. */
+  ensureStorageStatus: () => Promise<boolean | null>
+  setStorageConfigured: (configured: boolean) => void
 
   // Site config (Super Admin)
   patchSite: (fn: (site: SiteConfig) => SiteConfig) => void
@@ -131,7 +137,8 @@ interface Actions {
   upsertCategory: (c: Category) => Promise<void>
   removeCategory: (id: string) => boolean
   upsertStudent: (s: Student) => Promise<void>
-  removeStudent: (id: string) => Promise<void>
+  /** Block the account (same request as the Accounts screen); `roles` are the account's current ones and are kept as they are. */
+  deactivateStudent: (id: string, roles: string[]) => Promise<void>
   setPublishable: (kind: ContentKind, id: string, patch: Partial<Publishable>) => Promise<void>
 
   // Student
@@ -147,7 +154,8 @@ interface Actions {
   addPresetToCart: (studentId: string, preset: Preset, opts?: { chosenOptional?: string[]; directionId?: string }) => PresetCartResult
   /** Removes a package's courses from the cart (those another package in the cart also includes stay). */
   removeCartBundle: (studentId: string, presetId: string) => void
-  checkout:(provider: PaymentProviderId) => Promise<{ url: string; paymentId: string }>
+  /** Opens a payment; a free selection is activated at once and comes back with url null. */
+  checkout: (provider: PaymentProviderId) => Promise<{ url: string | null; paymentId: string; free?: boolean }>
   renewSubscription: (studentId: string, provider?: PaymentProviderId) => Promise<void>
   cancelSubscription: (studentId: string) => Promise<void>
   toggleSavedCourse: (studentId: string, courseId: string) => void
@@ -192,6 +200,10 @@ export interface StoreState extends DemoState, Actions {
   /** The signed-in account's latest notifications and how many are unread. */
   notifications: AppNotification[]
   unreadCount: number
+  /** Public content lists: not asked yet, in flight, or in the store (reloaded on every sign-in/out). */
+  contentStatus: 'idle' | 'loading' | 'ready'
+  /** The API has object storage for uploads (null = not asked yet). */
+  storageConfigured: boolean | null
 }
 
 const upsertIn = <T extends { id: string }>(list: T[], item: T): T[] => (list.some((x) => x.id === item.id) ? list.map((x) => (x.id === item.id ? item : x)) : [...list, item])
@@ -241,7 +253,7 @@ const courseInput = (c: Course, withDiscount = false) => ({
   title: c.title, categoryId: c.categoryId, subjectId: c.subjectId ?? null, summary: c.summary, description: c.description, curriculum: c.curriculum,
   // An online course belongs to the platform center/profile, which the server sets; only offline courses send them.
   ...(isOnlineCourse(c) ? {} : { centerId: c.centerId, teacherId: c.teacherId }),
-  level: c.level, durationMonths: c.durationMonths, price: Math.round(c.price), coverSeed: c.coverSeed, imageUrl: c.imageUrl ?? null, meyosGrant: !!c.meyosGrant, ...publishableInput(c),
+  level: c.level, durationMonths: c.durationMonths, price: Math.round(c.price), coverSeed: c.coverSeed, imageUrl: storableUrl(c.imageUrl), meyosGrant: !!c.meyosGrant, ...publishableInput(c),
   // Only the Super Admin sends the discount; the server refuses it from anyone else.
   ...(withDiscount ? { discount: c.discount ?? null } : {}),
   // The learning format always travels; the link, provider and certificate only for online courses (the server accepts them from the Super Admin only).
@@ -252,18 +264,25 @@ const courseInput = (c: Course, withDiscount = false) => ({
 const groupInput = (g: Course['groups'][number]) => ({ name: g.name, days: g.days, start: g.start, end: g.end, room: g.room, capacity: g.capacity })
 const videoInput = (v: Video) => ({
   teacherId: v.teacherId, courseId: v.courseId ?? null, title: v.title, description: v.description,
-  source: v.source.kind === 'link' ? { kind: 'link' as const, url: v.source.url } : { kind: 'upload' as const, key: v.source.file.name, url: v.source.file.previewUrl },
-  durationSec: v.durationSec, thumbnailUrl: v.thumbnailUrl ?? null, coverSeed: v.coverSeed, ...publishableInput(v),
+  // A browser-only `blob:` preview is never saved: without storage an uploaded file has no address at all.
+  source: v.source.kind === 'link' ? { kind: 'link' as const, url: v.source.url } : { kind: 'upload' as const, key: v.source.file.name, url: storableUrl(v.source.file.previewUrl) ?? undefined },
+  durationSec: v.durationSec, thumbnailUrl: storableUrl(v.thumbnailUrl), coverSeed: v.coverSeed, ...publishableInput(v),
 })
 const playlistInput = (p: Playlist) => ({ teacherId: p.teacherId, title: p.title, description: p.description, videoIds: p.videoIds, coverSeed: p.coverSeed, ...publishableInput(p) })
 const resourceInput = (r: Resource) => ({
   teacherId: r.teacherId, courseId: r.courseId ?? null, title: r.title, description: r.description, kind: r.kind,
-  file: r.file ? { name: r.file.name, size: r.file.size, mime: r.file.mime } : null, url: r.url ?? null, pages: r.pages ?? null, ...publishableInput(r),
+  file: r.file ? { name: r.file.name, size: r.file.size, mime: r.file.mime } : null, url: storableUrl(r.url), pages: r.pages ?? null, ...publishableInput(r),
 })
-const teacherInput = (t: Teacher) => ({
-  name: t.name, title: t.title, bio: t.bio, expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, bannerTone: t.bannerTone,
-  avatarUrl: t.avatarUrl ?? t.avatarUpload?.previewUrl ?? null,
-  bannerUrl: t.bannerUrl ?? t.bannerUpload?.previewUrl ?? null, tagline: t.tagline, channelActive: t.channelActive, featured: t.featured ?? null,
+/** A localized text as the API requires it, every language present (a self-registered profile starts with `{}`). */
+const fullL = (l: { uz?: string; ru?: string; en?: string } | null | undefined) => ({ uz: l?.uz ?? '', ru: l?.ru ?? '', en: l?.en ?? '' })
+/**
+ * Profile payload for PATCH /manage/profile and the Super Admin routes. Only the Super Admin sends `centerId`, and only
+ * a real one: a teacher's own save leaves it out (the API refuses null, and a self-registered teacher has no center yet).
+ * Browser-only `blob:` previews never travel; uploaded images arrive here already as their storage address.
+ */
+const teacherInput = (t: Teacher, admin: boolean) => ({
+  name: t.name, title: fullL(t.title), bio: fullL(t.bio), expertise: t.expertise, ...(admin && t.centerId ? { centerId: t.centerId } : {}), avatarSeed: t.avatarSeed, bannerTone: t.bannerTone,
+  avatarUrl: storableUrl(t.avatarUrl), bannerUrl: storableUrl(t.bannerUrl), tagline: fullL(t.tagline), channelActive: t.channelActive, featured: t.featured ?? null,
 })
 
 /** API video → web shape (uploads carry a key + optional URL). */
@@ -346,6 +365,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
 
   // The workspace request in flight, shared by every RequireRole that asks while it loads.
   let workspaceLoading: Promise<unknown> | null = null
+  // The public content request in flight, keyed by who is asking; the answer for a newer account always wins over an older one.
+  let contentLoading: { key: string; promise: Promise<void> } | null = null
+  let contentSeq = 0
+  let storageStatusLoading: Promise<boolean | null> | null = null
   return createStore<StoreState>()((set, get) => {
     const toast = (err: unknown) => get().notify(apiErrorText(err, get().lang), 'warn')
     const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
@@ -357,23 +380,31 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       }
     }
     let saveSiteTimer: ReturnType<typeof setTimeout> | undefined
+    // Site saves run one after another: a save fired while the previous one is still in flight would resend the same
+    // version and the server would answer version_conflict to the admin's own edit.
+    let siteSaveChain: Promise<void> = Promise.resolve()
     const packageTimers = new Map<string, ReturnType<typeof setTimeout>>()
     const packagePatches = new Map<string, Partial<Package>>()
     const scheduleSiteSave = () => {
       if (get().role !== 'admin') return
       clearTimeout(saveSiteTimer)
-      saveSiteTimer = setTimeout(async () => {
-        const { packages: _p, presets, universities, ...rest } = get().site
-        void _p
-        // Presets and universities are sent only once the full lists have been loaded; without them the server keeps the
-        // stored ones, so a save made before the load can never delete packages that are still drafts.
-        const data = get().presetsLoaded ? { ...rest, presets, universities } : rest
-        try {
-          const r = await api<{ version: number }>('/admin/site', { method: 'PUT', body: { data, version: get().siteVersion } })
-          set({ siteVersion: r.version })
-        } catch (err) {
-          toast(err)
-        }
+      saveSiteTimer = setTimeout(() => {
+        siteSaveChain = siteSaveChain.then(async () => {
+          // The version in the server-rendered page comes from a cached public fetch and can be a minute old; the admin
+          // workspace load (loadAdminPresets) brings the current one, so wait for it before the first save.
+          if (workspaceLoading) await workspaceLoading.catch(() => undefined)
+          const { packages: _p, presets, universities, ...rest } = get().site
+          void _p
+          // Presets and universities are sent only once the full lists have been loaded; without them the server keeps the
+          // stored ones, so a save made before the load can never delete packages that are still drafts.
+          const data = get().presetsLoaded ? { ...rest, presets, universities } : rest
+          try {
+            const r = await api<{ version: number }>('/admin/site', { method: 'PUT', body: { data, version: get().siteVersion } })
+            set({ siteVersion: r.version })
+          } catch (err) {
+            toast(err)
+          }
+        })
       }, 800)
     }
     const patchMe = (fn: (st: Student) => Student) => set((s) => ({ students: s.students.map((st) => (st.id === s.currentStudentId ? fn(st) : st)) }))
@@ -463,6 +494,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       sessionQr: {},
       notifications: [],
       unreadCount: 0,
+      contentStatus: 'idle',
+      storageConfigured: null,
 
       // ── UI ──
       setLang: (lang) => set({ lang }),
@@ -597,8 +630,9 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       loadAdminPresets: async () => {
         // The public site response leaves out presets that are not enabled; the admin editor needs the full list.
-        const full = await api<{ presets?: Preset[]; universities?: University[] }>('/admin/site')
-        set((s) => ({ site: { ...s.site, presets: full.presets ?? [], universities: full.universities ?? [] }, presetsLoaded: true }))
+        const full = await api<{ presets?: Preset[]; universities?: University[]; version?: number }>('/admin/site')
+        // The current version replaces the cached one the page was rendered with; a save that finished meanwhile is never undone (versions only grow).
+        set((s) => ({ site: { ...s.site, presets: full.presets ?? [], universities: full.universities ?? [] }, presetsLoaded: true, siteVersion: Math.max(s.siteVersion, full.version ?? 0) }))
       },
       loadStudentOverview: async () => {
         const o = await api<ApiOverview>('/student/subscription')
@@ -675,6 +709,33 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           attendance: [...s.attendance.filter((a) => a.studentId !== me), ...d.records],
         }))
       },
+      loadPublicContent: async () => {
+        // One request per account; when the account changes while a request is still running, only the newest answer lands.
+        const key = `${get().role}:${get().auth.user?.id ?? ''}`
+        if (contentLoading?.key === key) return contentLoading.promise
+        const seq = ++contentSeq
+        set({ contentStatus: 'loading' })
+        const promise = api<{ videos: Video[]; playlists: Playlist[]; resources: Resource[] }>('/public/content')
+          .then((c) => {
+            if (seq !== contentSeq) return
+            set({ videos: c.videos.map((v) => mapVideo(v as Video & { source: { kind: string; url?: string; key?: string } })), playlists: c.playlists, resources: c.resources, contentStatus: 'ready' })
+          })
+          .catch(() => { if (seq === contentSeq) set({ contentStatus: 'ready' }) })
+          .finally(() => { if (contentLoading?.promise === promise) contentLoading = null })
+        contentLoading = { key, promise }
+        return promise
+      },
+      ensureStorageStatus: async () => {
+        const known = get().storageConfigured
+        if (known !== null) return known
+        // When the question itself fails the control stays usable: the upload attempt reports what is wrong.
+        storageStatusLoading ??= fetchStorageStatus()
+          .catch(() => true)
+          .then((configured) => { set({ storageConfigured: configured }); return configured })
+          .finally(() => { storageStatusLoading = null })
+        return storageStatusLoading
+      },
+      setStorageConfigured: (configured) => set({ storageConfigured: configured }),
 
       // ── site ──
       patchSite: (fn) => { set((s) => ({ site: fn(s.site) })); scheduleSiteSave() },
@@ -753,7 +814,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           ? (exists ? `/admin/teachers/${t.id}` : '/admin/teachers')
           : `/manage/profile`
         const method = isAdmin && !exists ? 'POST' : 'PATCH'
-        const saved = await guard(() => api<Teacher>(path, { method, body: teacherInput(t) }))
+        const saved = await guard(() => api<Teacher>(path, { method, body: teacherInput(t, isAdmin) }))
         set((s) => ({
           teachers: upsertIn(s.teachers.filter((x) => x.id !== t.id), saved),
           auth: s.auth.user && s.currentTeacherId === t.id
@@ -795,8 +856,11 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         await guard(() => api(`/admin/users/${st.id}`, { method: 'PATCH', body: { displayName: st.profile.displayName, district: st.profile.district, preferredLang: st.profile.preferredLang } }))
         set((s) => ({ students: s.students.map((x) => (x.id === st.id ? { ...x, profile: st.profile } : x)) }))
       },
-      removeStudent: async (id) => {
-        await guard(() => api(`/admin/users/${id}/roles`, { method: 'PUT', body: { roles: ['STUDENT'], isActive: false, reason: 'Deactivated from the admin people screen' } }))
+      deactivateStudent: async (id, roles) => {
+        // The roles endpoint replaces the whole list, so the current roles are sent back unchanged (a teacher or center
+        // administrator who is also a student keeps those roles); Super Admin is owner-only and never sent.
+        const kept = roles.filter((r) => r !== 'PLATFORM_ADMIN')
+        await guard(() => api(`/admin/users/${id}/roles`, { method: 'PUT', body: { roles: kept.length ? kept : ['STUDENT'], isActive: false, reason: 'Blocked from the admin people screen' } }))
         set((s) => ({ students: s.students.filter((x) => x.id !== id) }))
       },
       setPublishable: async (kind, id, patch) => {
@@ -896,11 +960,17 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         const me = get().students.find((x) => x.id === get().currentStudentId)
         if (!me) throw new Error('Not signed in')
         await guard(() => api('/student/subscription/draft', { method: 'PUT', body: { packageId: me.builder.packageId, groupIds: me.builder.groupIds, meyosGrant: me.builder.meyosGrant } }))
-        return guard(() => api<{ url: string; paymentId: string }>('/student/subscription/checkout', { method: 'POST', body: { provider, lang: get().lang } }))
+        // A free selection is activated at once and comes back without a provider page (url null).
+        return guard(() => api<{ url: string | null; paymentId: string; free?: boolean }>('/student/subscription/checkout', { method: 'POST', body: { provider, lang: get().lang } }))
       },
       renewSubscription: async (_studentId, provider = 'PAYME') => {
-        const r = await guard(() => api<{ url: string }>('/student/subscription/renew', { method: 'POST', body: { provider, lang: get().lang } }))
-        if (typeof window !== 'undefined') window.location.href = r.url
+        // Nothing is renewed here: the API opens a payment and the browser goes to the provider's page to pay for it.
+        const r = await guard(() => api<{ url: string | null; paymentId: string }>('/student/subscription/renew', { method: 'POST', body: { provider, lang: get().lang } }))
+        if (typeof window === 'undefined') return
+        // A free renewal needs no provider page: the return page shows it paid and reloads the cabinet.
+        if (!r.url) { window.location.href = `/${get().lang}/payments/${r.paymentId}/return`; return }
+        get().notify(translate(get().lang, 'checkout.redirecting'))
+        window.location.href = r.url
       },
       cancelSubscription: async () => {
         await guard(() => api('/student/subscription/cancel', { method: 'POST', body: {} }))
@@ -1002,6 +1072,20 @@ export function StoreProvider({ initial, children }: { initial: InitialData; chi
   useEffect(() => {
     store.getState().hydrateGuest()
     void store.getState().bootstrap()
+  }, [store])
+  useEffect(() => {
+    // Visitors, students and centers read the public content lists (teachers and admins get theirs with the workspace);
+    // every sign-in or sign-out reloads them, so what one account could see never lingers in the next one's lists.
+    let seen = ''
+    const sync = (s: StoreState) => {
+      if (s.auth.status !== 'anonymous' && s.auth.status !== 'authenticated') return
+      const key = `${s.role}:${s.auth.user?.id ?? ''}`
+      if (key === seen) return
+      seen = key
+      if (s.role !== 'teacher' && s.role !== 'admin') void s.loadPublicContent()
+    }
+    sync(store.getState())
+    return store.subscribe(sync)
   }, [store])
   return createElement(StoreContext.Provider, { value: store }, children)
 }

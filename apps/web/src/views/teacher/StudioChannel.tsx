@@ -15,7 +15,7 @@ import {
   Select,
   Toggle,
 } from '../../components/ui'
-import { UploadField } from '../../components/UploadField'
+import { StorageUploadField } from '../../components/StorageUploadField'
 import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
 import { useCurrentTeacher } from '../../store/selectors'
@@ -56,7 +56,7 @@ export function StudioChannel() {
       return
     }
     if (draft.avatarUrl && !/^https?:\/\//i.test(draft.avatarUrl)) {
-      setSaveError('URL https:// bilan boshlanishi kerak')
+      setSaveError(t('studio.channel.urlHttps'))
       return
     }
     setSaving(true)
@@ -149,17 +149,12 @@ export function StudioChannel() {
                   className="ring-2 ring-forest/20"
                 />
                 <div className="min-w-0 flex-1 space-y-2">
-                  <UploadField
-                    kind="image"
-                    accept="image/jpeg,image/png,image/webp"
-                    value={draft.avatarUpload}
-                    onChange={(v) =>
-                      setDraft({
-                        ...draft,
-                        avatarUpload: v,
-                        avatarUrl: v?.previewUrl ? undefined : draft.avatarUrl,
-                      })
-                    }
+                  {/* The photo goes to object storage; its address is what the profile saves (never a browser-only preview). */}
+                  <StorageUploadField
+                    kind="avatar"
+                    url={draft.avatarUrl}
+                    onUploaded={(r) => setDraft({ ...draft, avatarUrl: r.publicUrl, avatarUpload: undefined })}
+                    onRemove={() => setDraft({ ...draft, avatarUrl: null, avatarUpload: undefined })}
                   />
                 </div>
               </div>
@@ -167,7 +162,7 @@ export function StudioChannel() {
               {/* Direct image URL input */}
               <Field
                 label={t('studio.channel.avatarUrl')}
-                hint="HTTPS havola (masalan, CDN yoki shaxsiy rasm manzili)"
+                hint={t('studio.channel.avatarUrlHint')}
               >
                 <div className="flex gap-2">
                   <Input
@@ -191,10 +186,6 @@ export function StudioChannel() {
                   )}
                 </div>
               </Field>
-
-              <Notice tone="info" className="text-[12px] leading-relaxed">
-                {t('studio.channel.storageUnavailable')}
-              </Notice>
             </div>
 
             {/* Banner Section */}
@@ -202,17 +193,11 @@ export function StudioChannel() {
               <div className="text-xs font-medium text-charcoal/80">
                 {t('studio.channel.banner')}
               </div>
-              <UploadField
-                kind="image"
-                accept="image/jpeg,image/png,image/webp"
-                value={draft.bannerUpload}
-                onChange={(v) =>
-                  setDraft({
-                    ...draft,
-                    bannerUpload: v,
-                    bannerUrl: v?.previewUrl ? undefined : draft.bannerUrl,
-                  })
-                }
+              <StorageUploadField
+                kind="banner"
+                url={draft.bannerUrl}
+                onUploaded={(r) => setDraft({ ...draft, bannerUrl: r.publicUrl, bannerUpload: undefined })}
+                onRemove={() => setDraft({ ...draft, bannerUrl: null, bannerUpload: undefined })}
               />
               <Field label={t('studio.channel.tone')}>
                 <div className="flex items-center gap-3">
@@ -269,7 +254,7 @@ export function StudioChannel() {
             {/* Expertise / Specializations */}
             <Field
               label={t('studio.channel.expertise')}
-              hint="Masalan: Matematika, Fizika, IELTS, SAT, Web dasturlash"
+              hint={t('studio.channel.expertiseHint')}
             >
               <Input
                 value={draft.expertise.join(', ')}
@@ -295,12 +280,12 @@ export function StudioChannel() {
               </p>
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {[
-                  'Özbek tili',
-                  'Rus tili',
-                  'Ingliz tili',
-                  '5+ yil tajriba',
-                  'IELTS 8.0+',
-                  'Oliy toifa',
+                  t('studio.channel.tag.uz'),
+                  t('studio.channel.tag.ru'),
+                  t('studio.channel.tag.en'),
+                  t('studio.channel.tag.experience'),
+                  t('studio.channel.tag.ielts'),
+                  t('studio.channel.tag.topCategory'),
                 ].map((tag) => {
                   const hasTag = draft.expertise.includes(tag)
                   return (
@@ -422,10 +407,10 @@ export function StudioChannel() {
                 className="ring-4 ring-paper transition-transform duration-300 hover:scale-105"
               />
               <div className="mt-3 font-display text-2xl text-charcoal">
-                {draft.name || 'Ism kiritilmagan'}
+                {draft.name || t('studio.channel.noName')}
               </div>
               <div className="text-xs font-medium text-charcoal/60">
-                {tr(draft.title) || 'Lavozim'} · {center?.name ?? 'ILMORA'}
+                {tr(draft.title) || t('studio.channel.noTitle')} · {center?.name ?? 'ILMORA'}
               </div>
               {draft.tagline && (
                 <p className="mt-3 font-display text-lg italic text-charcoal/70">

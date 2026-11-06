@@ -3,7 +3,7 @@ import { dueReminder, finalPriceMinor, MAX_CART_COURSES, nextLifecycleStep, over
 import { AppError } from '../../common/errors'
 import { addMonthsUtc } from '../../common/time'
 import { ENV, type Env } from '../../config/env'
-import type { PaymentProvider } from '../../generated/prisma/enums'
+import type { PaymentProvider, SubscriptionStatus } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
@@ -17,6 +17,9 @@ type Db = TransactionClient | PrismaService['client']
 type PackageAccess = { accessKind: 'PERIOD' | 'LESSONS'; periodDays: number | null; lessonCount: number | null } | null
 
 const DAY_MS = 86_400_000
+
+/** A cancelled or expired subscription never comes back: a late settlement is refused (and refunded) rather than applied. */
+export const isClosed = (status: SubscriptionStatus): boolean => status === 'CANCELLED' || status === 'EXPIRED'
 
 /**
  * Subscription lifecycle: draft (builder) → checkout (seat holds + pending payment) → active (on settlement) →
@@ -149,12 +152,17 @@ export class SubscriptionService {
       throw AppError.invalid('incomplete', 'Select at least one course to continue')
     }
     const open = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['PENDING_PAYMENT', 'ACTIVE', 'PAST_DUE'] } } })
-    if (open) throw AppError.conflict('subscription_exists', 'You already have an active or pending subscription')
+    if (open && open.status !== 'PENDING_PAYMENT') throw AppError.conflict('subscription_exists', 'You already have an active or pending subscription')
 
     const now = new Date()
     const periodEnd = this.periodEnd(now, pkg)
     const expiresAt = new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000)
     const result = await this.prisma.tx(async (tx) => {
+      // An earlier checkout whose payment failed, was cancelled by the bank or was simply abandoned gives way to this one
+      // instead of blocking the student until its hold expires; a settlement that landed meanwhile wins.
+      if (open && !(await this.cancelIn(tx, open.id, ['PENDING_PAYMENT'], 'checkout_retry', now))) {
+        throw AppError.conflict('subscription_exists', 'You already have an active or pending subscription')
+      }
       // Row locks serialize concurrent checkouts touching the same groups.
       await tx.$queryRawUnsafe(`SELECT id FROM "Group" WHERE id = ANY($1::text[]) AND "tenantId" = $2 FOR UPDATE`, draft.draftGroupIds, tenantId)
       const groups = await this.validateSelection(tenantId, draft.packageId, draft.draftGroupIds, studentId, tx)
@@ -169,13 +177,22 @@ export class SubscriptionService {
       await tx.enrollment.createMany({
         data: groups.map((g) => ({ tenantId, subscriptionId: sub.id, studentId, groupId: g.id, courseId: g.courseId, status: 'PENDING' as const })),
       })
-      const payment = await tx.payment.create({
-        data: { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd, amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId },
-      })
-      await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider, amountMinor: amountMinor.toString(), listAmountMinor: listMinor.toString(), discountMinor: (listMinor - amountMinor).toString(), groupIds: draft.draftGroupIds, packageId: draft.packageId, kind: sub.kind, lessonsTotal: sub.lessonsTotal } })
+      const payment = await this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd, amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId })
+      await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider: payment.provider, free: payment.state === 'PAID', amountMinor: amountMinor.toString(), listAmountMinor: listMinor.toString(), discountMinor: (listMinor - amountMinor).toString(), groupIds: draft.draftGroupIds, packageId: draft.packageId, kind: sub.kind, lessonsTotal: sub.lessonsTotal } })
       return { subscription: sub, payment }
     })
     return result
+  }
+
+  /**
+   * The payment a provider adapter will settle. Nothing to collect (free courses) means nothing a provider could ever
+   * confirm, so the payment is recorded as paid without a provider and the subscription starts on the spot.
+   */
+  private async createPayment(tx: TransactionClient, now: Date, data: { tenantId: string; studentId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor: bigint; currency: string; provider: PaymentProvider; expiresAt: Date; createdById: string }) {
+    const free = data.amountMinor === 0n
+    const payment = await tx.payment.create({ data: free ? { ...data, provider: null, state: 'PAID', paidAt: now } : data })
+    if (free) await this.applySettlement(tx, payment)
+    return payment
   }
 
   /** Renewal payment for the next period of an active or blocked subscription (no new seat holds). */
@@ -187,9 +204,9 @@ export class SubscriptionService {
     const now = new Date()
     // An early renewal continues after the current period; a renewal of a blocked subscription starts a fresh period now.
     const periodStart = sub.status === 'ACTIVE' && sub.kind === 'PERIOD' && sub.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now
-    const payment = await this.prisma.client.payment.create({
-      data: { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor: sub.amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId },
-    })
+    const payment = await this.prisma.tx((tx) =>
+      this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor: sub.amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId }),
+    )
     return { subscription: sub, payment }
   }
 
@@ -201,6 +218,9 @@ export class SubscriptionService {
   async applySettlement(tx: TransactionClient, payment: { id: string; tenantId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor?: bigint }) {
     const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId }, include: { package: true, student: { select: { displayName: true } } } })
     if (!sub) throw new Error(`Subscription ${payment.subscriptionId} missing for payment ${payment.id}`)
+    // Money arriving for a subscription that was cancelled or expired meanwhile must be refused (and refunded), never
+    // re-enroll the student behind their back. The adapters check this before debiting; the settle path confirms it here.
+    if (isClosed(sub.status)) throw AppError.conflict('subscription_closed', `Subscription is ${sub.status.toLowerCase()}`)
     const now = new Date()
     const joining = await tx.enrollment.findMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, include: { group: { select: { id: true, name: true, course: { select: { id: true, title: true, teacherId: true, centerId: true } } } } } })
     await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, data: { status: 'ACTIVE', enrolledAt: now } })
@@ -352,13 +372,24 @@ export class SubscriptionService {
   async cancel(tenantId: string, studentId: string, reason?: string) {
     const sub = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'] } } })
     if (!sub) throw AppError.notFound('Subscription')
-    await this.prisma.tx(async (tx) => {
-      await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: new Date() } })
-      await tx.payment.updateMany({ where: { subscriptionId: sub.id, state: 'PENDING' }, data: { state: 'CANCELLED', cancelledAt: new Date() } })
-      await tx.subscription.update({ where: { id: sub.id }, data: { status: 'CANCELLED', cancelledAt: new Date() } })
-      await this.audit.record({ tx, action: 'subscription.cancel', entityType: 'Subscription', entityId: sub.id, reason })
-    })
+    const cancelled = await this.prisma.tx((tx) => this.cancelIn(tx, sub.id, ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'], reason))
+    if (!cancelled) throw AppError.notFound('Subscription')
     return { ok: true }
+  }
+
+  /**
+   * Cancels a subscription inside the caller's transaction: seats released, pending payments voided. Returns false
+   * (nothing written) when the row is no longer in one of `from`, e.g. a settlement activated it meanwhile. The payment
+   * rows are locked first, in the order settle() takes them, so the two serialize instead of deadlocking.
+   */
+  private async cancelIn(tx: TransactionClient, subscriptionId: string, from: SubscriptionStatus[], reason?: string, now = new Date()): Promise<boolean> {
+    await tx.$queryRawUnsafe(`SELECT id FROM "Payment" WHERE "subscriptionId" = $1 FOR UPDATE`, subscriptionId)
+    const cancelled = await tx.subscription.updateMany({ where: { id: subscriptionId, status: { in: from } }, data: { status: 'CANCELLED', cancelledAt: now } })
+    if (cancelled.count !== 1) return false
+    await tx.enrollment.updateMany({ where: { subscriptionId, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: now } })
+    await tx.payment.updateMany({ where: { subscriptionId, state: 'PENDING' }, data: { state: 'CANCELLED', cancelledAt: now } })
+    await this.audit.record({ tx, action: 'subscription.cancel', entityType: 'Subscription', entityId: subscriptionId, reason })
+    return true
   }
 
   private async grantCourseIds(tenantId: string, groupIds: string[]): Promise<string[]> {

@@ -186,11 +186,12 @@ export class AccountService {
   async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult> {
     const raw = input.login.trim()
     const login = raw.normalize('NFKC').toLowerCase()
-    const key = `login:fail:${tenantId}:${login}`
+    // The failure counter follows the account, not the spelling: every way of writing a phone shares one lock.
+    const phoneParsed = normalizeUzPhone(raw)
+    const key = `login:fail:${tenantId}:${phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
     await this.assertNotLocked(key)
 
     // Lookup user by normalized phone number or by unique login username
-    const phoneParsed = normalizeUzPhone(raw)
     let user: UserRow | null = null
     if (phoneParsed.ok) {
       user = await this.prisma.client.user.findFirst({ where: { tenantId, phoneE164: phoneParsed.e164 }, include: USER_INCLUDE })
@@ -280,9 +281,6 @@ export class AccountService {
           preferredLang,
           roles,
           lastLoginAt: now,
-          offerAcceptedAt: now,
-          offerVersion: OFFER_VERSION,
-          consentAt: now,
         },
         include: USER_INCLUDE,
       })

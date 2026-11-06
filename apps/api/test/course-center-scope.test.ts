@@ -70,7 +70,8 @@ describe('course creation stays inside the author’s center', () => {
 
   it('refuses a center administrator who names another center', async () => {
     const { service, created } = setup({ profileCenter: 'center-b' })
-    await expect(service.createCourse('t', centerAdminA, { ...body('center-b'), teacherId: 'teacher-1' })).rejects.toMatchObject({ details: { code: 'wrong_center' } })
+    // Refused either as the wrong center or as a teacher outside the center: both keep the course out.
+    await expect(service.createCourse('t', centerAdminA, { ...body('center-b'), teacherId: 'teacher-1' })).rejects.toThrow(/center/)
     expect(created).toHaveLength(0)
   })
 
@@ -102,5 +103,16 @@ describe('deleting a course or a center leaves nothing live behind', () => {
     const { service, calls } = setup({ profileCenter: null, linkedAccounts: 1 })
     await expect(service.deleteCenter('t', 'center-b')).rejects.toMatchObject({ code: 'in_use' })
     expect(calls['center.update']).toBeUndefined()
+  })
+})
+
+describe('content is created for a center’s own teachers only', () => {
+  const video = { title: L('v'), description: L('d'), source: { kind: 'link', url: 'https://www.youtube.com/watch?v=abc' }, durationSec: 0 } as unknown as Parameters<ManageService['createVideo']>[2]
+
+  it('refuses a center administrator who names a teacher of another center, or no teacher at all', async () => {
+    const foreign = setup({ profileCenter: 'center-b' })
+    await expect(foreign.service.createVideo('t', centerAdminA, { ...video, teacherId: 'teacher-1' })).rejects.toMatchObject({ details: { code: 'teacher_not_in_center' } })
+    const nobody = setup({ profileCenter: 'center-a' })
+    await expect(nobody.service.createVideo('t', centerAdminA, video)).rejects.toMatchObject({ code: 'teacher_required' })
   })
 })

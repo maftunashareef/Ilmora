@@ -8,22 +8,11 @@ import { isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../../lib/demoMode'
 import { Link, useLocale, useNavigate, useSearchParams } from '../../lib/router'
-import { useStore, type AuthUser } from '../../store/useStore'
+import { canOpen, homeFor } from '../../lib/workspaceHome'
+import { useStore } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
-type Role = AuthUser['roles'][number]
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
-
-/** Which workspace a path belongs to; paths outside the three workspaces are open to any signed-in account. */
-const workspaceOf = (path: string) => (path.startsWith('/admin') ? 'admin' : path.startsWith('/teacher') ? 'teacher' : path.startsWith('/center') ? 'center' : path.startsWith('/student') ? 'student' : null)
-const canOpen = (roles: Role[], path: string) => {
-  const w = workspaceOf(path)
-  if (!w || roles.includes('PLATFORM_ADMIN')) return true
-  // Finance admins may open the finance page of the admin workspace, nothing else in it.
-  if (w === 'admin') return roles.includes('FINANCE_ADMIN') && (path === '/admin/finance' || path.startsWith('/admin/finance/'))
-  return w === 'teacher' ? roles.includes('TEACHER') : w === 'center' ? roles.includes('CENTER_ADMIN') : w === 'student' ? roles.includes('STUDENT') : false
-}
-const homeFor = (roles: Role[]) => (roles.includes('PLATFORM_ADMIN') ? '/admin' : roles.includes('TEACHER') ? '/teacher' : roles.includes('CENTER_ADMIN') ? '/center' : roles.includes('FINANCE_ADMIN') ? '/admin/finance' : '/student')
 
 export function LoginPage() {
   const { t } = useT()
