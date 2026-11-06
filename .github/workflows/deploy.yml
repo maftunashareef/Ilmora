@@ -28,6 +28,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  actions: read # read CI run status to gate the release on a green build
 
 env:
   REGISTRY: ghcr.io
@@ -52,6 +53,34 @@ jobs:
             *",$actor,"*) echo "release started by $ACTOR" ;;
             *) echo "::error::$ACTOR is not listed in the RELEASE_ACTORS repository variable"; exit 1 ;;
           esac
+
+      - name: Release only from the default branch (main)
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::releases run only from main (this run is on $REF). Merge to main and release from there."
+            exit 1
+          fi
+          echo "releasing from $REF"
+
+      - name: Require a green CI run for this commit
+        if: ${{ !inputs.files_only }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The exact commit being released must have a successful "CI" run. ci.yml runs on every push to main, so a
+          # commit that reached main through a merge always has one. No green CI ⇒ refuse to roll out.
+          ok=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&status=completed" \
+                 --jq '[.workflow_runs[] | select(.conclusion=="success")] | length')
+          if [ "${ok:-0}" -ge 1 ]; then
+            echo "CI is green for $SHA"
+          else
+            echo "::error::no successful CI run for $SHA — wait for CI on main to pass before releasing"
+            exit 1
+          fi
 
   build-push:
     name: Build and push images
@@ -115,6 +144,10 @@ jobs:
     needs: [authorize, build-push]
     if: ${{ always() && needs.authorize.result == 'success' && (inputs.files_only || needs.build-push.result == 'success') }}
     runs-on: ubuntu-latest
+    # Protected environment: the root SSH key and host secrets live here, not as plain repo secrets, so the deploy step
+    # is gated by this environment's protection rules (required reviewers / allowed branches). Configure them in
+    # Settings → Environments → production, and move DEPLOY_SSH_KEY / DEPLOY_KNOWN_HOSTS / WEB_HOST / ADMIN_HOST into it.
+    environment: production
     timeout-minutes: 30
     env:
       FILES_ONLY: ${{ inputs.files_only }}
