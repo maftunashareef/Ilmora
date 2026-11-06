@@ -344,6 +344,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
     }
   }
 
+  // The workspace request in flight, shared by every RequireRole that asks while it loads.
+  let workspaceLoading: Promise<unknown> | null = null
   return createStore<StoreState>()((set, get) => {
     const toast = (err: unknown) => get().notify(apiErrorText(err, get().lang), 'warn')
     const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
@@ -573,9 +575,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         set({ sessions: [], attendance: [], myPayments: [], notifications: [], unreadCount: 0, cartBundles: [] })
       },
       ensureWorkspace: async () => {
-        // The workspace (own courses, videos, people) exists for teachers and admins only.
+        // The workspace (own courses, videos, people) exists for teachers and admins only; concurrent callers share one load.
         if (get().workspaceLoaded || get().role === 'visitor' || get().role === 'student') return
-        await guard(refreshWorkspace)
+        workspaceLoading ??= guard(refreshWorkspace).finally(() => { workspaceLoading = null })
+        await workspaceLoading
       },
       hydrateGuest: () => {
         set({ cartBundles: readBundles() })

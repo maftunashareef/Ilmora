@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { z } from 'zod'
-import { isSafeExternalUrl, normalizeUzPhone, somToTiyin, validateCapacity } from '@ilmora/shared'
+import { isSafeExternalUrl, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import { ENV, type Env, s3Configured } from '../../config/env'
@@ -201,15 +201,18 @@ export class ManageService {
           const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
           if (!teacher || teacher.centerId !== centerId) throw AppError.invalid('teacher_not_in_center', 'Choose a teacher of your center')
         } else {
-          // A teacher may only create a course at the center their own profile belongs to — never in a foreign center.
+          // A teacher creates courses for the center their profile belongs to; a profile without a center cannot host offline courses yet.
           const teacher = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id: teacherId }, select: { centerId: true } })
           if (!teacher) throw AppError.notFound('TeacherProfile')
-          if (!teacher.centerId || teacher.centerId !== centerId) throw AppError.forbidden('You can only create courses for your own center', { code: 'wrong_center' })
+          if (!teacher.centerId) throw AppError.forbidden('Your profile is not linked to a center yet', { code: 'teacher_center_required' })
+          if (teacher.centerId !== centerId) throw AppError.forbidden('You can only create courses for your own center', { code: 'wrong_center' })
         }
       }
     }
     const perms = await this.permsFor(tenantId, actor, centerId)
     if (!this.isAdmin(actor) && !perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
+    // Without the price switch the author's figure is ignored, like updateCourse refuses it: the course starts at the default price.
+    const price = online || this.isAdmin(actor) || perms.editPrices ? input.price : DEFAULT_COURSE_PRICE_SOM
     if (input.discount && !this.canSetDiscount(actor, centerId)) throw AppError.forbidden('Only the Super Admin or the course center can set discounts')
     await this.assertCanPublish(tenantId, actor, centerId, input.status)
     const slug = await this.uniqueSlug('course', tenantId, slugify(input.title.en || input.title.uz))
@@ -218,7 +221,7 @@ export class ManageService {
         ...formatData,
         tenantId, slug, title: input.title as Json, categoryId: input.categoryId, centerId, teacherId, subjectId: input.subjectId ?? null,
         summary: input.summary as Json, description: input.description as Json, curriculum: input.curriculum as Json, level: up(input.level), durationMonths: input.durationMonths,
-        priceMinor: somToTiyin(input.price), ...this.discountColumns(input.discount ?? null), coverSeed: input.coverSeed ?? Math.floor(Math.random() * 1000), imageUrl: input.imageUrl ?? null, meyosGrant: this.isAdmin(actor) ? (input.meyosGrant ?? false) : false,
+        priceMinor: somToTiyin(price), ...this.discountColumns(input.discount ?? null), coverSeed: input.coverSeed ?? Math.floor(Math.random() * 1000), imageUrl: input.imageUrl ?? null, meyosGrant: this.isAdmin(actor) ? (input.meyosGrant ?? false) : false,
         createdById: actor.id, ...this.publishableData(input, actor, !!perms.publishDirectly),
       } as Prisma.CourseUncheckedCreateInput,
       include: { groups: true },
@@ -324,8 +327,14 @@ export class ManageService {
     this.assertTeacherScope(actor, course)
     const enrolled = await this.prisma.client.enrollment.count({ where: { tenantId, groupId: { in: course.groups.map((g) => g.id) }, status: { in: ['PENDING', 'ACTIVE'] } } })
     if (enrolled > 0) throw AppError.conflict('has_enrollments', 'Archive the course instead: students are enrolled in its groups')
+    const groupIds = course.groups.map((g) => g.id)
     await this.prisma.client.course.update({ where: { id }, data: { deletedAt: new Date(), status: 'ARCHIVED' } })
-    await this.audit.record({ action: 'course.delete', entityType: 'Course', entityId: id })
+    if (groupIds.length > 0) {
+      // The groups go with the course, and lessons that were still to come are cancelled so nobody can open attendance on them.
+      await this.prisma.client.group.updateMany({ where: { id: { in: groupIds } }, data: { deletedAt: new Date() } })
+      await this.prisma.client.lessonSession.updateMany({ where: { groupId: { in: groupIds }, status: 'SCHEDULED' }, data: { status: 'CANCELLED', attendanceOpen: false, attendanceTokenHash: null } })
+    }
+    await this.audit.record({ action: 'course.delete', entityType: 'Course', entityId: id, after: { groups: groupIds.length } })
     return { ok: true }
   }
 
@@ -348,9 +357,12 @@ export class ManageService {
     if (!group) throw AppError.notFound('Group')
     this.assertTeacherScope(actor, group.course)
     const perms = await this.permsFor(tenantId, actor, group.course.centerId)
+    const sameDays = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((d) => b.includes(d))
+    // Only a real change counts: a form that resends the same schedule must not regenerate the lessons or notify anyone.
+    const scheduleChanged = (input.days !== undefined && !sameDays(input.days, group.days)) || (input.start !== undefined && input.start !== group.startTime) || (input.end !== undefined && input.end !== group.endTime)
     if (!this.isAdmin(actor)) {
       if (!perms.manageGroups) throw AppError.forbidden('Group management is disabled for teachers')
-      if ((input.days || input.start || input.end) && !perms.editSchedules) throw AppError.forbidden('Schedule changes require Super Admin')
+      if (scheduleChanged && !perms.editSchedules) throw AppError.forbidden('Schedule changes require Super Admin')
     }
     const enrolled = await this.prisma.client.enrollment.count({ where: { tenantId, groupId: id, status: { in: ['PENDING', 'ACTIVE'] } } })
     if (input.capacity !== undefined) {
@@ -362,7 +374,6 @@ export class ManageService {
     const effectiveEnd = input.end ?? group.endTime
     if ((input.start !== undefined || input.end !== undefined) && effectiveStart >= effectiveEnd)
       throw AppError.invalid('invalid_schedule', 'start time must be before end time', { start: effectiveStart, end: effectiveEnd })
-    const scheduleChanged = !!(input.days || input.start || input.end)
     const updated = await this.prisma.client.group.update({
       where: { id },
       data: { name: input.name, days: input.days, startTime: input.start, endTime: input.end, room: input.room, capacity: input.capacity },
@@ -568,8 +579,12 @@ export class ManageService {
     return this.prisma.client.center.create({ data: { tenantId, slug: await this.uniqueSlug('center', tenantId, slugify(input.name)), ...data } })
   }
   async deleteCenter(tenantId: string, id: string) {
-    const used = await this.prisma.client.course.count({ where: { tenantId, centerId: id } }) + (await this.prisma.client.teacherProfile.count({ where: { tenantId, centerId: id } }))
-    if (used > 0) throw AppError.conflict('in_use', 'Center has courses or teachers')
+    const [courses, teachers, accounts] = await Promise.all([
+      this.prisma.client.course.count({ where: { tenantId, centerId: id } }),
+      this.prisma.client.teacherProfile.count({ where: { tenantId, centerId: id } }),
+      this.prisma.client.user.count({ where: { tenantId, centerId: id } }),
+    ])
+    if (courses + teachers + accounts > 0) throw AppError.conflict('in_use', 'Center has courses, teachers or linked accounts')
     await this.prisma.client.center.update({ where: { id }, data: { deletedAt: new Date() } })
     return { ok: true }
   }

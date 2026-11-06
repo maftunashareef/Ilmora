@@ -123,3 +123,9 @@ export const tashkentLocalToIso = (local: string): string => new Date(Date.parse
 
 /** ISO instant -> `datetime-local` text (YYYY-MM-DDTHH:mm) in Asia/Tashkent time. */
 export const isoToTashkentLocal = (iso: string): string => new Date(Date.parse(iso) + TASHKENT_OFFSET_MS).toISOString().slice(0, 16)
+
+/**
+ * Monthly price a course starts with when its author may not set prices (teachers in a workspace where the center or the
+ * Super Admin keeps that right). The course form shows the same figure, locked; the API stores it whatever the form sends.
+ */
+export const DEFAULT_COURSE_PRICE_SOM = 500_000

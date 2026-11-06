@@ -1276,6 +1276,8 @@ export const dict = {
   'apiError.duplicateRecord': d('Bunday qiymatga ega yozuv allaqaçon mavjud.', 'Запись с таким значением уже существует.', 'A record with the same value already exists.'),
   'apiError.versionConflict': d('Sozlamalarni boşqa administrator özgartirgan. Sahifani yangilab, qayta urinib köring.', 'Настройки изменил другой администратор. Обновите страницу и повторите.', 'Someone else changed the settings. Reload the page and try again.'),
   'apiError.invalidCode': d('Kod notöğri, muddati ötgan yoki allaqaçon işlatilgan.', 'Код неверный, просрочен или уже использован.', 'The code is invalid, expired or already used.'),
+  'apiError.teacherCenterRequired': d('Profilingiz hali öquv markaziga boğlanmagan. Markaz sizni öqituvçi sifatida qöşgandan keyin kurs yarata olasiz.', 'Ваш профиль ещё не привязан к учебному центру. Создавать курсы можно после того, как центр добавит вас как преподавателя.', 'Your profile is not linked to a center yet. You can create courses once a center adds you as its teacher.'),
+  'apiError.wrongCenter': d('Kursni faqat öz markazingiz uçun yaratiş mumkin.', 'Курс можно создать только для своего центра.', 'A course can only be created for your own center.'),
   'apiError.centerName': d('Markaz nomini kiriting (kamida 2 ta belgi).', 'Введите название центра (не менее 2 символов).', 'Enter the center name (at least 2 characters).'),
   'apiError.incomplete': d('Davom etiş uçun paket va kurslarni tanlang.', 'Чтобы продолжить, выберите пакет и курсы.', 'Choose a package and courses to continue.'),
   'apiError.limit': d('Tanlangan kurslar soni ruxsat etilgan çegaradan oşib ketdi.', 'Выбрано больше курсов, чем разрешено.', 'More courses are selected than allowed.'),

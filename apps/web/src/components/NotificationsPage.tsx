@@ -8,7 +8,7 @@ import { notificationHref, type DashboardRole } from '../lib/notificationLinks'
 import { useNavigate } from '../lib/router'
 import { useStore } from '../store/useStore'
 import { notificationText } from './NotificationBell'
-import { Button, cx, EmptyState, Icon, PageTitle, Tabs } from './ui'
+import { Button, cx, EmptyState, Icon, Notice, PageTitle, Tabs } from './ui'
 
 const PAGE = 50
 
@@ -25,13 +25,14 @@ export function NotificationsPage({ role, eyebrow }: { role: DashboardRole; eyeb
   const [more, setMore] = useState(false)
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
   const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
 
   const load = useCallback(async (before?: string) => {
     const r = await api<{ items: AppNotification[]; unreadCount: number }>(`/notifications?limit=${PAGE}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
     setItems((prev) => (before && prev ? [...prev, ...r.items] : r.items))
     setMore(r.items.length === PAGE)
   }, [])
-  useEffect(() => { void load().catch(() => setItems([])) }, [load])
+  useEffect(() => { void load().catch(() => { setFailed(true); setItems([]) }) }, [load])
 
   const open = (n: AppNotification) => {
     if (!n.readAt) {
@@ -55,6 +56,7 @@ export function NotificationsPage({ role, eyebrow }: { role: DashboardRole; eyeb
     <div>
       <PageTitle eyebrow={eyebrow} title={t('notif.title')} subtitle={t('notif.pageHint')} action={unread > 0 ? <Button variant="secondary" disabled={busy} onClick={() => void markAll()}><Icon name="check" className="h-4 w-4" />{t('notif.markAll')}</Button> : undefined} />
       <Tabs tabs={[{ id: 'all', label: t('notif.filter.all') }, { id: 'unread', label: t('notif.filter.unread'), count: unread }]} value={filter} onChange={setFilter} className="mb-4" />
+      {failed && <Notice tone="warn" className="mb-4">{t('center.loadError')}</Notice>}
       {items === null ? (
         <div className="py-10 text-center text-sm text-charcoal/55">{t('common.loading')}</div>
       ) : shown.length === 0 ? (

@@ -350,7 +350,7 @@ export class AccountService {
     const root = base.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'teacher'
     for (let n = 0; n < 50; n++) {
       const slug = n === 0 ? root : `${root}-${n + 1}`
-      if (!(await tx.teacherProfile.findFirst({ where: { tenantId, slug }, select: { id: true } }))) return slug
+      if (!(await tx.teacherProfile.findFirst({ where: { tenantId, slug }, select: { id: true }, includeDeleted: true } as never))) return slug
     }
     return `${root}-${Date.now().toString(36)}`
   }

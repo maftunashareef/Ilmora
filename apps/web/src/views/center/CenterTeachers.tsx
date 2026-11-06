@@ -59,7 +59,7 @@ export function CenterTeachers() {
                 <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{te.name}</span>{te.account ? <Badge tone="sage">{t('center.teacherLinked')}{te.account.login ? ` · @${te.account.login}` : ''}</Badge> : <Badge tone="muted">{t('center.teacherUnlinked')}</Badge>}</div>
                 <div className="truncate text-xs text-charcoal/55">{tr(te.title)}{te.expertise.length ? ` · ${te.expertise.join(', ')}` : ''} · {countLabel(lang, te.courses, NOUNS.course)}</div>
               </div>
-              <Button size="sm" variant="secondary" onClick={() => setDraft({ id: te.id, name: te.name, title: te.title, bio: te.bio, expertise: te.expertise.join(', '), login: '' })}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
+              <Button size="sm" variant="secondary" onClick={() => setDraft({ id: te.id, name: te.name, title: te.title, bio: te.bio, expertise: te.expertise.join(', '), login: '' })} aria-label={t('common.edit')}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
               <Button size="sm" variant="danger" disabled={busy || te.courses > 0} title={te.courses > 0 ? t('center.err.inUse') : t('center.removeTeacher')} onClick={() => void remove(te.id)}><Icon name="x" className="h-3.5 w-3.5" /></Button>
             </li>
           ))}

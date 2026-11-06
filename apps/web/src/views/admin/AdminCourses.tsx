@@ -1,16 +1,16 @@
 import { filterCourses, formatCounts, isOnlineCourse, isSafeExternalUrl, type FormatFilter } from '@ilmora/shared'
 import { useState } from 'react'
-import { Link } from '@/lib/router'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { CourseForm } from '../../components/course/CourseForm'
 import { FormatBadge, PriceNow, ScheduleChips } from '../../components/course/CourseCard'
 import { ArtCover, Badge, Button, Card, Eyebrow, Icon, Input, Modal, PageTitle, Segmented, Toggle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
+import { siteHref } from '../../lib/siteUrl'
 import { useStore } from '../../store/useStore'
 import type { Course, CourseCardTemplate } from '../../types'
 
 export function AdminCourses() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const courses = useStore((s) => s.courses)
   const teachers = useStore((s) => s.teachers)
   const centers = useStore((s) => s.centers)
@@ -59,7 +59,7 @@ export function AdminCourses() {
             <li key={c.id} className="card flex flex-wrap items-center gap-4 p-3">
               <ArtCover seed={c.coverSeed} tone={center?.tone} imageUrl={c.imageUpload?.previewUrl || c.imageUrl} className="h-14 w-20 shrink-0 rounded-control" />
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2"><FormatBadge course={c} /><Link to={`/courses/${c.id}`} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</Link><StatusBadge status={c.status} /><VisibilityBadge visibility={c.visibility} />{c.featured && <Badge tone="champagne"><Icon name="star" className="h-3 w-3" /></Badge>}{c.reviewRequested && <Badge tone="warn">{t('admin.reviewQueue')}</Badge>}</div>
+                <div className="flex flex-wrap items-center gap-2"><FormatBadge course={c} /><a href={siteHref(lang, `/courses/${c.id}`)} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</a><StatusBadge status={c.status} /><VisibilityBadge visibility={c.visibility} />{c.featured && <Badge tone="champagne"><Icon name="star" className="h-3 w-3" /></Badge>}{c.reviewRequested && <Badge tone="warn">{t('admin.reviewQueue')}</Badge>}</div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-charcoal/55">
                   <span>{tr(categories.find((x) => x.id === c.categoryId)?.name)}</span>
                   {isOnlineCourse(c) ? (

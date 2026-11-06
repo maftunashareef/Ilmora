@@ -39,6 +39,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   // center inquiry form
   invalid_contact_name: 'auth.err.name',
   invalid_center_name: 'apiError.centerName',
+  teacher_center_required: 'apiError.teacherCenterRequired',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

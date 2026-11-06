@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from '@/lib/router'
 import { Avatar, Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, Modal, Notice, PageTitle, Select, Toggle } from '../../components/ui'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { countLabel, NOUNS } from '@ilmora/shared'
 import { api } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { emptyL, useT } from '../../i18n/useT'
+import { siteHref } from '../../lib/siteUrl'
 import { uid, useStore } from '../../store/useStore'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import type { Lang, Student, Teacher } from '../../types'
@@ -21,7 +21,6 @@ const toStudent = (u: StudentRow): Student => ({
 
 export function AdminPeople() {
   const { t, tr, lang } = useT()
-  const nav = useNavigate()
   const s = useStore()
   const [teacher, setTeacher] = useState<Teacher | null>(null)
   const [student, setStudent] = useState<Student | null>(null)
@@ -44,7 +43,7 @@ export function AdminPeople() {
 
   const newTeacher = (): Teacher => ({ id: uid('t'), name: '', title: emptyL(), bio: emptyL(), expertise: [], centerId: s.centers[0]?.id ?? '', avatarSeed: Math.floor(Math.random() * 60), bannerTone: '#163C35', tagline: emptyL(), channelActive: false })
   // Impersonation is not available in production; admins open the public channel instead.
-  const actAs = (role: 'teacher' | 'student', id: string) => { if (role === 'teacher') nav(`/teachers/${id}`) }
+  const actAs = (role: 'teacher' | 'student', id: string) => { if (role === 'teacher') window.location.assign(siteHref(lang, `/teachers/${id}`)) }
 
   return (
     <div>
@@ -61,8 +60,8 @@ export function AdminPeople() {
                   <div className="truncate text-xs text-charcoal/55">{tr(te.title)} · {s.centers.find((c) => c.id === te.centerId)?.name} · {countLabel(lang, s.courses.filter((c) => c.teacherId === te.id).length, NOUNS.course)}</div>
                 </div>
                 <Button size="sm" variant="ghost" onClick={() => actAs('teacher', te.id)} title={t('admin.people.actAs')}><Icon name="eye" className="h-3.5 w-3.5" /></Button>
-                <Button size="sm" variant="secondary" onClick={() => setTeacher(te)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
-                <Button size="sm" variant="danger" disabled={s.courses.some((c) => c.teacherId === te.id)} title={s.courses.some((c) => c.teacherId === te.id) ? t('admin.centers.inUse') : undefined} onClick={() => { if (confirm(t('common.confirmDelete'))) s.removeTeacher(te.id) }}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="secondary" onClick={() => setTeacher(te)} aria-label={t('common.edit')}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="danger" disabled={s.courses.some((c) => c.teacherId === te.id)} title={s.courses.some((c) => c.teacherId === te.id) ? t('admin.centers.inUse') : undefined} onClick={() => { if (confirm(t('common.confirmDelete'))) s.removeTeacher(te.id) }} aria-label={t('common.delete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
               </li>
             ))}
           </ul>
@@ -83,8 +82,8 @@ export function AdminPeople() {
                     <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{st.profile.displayName}</span>{st.subscription.status === 'active' && pkg ? <Badge tone="forest">{tr(pkg.name)}</Badge> : <Badge tone="muted">{t('admin.people.noSub')}</Badge>}</div>
                     <div className="truncate text-xs text-charcoal/55">{st.profile.district} · {st.subscription.groupIds.map((gid) => groups.find((g) => g.id === gid)?.course).filter(Boolean).join(', ') || '—'}</div>
                   </div>
-                  <Button size="sm" variant="secondary" onClick={() => setStudent(st)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
-                  <Button size="sm" variant="danger" onClick={async () => { if (confirm(t('common.confirmDelete'))) { await s.removeStudent(st.id); void loadStudents(page) } }}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="secondary" onClick={() => setStudent(st)} aria-label={t('common.edit')}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="danger" onClick={async () => { if (confirm(t('common.confirmDelete'))) { await s.removeStudent(st.id); void loadStudents(page) } }} aria-label={t('common.delete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
                 </li>
               )
             })}

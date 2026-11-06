@@ -70,13 +70,19 @@ export class SessionsProcessor extends WorkerHost implements OnModuleInit {
   }
 
   /** Exclusive execution per (queue, key): the JobRun unique constraint decides who runs. */
-  private async runOnce(queue: string, key: string, fn: (date: string) => Promise<unknown>) {
+  private async runOnce(queue: string, key: string, fn: (date: string) => Promise<unknown>): Promise<unknown> {
     const date = key.replace(/^daily-/, '')
     let run
     try {
       run = await TenantContext.system(() => this.prisma.client.jobRun.create({ data: { queue, jobKey: key, workerId: this.workerId } }))
     } catch (err) {
       if ((err as { code?: string }).code === 'P2002') {
+        // A run that failed earlier today is taken over; one that succeeded or is still running is left alone.
+        const failed = await TenantContext.system(() => this.prisma.client.jobRun.findFirst({ where: { queue, jobKey: key, status: 'FAILED' }, select: { id: true } }))
+        if (failed) {
+          await TenantContext.system(() => this.prisma.client.jobRun.delete({ where: { id: failed.id } }))
+          return this.runOnce(queue, key, fn)
+        }
         this.logger.log(`Skipping ${queue}/${key}: already executed by another worker`)
         return { skipped: true }
       }

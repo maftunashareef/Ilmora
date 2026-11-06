@@ -30,7 +30,7 @@ export class SessionsService {
     const rows = dates.map((date: string) => {
       const startsAt = zonedTimeToUtc(date, group.startTime, group.timezone)
       const endsAt = zonedTimeToUtc(date, group.endTime, group.timezone)
-      return { tenantId: group.tenantId, groupId: group.id, courseId: group.courseId, date: isoToDateColumn(date), startsAt, endsAt, status: endsAt < now ? ('COMPLETED' as const) : ('SCHEDULED' as const), generatedBy }
+      return { tenantId: group.tenantId, groupId: group.id, courseId: group.courseId, date: isoToDateColumn(date), startsAt, endsAt, status: endsAt < now ? ('COMPLETED' as const) : ('SCHEDULED' as const), absenceMarkedAt: endsAt < now ? now : null, generatedBy }
     })
     const res = await db.lessonSession.createMany({ data: rows, skipDuplicates: true })
     return res.count

@@ -12,7 +12,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 
 export interface DraftInput { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
 
-type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; meyosGrant: boolean; status: string } }
+type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; center: { status: string }; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; meyosGrant: boolean; status: string } }
 type Db = TransactionClient | PrismaService['client']
 type PackageAccess = { accessKind: 'PERIOD' | 'LESSONS'; periodDays: number | null; lessonCount: number | null } | null
 
@@ -101,9 +101,10 @@ export class SubscriptionService {
       if (!pkg.enabled) throw AppError.invalid('disabled', 'This package is not available')
     }
     if (groupIds.length === 0) return []
-    const groups = (await db.group.findMany({ where: { tenantId, id: { in: groupIds }, deletedAt: null }, include: { course: { select: { id: true, priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, meyosGrant: true, status: true } } } })) as GroupRow[]
+    const groups = (await db.group.findMany({ where: { tenantId, id: { in: groupIds }, deletedAt: null }, include: { course: { select: { id: true, center: { select: { status: true } }, priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, meyosGrant: true, status: true } } } })) as GroupRow[]
     if (groups.length !== groupIds.length) throw AppError.notFound('Group')
     if (groups.some((g) => g.course.status !== 'PUBLISHED')) throw AppError.invalid('disabled', 'One of the courses is not open for enrollment')
+    if (groups.some((g) => g.course.center.status !== 'ACTIVE')) throw AppError.invalid('disabled', 'One of the courses belongs to a center that is not approved')
     const courses = new Set(groups.map((g) => g.courseId))
     if (courses.size !== groups.length) throw AppError.invalid('duplicate', 'A course can be selected only once')
     const max = pkg?.maxCourses ?? MAX_CART_COURSES

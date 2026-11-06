@@ -32,7 +32,7 @@ export function notificationHref(n: Pick<AppNotification, 'type' | 'params'>, ro
       if (role === 'student') return '/student/attendance'
       if (role === 'teacher') return teacherGroup
       if (role === 'center') return centerDay
-      return centerId ? `/admin/centers/${centerId}?tab=attendance` : '/admin/centers'
+      return centerId ? `/admin/centers/${centerId}?tab=attendance${date ? `&date=${date}` : ''}` : '/admin/centers'
     case 'schedule':
       if (role === 'student') return '/student/timetable'
       if (role === 'teacher') return teacherGroup
@@ -45,7 +45,7 @@ export function notificationHref(n: Pick<AppNotification, 'type' | 'params'>, ro
       return '/admin/people'
     case 'subscription':
     case 'payment':
-      return role === 'student' ? '/student/subscription' : '/admin/finance'
+      return role === 'student' ? '/student/subscription' : role === 'admin' ? '/admin/finance' : notificationsPath(role)
     default:
       return notificationsPath(role)
   }

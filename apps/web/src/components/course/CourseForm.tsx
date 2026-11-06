@@ -84,7 +84,7 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
   const owner = teachers.find((x) => x.id === ownerId)
 
   const [draft, setDraft] = useState<Course>(() => initial ?? {
-    id: uid('c'), title: emptyL(), summary: emptyL(), description: emptyL(), curriculum: [], categoryId: categories[0]?.id ?? '', centerId: center?.id ?? owner?.centerId ?? offlineCenters[0]?.id ?? '', teacherId: ownerId ?? '',
+    id: uid('c'), title: emptyL(), summary: emptyL(), description: emptyL(), curriculum: [], categoryId: categories[0]?.id ?? '', centerId: center?.id ?? owner?.centerId ?? (mode === 'teacher' ? '' : offlineCenters[0]?.id ?? ''), teacherId: ownerId ?? '',
     level: 'beginner', durationMonths: 3, price: 500000, coverSeed: Math.floor(Math.random() * 60), groups: [],
     status: 'draft', visibility: 'public', audience: { studentIds: [], groupIds: [] }, featured: false, updatedAt: new Date().toISOString(),
   })
@@ -137,6 +137,7 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
   return (
     <div className="space-y-6">
       {lockText && <Notice tone="warn"><Icon name="lock" className="mr-1 inline h-3.5 w-3.5" />{t('studio.lockedByAdmin')}: {t('perm.teacher.editCourses')}</Notice>}
+      {isTeacher && !online && !draft.centerId && <Notice tone="warn">{t('apiError.teacherCenterRequired')}</Notice>}
       {mode === 'admin' && (
         <div>
           <div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('format.label')}</div>

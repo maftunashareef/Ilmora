@@ -158,6 +158,11 @@ export class AttendanceService {
           : { cancelledAt: null, cancelledById: null }),
       },
     })
+    if (next === 'CANCELLED' && session.status !== 'CANCELLED') {
+      // Lessons used by check-ins on a lesson that is now cancelled go back to lesson-based subscriptions.
+      const counted = await this.prisma.client.attendanceRecord.findMany({ where: { sessionId: session.id, lessonCounted: true }, select: { id: true, studentId: true } })
+      if (counted.length) await this.prisma.tx(async (tx) => { for (const r of counted) await this.subscriptions.releaseLesson(tx, session.tenantId, r.studentId, r.id) })
+    }
     await this.audit.record({ action: 'session.status', entityType: 'LessonSession', entityId: session.id, before: { status: session.status }, after: { status: next }, reason })
     await this.events.publish(session.id, { type: 'session', session: SessionsService.toDto(updated) })
     if (session.status !== next && (next === 'CANCELLED' || session.status === 'CANCELLED')) {
@@ -169,6 +174,7 @@ export class AttendanceService {
   /** Teacher correction: creates or updates a record with a reason; the original check-in time is never overwritten. */
   async correct(sessionId: string, actor: RequestActor, input: { studentId: string; status: AttendanceStatus; reason: string }) {
     const session = await this.sessionForTeacher(sessionId, actor)
+    if (session.status === 'CANCELLED') throw AppError.invalid('session_cancelled', 'A cancelled lesson has no attendance')
     const enrolled = await this.prisma.client.enrollment.findFirst({ where: { groupId: session.groupId, studentId: input.studentId, status: { in: ['ACTIVE', 'COMPLETED'] } } })
     if (!enrolled) throw AppError.invalid('not_enrolled', 'This student is not enrolled in the group')
     const before = await this.prisma.client.attendanceRecord.findUnique({ where: { sessionId_studentId: { sessionId: session.id, studentId: input.studentId } } })
@@ -212,12 +218,12 @@ export class AttendanceService {
     // A student who is already recorded gets the same answer on every repeat scan, even after the
     // teacher's QR rotated; a new record still requires the session's current, unexpired token.
     const existing = await this.prisma.client.attendanceRecord.findUnique({ where: { sessionId_studentId: { sessionId: session.id, studentId } } })
-    if (existing) return { ok: true, alreadyRecorded: true, record: toRecord(existing), session: dto }
+    if (existing && existing.method !== 'AUTO') return { ok: true, alreadyRecorded: true, record: toRecord(existing), session: dto }
     if (!session.attendanceTokenHash || session.attendanceTokenHash !== sha256(input.token)) return { ok: false, reason: 'invalid-link', session: dto }
     if (session.attendanceTokenExpiresAt && session.attendanceTokenExpiresAt < new Date()) return { ok: false, reason: 'expired', session: dto }
     if (!session.attendanceOpen || session.status === 'CANCELLED') return { ok: false, reason: 'closed', session: dto }
     if ((await this.subscriptions.accessFor(studentId)).blocked) return { ok: false, reason: 'blocked', session: dto }
-    return this.recordPresence(session, studentId, 'QR', meta)
+    return existing ? this.promoteAutoAbsence(session, existing, studentId, 'QR', meta) : this.recordPresence(session, studentId, 'QR', meta)
   }
 
   // ───────── student side: the center's standing QR code ─────────
@@ -272,6 +278,8 @@ export class AttendanceService {
     if (!enrolled) return { ok: false, reason: 'not-enrolled', session: dto }
     const existing = await this.prisma.client.attendanceRecord.findUnique({ where: { sessionId_studentId: { sessionId: session.id, studentId } } })
     if (existing && existing.status === 'PRESENT') return { ok: true, alreadyRecorded: true, record: toRecord(existing), session: dto }
+    // A record written by staff (a correction, an excuse) is the teacher's word; only the worker's automatic absence yields to a scan.
+    if (existing && existing.method !== 'AUTO') return { ok: true, alreadyRecorded: true, record: toRecord(existing), session: dto }
     if ((await this.subscriptions.accessFor(studentId)).blocked) return { ok: false, reason: 'blocked', session: dto }
     if (session.status === 'CANCELLED') return { ok: false, reason: 'cancelled', session: dto }
     const w = checkInWindow({ startsAt: session.startsAt, beforeMin: center.checkInBeforeMin, afterMin: center.absenceAfterMin }, now)
@@ -280,19 +288,23 @@ export class AttendanceService {
     const loc = checkLocation(center, typeof input.lat === 'number' && typeof input.lng === 'number' ? { lat: input.lat, lng: input.lng, accuracyM: input.accuracyM } : null)
     if (loc.result === 'location-required' || loc.result === 'too-far') return { ok: false, reason: loc.result, session: dto, window, distanceM: loc.distanceM == null ? null : Math.round(loc.distanceM) }
     // An AUTO absence already written for this lesson (window closed, then reopened by a settings change) becomes a presence.
-    if (existing) {
-      const row = await this.prisma.tx(async (tx) => {
-        const updated = await tx.attendanceRecord.update({ where: { id: existing.id }, data: { status: 'PRESENT', method: 'CENTER_QR', checkedInAt: now, recordedById: studentId, correctedAt: null, correctedById: null, ip: meta.ip, userAgent: meta.userAgent, version: { increment: 1 } } })
-        await this.subscriptions.consumeLesson(tx, session.tenantId, studentId, updated.id)
-        return updated
-      })
-      await this.audit.record({ action: 'attendance.check_in', entityType: 'AttendanceRecord', entityId: row.id, before: { status: existing.status, method: existing.method }, after: { sessionId: session.id, method: 'CENTER_QR', distanceM: loc.distanceM } })
-      const out = toRecord(row)
-      await this.events.publish(session.id, { type: 'record', record: out })
-      await this.notifyCheckIn(session, studentId, out)
-      return { ok: true, alreadyRecorded: false, record: out, session: dto }
-    }
+    if (existing) return this.promoteAutoAbsence(session, existing, studentId, 'CENTER_QR', meta, { distanceM: loc.distanceM }, now)
     return this.recordPresence(session, studentId, 'CENTER_QR', meta, { distanceM: loc.distanceM })
+  }
+
+  /** The worker's automatic absence becomes a presence when the student scans after all; staff corrections never reach here. */
+  private async promoteAutoAbsence(session: SessionRow, existing: { id: string; status: string; method: string }, studentId: string, method: 'QR' | 'CENTER_QR', meta: { ip?: string; userAgent?: string }, extra: { distanceM?: number | null } = {}, now = new Date()) {
+    const dto = SessionsService.toDto(session)
+    const row = await this.prisma.tx(async (tx) => {
+      const updated = await tx.attendanceRecord.update({ where: { id: existing.id }, data: { status: 'PRESENT', method, checkedInAt: now, recordedById: studentId, correctedAt: null, correctedById: null, ip: meta.ip, userAgent: meta.userAgent, version: { increment: 1 } } })
+      await this.subscriptions.consumeLesson(tx, session.tenantId, studentId, updated.id)
+      return updated
+    })
+    await this.audit.record({ action: 'attendance.check_in', entityType: 'AttendanceRecord', entityId: row.id, before: { status: existing.status, method: existing.method }, after: { sessionId: session.id, method, distanceM: extra.distanceM ?? undefined } })
+    const out = toRecord(row)
+    await this.events.publish(session.id, { type: 'record', record: out })
+    await this.notifyCheckIn(session, studentId, out)
+    return { ok: true as const, alreadyRecorded: false, record: out, session: dto }
   }
 
   /** Creates the PRESENT record (idempotent under a race), uses a lesson for lesson-based subscriptions, publishes and notifies. */
@@ -321,8 +333,8 @@ export class AttendanceService {
   }
 
   /** What every lesson notification carries: enough to render the text and to open the lesson's group or day. */
-  private lessonParams(session: { id?: string; date: Date; startsAt: Date; course: { id: string; title: unknown }; group: { id?: string; name: string; timezone: string } }) {
-    return { courseTitle: session.course.title, courseId: session.course.id, groupName: session.group.name, groupId: session.group.id ?? null, sessionId: session.id ?? null, date: dateColumnToIso(session.date), start: localTime(session.startsAt, session.group.timezone) }
+  private lessonParams(session: { id?: string; date: Date; startsAt: Date; course: { id: string; title: unknown; centerId?: string }; group: { id?: string; name: string; timezone: string } }) {
+    return { courseTitle: session.course.title, courseId: session.course.id, centerId: session.course.centerId ?? null, groupName: session.group.name, groupId: session.group.id ?? null, sessionId: session.id ?? null, date: dateColumnToIso(session.date), start: localTime(session.startsAt, session.group.timezone) }
   }
 
   private async notifyCheckIn(session: { tenantId: string; course: { id: string; title: unknown; teacherId: string }; group: { name: string; timezone: string }; date: Date; startsAt: Date }, studentId: string, record: RecordDto) {
@@ -363,14 +375,19 @@ export class AttendanceService {
       ])
       const have = new Set(recorded.map((r) => r.studentId))
       const missing = roster.map((r) => r.studentId).filter((id) => !have.has(id))
-      const stamped = await this.prisma.client.lessonSession.updateMany({ where: { id: s.id, absenceMarkedAt: null }, data: { absenceMarkedAt: now } })
-      if (stamped.count !== 1) continue // another worker took this lesson
+      // The stamp and the records land together: a crash between them would leave a stamped lesson without its absences.
+      const res = await this.prisma.tx(async (tx) => {
+        const stamped = await tx.lessonSession.updateMany({ where: { id: s.id, absenceMarkedAt: null }, data: { absenceMarkedAt: now } })
+        if (stamped.count !== 1) return null // another worker took this lesson
+        if (missing.length === 0) return { count: 0 }
+        return tx.attendanceRecord.createMany({
+          data: missing.map((studentId) => ({ tenantId, sessionId: s.id, studentId, status: 'ABSENT' as const, method: 'AUTO' as const, checkedInAt: now, recordedById: null, reason: 'No check-in before the window closed' })),
+          skipDuplicates: true,
+        })
+      })
+      if (!res) continue
       sessions++
       if (missing.length === 0) continue
-      const res = await this.prisma.client.attendanceRecord.createMany({
-        data: missing.map((studentId) => ({ tenantId, sessionId: s.id, studentId, status: 'ABSENT' as const, method: 'AUTO' as const, checkedInAt: now, recordedById: null, reason: 'No check-in before the window closed' })),
-        skipDuplicates: true,
-      })
       absent += res.count
       const rows = await this.prisma.client.attendanceRecord.findMany({ where: { sessionId: s.id, studentId: { in: missing } } })
       for (const r of rows) await this.events.publish(s.id, { type: 'record', record: toRecord(r) })
@@ -409,7 +426,7 @@ export class AttendanceService {
     const clash = await this.prisma.client.lessonSession.findFirst({ where: { groupId, date: isoToDateColumn(input.date) }, select: { id: true, status: true } })
     if (clash) throw AppError.conflict('session_exists', 'The group already has a lesson on that date; move or restore it instead', { sessionId: clash.id, status: clash.status.toLowerCase() })
     const session = await this.prisma.client.lessonSession.create({
-      data: { tenantId: group.tenantId, groupId, courseId: group.courseId, date: isoToDateColumn(input.date), startsAt, endsAt, status: endsAt < new Date() ? 'COMPLETED' : 'SCHEDULED', isExtra: true, note: input.note?.trim() || null, generatedBy: `user:${actor.id}` },
+      data: { tenantId: group.tenantId, groupId, courseId: group.courseId, date: isoToDateColumn(input.date), startsAt, endsAt, status: endsAt < new Date() ? 'COMPLETED' : 'SCHEDULED', absenceMarkedAt: endsAt < new Date() ? new Date() : null, isExtra: true, note: input.note?.trim() || null, generatedBy: `user:${actor.id}` },
       include: SESSION_INCLUDE,
     })
     await this.audit.record({ action: 'session.extra', entityType: 'LessonSession', entityId: session.id, after: { date: input.date, start: input.start, end: input.end } })
@@ -435,14 +452,14 @@ export class AttendanceService {
     const before = { date: fromDate, start: localTime(session.startsAt, tz), end: localTime(session.endsAt, tz) }
     let result
     if (date === fromDate) {
-      result = await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { startsAt, endsAt, note, status: endsAt < new Date() ? 'COMPLETED' : 'SCHEDULED', attendanceOpen: false, attendanceTokenHash: null, attendanceTokenExpiresAt: null }, include: SESSION_INCLUDE })
+      result = await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { startsAt, endsAt, note, status: endsAt < new Date() ? 'COMPLETED' : 'SCHEDULED', absenceMarkedAt: endsAt < new Date() ? new Date() : null, attendanceOpen: false, attendanceTokenHash: null, attendanceTokenExpiresAt: null }, include: SESSION_INCLUDE })
     } else {
       const clash = await this.prisma.client.lessonSession.findFirst({ where: { groupId: session.groupId, date: isoToDateColumn(date) }, select: { id: true, status: true } })
       if (clash) throw AppError.conflict('session_exists', 'The group already has a lesson on that date', { sessionId: clash.id, status: clash.status.toLowerCase() })
       result = await this.prisma.tx(async (tx) => {
         await tx.lessonSession.update({ where: { id: session.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledById: actor.id, attendanceOpen: false, attendanceTokenHash: null, attendanceTokenExpiresAt: null, absenceMarkedAt: new Date(), note } })
         return tx.lessonSession.create({
-          data: { tenantId: session.tenantId, groupId: session.groupId, courseId: session.courseId, date: isoToDateColumn(date), startsAt, endsAt, status: endsAt < new Date() ? 'COMPLETED' : 'SCHEDULED', isExtra: true, rescheduledFromId: session.id, note, generatedBy: `user:${actor.id}` },
+          data: { tenantId: session.tenantId, groupId: session.groupId, courseId: session.courseId, date: isoToDateColumn(date), startsAt, endsAt, status: endsAt < new Date() ? 'COMPLETED' : 'SCHEDULED', absenceMarkedAt: endsAt < new Date() ? new Date() : null, isExtra: true, rescheduledFromId: session.id, note, generatedBy: `user:${actor.id}` },
           include: SESSION_INCLUDE,
         })
       })
@@ -450,7 +467,7 @@ export class AttendanceService {
     }
     await this.audit.record({ action: 'session.reschedule', entityType: 'LessonSession', entityId: session.id, before, after: { date, start, end, newSessionId: result.id !== session.id ? result.id : undefined } })
     await this.events.publish(result.id, { type: 'session', session: SessionsService.toDto(result) })
-    await this.notifyGroup(result, 'schedule.changed', { ...this.lessonParams(result), fromDate: before.date, fromStart: before.start, note }, `session-moved:${session.id}:${Date.now()}`)
+    await this.notifyGroup(result, 'schedule.changed', { ...this.lessonParams(result), fromDate: before.date, fromStart: before.start, note }, `session-moved:${result.id}:${result.startsAt.toISOString()}`)
     return { session: SessionsService.toDto(result), replacedSessionId: result.id !== session.id ? session.id : null }
   }
 

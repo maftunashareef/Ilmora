@@ -6,6 +6,7 @@ import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { Link, useParams, useSearchParams } from '../../lib/router'
+import { siteHref } from '../../lib/siteUrl'
 import { useStore } from '../../store/useStore'
 import { CenterAttendance } from '../center/CenterAttendance'
 import { CenterCourses } from '../center/CenterCourses'
@@ -17,8 +18,6 @@ import { CenterScopeContext, type CenterOverview as Overview, type CenterScope, 
 import { CenterAdminsModal } from './CenterAdmins'
 import { centerStatusTone } from './PendingCenters'
 
-/** The public site, for links that leave the admin surface (empty locally, where both share one origin). */
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? '').replace(/\/$/, '')
 const SECTIONS: CenterSection[] = ['overview', 'courses', 'teachers', 'attendance', 'students', 'settings']
 const LABEL = { overview: 'dash.overview', courses: 'center.courses', teachers: 'center.teachers', attendance: 'center.attendance', students: 'center.students', settings: 'center.settings' } as const
 
@@ -39,7 +38,7 @@ export function AdminCenterDetail() {
   const base = `/admin/centers/${id}`
   const scope = useMemo<CenterScope>(() => ({ base, admin: true, links: (s) => (s === 'overview' ? base : `${base}?tab=${s}`) }), [base])
   const load = useCallback(() => api<Overview>(`${base}/overview`).then((d) => setCenter(d.center)).catch(() => setFailed(true)), [base])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { setFailed(false); void load() }, [load])
 
   const setStatus = async (status: CenterStatus) => {
     let reason: string | undefined
@@ -71,7 +70,7 @@ export function AdminCenterDetail() {
               {center.status === 'PENDING' && <Button size="sm" variant="danger" disabled={busy} onClick={() => void setStatus('REJECTED')}><Icon name="x" className="h-3.5 w-3.5" />{t('admin.centers.reject')}</Button>}
               {center.status === 'ACTIVE' && <Button size="sm" variant="danger" disabled={busy} onClick={() => void setStatus('BLOCKED')}><Icon name="lock" className="h-3.5 w-3.5" />{t('admin.centers.block')}</Button>}
               <Button size="sm" variant="secondary" onClick={() => setAdminsOpen(true)}><Icon name="users" className="h-3.5 w-3.5" />{t('admin.centerAdmins')}</Button>
-              {center.status === 'ACTIVE' && <LinkButton size="sm" variant="secondary" external to={`${SITE_URL}/${lang}/centers/${center.slug}`}><Icon name="external" className="h-3.5 w-3.5" />{t('admin.centers.publicPage')}</LinkButton>}
+              {center.status === 'ACTIVE' && <LinkButton size="sm" variant="secondary" external to={siteHref(lang, `/centers/${center.slug}`)}><Icon name="external" className="h-3.5 w-3.5" />{t('admin.centers.publicPage')}</LinkButton>}
             </div>
           </>
         )}
@@ -81,7 +80,7 @@ export function AdminCenterDetail() {
       <Notice tone="info" className="mb-4 text-xs">{t('admin.centers.oversightHint')}</Notice>
       <Tabs tabs={SECTIONS.map((s) => ({ id: s, label: t(LABEL[s]) }))} value={tab} onChange={(v) => setParams({ tab: v }, { replace: true })} className="mb-6" />
       <CenterScopeContext.Provider value={scope}>
-        <div key={`${id}:${tab}`}>
+        <div key={`${id}:${tab}:${center?.status ?? ''}`}>
           {tab === 'overview' && <CenterOverview />}
           {tab === 'courses' && <CenterCourses />}
           {tab === 'teachers' && <CenterTeachers />}

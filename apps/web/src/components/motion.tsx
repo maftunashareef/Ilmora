@@ -44,23 +44,6 @@ export function SplitWords({ text, className, baseDelay = 0.1, step = 0.06 }: { 
   )
 }
 
-/** Infinite ticker; the list is duplicated for a seamless loop and pauses on hover/focus. */
-export function Marquee({ items, label, className }: { items: ReactNode[]; label?: string; className?: string }) {
-  const row = [...items, ...items]
-  return (
-    <div className={cx('marquee-wrap', className)} aria-label={label}>
-      <div className="marquee">
-        {row.map((it, i) => (
-          <span key={i} className="flex shrink-0 items-center gap-8 pr-8" aria-hidden={i >= items.length}>
-            {it}
-            <span className="h-1 w-1 rounded-full bg-champagne" />
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /** Horizontal scroll-snap track with previous/next controls. */
 export function SnapTrack({ children, prevLabel, nextLabel, className, autoAdvanceMs }: { children: ReactNode; prevLabel: string; nextLabel: string; className?: string; autoAdvanceMs?: number }) {
   const ref = useRef<HTMLDivElement>(null)
