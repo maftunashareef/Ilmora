@@ -41,6 +41,12 @@ export class CatalogController {
     return this.catalog.publicCatalog(tenantId)
   }
 
+  /** Videos, playlists and resources the caller may open (more for a signed-in student: the bearer token is optional here). */
+  @Get('content')
+  content(@CurrentTenantId() tenantId: string, @Req() req: AuthenticatedRequest) {
+    return this.catalog.publicContent(tenantId, req.actor)
+  }
+
   @Get('courses/:key')
   course(@CurrentTenantId() tenantId: string, @Param('key') key: string, @Req() req: AuthenticatedRequest) {
     return this.catalog.courseBySlugOrId(tenantId, key, req.actor)

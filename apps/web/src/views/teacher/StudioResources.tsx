@@ -3,7 +3,7 @@ import { Link, useSearchParams } from '@/lib/router'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { finalizePublish, PublishFields, type PublishDraft } from '../../components/PublishFields'
 import { Badge, Button, EmptyState, Field, Icon, Input, LField, Modal, Notice, PageTitle, Select } from '../../components/ui'
-import { UploadField } from '../../components/UploadField'
+import { StorageUploadField } from '../../components/StorageUploadField'
 import { emptyL, useT } from '../../i18n/useT'
 import { formatBytes } from '../../lib/format'
 import { useCurrentTeacher } from '../../store/selectors'
@@ -19,7 +19,7 @@ export function StudioResources() {
   const resources = useStore((s) => s.resources.filter((r) => r.teacherId === teacher?.id))
   const courses = useStore((s) => s.courses.filter((c) => c.teacherId === teacher?.id))
   const perms = useStore((s) => s.site.permissions.teacher)
-  const { upsertResource, removeResource, notify } = useStore()
+  const { upsertResource, removeResource, notify, storageConfigured } = useStore()
   const [editing, setEditing] = useState<Resource | 'new' | null>(null)
   const [draft, setDraft] = useState<Resource | null>(null)
   const [pub, setPub] = useState<PublishDraft>({ status: 'draft', visibility: null, audience: { studentIds: [], groupIds: [] } })
@@ -33,7 +33,8 @@ export function StudioResources() {
   const save = () => {
     if (!draft) return
     if (!draft.title.uz && !draft.title.en && !draft.title.ru) { notify(`${t('common.title')}: ${t('common.required')}`, 'warn'); return }
-    if (draft.kind === 'link' ? !draft.url?.trim() : !draft.file) { notify(`${draft.kind === 'link' ? t('common.link') : t('common.upload')}: ${t('common.required')}`, 'warn'); return }
+    // A file resource carries an uploaded file (its storage address in `url`) or, without storage, a link to the file elsewhere.
+    if (draft.kind === 'link' ? !draft.url?.trim() : !draft.file && !draft.url?.trim()) { notify(`${draft.kind === 'link' ? t('common.link') : t('common.upload')}: ${t('common.required')}`, 'warn'); return }
     const r = finalizePublish(pub, 'teacher', perms)
     if (!r.ok) { notify(t(r.error), 'warn'); return }
     upsertResource({ ...draft, ...r.patch }); setEditing(null); notify(t('common.saved')); if (r.note) notify(t(r.note), 'warn')
@@ -71,7 +72,11 @@ export function StudioResources() {
             {draft.kind === 'link' ? (
               <Field label={t('common.link')} required><Input placeholder="https://…" value={draft.url ?? ''} onChange={(e) => setDraft({ ...draft, url: e.target.value })} /></Field>
             ) : (
-              <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('common.upload')} <span className="text-champagne">*</span></div><UploadField kind="file" accept={draft.kind === 'pdf' ? 'application/pdf' : undefined} value={draft.file} onChange={(f) => setDraft({ ...draft, file: f })} /></div>
+              <div className="space-y-3">
+                {/* The file goes to object storage; the resource keeps its name, size and type, and its storage address in `url`. */}
+                <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('common.upload')} <span className="text-champagne">*</span></div><StorageUploadField kind="resource-file" url={draft.file ? draft.url : undefined} fileName={draft.file?.name} onUploaded={(r) => setDraft({ ...draft, file: { name: r.name, size: r.size, mime: r.mime }, url: r.publicUrl })} onRemove={() => setDraft({ ...draft, file: undefined, url: undefined })} /></div>
+                {storageConfigured === false && <Field label={t('studio.upload.fileLink')} required><Input placeholder="https://…" value={draft.file ? '' : draft.url ?? ''} onChange={(e) => setDraft({ ...draft, file: undefined, url: e.target.value })} /></Field>}
+              </div>
             )}
             <PublishFields value={pub} onChange={setPub} teacherId={teacher.id} mode="teacher" />
           </div>

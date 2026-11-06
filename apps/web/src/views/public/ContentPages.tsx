@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Link, useParams, useSearchParams } from '@/lib/router'
 import { AccessDenied, NotFound } from '../../components/AccessGate'
 import { AccessBadge, StatusBadge, VisibilityBadge } from '../../components/course/badges'
@@ -6,10 +7,40 @@ import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { useT } from '../../i18n/useT'
 import { checkAccess } from '../../lib/access'
 import { formatBytes, formatDuration } from '../../lib/format'
+import { storableUrl } from '../../services/uploads'
 import { useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import type { Video } from '../../types'
 import { VideoCard } from './TeacherChannel'
+
+/**
+ * The content lists arrive after the first render: visitors, students and centers from /public/content, teachers and
+ * admins with their workspace. Until then a missing item means "not loaded yet", not "not found".
+ */
+function useContentReady(): boolean {
+  const role = useStore((s) => s.role)
+  const authStatus = useStore((s) => s.auth.status)
+  const contentStatus = useStore((s) => s.contentStatus)
+  const workspaceLoaded = useStore((s) => s.workspaceLoaded)
+  const ensureWorkspace = useStore((s) => s.ensureWorkspace)
+  const loadPublicContent = useStore((s) => s.loadPublicContent)
+  const usesWorkspace = role === 'teacher' || role === 'admin'
+  useEffect(() => {
+    if (authStatus !== 'authenticated' && authStatus !== 'anonymous') return
+    if (usesWorkspace) void ensureWorkspace()
+    else if (contentStatus === 'idle') void loadPublicContent()
+  }, [authStatus, usesWorkspace, contentStatus, ensureWorkspace, loadPublicContent])
+  return usesWorkspace ? workspaceLoaded : contentStatus === 'ready'
+}
+
+function ContentLoading() {
+  const { t } = useT()
+  return (
+    <div className="container-x flex min-h-[50vh] items-center justify-center text-sm text-charcoal/55" role="status" aria-live="polite">
+      <Icon name="refresh" className="mr-2 h-4 w-4 animate-spin" /> {t('common.loading')}
+    </div>
+  )
+}
 
 function embedFor(url: string): { kind: 'iframe' | 'video' | 'none'; src: string } {
   try {
@@ -64,7 +95,8 @@ export function VideoPage() {
   const course = useStore((s) => s.courses.find((c) => c.id === video?.courseId))
   const playlist = useStore((s) => s.playlists.find((p) => p.id === params.get('playlist')))
   const allVideos = useStore((s) => s.videos)
-  if (!video) return <NotFound />
+  const ready = useContentReady()
+  if (!video) return ready ? <NotFound /> : <ContentLoading />
   const access = checkAccess(video, viewer)
   if (!access.allowed) return <AccessDenied result={access} backTo={teacher ? { to: `/teachers/${teacher.id}?tab=videos`, label: t('courses.seeChannel') } : undefined} />
   const plVideos = playlist ? playlist.videoIds.map((vid) => allVideos.find((v) => v.id === vid)).filter((v): v is Video => !!v && checkAccess(v, viewer).allowed) : []
@@ -134,7 +166,8 @@ export function PlaylistPage() {
   const playlist = useStore((s) => s.playlists.find((p) => p.id === id))
   const teacher = useStore((s) => s.teachers.find((x) => x.id === playlist?.teacherId))
   const allVideos = useStore((s) => s.videos)
-  if (!playlist) return <NotFound />
+  const ready = useContentReady()
+  if (!playlist) return ready ? <NotFound /> : <ContentLoading />
   const access = checkAccess(playlist, viewer)
   if (!access.allowed) return <AccessDenied result={access} backTo={teacher ? { to: `/teachers/${teacher.id}?tab=playlists`, label: t('courses.seeChannel') } : undefined} />
   const videos = playlist.videoIds.map((vid) => allVideos.find((v) => v.id === vid)).filter((v): v is Video => !!v && checkAccess(v, viewer).allowed)
@@ -178,10 +211,14 @@ export function ResourcePage() {
   const teacher = useStore((s) => s.teachers.find((x) => x.id === r?.teacherId))
   const course = useStore((s) => s.courses.find((c) => c.id === r?.courseId))
   const canDownload = useStore((s) => s.site.permissions.student.downloadResources)
-  if (!r) return <NotFound />
+  const ready = useContentReady()
+  if (!r) return ready ? <NotFound /> : <ContentLoading />
   const access = checkAccess(r, viewer)
   if (!access.allowed) return <AccessDenied result={access} backTo={teacher ? { to: `/teachers/${teacher.id}?tab=resources`, label: t('courses.seeChannel') } : undefined} />
-  const downloadable = r.file?.previewUrl && (viewer.role !== 'student' || canDownload)
+  // An uploaded file lives at `url` (its storage address); a `blob:` preview from an older save only ever worked in the uploader's browser.
+  const fileUrl = r.file ? storableUrl(r.url) ?? storableUrl(r.file.previewUrl) ?? undefined : undefined
+  const linkUrl = r.file ? undefined : r.url
+  const downloadable = fileUrl && (viewer.role !== 'student' || canDownload)
   return (
     <div className="container-x py-10 lg:py-14">
       <div className="mx-auto max-w-3xl animate-fade">
@@ -193,18 +230,18 @@ export function ResourcePage() {
             <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-card bg-sage text-forest"><Icon name={r.kind === 'link' ? 'external' : 'file'} className="h-8 w-8" /></span>
             <div className="min-w-0 flex-1">
               {r.file && (<><div className="truncate font-medium text-charcoal">{r.file.name}</div><div className="mt-1 text-xs text-charcoal/55">{r.file.mime} · {formatBytes(r.file.size)}{r.pages ? ` · ${r.pages} ${t('common.pages')}` : ''}</div></>)}
-              {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="truncate text-sm text-forest underline">{r.url}</a>}
+              {linkUrl && <a href={linkUrl} target="_blank" rel="noopener noreferrer" className="truncate text-sm text-forest underline">{linkUrl}</a>}
             </div>
             <div className="flex flex-col gap-2">
-              {r.url && <LinkButton to={r.url} external variant="primary" size="sm">{t('channel.openExternal')} <Icon name="external" className="h-3.5 w-3.5" /></LinkButton>}
+              {linkUrl && <LinkButton to={linkUrl} external variant="primary" size="sm">{t('channel.openExternal')} <Icon name="external" className="h-3.5 w-3.5" /></LinkButton>}
               {r.file && (downloadable ? (
-                <a href={r.file.previewUrl} download={r.file.name} className="inline-flex items-center justify-center gap-2 rounded-control bg-forest px-4 py-2 text-sm font-medium text-ivory">{t('common.download')} <Icon name="download" className="h-3.5 w-3.5" /></a>
+                <a href={fileUrl} download={r.file.name} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control bg-forest px-4 py-2 text-sm font-medium text-ivory">{t('common.download')} <Icon name="download" className="h-3.5 w-3.5" /></a>
               ) : (
                 <span className="inline-flex items-center gap-2 rounded-control border border-charcoal/15 px-4 py-2 text-sm text-charcoal/50"><Icon name="lock" className="h-3.5 w-3.5" />{t('common.download')}</span>
               ))}
             </div>
           </div>
-          {r.file && !r.file.previewUrl && <Notice tone="info" className="mt-5 text-xs">{t('channel.demoFile')}</Notice>}
+          {r.file && !fileUrl && <Notice tone="info" className="mt-5 text-xs">{t('channel.demoFile')}</Notice>}
           {r.file && viewer.role === 'student' && !canDownload && <Notice tone="warn" className="mt-3 text-xs">{t('studio.lockedByAdmin')}: {t('perm.student.downloadResources')}</Notice>}
         </Card>
         <div className="mt-6 grid gap-4 sm:grid-cols-2">

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from '@/lib/router'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { finalizePublish, PublishFields, type PublishDraft } from '../../components/PublishFields'
 import { ArtCover, Badge, Button, EmptyState, Field, Icon, Input, LField, Modal, Notice, PageTitle, Segmented, Select } from '../../components/ui'
-import { UploadField } from '../../components/UploadField'
+import { StorageUploadField } from '../../components/StorageUploadField'
 import { emptyL, useT } from '../../i18n/useT'
 import { formatDuration } from '../../lib/format'
 import { useCurrentTeacher } from '../../store/selectors'
@@ -68,12 +68,16 @@ function VideoForm({ initial, teacherId, onSave, onCancel }: { initial?: Video; 
       <LField label={t('common.description')} multiline value={draft.description} onChange={(v) => setDraft({ ...draft, description: v })} />
       <div>
         <div className="mb-2 text-sm font-medium text-charcoal">{t('studio.videoSource')}</div>
-        <Segmented<'link' | 'upload'> value={sourceKind} onChange={(k) => setDraft({ ...draft, source: k === 'link' ? { kind: 'link', url: '' } : { kind: 'upload', file: { name: '', size: 0, mime: '' } } })} options={[{ id: 'link', label: t('common.link') }, { id: 'upload', label: t('common.upload') }]} />
+        {/* Videos are YouTube/Vimeo links. The switch only appears for a lesson saved as a file earlier, so it can be turned into a link. */}
+        {initial?.source.kind === 'upload' && <Segmented<'link' | 'upload'> value={sourceKind} onChange={(k) => setDraft({ ...draft, source: k === 'link' ? { kind: 'link', url: '' } : initial.source })} options={[{ id: 'link', label: t('common.link') }, { id: 'upload', label: t('channel.uploadedFile') }]} />}
         <div className="mt-3">
           {draft.source.kind === 'link' ? (
             <Field label={t('studio.videoLink')} required><Input placeholder="https://www.youtube.com/watch?v=…" value={draft.source.url} onChange={(e) => setDraft({ ...draft, source: { kind: 'link', url: e.target.value } })} /></Field>
           ) : (
-            <UploadField kind="video" accept="video/*" label={t('studio.videoUpload')} value={draft.source.kind === 'upload' && draft.source.file.name ? draft.source.file : undefined} onChange={(f) => setDraft({ ...draft, source: { kind: 'upload', file: f ?? { name: '', size: 0, mime: '' } } })} />
+            <div className="rounded-card border border-charcoal/10 bg-paper p-3 text-xs">
+              <div className="truncate font-medium text-charcoal">{draft.source.file.name || t('channel.uploadedFile')}</div>
+              <Notice tone="warn" className="mt-2 text-[12px]">{t('studio.videoUploadNote')}</Notice>
+            </div>
           )}
         </div>
       </div>
@@ -83,7 +87,8 @@ function VideoForm({ initial, teacherId, onSave, onCancel }: { initial?: Video; 
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={`${t('studio.thumbnail')} · URL`} hint={t('common.optional')}><Input placeholder="https://…" value={draft.thumbnailUrl ?? ''} onChange={(e) => setDraft({ ...draft, thumbnailUrl: e.target.value || undefined })} /></Field>
-        <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('studio.thumbnail')} · {t('common.upload')}</div><UploadField kind="image" accept="image/*" value={draft.thumbnailUpload} onChange={(v) => setDraft({ ...draft, thumbnailUpload: v })} /></div>
+        {/* The thumbnail goes to object storage and its address becomes the thumbnail URL (no browser-only preview is ever saved). */}
+        <div><div className="mb-1.5 text-xs font-medium text-charcoal/70">{t('studio.thumbnail')} · {t('common.upload')}</div><StorageUploadField kind="video-thumbnail" url={draft.thumbnailUrl} onUploaded={(r) => setDraft({ ...draft, thumbnailUrl: r.publicUrl, thumbnailUpload: undefined })} onRemove={() => setDraft({ ...draft, thumbnailUrl: undefined, thumbnailUpload: undefined })} /></div>
       </div>
       <div>
         <div className="mb-2 text-xs font-medium text-charcoal/70">{t('common.preview')}</div>

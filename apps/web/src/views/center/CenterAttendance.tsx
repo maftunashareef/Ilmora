@@ -29,6 +29,8 @@ export function CenterAttendance() {
 
   const load = (d: string) => api<{ date: string; sessions: CenterLesson[] }>(`${scope.base}/attendance?date=${encodeURIComponent(d)}`).then((r) => setLessons(r.sessions)).catch(() => setFailed(true))
   useEffect(() => { void load(date) }, [date])
+  // A notification about another day links here while the page is already open.
+  useEffect(() => { const d = params.get('date'); if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d) }, [params])
   useEffect(() => { api<CenterCourses>(`${scope.base}/courses`).then((r) => setCourses(r.courses)).catch(() => undefined) }, [])
 
   const open = async (l: CenterLesson) => {
@@ -71,7 +73,7 @@ export function CenterAttendance() {
           ))}
         </ul>
       )}
-      <Modal open={!!active} onClose={() => setActive(null)} title={active ? `${tr(active.courseTitle)} · ${active.group.name}` : ''} wide>
+      <Modal open={!!active} onClose={() => { setActive(null); void load(date) }} title={active ? `${tr(active.courseTitle)} · ${active.group.name}` : ''} wide>
         {active && session && course && group
           ? <SessionPanel session={session} course={course} group={group} roster={enrolledStudents(s.students, group.id)} />
           : <div className="py-10 text-center text-sm text-charcoal/55">{t('common.loading')}</div>}

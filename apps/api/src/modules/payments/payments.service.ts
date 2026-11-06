@@ -2,11 +2,11 @@ import { Inject, Injectable, Logger } from '@nestjs/common'
 import { tiyinToClickAmount } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { ENV, type Env, clickConfigured, paymeConfigured } from '../../config/env'
-import type { PaymentProvider } from '../../generated/prisma/enums'
+import type { PaymentProvider, PaymentState } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { SubscriptionService } from '../enrollment/subscription.service'
+import { isClosed, SubscriptionService } from '../enrollment/subscription.service'
 import { LedgerService } from './ledger.service'
 import { OutboxService } from './outbox.service'
 
@@ -41,12 +41,14 @@ export class PaymentsService {
 
   /** Builds the hosted-checkout URL for a pending payment (no card data ever touches ILMORA). */
   checkoutLink(payment: { id: string; amountMinor: bigint; provider: PaymentProvider | null; expiresAt: Date }, provider: 'PAYME' | 'CLICK', lang: 'uz' | 'ru' | 'en') {
+    // Nothing to collect: the checkout settled on the spot, so there is no provider page to send the student to.
+    if (payment.amountMinor === 0n) return { paymentId: payment.id, provider: null, url: null, expiresAt: payment.expiresAt, free: true as const }
     const returnUrl = `${this.env.PUBLIC_WEB_URL}/${lang}/payments/${payment.id}/return`
     if (provider === 'PAYME') {
       if (!paymeConfigured(this.env)) throw AppError.unavailable('Payme is not configured yet')
       const params = `m=${this.env.PAYME_MERCHANT_ID};ac.payment_id=${payment.id};a=${payment.amountMinor.toString()};l=${lang};c=${returnUrl}`
       const url = `${this.env.PAYME_CHECKOUT_URL.replace(/\/$/, '')}/${Buffer.from(params, 'utf8').toString('base64')}`
-      return { paymentId: payment.id, provider, url, expiresAt: payment.expiresAt }
+      return { paymentId: payment.id, provider, url, expiresAt: payment.expiresAt, free: false as const }
     }
     if (!clickConfigured(this.env)) throw AppError.unavailable('Click is not configured yet')
     const q = new URLSearchParams({
@@ -56,12 +58,23 @@ export class PaymentsService {
       transaction_param: payment.id,
       return_url: returnUrl,
     })
-    return { paymentId: payment.id, provider, url: `${this.env.CLICK_PAY_URL.replace(/\/$/, '')}/?${q.toString()}`, expiresAt: payment.expiresAt }
+    return { paymentId: payment.id, provider, url: `${this.env.CLICK_PAY_URL.replace(/\/$/, '')}/?${q.toString()}`, expiresAt: payment.expiresAt, free: false as const }
   }
 
   async lockPayment(tx: TransactionClient, paymentId: string) {
     await tx.$queryRawUnsafe(`SELECT id FROM "Payment" WHERE id = $1 FOR UPDATE`, paymentId)
     return tx.payment.findFirst({ where: { id: paymentId } })
+  }
+
+  /**
+   * Why `payment` cannot be settled right now, or null when it can. The adapters ask before accepting or performing a
+   * provider transaction, so no debit is taken for an order that can no longer be fulfilled: hold expired or cancelled,
+   * already paid through the other provider, or a subscription that is closed for good.
+   */
+  async settleBlocker(db: TransactionClient | PrismaService['client'], payment: { state: PaymentState; subscriptionId: string }): Promise<'payment_not_pending' | 'subscription_closed' | null> {
+    if (payment.state !== 'PENDING') return 'payment_not_pending'
+    const sub = await db.subscription.findFirst({ where: { id: payment.subscriptionId }, select: { status: true } })
+    return !sub || isClosed(sub.status) ? 'subscription_closed' : null
   }
 
   /**
@@ -114,7 +127,10 @@ export class PaymentsService {
     if (journal) await this.ledger.reverse(tx, journal.id, 'PAYMENT_REFUNDED', reason, actorId)
     await tx.payment.update({ where: { id: payment.id }, data: { state: 'REFUNDED', refundedAt: new Date() } })
     const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId } })
-    if (sub && (sub.status === 'ACTIVE' || sub.status === 'PAST_DUE')) {
+    // Only the payment that bought the current period takes the subscription down; a refund of an older period leaves
+    // a subscription whose newer period is paid alone.
+    const coversCurrent = !sub?.currentPeriodEnd || payment.periodEnd >= sub.currentPeriodEnd
+    if (sub && coversCurrent && (sub.status === 'ACTIVE' || sub.status === 'PAST_DUE')) {
       await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: new Date() } })
       await tx.subscription.update({ where: { id: sub.id }, data: { status: 'CANCELLED', cancelledAt: new Date() } })
     }

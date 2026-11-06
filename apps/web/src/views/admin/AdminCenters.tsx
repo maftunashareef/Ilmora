@@ -25,7 +25,7 @@ export function AdminCenters() {
 
   const saveCenter = async () => {
     if (!center?.name.trim()) return
-    await s.upsertCenter(center)
+    try { await s.upsertCenter(center) } catch { return }
     setCenter(null)
     notify(t('common.saved'))
     await reload()
@@ -58,7 +58,7 @@ export function AdminCenters() {
                   </div>
                   <LinkButton size="sm" variant="secondary" to={`/admin/centers/${c.id}`}><Icon name="external" className="h-3.5 w-3.5" />{t('admin.centers.openDashboard')}</LinkButton>
                   <Button size="sm" variant="secondary" title={t('admin.centerAdmins')} aria-label={t('admin.centerAdmins')} onClick={() => setAdminsFor(c)}><Icon name="users" className="h-3.5 w-3.5" /></Button>
-                  <Button size="sm" variant="secondary" onClick={() => setCenter(c)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="secondary" onClick={() => setCenter(c)} aria-label={t('common.edit')}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
                   <Button size="sm" variant="danger" disabled={busy === c.id || c.counts.courses + c.counts.teachers > 0} title={c.counts.courses + c.counts.teachers > 0 ? t('admin.centers.inUse') : undefined} onClick={() => void removeCenter(c)}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2 pl-5">
@@ -77,8 +77,8 @@ export function AdminCenters() {
               <li key={c.id} className="card flex items-center gap-3 p-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-control bg-sage font-display text-xl text-forest">{c.glyph}</span>
                 <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-charcoal">{tr(c.name)}</div><div className="text-xs text-charcoal/55">{countLabel(lang, s.courses.filter((x) => x.categoryId === c.id).length, NOUNS.course)}</div></div>
-                <Button size="sm" variant="secondary" onClick={() => setCat(c)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
-                <Button size="sm" variant="danger" disabled={catInUse(c.id)} title={catInUse(c.id) ? t('admin.centers.inUse') : undefined} onClick={() => { if (confirm(t('common.confirmDelete'))) s.removeCategory(c.id) }}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="secondary" onClick={() => setCat(c)} aria-label={t('common.edit')}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant="danger" disabled={catInUse(c.id)} title={catInUse(c.id) ? t('admin.centers.inUse') : undefined} onClick={() => { if (confirm(t('common.confirmDelete'))) s.removeCategory(c.id) }} aria-label={t('common.delete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
               </li>
             ))}
           </ul>
@@ -94,7 +94,7 @@ export function AdminCenters() {
           </div>
         )}
       </Modal>
-      <Modal open={!!cat} onClose={() => setCat(null)} title={cat ? tr(cat.name) || t('admin.centers.addCategory') : ''} footer={<><Button variant="ghost" onClick={() => setCat(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (cat && (cat.name.uz || cat.name.en || cat.name.ru)) { s.upsertCategory(cat); setCat(null); s.notify(t('common.saved')) } }}>{t('common.save')}</Button></>}>
+      <Modal open={!!cat} onClose={() => setCat(null)} title={cat ? tr(cat.name) || t('admin.centers.addCategory') : ''} footer={<><Button variant="ghost" onClick={() => setCat(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (cat && (cat.name.uz || cat.name.en || cat.name.ru)) { void s.upsertCategory(cat).then(() => { setCat(null); s.notify(t('common.saved')) }).catch(() => undefined) } }}>{t('common.save')}</Button></>}>
         {cat && (
           <div className="space-y-4">
             <LField label={t('common.name')} required value={cat.name} onChange={(v) => setCat({ ...cat, name: v })} />

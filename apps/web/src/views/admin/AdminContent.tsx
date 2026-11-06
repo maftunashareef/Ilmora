@@ -3,13 +3,14 @@ import { Link } from '@/lib/router'
 import { Badge, Button, Card, Eyebrow, Icon, Modal, PageTitle, Segmented, Select, Toggle } from '../../components/ui'
 import { VisibilityControl } from '../../components/VisibilityControl'
 import { useT } from '../../i18n/useT'
+import { siteHref } from '../../lib/siteUrl'
 import { useStore, type ContentKind } from '../../store/useStore'
 import type { Audience, Publishable, Status, Visibility } from '../../types'
 
 type Row = Publishable & { id: string; teacherId: string; kind: ContentKind; title: string; href: string }
 
 export function AdminContent() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const s = useStore()
   const [filter, setFilter] = useState<'all' | ContentKind>('all')
   const [audienceFor, setAudienceFor] = useState<Row | null>(null)
@@ -33,9 +34,9 @@ export function AdminContent() {
             {review.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center gap-3 rounded-control bg-paper p-3">
                 <Badge tone="muted">{KIND_LABEL[r.kind]}</Badge>
-                <Link to={r.href} className="min-w-0 flex-1 truncate text-sm font-medium text-charcoal hover:text-forest">{r.title}</Link>
+                <a href={siteHref(lang, r.href)} className="min-w-0 flex-1 truncate text-sm font-medium text-charcoal hover:text-forest">{r.title}</a>
                 <span className="text-xs text-charcoal/55">{s.teachers.find((x) => x.id === r.teacherId)?.name}</span>
-                <Button size="sm" onClick={() => { s.setPublishable(r.kind, r.id, { status: 'published', reviewRequested: false }); s.notify(t('common.saved')) }}><Icon name="check" className="h-3.5 w-3.5" />{t('admin.approve')}</Button>
+                <Button size="sm" onClick={() => { void s.setPublishable(r.kind, r.id, { status: 'published', reviewRequested: false }).then(() => s.notify(t('common.saved'))).catch(() => undefined) }}><Icon name="check" className="h-3.5 w-3.5" />{t('admin.approve')}</Button>
                 <Button size="sm" variant="ghost" onClick={() => s.setPublishable(r.kind, r.id, { reviewRequested: false })}>{t('common.cancel')}</Button>
               </li>
             ))}

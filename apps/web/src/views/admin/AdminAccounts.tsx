@@ -74,7 +74,7 @@ export function AdminAccounts() {
                   {!a.roles.includes('PLATFORM_ADMIN') && (
                     <>
                       <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void toggleActive(a)}><Icon name={a.isActive ? 'lock' : 'check'} className="h-3.5 w-3.5" />{a.isActive ? t('admin.accounts.block') : t('admin.accounts.unblock')}</Button>
-                      <Button size="sm" variant="danger" disabled={busy === a.id} onClick={() => void remove(a)}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="danger" disabled={busy === a.id} onClick={() => void remove(a)} aria-label={t('common.delete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
                     </>
                   )}
                 </>

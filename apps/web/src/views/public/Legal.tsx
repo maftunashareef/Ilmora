@@ -1,10 +1,28 @@
 'use client'
-import { OFFER_STATUS, OFFER_TEXT, OFFER_VERSION, OPERATOR, pick, type LegalBlock } from '@ilmora/shared'
-import { Card, Eyebrow, Notice, PageTitle } from '../../components/ui'
+import { LANGS, OFFER_STATUS, OFFER_TEXT, OFFER_VERSION, OPERATOR, pick, type LegalBlock } from '@ilmora/shared'
+import { Card, Eyebrow, langName, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { Link } from '../../lib/router'
+import type { Lang } from '../../types'
 
 const EDITION_LABEL = '21.10.2026'
+
+/** The owner has supplied the offer in Uzbek (governing) and Russian only; a missing language shows the Uzbek text. */
+const FALLBACK_LANG: Lang = 'uz'
+
+/** Shown when the document has no text in the interface language, with links to the other editions that do exist. */
+function MissingLanguageNotice({ path }: { path: string }) {
+  const { t } = useT()
+  const others = LANGS.map((l) => l.code).filter((code) => code !== FALLBACK_LANG && OFFER_TEXT[code])
+  return (
+    <Notice tone="info" className="mb-6 text-xs">
+      {t('legal.ruOnly')}
+      {others.map((code) => (
+        <span key={code}> · <Link to={`/${code}${path}`} className="font-medium underline" lang={code}>{langName(code)}</Link></span>
+      ))}
+    </Notice>
+  )
+}
 
 function Blocks({ blocks }: { blocks: LegalBlock[] }) {
   return (
@@ -36,19 +54,19 @@ function Blocks({ blocks }: { blocks: LegalBlock[] }) {
   )
 }
 
-/** Public offer: the owner's document, shown in the requested language when supplied, otherwise in Russian with a notice. */
+/** Public offer: the owner's document in the interface language when supplied (uz, ru), otherwise the governing Uzbek text with a notice. */
 export function OfferPage() {
   const { t, lang } = useT()
   const own = OFFER_TEXT[lang]
-  const blocks = own ?? OFFER_TEXT.uz ?? []
+  const blocks = own ?? OFFER_TEXT[FALLBACK_LANG] ?? []
   return (
     <div className="container-x py-12 lg:py-16">
       <div className="mx-auto max-w-3xl">
         <Eyebrow className="mb-3">{t('legal.offer')} · {t('legal.edition')} {OFFER_VERSION}</Eyebrow>
         {OFFER_STATUS === 'draft' && <Notice tone="warn" className="mb-4 text-xs">{t('legal.draftNotice', { date: EDITION_LABEL })}</Notice>}
-        {!own && <Notice tone="info" className="mb-6 text-xs">{t('legal.ruOnly')}</Notice>}
+        {!own && <MissingLanguageNotice path="/oferta" />}
         <Card className="px-6 py-8 sm:px-10">
-          <Blocks blocks={blocks} />
+          <div lang={own ? lang : FALLBACK_LANG}><Blocks blocks={blocks} /></div>
         </Card>
         <p className="mt-6 text-xs text-charcoal/50">
           <Link to="/privacy" className="underline">{t('legal.privacy')}</Link> · <a className="underline" href={`mailto:${OPERATOR.email}`}>{OPERATOR.email}</a>
@@ -61,7 +79,7 @@ export function OfferPage() {
 /** Personal data: a factual summary of what the platform processes, then section 9 and appendix 1 of the offer. */
 export function PrivacyPage() {
   const { t, lang } = useT()
-  const all = OFFER_TEXT[lang] ?? OFFER_TEXT.uz ?? []
+  const all = OFFER_TEXT[lang] ?? OFFER_TEXT[FALLBACK_LANG] ?? []
   const idx = (re: RegExp) => all.findIndex((b) => b.t === 'h2' && re.test(b.text))
   const s9 = idx(/^9\./)
   const s10 = idx(/^10\./)
@@ -77,9 +95,9 @@ export function PrivacyPage() {
           {t('legal.privacyContact')}: <a className="underline" href={`mailto:${OPERATOR.email}`}>{OPERATOR.email}</a> · {OPERATOR.phone} · {pick(lang, OPERATOR.legalName)}
         </p>
         {OFFER_STATUS === 'draft' && <Notice tone="warn" className="mb-4 text-xs">{t('legal.draftNotice', { date: EDITION_LABEL })}</Notice>}
-        {!OFFER_TEXT[lang] && <Notice tone="info" className="mb-6 text-xs">{t('legal.ruOnly')}</Notice>}
+        {!OFFER_TEXT[lang] && <MissingLanguageNotice path="/privacy" />}
         <Card className="px-6 py-8 sm:px-10">
-          <Blocks blocks={blocks} />
+          <div lang={OFFER_TEXT[lang] ? lang : FALLBACK_LANG}><Blocks blocks={blocks} /></div>
         </Card>
         <p className="mt-6 text-xs text-charcoal/50"><Link to="/oferta" className="underline">{t('legal.offer')}</Link></p>
       </div>

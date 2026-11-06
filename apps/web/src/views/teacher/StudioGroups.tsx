@@ -57,7 +57,7 @@ export function StudioGroups() {
           <Timetable groups={groups} courses={courses} conflicts={conflicts} />
         </section>
       </div>
-      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing ? tr(editing.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (!editing) return; const bad = groupsCapacityError(draftGroups, students); if (bad) { notify(bad.check.reason === 'not-integer' ? t('capacity.invalid') : t('capacity.belowEnrolled', { n: bad.check.enrolled }), 'warn'); return } upsertCourse({ ...editing, groups: draftGroups, updatedAt: new Date().toISOString() }); setEditing(null); notify(t('common.saved')) }}>{t('common.save')}</Button></>}>
+      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing ? tr(editing.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (!editing) return; const bad = groupsCapacityError(draftGroups, students); if (bad) { notify(bad.check.reason === 'not-integer' ? t('capacity.invalid') : t('capacity.belowEnrolled', { n: bad.check.enrolled }), 'warn'); return } void upsertCourse({ ...editing, groups: draftGroups, updatedAt: new Date().toISOString() }).then(() => { setEditing(null); notify(t('common.saved')) }).catch(() => undefined) }}>{t('common.save')}</Button></>}>
         {editing && <GroupsEditor groups={draftGroups} onChange={setDraftGroups} courseId={editing.id} locked={locked} />}
       </Modal>
     </div>

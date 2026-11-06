@@ -4,7 +4,7 @@
 // - Every business row carries `tenantId`; services always scope queries by it (see TenantScope in src/infra/prisma).
 // - Soft-deletable entities carry `deletedAt`; the Prisma extension excludes them from normal queries.
 // - Money: integer amounts in the smallest unit (tiyin) + explicit ISO currency. Never floats.
-// - Timestamps are stored in UTC (timestamptz); local scheduling uses Asia/Tashkent in application code.
+// - Timestamps are `timestamp(3)` columns holding UTC instants (Prisma reads and writes them as UTC); local scheduling uses Asia/Tashkent in application code.
 // - Financial and attendance history is append-only: corrections and reversals create new rows, they never rewrite settled ones.
 
 generator client {

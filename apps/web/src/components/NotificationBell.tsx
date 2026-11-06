@@ -76,13 +76,13 @@ export function NotificationBell() {
         <div role="dialog" aria-label={t('notif.title')} className="animate-rise absolute right-0 z-[70] mt-2 w-[22rem] max-w-[calc(100vw-2rem)] rounded-card border border-charcoal/10 bg-paper shadow-lift">
           <div className="flex items-center justify-between border-b border-charcoal/10 px-4 py-3">
             <span className="text-sm font-medium text-charcoal">{t('notif.title')}</span>
-            {unread > 0 && <Button size="sm" variant="ghost" onClick={() => void markRead()}>{t('notif.markAll')}</Button>}
+            {unread > 0 && <Button size="sm" variant="ghost" onClick={() => void markRead().catch(() => undefined)}>{t('notif.markAll')}</Button>}
           </div>
           <ul className="max-h-[24rem] overflow-y-auto">
             {items.length === 0 && <li className="px-4 py-6 text-center text-xs text-charcoal/50">{t('notif.empty')}</li>}
             {items.map((n) => (
               <li key={n.id} className={cx('border-b border-charcoal/5 px-4 py-3 text-[13px] leading-relaxed', n.readAt ? 'text-charcoal/65' : 'bg-sage/30 text-charcoal')}>
-                <button type="button" className="w-full text-left" onClick={() => { if (!n.readAt) void markRead([n.id]); if (role) { setOpen(false); nav(notificationHref(n, role)) } }}>
+                <button type="button" className="w-full text-left" onClick={() => { if (!n.readAt) void markRead([n.id]).catch(() => undefined); if (role) { setOpen(false); nav(notificationHref(n, role)) } }}>
                   {notificationText(n, lang, t, tr)}
                   <span className="mt-1 block text-[11px] text-charcoal/45">{formatDate(n.createdAt, lang)} · {formatTime(n.createdAt, lang)}</span>
                 </button>

@@ -1,5 +1,5 @@
 'use client'
-import { PUBLIC_API_URL, session } from '../lib/api'
+import { PUBLIC_API_URL, refreshSession, session } from '../lib/api'
 import { useStore } from '../store/useStore'
 
 export type { CheckInFailure, CheckInInput, CheckInResult } from '@ilmora/shared'
@@ -13,11 +13,17 @@ export function subscribeToSession(sessionId: string, onEvent?: (e: { type: stri
   const run = async () => {
     let attempt = 0
     while (!controller.signal.aborted) {
+      if (!session.token) {
+        await new Promise((r) => setTimeout(r, 2_000))
+        continue
+      }
       try {
         const res = await fetch(`${PUBLIC_API_URL}/v1/teacher/sessions/${sessionId}/stream`, {
-          headers: { Accept: 'text/event-stream', Authorization: `Bearer ${session.token ?? ''}`, 'X-Requested-With': 'ilmora' },
+          headers: { Accept: 'text/event-stream', Authorization: `Bearer ${session.token}`, 'X-Requested-With': 'ilmora' },
           signal: controller.signal,
         })
+        // The access token expires while the stream is open (~15 min); a reconnect with the old one is refused, so renew it before retrying.
+        if (res.status === 401) await refreshSession()
         if (!res.ok || !res.body) throw new Error(`stream ${res.status}`)
         attempt = 0
         const reader = res.body.getReader()

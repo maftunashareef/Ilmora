@@ -27,9 +27,10 @@ export function CenterSettings() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [qr, setQr] = useState<CenterQr | null>(null)
   const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
 
   useEffect(() => {
-    api<CenterOverview>(`${scope.base}/overview`).then((o) => { setCenter(o.center); setDraft(toDraft(o.center)) }).catch(() => notify(t('center.loadError'), 'warn'))
+    api<CenterOverview>(`${scope.base}/overview`).then((o) => { setCenter(o.center); setDraft(toDraft(o.center)) }).catch(() => { setFailed(true); notify(t('center.loadError'), 'warn') })
     api<CenterQr>(`${scope.base}/qr`).then(setQr).catch(() => undefined)
   }, [notify, t])
 
@@ -55,6 +56,7 @@ export function CenterSettings() {
     try { setQr(await api<CenterQr>(`${scope.base}/qr/rotate`, { method: 'POST', body: {} })); notify(t('center.qrRotated')) } catch (err) { fail(err) } finally { setBusy(false) }
   }
 
+  if (failed) return <Notice tone="warn">{t('center.loadError')}</Notice>
   if (!center || !draft) return <div className="py-16 text-center text-sm text-charcoal/55">{t('common.loading')}</div>
   const locked = center.status === 'BLOCKED'
 

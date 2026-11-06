@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { safeEqual } from '../../../common/crypto'
 import { ENV, type Env } from '../../../config/env'
-import { PrismaService } from '../../../infra/prisma/prisma.service'
+import type { PaymentState } from '../../../generated/prisma/enums'
+import { PrismaService, type TransactionClient } from '../../../infra/prisma/prisma.service'
 import { PaymentsService } from '../payments.service'
 
 /** Payme Merchant API error codes (docs/payments/payme-merchant-api.md §3). */
@@ -95,9 +96,25 @@ export class PaymeService {
     const amount = this.amountFrom(params)
     const payment = await this.prisma.client.payment.findFirst({ where: { id: paymentId } })
     if (!payment) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
-    if (payment.state !== 'PENDING' || (payment.expiresAt && payment.expiresAt < new Date())) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
+    if (!(await this.payable(this.prisma.client, payment))) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
     if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
     return { allow: true }
+  }
+
+  /** The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. */
+  private async payable(db: TransactionClient | PrismaService['client'], payment: { state: PaymentState; subscriptionId: string; expiresAt: Date | null }): Promise<boolean> {
+    if (payment.expiresAt && payment.expiresAt < new Date()) return false
+    return (await this.payments.settleBlocker(db, payment)) === null
+  }
+
+  /**
+   * Runs `fn` in one transaction and raises a PaymeError it *returns* only after the commit. Throwing inside the
+   * transaction would roll back the bookkeeping done before refusing (a transaction row cancelled with its reason).
+   */
+  private async txRefusing<T>(fn: (tx: TransactionClient) => Promise<T | PaymeError>): Promise<T> {
+    const out = await this.prisma.tx(fn)
+    if (out instanceof PaymeError) throw out
+    return out
   }
 
   private async create(params: Record<string, unknown>, sandbox: boolean) {
@@ -107,7 +124,7 @@ export class PaymeService {
     const paymentId = this.paymentIdFrom(params)
     const amount = this.amountFrom(params)
 
-    return this.prisma.tx(async (tx) => {
+    return this.txRefusing(async (tx) => {
       const payment = await this.payments.lockPayment(tx, paymentId)
       if (!payment) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
       const existing = await tx.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: providerTxId } } })
@@ -116,13 +133,13 @@ export class PaymeService {
         if (existing.state === 'CREATED') {
           if (this.expired(existing.providerTime)) {
             await this.cancelCreated(tx, existing.id, payment.id, 4)
-            throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
+            return new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
           }
           return { create_time: existing.createdAt.getTime(), transaction: String(existing.seq), state: 1 }
         }
         throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
       }
-      if (payment.state !== 'PENDING' || (payment.expiresAt && payment.expiresAt < new Date())) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
+      if (!(await this.payable(tx, payment))) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
       if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
       const active = await tx.paymentTransaction.findFirst({ where: { paymentId: payment.id, provider: 'PAYME', state: 'CREATED' } })
       if (active) throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
@@ -136,17 +153,24 @@ export class PaymeService {
 
   private async perform(params: Record<string, unknown>) {
     const providerTxId = String(params.id ?? '')
-    return this.prisma.tx(async (tx) => {
+    return this.txRefusing(async (tx) => {
       const found = await tx.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: providerTxId } } })
       if (!found) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
-      await this.payments.lockPayment(tx, found.paymentId)
+      const payment = await this.payments.lockPayment(tx, found.paymentId)
       const row = await tx.paymentTransaction.findFirst({ where: { id: found.id } })
       if (!row) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
       if (row.state === 'PERFORMED') return { transaction: String(row.seq), perform_time: row.performedAt!.getTime(), state: 2 }
       if (row.state !== 'CREATED') throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
       if (this.expired(row.providerTime)) {
         await this.cancelCreated(tx, row.id, row.paymentId, 4)
-        throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
+        return new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
+      }
+      // The order can no longer be fulfilled (hold expired or cancelled, paid through the other provider, subscription
+      // closed): refusing makes Payme reverse the debit instead of us taking money that activates nothing. The row is
+      // closed the way a timeout is, so CheckTransaction and a later CancelTransaction tell the same story.
+      if (!payment || (await this.payments.settleBlocker(tx, payment))) {
+        await this.cancelCreated(tx, row.id, row.paymentId, 3)
+        return new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
       }
       const performedAt = new Date()
       await this.payments.settle(tx, { paymentId: row.paymentId, provider: 'PAYME', providerTransactionId: providerTxId, performedAt })

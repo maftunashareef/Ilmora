@@ -83,6 +83,7 @@ export function PreviewPage() {
     setBusy(true)
     try {
       const r = await checkout(provider)
+      if (!r.url) { window.location.assign(`/${lang}/payments/${r.paymentId}/return`); return }
       notify(t('checkout.redirecting'))
       window.location.assign(r.url)
     } catch (err) {

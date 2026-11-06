@@ -5,21 +5,8 @@ import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { useNavigate, useSearchParams } from '../../lib/router'
-import { useStore, type AuthUser } from '../../store/useStore'
-
-type Role = AuthUser['roles'][number]
-
-const workspaceOf = (path: string) =>
-  path.startsWith('/admin') ? 'admin' : path.startsWith('/teacher') ? 'teacher' : path.startsWith('/student') ? 'student' : null
-
-const canOpen = (roles: Role[], path: string) => {
-  const w = workspaceOf(path)
-  if (!w || roles.includes('PLATFORM_ADMIN')) return true
-  return w === 'teacher' ? roles.includes('TEACHER') : w === 'student' ? roles.includes('STUDENT') : false
-}
-
-const homeFor = (roles: Role[]) =>
-  roles.includes('PLATFORM_ADMIN') ? '/admin' : roles.includes('TEACHER') ? '/teacher' : '/student'
+import { canOpen, homeFor } from '../../lib/workspaceHome'
+import { useStore } from '../../store/useStore'
 
 export function GoogleCallbackPage() {
   const { t } = useT()

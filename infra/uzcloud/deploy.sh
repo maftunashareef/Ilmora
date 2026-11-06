@@ -45,6 +45,13 @@ case "$ROLE" in
     pull_images --profile migrate
     $COMPOSE up -d postgres redis
     wait_healthy postgres
+    # The live database is dumped before the schema moves (restore path: admin/backup.sh --restore).
+    if grep -q '^BACKUP_PASSPHRASE=' ../api.env; then
+      echo "== backup before migrations"
+      $COMPOSE run --rm --no-deps --build backup backup.sh --now
+    else
+      echo "== BACKUP_PASSPHRASE is not set in api.env: no backup before migrations (set up admin/backup.sh)"
+    fi
     echo "== migrations"
     $COMPOSE --profile migrate run --rm migrate
     # Initial data only on the very first release (no tenant yet); later releases never re-seed over admins' edits.
@@ -60,6 +67,8 @@ case "$ROLE" in
   web)
     pull_images
     $COMPOSE up -d
+    # The Caddyfile is mounted read-only and re-read only on reload; the release copies it fresh every time.
+    $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "caddy reload skipped (container not up yet)"
     wait_healthy api
     wait_healthy web
     # Through the local Caddy with the real certificate (the public IP belongs to the network, so this machine may not

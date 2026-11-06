@@ -65,8 +65,16 @@ export const dateColumnToIso = (d: Date): string => d.toISOString().slice(0, 10)
 /** Convert "YYYY-MM-DD" to the UTC-midnight Date Prisma expects for a DATE column. */
 export const isoToDateColumn = (iso: string): Date => new Date(`${iso}T00:00:00.000Z`)
 
+/**
+ * Calendar months in UTC, keeping the time of day. A day the target month does not have is clamped to its last day
+ * (31 Jan + 1 → 28/29 Feb, 31 Mar + 1 → 30 Apr) instead of spilling into the month after, so a monthly period never
+ * ends on the 2nd or 3rd.
+ */
 export const addMonthsUtc = (d: Date, months: number): Date => {
   const out = new Date(d.getTime())
+  out.setUTCDate(1)
   out.setUTCMonth(out.getUTCMonth() + months)
+  const lastDay = new Date(Date.UTC(out.getUTCFullYear(), out.getUTCMonth() + 1, 0)).getUTCDate()
+  out.setUTCDate(Math.min(d.getUTCDate(), lastDay))
   return out
 }

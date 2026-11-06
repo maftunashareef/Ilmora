@@ -20,7 +20,7 @@ Education-platform monorepo (Tashkent):
 - **Web:** Next.js 16, App Router, `/uz` `/ru` `/en` locales, RSC + client components
 - **API:** NestJS 12, Prisma 7 / PostgreSQL, Redis + BullMQ, Payme + Click adapters
 - **Shared:** `packages/shared` — domain types, pure rules, i18n dict, legal text
-- **Deploy:** Docker/nginx VPS + Vercel+Render staging. CI via GitHub Actions.
+- **Deploy:** UzCloud, two machines behind Caddy (infra/uzcloud), released by the manual "Release (UzCloud)" GitHub Actions workflow from main after green CI; the Render blueprint in README is a demo option only. CI via GitHub Actions.
 
 Stack: Node 24, TypeScript ~6, oxlint, vitest. No tsc in PATH — use `node_modules/.bin/tsc`.
 

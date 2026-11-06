@@ -2,6 +2,7 @@ import Image from 'next/image'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet, useLocation } from '@/lib/router'
 import { useT } from '../../i18n/useT'
+import { siteHref } from '../../lib/siteUrl'
 import { useStore } from '../../store/useStore'
 import type { Role } from '../../types'
 import { NotificationBell } from '../NotificationBell'
@@ -11,8 +12,10 @@ import { LangSwitcher, RoleSwitcher } from './Switchers'
 export interface DashNavItem { id: string; to: string; label: string; icon: string; end?: boolean }
 
 export function DashboardShell({ title, subtitle, items, role, extra }: { title: string; subtitle?: string; items: DashNavItem[]; role: Role; extra?: ReactNode }) {
-  const { t } = useT()
+  const { t, lang } = useT()
   const site = useStore((s) => s.site)
+  // The admin workspace may live on its own host; "back to the site" then has to leave it.
+  const home = role === 'admin' ? siteHref(lang, '') || '/' : '/'
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
@@ -46,7 +49,7 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
         {sidebar}
         {extra && <div className="mt-4">{extra}</div>}
         <div className="mt-6 border-t border-charcoal/10 pt-4">
-          <Link to="/" className="flex items-center gap-2 px-2 text-xs text-charcoal/55 hover:text-forest"><Icon name="arrowLeft" className="h-3.5 w-3.5" />{t('nav.backToSite')}</Link>
+          <a href={home} className="flex items-center gap-2 px-2 text-xs text-charcoal/55 hover:text-forest"><Icon name="arrowLeft" className="h-3.5 w-3.5" />{t('nav.backToSite')}</a>
           <p className="mt-3 px-2 text-[11px] leading-relaxed text-charcoal/40">{t('dash.demoNotice')}</p>
         </div>
       </aside>
@@ -67,7 +70,7 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
           <div className="animate-fade border-b border-charcoal/10 bg-paper px-4 py-4 lg:hidden">
             {sidebar}
             {extra && <div className="mt-3">{extra}</div>}
-            <div className="mt-3 flex items-center justify-between"><Link to="/" className="text-xs text-charcoal/60">{t('nav.backToSite')}</Link><LangSwitcher compact /></div>
+            <div className="mt-3 flex items-center justify-between"><a href={home} className="text-xs text-charcoal/60">{t('nav.backToSite')}</a><LangSwitcher compact /></div>
           </div>
         )}
         <main id="dash-main" className="flex-1 px-4 py-6 md:px-8 md:py-8">

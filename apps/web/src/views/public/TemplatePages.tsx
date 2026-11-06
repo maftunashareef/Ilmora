@@ -584,6 +584,7 @@ function InquiryForm({ s }: { s: Section }) {
     telegram: '',
     courses: '',
     message: '',
+    consent: false,
   })
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
@@ -601,11 +602,13 @@ function InquiryForm({ s }: { s: Section }) {
   const isCenterValid = form.centerName.trim().length >= 2
   const isContactValid = form.contactName.trim().length >= 2
   const isPhoneValid = phoneParsed.ok
-  const isValid = isCenterValid && isContactValid && isPhoneValid
+  // The API stores the consent timestamp, so the visitor must tick the box; nothing is sent without it.
+  const isConsentValid = form.consent
+  const isValid = isCenterValid && isContactValid && isPhoneValid && isConsentValid
 
   const submit = async () => {
     if (busy) return
-    setTouched({ centerName: true, contactName: true, phone: true })
+    setTouched({ centerName: true, contactName: true, phone: true, consent: true })
     if (!isValid) return
 
     setBusy(true)
@@ -622,7 +625,7 @@ function InquiryForm({ s }: { s: Section }) {
           telegram: form.telegram.trim() || undefined,
           courses: form.courses.trim() || undefined,
           message: form.message.trim() || undefined,
-          consent: true,
+          consent: form.consent,
         },
         auth: false,
       })
@@ -639,7 +642,7 @@ function InquiryForm({ s }: { s: Section }) {
         } else if (err.code === 'rate_limited' || err.status === 429) {
           setError(t('centers.form.rateLimited'))
         } else if (err.code === 'consent_required') {
-          setError(t('auth.consent.required'))
+          setError(t('centers.form.consentRequired'))
         } else if (err.status >= 500) {
           setError(t('centers.form.serverError'))
         } else if (err.code === 'validation_failed' && Array.isArray(err.details) && err.details.length) {
@@ -688,6 +691,7 @@ function InquiryForm({ s }: { s: Section }) {
                       telegram: '',
                       courses: '',
                       message: '',
+                      consent: false,
                     })
                   }}
                 >
@@ -775,6 +779,24 @@ function InquiryForm({ s }: { s: Section }) {
                     onChange={(e) => setForm({ ...form, message: e.target.value })}
                   />
                 </Field>
+                <label className="sm:col-span-2 flex cursor-pointer items-start gap-3 text-[13px] leading-relaxed text-charcoal/80">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-forest"
+                    disabled={busy}
+                    checked={form.consent}
+                    onChange={(e) => setForm({ ...form, consent: e.target.checked })}
+                    aria-required
+                    aria-invalid={touched.consent && !isConsentValid ? true : undefined}
+                  />
+                  <span>
+                    {t('centers.form.consent')} <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-forest underline">{t('legal.privacy')}</Link>
+                    <span className="text-garnet"> *</span>
+                  </span>
+                </label>
+                {touched.consent && !isConsentValid && (
+                  <p className="sm:col-span-2 -mt-2 text-xs text-garnet" role="alert">{t('centers.form.consentRequired')}</p>
+                )}
                 {error && (
                   <div className="sm:col-span-2" role="alert">
                     <Notice tone="warn">{error}</Notice>

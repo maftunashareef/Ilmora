@@ -24,7 +24,7 @@ export function StudentProfile() {
         <Toggle checked={draft.reminders} onChange={(v) => setDraft({ ...draft, reminders: v })} label={t('student.profile.reminders')} />
         <div className="flex items-center justify-between gap-3 border-t border-charcoal/10 pt-5">
           <span className="text-xs text-charcoal/50">{dirty ? t('common.unsaved') : t('common.saved')}</span>
-          <Button disabled={!dirty || !draft.displayName.trim()} onClick={() => { updateProfile(student.id, draft); setLang(draft.preferredLang); notify(t('common.saved')) }}>{t('common.saveChanges')}</Button>
+          <Button disabled={!dirty || !draft.displayName.trim()} onClick={() => { void updateProfile(student.id, draft).then(() => { setLang(draft.preferredLang); notify(t('common.saved')) }).catch(() => undefined) }}>{t('common.saveChanges')}</Button>
         </div>
       </Card>
       <Notice tone="info" className="mt-6 max-w-xl text-xs">{t('dash.demoNotice')}</Notice>
