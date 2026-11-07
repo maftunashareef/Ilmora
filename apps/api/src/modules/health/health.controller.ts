@@ -6,7 +6,7 @@ import { PrismaService } from '../../infra/prisma/prisma.service'
 import { RedisService } from '../../infra/redis/redis.service'
 
 /**
- * Liveness: the process answers. Readiness: database and Redis respond (used by Docker/nginx/CI smoke checks).
+ * Liveness: the process answers. Readiness: database and Redis respond (Docker health checks, release smoke checks).
  * These routes sit outside the API prefix and the rate limiter.
  */
 @Controller('health')
