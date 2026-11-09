@@ -1,50 +1,20 @@
-import { type CanActivate, type ExecutionContext, HttpStatus, Inject, Injectable, SetMetadata } from '@nestjs/common'
+import { type CanActivate, type ExecutionContext, HttpStatus, Injectable, SetMetadata } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
-import type { Role } from '../generated/prisma/enums'
+import { PrismaService } from '../infra/prisma/prisma.service'
 import type { RequestActor } from '../infra/tenancy/tenant-context'
 import type { AuthenticatedRequest } from './decorators'
 import { AppError } from './errors'
 
 /**
  * Access rules of the registry (ТЗ «реестр учреждений, компании, студенты», 9.2 and 9.4):
- *  - the new roles;
- *  - `@Approved(kind)`: the account's institution or company must be approved, otherwise 403 `not_approved`;
+ *  - `@Approved(kind)`: the account's institution or company must have been approved, otherwise 403 `not_approved`;
  *  - `ownInstitutionId` / `ownCompanyId`: the scope every query filters by, taken from the session, never from the request.
  */
 
-/**
- * Registry roles. The data engineer's migration adds them to `enum Role`; until then they are not in the generated
- * type, hence the cast. Once the enum has them, replace `REGISTRY_ROLES.X` with the plain literal and delete this.
- */
-export const REGISTRY_ROLES = {
-  INSTITUTION_ADMIN: 'INSTITUTION_ADMIN' as unknown as Role,
-  COMPANY_ADMIN: 'COMPANY_ADMIN' as unknown as Role,
-  MINISTRY: 'MINISTRY' as unknown as Role,
-} as const
-
 export type OrgKind = 'institution' | 'company'
-/** Review status of an institution's or company's profile (ТЗ 4.2, 4.3). */
-export type OrgStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'BLOCKED'
-
-/**
- * Reads the current review status. Read from the database on every request (a short Redis cache is fine), not from
- * the token: a rejection or a block must take effect at once, not when the access token expires.
- */
-export interface OrgStatusReader {
-  status(kind: OrgKind, id: string): Promise<OrgStatus | null>
-}
-export const ORG_STATUS_READER = Symbol('ORG_STATUS_READER')
-
-/** Until the registry tables exist no account has an institution or company, so nothing is approved (fail closed). */
-@Injectable()
-export class StubOrgStatusReader implements OrgStatusReader {
-  async status(): Promise<OrgStatus | null> {
-    return null
-  }
-}
 
 export const APPROVED_KEY = 'ilmora:approved'
-/** The handler (or controller) needs the account's institution / company to be APPROVED. */
+/** The handler (or controller) needs the account's institution / company to have been approved. */
 export const Approved = (kind: OrgKind) => SetMetadata(APPROVED_KEY, kind)
 
 export function orgIdOf(actor: RequestActor | undefined, kind: OrgKind): string | null {
@@ -52,21 +22,33 @@ export function orgIdOf(actor: RequestActor | undefined, kind: OrgKind): string 
   return (kind === 'institution' ? actor.institutionId : actor.companyId) ?? null
 }
 
-/** Runs after AuthGuard and RolesGuard. The Super Admin gets no bypass: approved-only routes act on one's own organization. */
+/**
+ * Runs after AuthGuard and RolesGuard. The workspace is open once the organization was approved (`approvedAt` set):
+ * an approved institution that edits its name goes back to PENDING and keeps working (docs/registry/data-model.md).
+ * Read from the database on every request, not from the token, so a withdrawn approval takes effect at once.
+ * The Super Admin gets no bypass: approved-only routes act on one's own organization.
+ */
 @Injectable()
 export class ApprovedGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector, @Inject(ORG_STATUS_READER) private readonly reader: OrgStatusReader) {}
+  constructor(private readonly reflector: Reflector, private readonly prisma: PrismaService) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const kind = this.reflector.getAllAndOverride<OrgKind | undefined>(APPROVED_KEY, [ctx.getHandler(), ctx.getClass()])
     if (!kind) return true
     const req = ctx.switchToHttp().getRequest<AuthenticatedRequest>()
     const id = orgIdOf(req.actor, kind)
-    const status = id ? await this.reader.status(kind, id) : null
-    if (status !== 'APPROVED') {
-      throw new AppError('not_approved', kind === 'institution' ? 'The institution is not approved yet' : 'The company is not approved yet', HttpStatus.FORBIDDEN, { status })
+    if (!id || !(await this.isApproved(kind, id))) {
+      throw new AppError('not_approved', kind === 'institution' ? 'The institution is not approved yet' : 'The company is not approved yet', HttpStatus.FORBIDDEN)
     }
     return true
+  }
+
+  private async isApproved(kind: OrgKind, id: string): Promise<boolean> {
+    const where = { id, approvedAt: { not: null } }
+    const row = kind === 'institution'
+      ? await this.prisma.client.institution.findFirst({ where: { ...where, mergedIntoId: null }, select: { id: true } })
+      : await this.prisma.client.company.findFirst({ where, select: { id: true } })
+    return row !== null
   }
 }
 

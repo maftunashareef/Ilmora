@@ -3,7 +3,7 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import { CoreModule } from './core.module'
 import { AppExceptionFilter } from './common/filters/app-exception.filter'
 import { AppThrottlerGuard, AuthGuard, RolesGuard } from './common/guards'
-import { ApprovedGuard, ORG_STATUS_READER, StubOrgStatusReader } from './common/registry-access'
+import { ApprovedGuard } from './common/registry-access'
 import { RequestContextMiddleware } from './common/request-context.middleware'
 import { AttendanceModule } from './modules/attendance/attendance.module'
 import { AuthModule } from './modules/auth/auth.module'
@@ -39,8 +39,7 @@ import { WorkerModule } from './worker.module'
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
-    // Registry: approved-only routes (ТЗ 4.2, 4.3). STUB reader until the registry tables exist — nothing is approved.
-    { provide: ORG_STATUS_READER, useClass: StubOrgStatusReader },
+    // Registry: approved-only routes (ТЗ 4.2, 4.3).
     { provide: APP_GUARD, useClass: ApprovedGuard },
   ],
 })

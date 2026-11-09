@@ -49,6 +49,9 @@ export type UserRow = {
   roles: Role[]
   isOwner: boolean
   centerId: string | null
+  /** Registry: the institution / company this account represents (INSTITUTION_ADMIN / COMPANY_ADMIN). */
+  institutionId: string | null
+  companyId: string | null
   isActive: boolean
   offerAcceptedAt: Date | null
   offerVersion: string | null
@@ -324,7 +327,7 @@ export class AccountService {
 
   async openSession(user: UserRow, meta: SessionMeta): Promise<LoginResult> {
     const roles = await this.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null })
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
     const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta)
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: this.toPublic(user, roles) }
   }

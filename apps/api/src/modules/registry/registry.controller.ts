@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
-import { CurrentActor, Roles } from '../../common/decorators'
-import { REGISTRY_ROLES } from '../../common/registry-access'
+import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { DirectionInput, DirectionsQuery, DistrictsQuery, InstitutionsQuery, StudentInstitutionInput } from './registry.schemas'
@@ -25,14 +24,14 @@ export class RegistryController {
 
   /** Institutions fill their directions before approval, so no `@Approved` here. */
   @Post('directions')
-  @Roles('STUDENT', REGISTRY_ROLES.INSTITUTION_ADMIN, REGISTRY_ROLES.COMPANY_ADMIN)
+  @Roles('STUDENT', 'INSTITUTION_ADMIN', 'COMPANY_ADMIN')
   @Throttle({ default: { limit: 20, ttl: DAY } })
-  addDirection(@CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(DirectionInput)) dto: DirectionInput) { return this.registry.addDirection(a, dto) }
+  addDirection(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(DirectionInput)) dto: DirectionInput) { return this.registry.addDirection(t, a, dto) }
 
   @Get('institutions') institutions(@Query(new ZodValidationPipe(InstitutionsQuery)) q: InstitutionsQuery) { return this.registry.searchInstitutions(q) }
 
   @Post('institutions')
   @Roles('STUDENT')
   @Throttle({ default: { limit: 3, ttl: DAY } })
-  addInstitution(@CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(StudentInstitutionInput)) dto: StudentInstitutionInput) { return this.registry.addStudentInstitution(a, dto) }
+  addInstitution(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(StudentInstitutionInput)) dto: StudentInstitutionInput) { return this.registry.addStudentInstitution(t, a, dto) }
 }
