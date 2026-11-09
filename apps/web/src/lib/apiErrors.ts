@@ -39,6 +39,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   // center inquiry form
   invalid_contact_name: 'auth.err.name',
   invalid_center_name: 'apiError.centerName',
+  teacher_center_required: 'apiError.teacherCenterRequired',
+  subscription_closed: 'apiError.subscriptionClosed',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
@@ -64,6 +66,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   invalid_schedule: 'apiError.schedule',
   invalid_featured: 'apiError.featured',
   storage_not_configured: 'studio.channel.storageUnavailable',
+  storage_unavailable: 'studio.upload.unavailable',
   invalid_site_config: 'apiError.siteConfig',
   // university packages
   invalid_preset_course: 'apiError.presetData',

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { isSafeExternalUrl } from './catalog.js'
-import { presetMissingSubjects, presetPublishability, presetTotal, presetCourses, universityDirections, type PresetCourse } from './presets.js'
+import { presetNeedsConfirmation, presetPublishability, presetTotal, presetCourses, universityDirections, type PresetCourse } from './presets.js'
 import * as sampleData from './sample-data.js'
 import type { Preset } from './types.js'
 import { UNIVERSITIES, UNIVERSITY_PACKAGES } from './university-packages.js'
+import { isPreparationTrack } from './presets.js'
 
 /** The ILMORA offline courses a subject may be mapped to (sample catalog ids; resolved by id or slug at import time). */
 const OFFLINE: PresetCourse[] = sampleData.courses.map((c) => ({ id: c.id, status: c.status, visibility: c.visibility, groups: c.groups.map((g) => ({ id: g.id })) }))
@@ -26,8 +27,8 @@ describe('researched university packages', () => {
     for (const p of UNIVERSITY_PACKAGES) expect(uniIds, p.id).toContain(p.universityId)
   })
 
-  it('give every university a name, a city and an https website', () => {
-    for (const u of UNIVERSITIES) {
+  it('give every university a name, a city and an https website (a preparation track is not a university and has none)', () => {
+    for (const u of UNIVERSITIES.filter((x) => !isPreparationTrack(x))) {
       expect(u.name.trim(), u.id).not.toBe('')
       expect(u.city?.trim(), u.id).toBeTruthy()
       expect(isSafeExternalUrl(u.website), u.id).toBe(true)
@@ -73,12 +74,12 @@ describe('researched university packages', () => {
     }
   })
 
-  it('can be published only when every subject has a course and the requirement is verified', () => {
+  it('can be published with an official source and at least one covered required subject (unverified ones are marked)', () => {
     for (const p of UNIVERSITY_PACKAGES) {
       const preset = toPreset(p)
-      const missing = presetMissingSubjects(preset)
-      const result = presetPublishability(preset, OFFLINE)
-      expect(result.ok, p.id).toBe(missing.length === 0 && p.admission.status === 'verified')
+      const coveredRequired = preset.slots.some((s) => !s.optional && s.courseId)
+      expect(presetPublishability(preset, OFFLINE).ok, p.id).toBe(isSafeExternalUrl(p.admission.url) && coveredRequired)
+      expect(presetNeedsConfirmation(preset), p.id).toBe(p.admission.status !== 'verified' || !p.admission.academicYear || !p.admission.checkedOn)
     }
   })
 
@@ -87,8 +88,8 @@ describe('researched university packages', () => {
     const drafts = UNIVERSITY_PACKAGES.filter((p) => !presetPublishability(toPreset(p), OFFLINE).ok)
     expect(publishable.length).toBeGreaterThan(0)
     expect(drafts.length).toBeGreaterThan(0)
-    // every unpublishable package is explained by a missing course or an unverified source
-    for (const p of drafts) expect(p.subjects.some((s) => s.course === null) || p.admission.status !== 'verified', p.id).toBe(true)
+    // every unpublishable package is explained: no required subject has an ILMORA course (never a made-up one)
+    for (const p of drafts) expect(p.subjects.filter((s) => !s.optional).every((s) => s.course === null), p.id).toBe(true)
   })
 
   it('totals a publishable package from its courses’ own prices only (no package discount of its own)', () => {
@@ -136,20 +137,22 @@ describe('faculties, directions and the INHA and Narxoz data', () => {
     expect(business.subjects.filter((s) => !s.optional).map((s) => s.label.en)).toEqual(['Mathematics'])
   })
 
-  it('keeps every Narxoz pair an unverified draft: one package per pair, never one universal package', () => {
+  it('keeps every Narxoz pair marked for confirmation: one package per pair, never one universal package', () => {
     const narxoz = UNIVERSITY_PACKAGES.filter((p) => p.universityId === 'uni-narxoz')
     expect(narxoz).toHaveLength(6)
     for (const p of narxoz) {
       expect(p.admission.status, p.id).toBe('needs_review')
+      expect(presetNeedsConfirmation(toPreset(p)), p.id).toBe(true)
       expect(p.subjects, p.id).toHaveLength(2)
       expect(p.directionIds, p.id).toHaveLength(1)
-      expect(presetPublishability(toPreset(p), OFFLINE).ok, p.id).toBe(false)
     }
+    // Law + World History: ILMORA has a course for neither, so that pair cannot be offered
+    expect(narxoz.filter((p) => !presetPublishability(toPreset(p), OFFLINE).ok).map((p) => p.id)).toEqual(['uni-narxoz-law-history'])
   })
 })
 
 describe('the seven universities of the preparation catalogue', () => {
-  const ids = ['uni-inha', 'uni-narxoz', 'uni-tuit', 'uni-kiut', 'uni-mdis', 'uni-millat-umidi', 'uni-wiut']
+  const ids = ['uni-inha', 'uni-tsue', 'uni-tuit', 'uni-kiut', 'uni-mdis', 'uni-millat-umidi', 'uni-wiut']
   const packagesOf = (id: string) => UNIVERSITY_PACKAGES.filter((p) => p.universityId === id)
 
   it('each has its official name and an https website on its own domain', () => {
@@ -161,17 +164,40 @@ describe('the seven universities of the preparation catalogue', () => {
     }
   })
 
-  it('publishes only what an official 2026 page states: INHA and WIUT verified, the others to be verified', () => {
+  it('calls verified only what an official 2026 page states: INHA and WIUT verified, Narxoz, TUIT, KIUT and MDIS to be confirmed', () => {
     for (const id of ['uni-inha', 'uni-wiut']) for (const p of packagesOf(id)) expect(p.admission, p.id).toMatchObject({ status: 'verified', academicYear: '2026-2027' })
-    for (const id of ['uni-narxoz', 'uni-tuit', 'uni-kiut', 'uni-mdis']) {
-      expect(packagesOf(id).length, id).toBeGreaterThan(0)
-      for (const p of packagesOf(id)) expect(presetPublishability(toPreset(p), OFFLINE).ok, p.id).toBe(false)
-    }
-    expect(packagesOf('uni-millat-umidi')).toEqual([]) // nothing could be read on its official site
+    for (const id of ['uni-narxoz', 'uni-tuit', 'uni-kiut', 'uni-mdis']) for (const p of packagesOf(id)) expect(presetNeedsConfirmation(toPreset(p)), p.id).toBe(true)
   })
 
-  it('are all shown on the University preparation page (with CAU, already shown), while their unverified packages stay drafts', () => {
-    expect(UNIVERSITIES.filter((u) => u.published).map((u) => u.id).sort()).toEqual([...ids, 'uni-cau'].sort())
+  it('gives every university of the catalogue (and CAU) at least one package the site can publish', () => {
+    for (const id of [...ids, 'uni-cau']) expect(packagesOf(id).filter((p) => presetPublishability(toPreset(p), OFFLINE).ok).length, id).toBeGreaterThan(0)
+  })
+
+  const tracks = ['prep-economics', 'prep-general', 'prep-it', 'prep-law', 'prep-medical']
+
+  it('are all shown on the University Admission page (with CAU, already shown, and the preparation tracks); Narxoz is not', () => {
+    expect(UNIVERSITIES.filter((u) => u.published).map((u) => u.id).sort()).toEqual([...ids, 'uni-cau', ...tracks].sort())
+    expect(UNIVERSITIES.filter((u) => isPreparationTrack(u)).map((u) => u.id).sort()).toEqual(tracks)
+  })
+
+  it('gives every route of every preparation track a package the site can publish, from existing courses', () => {
+    for (const id of tracks) {
+      const routes = UNIVERSITIES.find((u) => u.id === id)!.faculties!.flatMap((f) => f.directions)
+      expect(routes.length, id).toBeGreaterThanOrEqual(2)
+      for (const route of routes) {
+        const offers = packagesOf(id).filter((p) => p.directionIds?.includes(route.id))
+        expect(offers.filter((p) => presetPublishability(toPreset(p), OFFLINE).ok).length, route.id).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('marks a track package unverified unless it rests on a source that states the requirement, and keeps programming an optional extra', () => {
+    const status = (id: string) => UNIVERSITY_PACKAGES.find((p) => p.id === id)!.admission.status
+    expect(status('prep-it-state')).toBe('verified')
+    expect(status('prep-economics-state')).toBe('verified')
+    for (const id of ['prep-general-state', 'prep-general-international', 'prep-it-engineering', 'prep-it-international', 'prep-economics-english']) expect(status(id), id).toBe('needs_review')
+    const extra = UNIVERSITY_PACKAGES.find((p) => p.id === 'prep-it-state')!.subjects.find((s) => s.course === 'c-python')!
+    expect(extra.optional).toBe(true)
   })
 
   it('maps WIUT programmes to packages by their stated requirements, and leaves Business Information Systems without one', () => {

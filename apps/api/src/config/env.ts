@@ -140,6 +140,9 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     if (!env.COOKIE_SECURE) throw new Error('COOKIE_SECURE must be true in production')
     if (env.SMS_PROVIDER === 'console' && !env.SMS_ALLOW_CONSOLE_IN_PRODUCTION) throw new Error('SMS_PROVIDER=console is not allowed in production unless SMS_ALLOW_CONSOLE_IN_PRODUCTION=true (demo/staging without an SMS contract)')
     if (env.REDIS_MODE !== 'redis') throw new Error('REDIS_MODE=off is a development convenience and is not allowed in production')
+    // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
+    if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
+    if (clickConfigured(env) && env.CLICK_ALLOWED_IPS.length === 0) console.warn('CLICK_ALLOWED_IPS is empty: Click callbacks are accepted from any address (the signature is still checked)')
   }
   return env
 }

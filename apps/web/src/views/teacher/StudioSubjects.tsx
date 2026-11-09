@@ -57,11 +57,11 @@ export function StudioSubjects() {
           ))}
         </ul>
       </section>
-      <Modal open={!!subject} onClose={() => setSubject(null)} title={t('studio.newSubject')} footer={<><Button variant="ghost" onClick={() => setSubject(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (subject && (subject.name.uz || subject.name.en || subject.name.ru)) { upsertSubject(subject); setSubject(null); notify(t('common.saved')) } }}>{t('common.save')}</Button></>}>
+      <Modal open={!!subject} onClose={() => setSubject(null)} title={t('studio.newSubject')} footer={<><Button variant="ghost" onClick={() => setSubject(null)}>{t('common.cancel')}</Button><Button onClick={() => { if (subject && (subject.name.uz || subject.name.en || subject.name.ru)) { void upsertSubject(subject).then(() => { setSubject(null); notify(t('common.saved')) }).catch(() => undefined) } }}>{t('common.save')}</Button></>}>
         {subject && <div className="space-y-4"><LField label={t('common.name')} required value={subject.name} onChange={(v) => setSubject({ ...subject, name: v })} /><LField label={t('common.description')} value={subject.description} onChange={(v) => setSubject({ ...subject, description: v })} /></div>}
       </Modal>
       <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('studio.newCourse') : editing ? tr(editing.title) : ''}>
-        {editing && <CourseForm mode="teacher" teacherId={teacher.id} initial={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSave={(c) => { upsertCourse(c); setEditing(null); notify(t('common.saved')) }} />}
+        {editing && <CourseForm mode="teacher" teacherId={teacher.id} initial={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSave={(c) => { void upsertCourse(c).then(() => { setEditing(null); notify(t('common.saved')) }).catch(() => undefined) }} />}
       </Modal>
     </div>
   )

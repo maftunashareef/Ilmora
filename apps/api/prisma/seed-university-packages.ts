@@ -11,8 +11,9 @@
  * faculties and directions, whether the university is shown on the site, a package's directions, an optional extra such as
  * IELTS) filled in where they are still empty. Each subject is mapped to an existing ILMORA offline course by the
  * course id or slug named in the data file; a subject with no such course is left unmapped and reported, never filled with
- * a made-up course. A package is published only when presetPublishability allows it (every subject mapped to an available
- * course AND its admission requirements verified against an official page); everything else stays an unpublished draft.
+ * a made-up course. A package is published only for a university the site shows and when presetPublishability allows it
+ * (an official source page, at least one subject covered, every named course available); unverified requirements are shown
+ * as "requires confirmation". Everything else stays an unpublished draft.
  */
 import { PrismaPg } from '@prisma/adapter-pg'
 import { presetPublishability, UNIVERSITIES, UNIVERSITY_PACKAGES, type Preset, type PresetCourse, type University } from '@ilmora/shared'
@@ -59,13 +60,18 @@ async function main() {
 
   // Records imported before faculties, directions and optional subjects existed get those fields filled in, and only
   // where they are still empty: nothing an admin has entered is replaced. With --refresh, the researched records are
-  // re-applied instead (an uploaded logo is kept) and each package is published again only by the publishing rule.
+  // re-applied instead (a logo an admin uploaded is kept; a logo file shipped under /universities/ follows the data file) and
+  // each package is published again only by the publishing rule.
   let completed = 0
+  // Packages are published only for the universities the site shows (UNIVERSITIES[].published); the others stay drafts.
+  const shown = new Set(UNIVERSITIES.filter((u) => u.published).map((u) => u.id))
+  const publishable = (preset: Preset) => shown.has(preset.universityId ?? '') && presetPublishability(preset, courses).ok
   const universities = (data.universities ?? []).map((stored) => {
     const seed = UNIVERSITIES.find((u) => u.id === stored.id)
     if (!seed) return stored
     if (REFRESH) {
-      const next = { ...seed, logoUrl: stored.logoUrl || seed.logoUrl }
+      const uploaded = stored.logoUrl && !stored.logoUrl.startsWith('/universities/') ? stored.logoUrl : undefined
+      const next = { ...seed, logoUrl: uploaded || seed.logoUrl }
       if (JSON.stringify(next) !== JSON.stringify(stored)) completed++
       return next
     }
@@ -88,7 +94,7 @@ async function main() {
     if (!seed) return stored
     if (REFRESH) {
       const next = toPreset(seed)
-      next.enabled = presetPublishability(next, courses).ok
+      next.enabled = publishable(next)
       if (JSON.stringify(next) !== JSON.stringify(stored)) completed++
       return next
     }
@@ -108,8 +114,7 @@ async function main() {
   for (const seed of UNIVERSITY_PACKAGES) {
     if (presets.some((p) => p.id === seed.id)) continue
     const preset = toPreset(seed)
-    const result = presetPublishability(preset, courses)
-    preset.enabled = result.ok
+    preset.enabled = publishable(preset)
     presets.push(preset)
     added++
     if (preset.enabled) published++

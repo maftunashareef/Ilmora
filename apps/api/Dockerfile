@@ -2,7 +2,7 @@
 # ILMORA API — multi-stage build. Targets:
 #   api      : production runtime (API or worker, selected by APP_ROLE / command), non-root, prod deps only
 #   migrator : same code with the Prisma CLI, used only to run `prisma migrate deploy` before a rollout
-# Size is measured with `docker image inspect --format '{{.Size}}'` (uncompressed); see docs/deployment.md.
+# Size is measured with `docker image inspect --format '{{.Size}}'` (uncompressed).
 
 ARG NODE_IMAGE=node:24-alpine
 

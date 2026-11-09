@@ -8,6 +8,7 @@ import { CourseForm } from '../../components/course/CourseForm'
 import { DiscountFields } from '../../components/course/DiscountFields'
 import { Badge, Button, Card, EmptyState, Icon, Modal, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
+import { siteHref } from '../../lib/siteUrl'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { publishSeatCounts } from '../../lib/enrollment'
@@ -102,7 +103,7 @@ export function CenterCourses() {
               <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 p-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link to={`/courses/${c.id}`} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</Link>
+                    {scope.admin ? <a href={siteHref(lang, `/courses/${c.id}`)} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</a> : <Link to={`/courses/${c.id}`} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</Link>}
                     <StatusBadge status={c.status} />
                     <VisibilityBadge visibility={c.visibility} />
                   </div>
@@ -112,9 +113,9 @@ export function CenterCourses() {
                 </div>
                 <div className="text-right text-sm font-medium text-charcoal"><PriceNow course={c} withCurrency /></div>
                 <div className="flex gap-1">
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(c)}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(c)} aria-label={t('common.edit')}><Icon name="edit" className="h-3.5 w-3.5" /></Button>
                   <Button size="sm" variant="secondary" onClick={() => { setDiscounting(c); setDraft(discountToDraft(c.discount)) }} title={c.discount ? t('center.editDiscount') : t('center.setDiscount')}><Icon name="tag" className="h-3.5 w-3.5" /></Button>
-                  <Button size="sm" variant="danger" disabled={busy} onClick={() => void remove(c)}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="danger" disabled={busy} onClick={() => void remove(c)} aria-label={t('common.delete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
                 </div>
               </Card>
             </li>

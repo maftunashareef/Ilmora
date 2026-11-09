@@ -20,7 +20,7 @@ export const OFFER_UZ: LegalBlock[] = [
 },
 {
 "t": "p",
-"text": "«ANJIR-GROUP» masʼuliyati cheklangan jamiyati, STIR 312525684, manzili: Toshkent shahri, Shayxontohur tumani, Hadra MFY, Hadra mavzesi, 5-uy, 54-xonadon (bundan buyon — «Operator»), Ustav asosida ish yurituvchi direktor ABDUHAMIDOV ABDURASHID ABDUVOHID OʻGʻLI timsolida, https://ilmora-ten.vercel.app manzilidagi ILMORA platformasining (bundan buyon — «Platforma») egasi va operatori sifatida Oʻzbekiston Respublikasi Fuqarolik kodeksining 369- va 370-moddalariga muvofiq ushbu ommaviy ofertani (bundan buyon — «Oferta») eʼlon qiladi va har qanday muomalaga layoqatli jismoniy shaxsga quyida bayon etilgan shartlarda shartnoma tuzishni taklif qiladi."
+"text": "«ANJIR-GROUP» masʼuliyati cheklangan jamiyati, STIR 312525684, manzili: Toshkent shahri, Shayxontohur tumani, Hadra MFY, Hadra mavzesi, 5-uy, 54-xonadon (bundan buyon — «Operator»), Ustav asosida ish yurituvchi direktor ABDUHAMIDOV ABDURASHID ABDUVOHID OʻGʻLI timsolida, https://ilmoraa.uz manzilidagi ILMORA platformasining (bundan buyon — «Platforma») egasi va operatori sifatida Oʻzbekiston Respublikasi Fuqarolik kodeksining 369- va 370-moddalariga muvofiq ushbu ommaviy ofertani (bundan buyon — «Oferta») eʼlon qiladi va har qanday muomalaga layoqatli jismoniy shaxsga quyida bayon etilgan shartlarda shartnoma tuzishni taklif qiladi."
 },
 {
 "t": "p",
@@ -72,7 +72,7 @@ export const OFFER_UZ: LegalBlock[] = [
 },
 {
 "t": "clause",
-"text": "1.11. Toʻlov provayderi — bank kartasi yoki boshqa usulda toʻlovni qabul qiladigan tashkilot: ______________, ______________."
+"text": "1.11. Toʻlov provayderi — bank kartasi yoki boshqa usulda toʻlovni qabul qiladigan tashkilot: Payme, Click."
 },
 {
 "t": "clause",
@@ -256,7 +256,7 @@ export const OFFER_UZ: LegalBlock[] = [
 },
 {
 "t": "clause",
-"text": "5.4. Toʻlov tartibi. Toʻlov — Davr boshlanishidan oldin soʻmda 100% oldindan toʻlov. Usullari: bank kartasi (Uzcard, Humo [va boshqalar: ____]) va Toʻlov provayderlari ______________ orqali boshqa usullar. Karta maʼlumotlari Toʻlov provayderi sahifasida kiritiladi, Operator ularni saqlamaydi."
+"text": "5.4. Toʻlov tartibi. Toʻlov — Davr boshlanishidan oldin soʻmda 100% oldindan toʻlov. Usullari: bank kartasi (Uzcard, Humo) va Toʻlov provayderlari Payme va Click orqali boshqa usullar. Karta maʼlumotlari Toʻlov provayderi sahifasida kiritiladi, Operator ularni saqlamaydi."
 },
 {
 "t": "clause",
@@ -746,12 +746,12 @@ export const OFFER_UZ: LegalBlock[] = [
 {
 "t": "kv",
 "label": "H/r (elektron tijorat hisob-kitoblari uchun)",
-"value": "20208000507335080001 [agar qonun boʻyicha elektron tijorat uchun alohida hisob kerak boʻlsa — uni koʻrsatish: ____]"
+"value": "20208000107335080002"
 },
 {
 "t": "kv",
 "label": "Bank, MFO",
-"value": "«IPAK YOʻLI» AIT Banki Bosh ofisi, Toshkent sh.; MFO 00444"
+"value": "________________________ (bank); MFO 00401"
 },
 {
 "t": "kv",
@@ -781,7 +781,7 @@ export const OFFER_UZ: LegalBlock[] = [
 {
 "t": "kv",
 "label": "Sayt",
-"value": "https://ilmora-ten.vercel.app [ishga tushirilganda asosiy domenga almashtirish]"
+"value": "https://ilmoraa.uz"
 },
 {
 "t": "kv",

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { billedSom } from '@ilmora/shared'
 import { Link, useNavigate } from '@/lib/router'
 import { FormatBadge, ScheduleChips } from '../../components/course/CourseCard'
@@ -14,8 +15,20 @@ export function StudentSubscription() {
   const nav = useNavigate()
   const student = useCurrentStudent()
   const s = useStore()
+  const [busy, setBusy] = useState<'renew' | 'cancel' | null>(null)
   if (!student) return null
   const sub = student.subscription
+  // Renewal is paid on the provider's page: the store redirects there once the API has created the payment; errors are toasted by the store.
+  const renew = async () => {
+    if (busy) return
+    setBusy('renew')
+    try { await s.renewSubscription(student.id) } catch { /* toasted by the store */ } finally { setBusy(null) }
+  }
+  const cancel = async () => {
+    if (busy || !confirm(t('common.confirmDelete'))) return
+    setBusy('cancel')
+    try { await s.cancelSubscription(student.id); s.notify(t('common.saved')) } catch { /* toasted by the store */ } finally { setBusy(null) }
+  }
   const pkg = s.site.packages.find((p) => p.id === sub.packageId)
   const groups = resolveGroups(sub.groupIds, s.courses)
   const listTotal = groups.reduce((n, g) => n + (s.courses.find((c) => c.id === g.courseId)?.price ?? 0), 0)
@@ -25,7 +38,7 @@ export function StudentSubscription() {
   if (sub.status !== 'active') return <div><PageTitle eyebrow={t('dash.studentSpace')} title={t('student.subscription')} /><EmptyState title={t('student.overview.noSub')} action={<LinkButton to="/builder">{t('student.overview.buildOne')}</LinkButton>} /></div>
   return (
     <div>
-      <PageTitle eyebrow={t('dash.studentSpace')} title={t('student.subscription')} action={<><Button variant="secondary" onClick={() => { s.setBuilderPackage(student.id, pkg?.id ?? null); nav('/builder') }}><Icon name="edit" className="h-4 w-4" />{t('student.sub.change')}</Button><Button onClick={() => { s.renewSubscription(student.id); s.notify(t('student.sub.renewed')) }}><Icon name="refresh" className="h-4 w-4" />{t('student.sub.renewNow')}</Button></>} />
+      <PageTitle eyebrow={t('dash.studentSpace')} title={t('student.subscription')} action={<><Button variant="secondary" onClick={() => { s.setBuilderPackage(student.id, pkg?.id ?? null); nav('/builder') }}><Icon name="edit" className="h-4 w-4" />{t('student.sub.change')}</Button><Button disabled={busy !== null} onClick={() => void renew()}><Icon name="refresh" className={busy === 'renew' ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />{busy === 'renew' ? t('checkout.redirecting') : t('student.sub.renewNow')}</Button></>} />
       <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <Card className="p-7">
           <div className="flex items-start justify-between"><div><Eyebrow>{t('student.sub.package')}</Eyebrow><div className="mt-1 font-display text-5xl text-charcoal">{pkg ? tr(pkg.name) : t('builder.custom')}</div></div>{sub.blocked ? <Badge tone="danger">{t('student.sub.blocked')}</Badge> : <Badge tone="forest">{t('common.enabled')}</Badge>}</div>
@@ -49,7 +62,7 @@ export function StudentSubscription() {
           {total < listTotal && <p className="mt-1 text-[11px] text-charcoal/45">{t('discount.applied')}</p>}
           <p className="mt-2 text-[11px] text-charcoal/45">{t('builder.transparent')}</p>
           <Notice tone="info" className="mt-5 text-xs">{t('preview.renewalNote')} {t('preview.paymentNote')}</Notice>
-          <Button variant="danger" size="sm" className="mt-5" onClick={() => { if (confirm(t('common.confirmDelete'))) { s.cancelSubscription(student.id); s.notify(t('common.saved')) } }}>{t('student.sub.cancel')}</Button>
+          <Button variant="danger" size="sm" className="mt-5" disabled={busy !== null} onClick={() => void cancel()}>{t('student.sub.cancel')}</Button>
         </Card>
         <div>
           <Eyebrow className="mb-3">{t('student.courses')}</Eyebrow>

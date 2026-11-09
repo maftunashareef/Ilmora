@@ -186,11 +186,9 @@ export class AccountService {
   async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult> {
     const raw = input.login.trim()
     const login = raw.normalize('NFKC').toLowerCase()
-    // Lock on the canonical identity, not the raw text: a phone typed in different styles (+998…, 998…, 90…, with
-    // spaces) must map to ONE lock bucket, otherwise the 10-failure lock is bypassed by varying the spelling (Ж7).
+    // The failure counter follows the account, not the spelling: every way of writing a phone shares one lock.
     const phoneParsed = normalizeUzPhone(raw)
-    const identity = phoneParsed.ok ? `phone:${phoneParsed.e164}` : `login:${login}`
-    const key = `login:fail:${tenantId}:${identity}`
+    const key = `login:fail:${tenantId}:${phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
     await this.assertNotLocked(key)
 
     // Lookup user by normalized phone number or by unique login username
@@ -354,7 +352,7 @@ export class AccountService {
     const root = base.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'teacher'
     for (let n = 0; n < 50; n++) {
       const slug = n === 0 ? root : `${root}-${n + 1}`
-      if (!(await tx.teacherProfile.findFirst({ where: { tenantId, slug }, select: { id: true } }))) return slug
+      if (!(await tx.teacherProfile.findFirst({ where: { tenantId, slug }, select: { id: true }, includeDeleted: true } as never))) return slug
     }
     return `${root}-${Date.now().toString(36)}`
   }

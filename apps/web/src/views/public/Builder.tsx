@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { countLabel, foldForSearch, isOnlineCourse, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals } from '@ilmora/shared'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { countLabel, foldForSearch, isOnlineCourse, isPreparationTrack, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { Link, useNavigate, useSearchParams } from '@/lib/router'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
@@ -7,13 +7,72 @@ import { ArtCover, Badge, Button, Card, cx, Eyebrow, Icon, Input, Modal, Notice,
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
 import { UniversityPackagesSection } from './UniversityPackages'
+import { UniversityLogo } from './Universities'
+import { arrangeCartByPackage } from '../../lib/cartPackages'
+import { formatSom } from '../../lib/format'
+import { usePresetCart } from '../../store/usePresetCart'
 import { CourseFinderPrompt } from './CourseFinder'
 import { JourneyTracker } from '../../components/JourneySteps'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import { findConflicts, overlaps, resolveGroups, weeklyHours } from '../../lib/schedule'
 import { useCurrentStudent } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
-import type { Course, Preset } from '../../types'
+import type { Course, Group, Preset, University } from '../../types'
+
+/** One course of the cart: center, group and schedule, price, and buttons to switch the group or take it out. */
+function CartLine({ group, course, clash, onChangeGroup, onRemove }: { group: Group; course: Course; clash: boolean; onChangeGroup?: () => void; onRemove: () => void }) {
+  const { t, tr } = useT()
+  const center = useStore((s) => s.centers.find((x) => x.id === course.centerId))
+  return (
+    <li className="flex items-start justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <div className="break-words text-sm font-medium text-charcoal">{tr(course.title)}</div>
+        <div className="mt-0.5 break-words text-[11px] text-charcoal/55">{[center?.name, group.name].filter(Boolean).join(' · ')}</div>
+        <div className="mt-1"><ScheduleChips group={group} compact /></div>
+        {clash && <div className="mt-1 text-[11px] text-red-700">{t('builder.conflict')}</div>}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="whitespace-nowrap text-right text-sm text-charcoal"><PriceNow course={course} /></div>
+        <div className="flex gap-0.5">
+          {onChangeGroup && <button type="button" onClick={onChangeGroup} aria-label={t('builder.changeGroup')} title={t('builder.changeGroup')} className="rounded-full p-1.5 text-charcoal/45 transition hover:bg-sage hover:text-forest"><Icon name="refresh" className="h-3.5 w-3.5" /></button>}
+          <button type="button" onClick={onRemove} aria-label={t('common.remove')} title={t('common.remove')} className="rounded-full p-1.5 text-charcoal/45 transition hover:bg-red-50 hover:text-red-700"><Icon name="x" className="h-3.5 w-3.5" /></button>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+/**
+ * A university package in the cart: the university, the chosen faculty and direction, the package name, its courses
+ * (children), the package's monthly price and a button that takes the whole package out.
+ */
+function CartPackage({ preset, university, directionId, groups, onRemove, children }: { preset: Preset; university?: University; directionId?: string; groups: Group[]; onRemove: () => void; children: ReactNode }) {
+  const { t, tr, lang } = useT()
+  const courses = useStore((s) => s.courses)
+  const place = university && directionId ? universityDirections(university).find((x) => x.direction.id === directionId) : undefined
+  const track = !!university && isPreparationTrack(university)
+  const total = priceTotals(groups.map((g) => courses.find((c) => c.id === g.courseId)).filter((c): c is Course => !!c))
+  return (
+    <section className="rounded-card border border-champagne/55 bg-gradient-to-br from-ivory via-paper to-sage/35 p-4" aria-label={tr(preset.name)}>
+      <div className="flex items-center justify-between gap-3">
+        {university ? <UniversityLogo university={university} height={40} maxWidth={150} align="start" /> : <span className="eyebrow">{t('uni.cartPackage')}</span>}
+        <button type="button" onClick={onRemove} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-charcoal/10 bg-paper px-2.5 py-1 text-[11px] font-medium text-charcoal/60 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"><Icon name="trash" className="h-3.5 w-3.5" />{t('uni.removePackage')}</button>
+      </div>
+      {university && <div className="eyebrow mt-3">{t('uni.cartPackage')}</div>}
+      {university && <div className="mt-0.5 break-words font-display text-lg leading-tight text-charcoal">{universityName(university, lang)}</div>}
+      {place && <div className="mt-0.5 break-words text-[11px] text-charcoal/60">{[track ? '' : tr(place.faculty.name), tr(place.direction.name)].filter(Boolean).join(' · ')}</div>}
+      <div className="mt-1 break-words text-xs font-semibold text-forest">{tr(preset.name)}</div>
+      <ul className="mt-2 divide-y divide-charcoal/10">{children}</ul>
+      <div className="flex items-baseline justify-between gap-3 border-t border-champagne/50 pt-2.5 text-sm">
+        <span className="text-charcoal/60">{t('uni.packagePrice')}</span>
+        <span className="whitespace-nowrap font-semibold tabular-nums text-charcoal">
+          {total.saved > 0 && <span className="mr-1.5 text-xs font-normal text-charcoal/45 line-through">{formatSom(total.list, lang, false)}</span>}
+          {formatSom(total.final, lang)}
+        </span>
+      </div>
+    </section>
+  )
+}
 
 export function BuilderPage() {
   const { t, tr, lang } = useT()
@@ -29,13 +88,13 @@ export function BuilderPage() {
   const setBuilderPackage = useStore((s) => s.setBuilderPackage)
   const addBuilderGroup = useStore((s) => s.addBuilderGroup)
   const removeBuilderCourse = useStore((s) => s.removeBuilderCourse)
+  const removeCartBundle = useStore((s) => s.removeCartBundle)
+  const cartBundles = useStore((s) => s.cartBundles)
   const notify = useStore((s) => s.notify)
   const guestHydrated = useStore((s) => s.guestHydrated)
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('')
   const [picker, setPicker] = useState<Course | null>(null)
-  // Courses of an added preset that still need a group choice, in order; the group picker walks through them.
-  const [queue, setQueue] = useState<Course[]>([])
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
 
@@ -81,7 +140,7 @@ export function BuilderPage() {
   const tryAdd = (groupId: string) => {
     if (!student) return
     const r = addBuilderGroup(student.id, groupId)
-    if (r.ok) { notify(t('courses.inPlan')); setPicker(queue[0] ?? null); setQueue(queue.slice(1)); return }
+    if (r.ok) { notify(t('courses.inPlan')); setPicker(null); return }
     const conflictName = r.conflictWith ? tr(courses.find((c) => c.id === r.conflictWith)?.title) : ''
     const msg = { 'no-package': t('builder.pickPackageFirst'), limit: pkg ? t('builder.limitReached') : t('builder.customLimit', { n: MAX_CART_COURSES }), duplicate: t('builder.duplicate'), conflict: `${t('builder.conflict')} — ${conflictName}. ${t('builder.conflictHint')}`, disabled: t('builder.packageDisabled'), full: `${t('capacity.full')} — ${t('capacity.fullHint')}` }[r.reason]
     notify(msg, 'warn')
@@ -92,26 +151,14 @@ export function BuilderPage() {
     else setPicker(c)
   }
 
-  // Adds the courses of a ready-made preset to the same cart: regular validation, no duplicates, nothing added half-way.
-  // `chosenOptional` lists the optional extras the student kept (from the university page); without it every course counts.
+  // A ready-made package goes into the same cart in one step (groups picked automatically, nothing added half-way).
+  const addPreset = usePresetCart()
   const startPreset = (preset: Preset, chosenOptional?: string[]) => {
-    if (!student) return
-    const plan = presetCartPlan(preset, courses, student.builder.groupIds, chosenOptional)
-    if (plan.toAdd.length === 0) { notify(t('preset.allInCart')); return }
-    if (selectedGroups.length + plan.toAdd.length > maxSelectable) { notify(pkg ? t('builder.limitReached') : t('builder.customLimit', { n: MAX_CART_COURSES }), 'warn'); return }
-    // Courses with a single group can be checked up front; if one would clash or is full, nothing is added.
-    const fixed = plan.toAdd.filter((c) => c.groups.length === 1).map((c) => c.groups[0])
-    if (findConflicts([...selectedGroups, ...fixed]).length > 0 || fixed.some((g) => isGroupFull(g, students, student.id))) { notify(t('preset.cannotAdd'), 'warn'); return }
-    const pending: Course[] = []
-    for (const c of plan.toAdd) {
-      if (c.groups.length > 1) { pending.push(c); continue }
-      if (!addBuilderGroup(student.id, c.groups[0].id).ok) { notify(t('preset.cannotAdd'), 'warn'); return }
-    }
-    if (plan.inCart.length > 0) notify(t('preset.skipped'))
-    if (pending.length > 0) { setQueue(pending.slice(1)); setPicker(pending[0]) } else notify(t('preset.added'))
+    if (student && presetCartPlan(preset, courses, student.builder.groupIds, chosenOptional).toAdd.length === 0) { notify(t('preset.allInCart')); return }
+    addPreset(preset, { chosenOptional })
   }
 
-  // /builder?preset=<id>&extra=<slotIds> (Enroll on a university page) adds that published package once, with the chosen extras.
+  // /builder?preset=<id>&extra=<slotIds> (older links to a university package) adds that published package once, with the chosen extras.
   const handledPreset = useRef<string | null>(null)
   useEffect(() => {
     const id = params.get('preset')
@@ -122,6 +169,20 @@ export function BuilderPage() {
     handledPreset.current = key
     startPreset(preset, (params.get('extra') ?? '').split(',').filter(Boolean))
   }, [params, student, presets, guestHydrated, startPreset]) // startPreset is new every render; handledPreset makes this run once per link
+
+  // /builder#cart ("Go to cart" after adding a package) opens on the summary, which on phones sits below the course list.
+  useEffect(() => {
+    if (window.location.hash !== '#cart') return
+    const timer = setTimeout(() => document.getElementById('cart')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+    return () => clearTimeout(timer)
+  }, [])
+
+  // University packages in the cart are shown together (each course once); the remaining courses follow on their own.
+  const { packages: cartPackages, loose: looseGroups } = arrangeCartByPackage(selectedGroups, cartBundles, presets ?? [], universities ?? [])
+  const cartLine = (g: (typeof selectedGroups)[number]) => {
+    const c = courses.find((x) => x.id === g.courseId)!
+    return <CartLine key={g.id} group={g} course={c} clash={conflicts.some((k) => k.a.id === g.id || k.b.id === g.id)} onChangeGroup={c.groups.length > 1 ? () => setPicker(c) : undefined} onRemove={() => student && removeBuilderCourse(student.id, c.id)} />
+  }
 
   // /builder?add=<courseId> (from the saved courses page) adds that course once, opening the group picker when it has several.
   const handledAdd = useRef<string | null>(null)
@@ -226,6 +287,7 @@ export function BuilderPage() {
 
         {/* Summary */}
         <aside id="builder-summary" className="min-w-0 scroll-mt-24 lg:sticky lg:top-24 lg:self-start">
+          <span id="cart" className="block scroll-mt-24" aria-hidden="true" />
           <Card className="p-6">
             <div className="flex items-center justify-between">
               <Eyebrow>{t('builder.yourSelection')}</Eyebrow>
@@ -239,23 +301,19 @@ export function BuilderPage() {
             {selectedGroups.length === 0 ? (
               <p className="mt-5 text-sm text-charcoal/55">{t('builder.emptySelection')}</p>
             ) : (
-              <ul className="mt-5 divide-y divide-charcoal/10">
-                {selectedGroups.map((g) => {
-                  const c = courses.find((x) => x.id === g.courseId)!
-                  const clash = conflicts.some((k) => k.a.id === g.id || k.b.id === g.id)
-                  return (
-                    <li key={g.id} className="flex items-start justify-between gap-3 py-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-charcoal">{tr(c.title)}</div>
-                        <div className="mt-0.5 text-[11px] text-charcoal/55">{g.name}</div>
-                        <div className="mt-1"><ScheduleChips group={g} compact /></div>
-                        {clash && <div className="mt-1 text-[11px] text-red-700">{t('builder.conflict')}</div>}
-                      </div>
-                      <div className="text-right text-sm text-charcoal"><PriceNow course={c} /></div>
-                    </li>
-                  )
-                })}
-              </ul>
+              <div className="mt-5 space-y-4">
+                {cartPackages.map((p) => (
+                  <CartPackage key={p.presetId} preset={p.preset} university={p.university} directionId={p.directionId} groups={p.groups} onRemove={() => student && removeCartBundle(student.id, p.presetId)}>
+                    {p.groups.map(cartLine)}
+                  </CartPackage>
+                ))}
+                {looseGroups.length > 0 && (
+                  <div>
+                    {cartPackages.length > 0 && <div className="text-[11px] font-semibold uppercase tracking-wider text-charcoal/50">{t('uni.otherCourses')}</div>}
+                    <ul className="divide-y divide-charcoal/10">{looseGroups.map(cartLine)}</ul>
+                  </div>
+                )}
+              </div>
             )}
             <div className="mt-4 border-t border-charcoal/10 pt-4">
               <div className="flex items-end justify-between gap-3">
@@ -282,7 +340,7 @@ export function BuilderPage() {
         </aside>
       </div>
 
-      <Modal open={!!picker} onClose={() => { setPicker(null); setQueue([]) }} title={picker ? `${t('courses.chooseGroup')} — ${tr(picker.title)}` : ''}>
+      <Modal open={!!picker} onClose={() => setPicker(null)} title={picker ? `${t('courses.chooseGroup')} — ${tr(picker.title)}` : ''}>
         {picker && (
           <ul className="space-y-2">
             {picker.groups.map((g) => {

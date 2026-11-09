@@ -68,6 +68,29 @@ export class CatalogService {
     }
   }
 
+  /**
+   * Every video, playlist and resource the caller may open: published public items of the teachers the catalog lists
+   * (a center took them and the center is ACTIVE), plus the published private items shared with a signed-in student by
+   * name or through a group of an active subscription. Drafts, archived items and other people's private items never leave.
+   */
+  async publicContent(tenantId: string, actor?: RequestActor) {
+    const groupIds = await this.actorGroupIds(actor)
+    const listedTeacher = { centerId: { not: null }, center: { status: 'ACTIVE' as const } }
+    const shared = actor ? [{ audienceStudentIds: { has: actor.id } }, ...(groupIds.length ? [{ audienceGroupIds: { hasSome: groupIds } }] : [])] : []
+    const where = { tenantId, status: 'PUBLISHED' as const, OR: [{ visibility: 'PUBLIC' as const, teacher: listedTeacher }, ...shared] }
+    const [videos, playlists, resources] = await Promise.all([
+      this.prisma.client.video.findMany({ where, orderBy: { updatedAt: 'desc' } }),
+      this.prisma.client.playlist.findMany({ where, include: { items: { orderBy: { position: 'asc' } } }, orderBy: { updatedAt: 'desc' } }),
+      this.prisma.client.resource.findMany({ where, orderBy: { updatedAt: 'desc' } }),
+    ])
+    // The query already narrows the rows; the access rule is applied once more so both can never disagree.
+    return {
+      videos: videos.filter((v) => canView(v, actor, groupIds)).map(toVideo),
+      playlists: playlists.filter((p) => canView(p, actor, groupIds)).map(toPlaylist),
+      resources: resources.filter((r) => canView(r, actor, groupIds)).map(toResource),
+    }
+  }
+
   async contentItem(tenantId: string, kind: 'video' | 'playlist' | 'resource', id: string, actor?: RequestActor) {
     const groupIds = await this.actorGroupIds(actor)
     if (kind === 'video') {

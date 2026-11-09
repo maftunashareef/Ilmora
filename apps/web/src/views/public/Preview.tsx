@@ -1,11 +1,14 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { MAX_CART_COURSES, priceTotals } from '@ilmora/shared'
+import { isPreparationTrack, MAX_CART_COURSES, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { Badge, Button, Card, cx, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
+import { arrangeCartByPackage } from '../../lib/cartPackages'
+import { formatSom } from '../../lib/format'
+import { UniversityLogo } from './Universities'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import { findConflicts, lessonsPerWeek, resolveGroups, weeklyHours } from '../../lib/schedule'
 import { Link, useLocation, useNavigate } from '../../lib/router'
@@ -16,7 +19,7 @@ const PROVIDER_LABEL: Record<PaymentProviderId, string> = { PAYME: 'Payme', CLIC
 
 /** Step 3: review the selection, pick Payme or Click and go to the provider's hosted payment page. */
 export function PreviewPage() {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const nav = useNavigate()
   const { pathname } = useLocation()
   const auth = useStore((s) => s.auth)
@@ -28,6 +31,9 @@ export function PreviewPage() {
   const setBuilderGrant = useStore((s) => s.setBuilderGrant)
   const checkout = useStore((s) => s.checkout)
   const notify = useStore((s) => s.notify)
+  const cartBundles = useStore((s) => s.cartBundles)
+  const presets = useStore((s) => s.site.presets)
+  const universities = useStore((s) => s.site.universities)
   const [providers, setProviders] = useState<Record<PaymentProviderId, boolean> | null>(null)
   const [provider, setProvider] = useState<PaymentProviderId>('PAYME')
   const [busy, setBusy] = useState(false)
@@ -50,6 +56,7 @@ export function PreviewPage() {
   const ok = countOk && conflicts.length === 0 && fullGroups.length === 0
   const grantCourses = groups.map((g) => courses.find((c) => c.id === g.courseId)).filter((c): c is NonNullable<typeof c> => !!c?.meyosGrant)
   const hasSubscription = student?.subscription.status === 'active'
+  const { packages: cartPackages } = arrangeCartByPackage(groups, cartBundles, presets ?? [], universities ?? [])
 
   if (auth.status === 'anonymous') {
     return (
@@ -76,6 +83,7 @@ export function PreviewPage() {
     setBusy(true)
     try {
       const r = await checkout(provider)
+      if (!r.url) { window.location.assign(`/${lang}/payments/${r.paymentId}/return`); return }
       notify(t('checkout.redirecting'))
       window.location.assign(r.url)
     } catch (err) {
@@ -90,6 +98,29 @@ export function PreviewPage() {
       <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-6">
           <Timetable groups={groups} courses={courses} conflicts={conflicts} />
+          {cartPackages.length > 0 && (
+            <ul className="space-y-3">
+              {cartPackages.map((p) => {
+                const where = p.university && p.directionId ? universityDirections(p.university).find((x) => x.direction.id === p.directionId) : undefined
+                const sum = priceTotals(p.groups.map((g) => courses.find((c) => c.id === g.courseId)).filter((c): c is NonNullable<typeof c> => !!c))
+                return (
+                  <li key={p.presetId} className="flex flex-wrap items-center gap-4 rounded-card border border-champagne/55 bg-gradient-to-r from-ivory via-paper to-sage/35 p-4">
+                    {p.university && <UniversityLogo university={p.university} height={44} maxWidth={96} />}
+                    <div className="min-w-0 flex-1">
+                      <div className="eyebrow">{t('uni.cartPackage')}</div>
+                      <div className="mt-0.5 break-words font-display text-xl leading-tight text-charcoal">{p.university ? universityName(p.university, lang) : tr(p.preset.name)}</div>
+                      {where && <div className="break-words text-xs text-charcoal/60">{[p.university && isPreparationTrack(p.university) ? '' : tr(where.faculty.name), tr(where.direction.name)].filter(Boolean).join(' · ')}</div>}
+                      <div className="mt-0.5 break-words text-xs font-semibold text-forest">{tr(p.preset.name)} · {p.groups.map((g) => tr(courses.find((c) => c.id === g.courseId)?.title)).join(', ')}</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-[11px] text-charcoal/50">{t('uni.packagePrice')}</div>
+                      <div className="whitespace-nowrap font-display text-xl text-charcoal">{formatSom(sum.final, lang)}</div>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
           <ul className="grid gap-3 sm:grid-cols-2">
             {groups.map((g) => {
               const c = courses.find((x) => x.id === g.courseId)!

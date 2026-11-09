@@ -132,13 +132,6 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
 .rise-seq > :nth-child(5) { animation-delay: 0.75s; }
 .rise-seq > :nth-child(6) { animation-delay: 0.9s; }
 
-/* Marquee ticker */
-.marquee-wrap { overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
-.marquee { display: flex; width: max-content; will-change: transform; animation: marqueeLeft 60s linear infinite; }
-.marquee-wrap:hover .marquee, .marquee-wrap:focus-within .marquee { animation-play-state: paused; }
-@keyframes marqueeLeft { to { transform: translateX(-50%); } }
-@media (prefers-reduced-motion: reduce) { .marquee { animation: none; } }
-
 /* How It Works journey: the connecting line draws in when shown; the builder tracker's current step breathes gently. */
 .journey-progress { transition: transform 0.7s var(--ease-out-soft); }
 /* Each step's screen fades in; its parts pop in one after another (--d is the delay); the timer bar fills while the tour plays. */
@@ -209,7 +202,7 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
   .discount-track { animation: none; }
   .discount-marquee { overflow-x: auto; mask-image: none; scroll-snap-type: x mandatory; }
   .discount-card { scroll-snap-align: start; }
-  .discount-copy, .discount-toggle { display: none; }
+  .discount-copy { display: none; }
   .discount-glow::before { animation: none; opacity: 0.6; transform: none; }
 }
 
@@ -236,6 +229,16 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
 @keyframes floatB { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-22px, -16px); } }
 .float-a { animation: floatA 14s ease-in-out infinite; }
 .float-b { animation: floatB 18s ease-in-out infinite; }
+
+/* University Admission hero: the photo drifts very slowly, the notes over it bob gently */
+@keyframes kenBurns { from { transform: scale(1); } to { transform: scale(1.09); } }
+@keyframes floatSoft { 0%, 100% { translate: 0 0; } 50% { translate: 0 -7px; } }
+.ken-burns { animation: kenBurns 18s ease-in-out infinite alternate; will-change: transform; }
+.float-soft { animation: floatSoft 6s ease-in-out infinite; }
+.float-soft-late { animation: floatSoft 7s ease-in-out 1.2s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ken-burns, .float-soft, .float-soft-late { animation: none; }
+}
 
 /* Horizontal snap track */
 .snap-track { display: flex; gap: 1.25rem; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; padding: 0.5rem 0 1.5rem; }

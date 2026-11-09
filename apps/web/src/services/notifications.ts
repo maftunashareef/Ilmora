@@ -1,5 +1,5 @@
 'use client'
-import { PUBLIC_API_URL, session } from '../lib/api'
+import { PUBLIC_API_URL, refreshSession, session } from '../lib/api'
 
 /**
  * Live notifications: server-sent events over fetch (so the bearer token can be sent). Every ping makes the caller
@@ -19,6 +19,7 @@ export function subscribeToNotifications(onPing: (event: { type: string }) => vo
           headers: { Accept: 'text/event-stream', Authorization: `Bearer ${session.token}`, 'X-Requested-With': 'ilmora' },
           signal: controller.signal,
         })
+        if (res.status === 401) await refreshSession()
         if (!res.ok || !res.body) throw new Error(`stream ${res.status}`)
         attempt = 0
         const reader = res.body.getReader()

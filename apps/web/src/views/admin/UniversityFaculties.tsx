@@ -42,7 +42,7 @@ export function LogoField({ university, onChange, onDarkChange }: { university: 
   return (
     <Field label={t('admin.uni.logo')}>
       <div className="flex items-start gap-3">
-        <UniversityLogo key={university.logoUrl} university={university} size={56} />
+        <UniversityLogo key={university.logoUrl} university={university} height={56} maxWidth={180} align="start" />
         <div className="min-w-0 flex-1 space-y-2">
           <Input type="url" aria-label={t('admin.uni.logoUrl')} placeholder={t('admin.uni.logoUrl')} value={university.logoUrl ?? ''} onChange={(e) => onChange(e.target.value.trim())} />
           <div className="flex flex-wrap items-center gap-2">

@@ -71,12 +71,12 @@ export function SessionPanel({ session, course, group, roster }: { session: Less
   const missing = roster.filter((st) => !checked.some((c) => c.id === st.id))
   const url = qr?.url ?? ''
   const copy = async () => { try { await navigator.clipboard.writeText(url); notify(t('common.copied')) } catch { notify(url) } }
-  const toggle = async (open: boolean) => { setBusy(true); try { await setSessionAttendance(session.id, open) } finally { setBusy(false) } }
-  const rotate = async () => { setBusy(true); try { await refreshSessionQr(session.id); notify(t('common.saved')) } finally { setBusy(false) } }
+  const toggle = async (open: boolean) => { setBusy(true); try { await setSessionAttendance(session.id, open) } catch { /* the store already showed the error */ } finally { setBusy(false) } }
+  const rotate = async () => { setBusy(true); try { await refreshSessionQr(session.id); notify(t('common.saved')) } catch { /* toasted by the store */ } finally { setBusy(false) } }
   const submitCorrection = async () => {
     if (!correcting || correcting.reason.trim().length < 3) return
     setBusy(true)
-    try { await correctAttendance(session.id, correcting.studentId, correcting.status, correcting.reason.trim()); notify(t('common.saved')); setCorrecting(null) } finally { setBusy(false) }
+    try { await correctAttendance(session.id, correcting.studentId, correcting.status, correcting.reason.trim()); notify(t('common.saved')); setCorrecting(null) } catch { /* toasted by the store */ } finally { setBusy(false) }
   }
   const submitMove = async () => {
     if (!moving) return
@@ -177,8 +177,8 @@ export function SessionPanel({ session, course, group, roster }: { session: Less
         <div className="flex flex-wrap justify-end gap-2">
           {session.status !== 'cancelled' && records.length === 0 && !moving && <Button size="sm" variant="secondary" onClick={() => setMoving({ date: session.date, start: session.start, end: session.end, note: session.note ?? '' })}><Icon name="calendar" className="h-3.5 w-3.5" />{t('session.move')}</Button>}
           {session.status === 'cancelled'
-            ? <Button size="sm" variant="secondary" onClick={() => setSessionStatus(session.id, isPastSession(session) ? 'completed' : 'scheduled')}>{t('session.restore')}</Button>
-            : <Button size="sm" variant="danger" onClick={() => setSessionStatus(session.id, 'cancelled')}>{t('session.cancel')}</Button>}
+            ? <Button size="sm" variant="secondary" onClick={() => void setSessionStatus(session.id, isPastSession(session) ? 'completed' : 'scheduled').catch(() => undefined)}>{t('session.restore')}</Button>
+            : <Button size="sm" variant="danger" onClick={() => void setSessionStatus(session.id, 'cancelled').catch(() => undefined)}>{t('session.cancel')}</Button>}
         </div>
       </div>
     </div>

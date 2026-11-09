@@ -1,6 +1,6 @@
 'use client'
 import { createContext, useContext } from 'react'
-import type { AttendanceMethod, CenterCheckInSettings, CenterStatus, Course, L, LessonSession, SubscriptionAccess, Teacher } from '@ilmora/shared'
+import type { CenterCheckInSettings, CenterStatus, Course, L, LessonSession, SubscriptionAccess, Teacher } from '@ilmora/shared'
 
 /** Shapes of the center workspace API (`/v1/center/*`). */
 
@@ -76,4 +76,3 @@ export const centerCourseInput = (c: Course) => ({
 
 export const centerGroupInput = (g: Course['groups'][number]) => ({ name: g.name, days: g.days, start: g.start, end: g.end, room: g.room, capacity: g.capacity })
 
-export const methodLabelKey = (m: AttendanceMethod) => (m === 'center_qr' ? 'session.centerQr' : m === 'auto' ? 'session.autoAbsent' : m === 'manual' ? 'session.correct' : 'session.qrTitle')

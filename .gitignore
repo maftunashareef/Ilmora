@@ -53,3 +53,6 @@ infra/data
 infra/backups/*.dump
 infra/backups/*.sql.gz
 
+
+# Vercel CLI link data (the demo copy is gone; the CLI may still create it locally)
+.vercel/

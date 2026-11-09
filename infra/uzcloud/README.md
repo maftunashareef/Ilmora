@@ -223,6 +223,26 @@ sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate
   `https://ilmoraa.uz/payments/click/prepare` и `https://ilmoraa.uz/payments/click/complete`.
 - **Закрыть админку по IP:** `ADMIN_ALLOW_IPS` в `web/.env`, затем `… compose.sh web up -d caddy`.
 
+## Удаление демо-данных перед запуском
+
+Сид оставляет в базе образцы: центры, учителей и учеников с пометкой «(demo)» и всё, что к ним привязано (курсы, группы,
+занятия, посещаемость, подписки, платежи, уведомления). Перед открытием для реальных пользователей их убирает команда
+`purge-demo` в контейнере мигратора. Настоящие аккаунты, владельцев и реальные центры она не трогает: строки выбираются
+только по пометке «(demo)» и по связям с ними, никогда по префиксу id. Без `--yes` команда лишь показывает таблицу того,
+что будет удалено. На **ilmora-admin**:
+
+```bash
+C="sh /opt/ilmora/infra/uzcloud/compose.sh"
+$C admin exec backup backup.sh --now                                                                  # 1. копия базы
+$C admin --profile migrate run --rm migrate node dist/cli/purge-demo.js --tenant ilmora --dry-run     # 2. посмотреть, что удалится
+$C admin --profile migrate run --rm -e ALLOW_DATA_PURGE=1 migrate node dist/cli/purge-demo.js --tenant ilmora --yes   # 3. удалить
+```
+
+Удаление идёт одной транзакцией; повторный запуск сообщает, что удалять нечего. Если реальные строки ссылались на
+демо-данные (сотрудник демо-центра, видео на демо-курсе), команда перечисляет их и только снимает ссылку. Пакеты
+вузов, чьи предметы были привязаны к демо-курсам, пропадают с сайта, пока админ не привяжет их к реальным курсам
+(админка → вузы) или не выполнит `npx tsx prisma/seed-university-packages.ts --refresh` в том же контейнере.
+
 ## Откат
 
 Релиз сохраняет прежние образы в `.env.previous`. Сначала web, потом admin:

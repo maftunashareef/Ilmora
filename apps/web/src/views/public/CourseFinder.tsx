@@ -662,7 +662,7 @@ export function CourseFinderTeaser({ s }: { s: Section }) {
       <div className="reveal reveal-scale relative overflow-hidden rounded-card border border-charcoal/10 bg-gradient-to-br from-paper via-ivory to-sage/50 px-6 py-12 sm:px-10 md:px-14 md:py-16">
         <div className="float-a pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full border border-champagne/40" aria-hidden="true" />
         <div className="float-b pointer-events-none absolute -bottom-24 right-24 h-64 w-64 rounded-full border border-forest/10" aria-hidden="true" />
-        <div className="relative grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="relative grid items-center gap-10 lg:grid-cols-[0.92fr_1.08fr] lg:gap-14">
           <div>
             <Eyebrow>{t('finder.eyebrow')}</Eyebrow>
             <h2 className="mt-3 font-display text-4xl leading-tight text-charcoal md:text-5xl">{tr(s.title) || t('finder.title')}</h2>
@@ -675,9 +675,10 @@ export function CourseFinderTeaser({ s }: { s: Section }) {
             <LinkButton to="/course-finder" size="lg" className="mt-8">{t('finder.teaser.cta')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>
           </div>
           {/* The first question of the finder: four goals in a balanced 2x2 grid that open the finder with the goal chosen. */}
-          <div className="reveal-stagger grid w-full max-w-[25.5rem] grid-cols-2 gap-2.5 justify-self-center lg:justify-self-end" onMouseLeave={() => setActive(0)}>
+          <div className="reveal-stagger grid w-full auto-rows-fr grid-cols-2 gap-3 sm:gap-4" onMouseLeave={() => setActive(0)}>
             {goals.map((g, i) => {
               const on = i === active
+              const icon = { university: 'cap', ielts: 'chat', career: 'briefcase', personal: 'sparkle' }[g]
               return (
                 <Link
                   key={g}
@@ -685,14 +686,22 @@ export function CourseFinderTeaser({ s }: { s: Section }) {
                   onMouseEnter={() => setActive(i)}
                   onFocus={() => setActive(i)}
                   className={cx(
-                    'reveal flex min-h-[3.75rem] items-center gap-2.5 rounded-2xl border bg-paper p-3 shadow-[0_1px_2px_rgba(32,39,37,0.05),0_8px_20px_-14px_rgba(22,60,53,0.35)] transition duration-300 ease-out hover:-translate-y-1 motion-reduce:transition-none motion-reduce:hover:translate-y-0',
-                    on ? 'finder-choice-on border-forest bg-sage/40' : 'border-charcoal/10',
+                    'reveal group relative flex min-h-[11rem] min-w-0 flex-col overflow-hidden rounded-card border bg-paper p-4 shadow-soft transition duration-500 ease-[var(--ease-out-soft)] hover:-translate-y-1 hover:shadow-lift focus:outline-none focus-visible:ring-2 focus-visible:ring-forest focus-visible:ring-offset-2 sm:min-h-[12rem] sm:p-5',
+                    on ? 'finder-choice-on border-forest/60' : 'border-charcoal/10',
                   )}
                 >
-                  <span aria-hidden="true" className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors duration-300', on ? 'bg-forest text-ivory' : 'bg-sage/70 text-forest')}>
-                    <Icon name={{ university: 'book', ielts: 'globe', career: 'layers', personal: 'star' }[g]} className="h-4 w-4" />
+                  {/* The goal's icon, large and faint, in the corner of the card. */}
+                  <span aria-hidden="true" className={cx('pointer-events-none absolute -bottom-5 -right-5 transition duration-500', on ? 'scale-110 text-champagne/30' : 'text-forest/[0.06]')}>
+                    <Icon name={icon} className="h-20 w-20 sm:h-28 sm:w-28" />
                   </span>
-                  <span className="min-w-0 text-sm font-medium leading-snug text-charcoal">{t(`finder.goal.${g}` as TKey)}</span>
+                  <span aria-hidden="true" className={cx('relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full ring-4 transition-colors duration-300', on ? 'bg-forest text-champagne ring-champagne/25' : 'bg-sage/70 text-forest ring-sage/30')}>
+                    <Icon name={icon} className="h-5 w-5" />
+                  </span>
+                  <span className="relative mt-4 font-display text-lg leading-[1.15] text-charcoal sm:text-[1.35rem]">{t(`finder.goal.${g}` as TKey)}</span>
+                  <span className="relative mt-1.5 text-xs leading-relaxed text-charcoal/60">{t(`finder.goal.${g}.hint` as TKey)}</span>
+                  <span aria-hidden="true" className={cx('absolute right-4 top-4 flex h-7 w-7 items-center justify-center rounded-full transition duration-300 sm:right-5 sm:top-5', on ? 'bg-forest text-ivory' : 'text-charcoal/30')}>
+                    <Icon name="arrowRight" className="h-3.5 w-3.5" />
+                  </span>
                 </Link>
               )
             })}
