@@ -6,6 +6,9 @@ export interface RequestActor {
   roles: Role[]
   centerId?: string | null
   teacherProfileId?: string | null
+  /** Registry: the institution (INSTITUTION_ADMIN) or company (COMPANY_ADMIN) this account represents — one each. */
+  institutionId?: string | null
+  companyId?: string | null
 }
 
 export interface TenantContextValue {
