@@ -28,6 +28,7 @@
     "prisma:seed:universities": "tsx prisma/seed-university-packages.ts",
     "prisma:restore:teachers": "tsx prisma/restore-teachers.ts",
     "owner:setup": "tsx src/cli/owner-setup.ts",
+    "demo:purge": "tsx src/cli/purge-demo.ts",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
