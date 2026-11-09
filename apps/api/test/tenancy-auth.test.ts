@@ -28,6 +28,16 @@ describe.skipIf(!DB_AVAILABLE)('tenant isolation (Prisma extension)', () => {
     await expect(ctx.prisma.client.course.findMany({})).rejects.toThrow(/tenant context/i)
   })
 
+  it('a tenantId sent in the data never moves a new row into another organization (Ж12)', async () => {
+    const a = await ctx.makeTenant('iso-e')
+    const b = await ctx.makeTenant('iso-f')
+    const created = await TenantContext.forTenant(a.tenantId, () => ctx.prisma.client.category.create({ data: { tenantId: b.tenantId, slug: 'smuggled', name: {} } }))
+    expect(created.tenantId).toBe(a.tenantId)
+    const many = await TenantContext.forTenant(a.tenantId, () => ctx.prisma.client.category.createManyAndReturn({ data: [{ tenantId: b.tenantId, slug: 'smuggled-2', name: {} }] }))
+    expect(many.map((r) => r.tenantId)).toEqual([a.tenantId])
+    expect(await TenantContext.forTenant(b.tenantId, () => ctx.prisma.client.category.count({ where: { slug: { startsWith: 'smuggled' } } }))).toBe(0)
+  })
+
   it('soft delete hides rows from normal reads but keeps them for includeDeleted', async () => {
     const a = await ctx.makeTenant('iso-d')
     await TenantContext.forTenant(a.tenantId, async () => {

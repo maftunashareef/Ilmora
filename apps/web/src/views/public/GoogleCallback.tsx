@@ -4,6 +4,7 @@ import { Card, Eyebrow, Icon, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
+import { consumeOAuthNonce } from '../../lib/oauthState'
 import { useNavigate, useSearchParams } from '../../lib/router'
 import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { useStore } from '../../store/useStore'
@@ -28,6 +29,7 @@ export function GoogleCallbackPage() {
   let stateLang: 'uz' | 'ru' | 'en' | undefined
   let stateRole: 'STUDENT' | 'TEACHER' | undefined
   let stateNext: string | null = null
+  let stateNonce: unknown
 
   if (rawState) {
     try {
@@ -36,6 +38,7 @@ export function GoogleCallbackPage() {
       if (parsed && typeof parsed === 'object') {
         if (parsed.lang && ['uz', 'ru', 'en'].includes(parsed.lang)) stateLang = parsed.lang
         if (parsed.role && ['STUDENT', 'TEACHER'].includes(parsed.role)) stateRole = parsed.role
+        stateNonce = parsed.nonce
         if (typeof parsed.next === 'string' && parsed.next.startsWith('/') && !parsed.next.startsWith('//')) {
           stateNext = parsed.next
         }
@@ -80,6 +83,13 @@ export function GoogleCallbackPage() {
     }
 
     codeExchanged.current = true
+    // Only a sign-in this tab started may finish here: a link with somebody else's code is refused (Ж8).
+    if (!consumeOAuthNonce(stateNonce)) {
+      const msg = t('auth.err.google')
+      setError(msg)
+      setTimeout(() => nav('/login', { replace: true }), 2500)
+      return
+    }
     const exchange = async () => {
       try {
         const redirectUri = `${window.location.origin}/auth/google/callback`
@@ -110,7 +120,7 @@ export function GoogleCallbackPage() {
     }
 
     void exchange()
-  }, [code, oauthError, oauthErrorDesc, loginWithGoogle, nav, notify, safeNext, stateLang, stateRole, lang, setLang, t])
+  }, [code, oauthError, oauthErrorDesc, loginWithGoogle, nav, notify, safeNext, stateLang, stateRole, stateNonce, lang, setLang, t])
 
   return (
     <div className="container-x py-14 lg:py-20">
