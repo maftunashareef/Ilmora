@@ -26,6 +26,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:seed:online": "tsx prisma/seed-online-courses.ts",
     "prisma:seed:universities": "tsx prisma/seed-university-packages.ts",
+    "prisma:seed:registry": "tsx prisma/seed-registry.ts",
+    "prisma:seed:registry-demo": "tsx prisma/seed-registry-demo.ts",
     "prisma:restore:teachers": "tsx prisma/restore-teachers.ts",
     "owner:setup": "tsx src/cli/owner-setup.ts",
     "demo:purge": "tsx src/cli/purge-demo.ts",
