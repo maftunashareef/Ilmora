@@ -48,8 +48,11 @@ export interface AuthUser {
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad?: boolean; marketing?: boolean }
 export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | OrgKind
-/** A technikum or a company registers with its details; `phone` (top level) is the organization's contact phone. */
-export interface OrganizationInput { name: string; region: string; inn: string; ownership?: OrgOwnership }
+/**
+ * A technikum or a company registers with its details; `phone` (top level) is the organization's contact phone.
+ * `technikumId` is set when the technikum was picked from the list (TECHNIKUMS), absent when its name was typed.
+ */
+export interface OrganizationInput { name: string; region: string; inn: string; ownership?: OrgOwnership; technikumId?: string }
 /**
  * CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center.
  * TECHNIKUM and COMPANY send `organization` (a technikum also sends `ownership`).

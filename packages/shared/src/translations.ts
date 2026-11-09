@@ -1359,6 +1359,12 @@ export const dict = {
   'auth.err.region': d('Hududni tanlang.', 'Выберите регион.', 'Choose a region.'),
   'auth.err.inn': d('STIR 9 ta raqamdan iborat bölsin.', 'ИНН должен состоять из 9 цифр.', 'The TIN must be 9 digits.'),
   'auth.err.innTaken': d('Bu STIR bilan taşkilot allaqaçon röyxatdan ötgan.', 'Организация с этим ИНН уже зарегистрирована.', 'An organization with this TIN is already registered.'),
+  'auth.org.technikumSearch': d('Nomini yozing yoki röyxatdan tanlang', 'Начните вводить название или выберите из списка', 'Start typing the name or pick it from the list'),
+  'auth.org.technikumFilterHint': d('Röyxat tanlangan hudud va turga qarab qisqaradi', 'Список сужается по выбранному региону и типу', 'The list narrows to the chosen region and type'),
+  'auth.org.technikumListed': d('Rasmiy röyxatdan tanlandi', 'Выбран из официального списка', 'Picked from the official list'),
+  'auth.org.technikumManual': d('Röyxatda yöq: nom qölda kiritildi', 'Нет в списке: название введено вручную', 'Not in the list: name typed by hand'),
+  'auth.org.technikumNoMatch': d('Röyxatda topilmadi. Texnikumning töliq nomini yozing.', 'В списке не найдено. Введите полное название техникума.', 'Not found in the list. Type the college’s full name.'),
+  'auth.org.technikumNotListed': d('Mening texnikumim röyxatda yöq', 'Моего техникума нет в списке', 'My college is not in the list'),
 
   // ── Center workspace ────────────────────────────────────────────────────────
   'center.teachers': d('Öqituvçilar', 'Преподаватели', 'Teachers'),

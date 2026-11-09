@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { isUzRegion, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, UZ_REGIONS, type OrgOwnership } from '@ilmora/shared'
+import { isUzRegion, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, TECHNIKUMS, UZ_REGIONS, type OrgOwnership, type Technikum } from '@ilmora/shared'
 import { ConsentFields, consentComplete, EMPTY_CONSENT, type ConsentState } from '../../components/ConsentGate'
+import { TechnikumPicker } from '../../components/TechnikumPicker'
 import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Select, Tabs } from '../../components/ui'
 import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
@@ -49,6 +50,7 @@ export function LoginPage() {
   const [role, setRole] = useState<RegisterRole | null>(null)
   const [centerName, setCenterName] = useState('')
   const [orgName, setOrgName] = useState('')
+  const [technikumId, setTechnikumId] = useState<string | null>(null)
   const [ownership, setOwnership] = useState<OrgOwnership | null>(null)
   const [region, setRegion] = useState('')
   const [inn, setInn] = useState('')
@@ -68,6 +70,27 @@ export function LoginPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({})
   const isOrg = mode === 'register' && isOrgRole(role)
   const clearError = (key: FieldKey) => { if (fieldErrors[key]) setFieldErrors((f) => ({ ...f, [key]: undefined })) }
+
+  const pickedTechnikum = technikumId ? TECHNIKUMS.find((x) => x.id === technikumId) : undefined
+  /** The TIN shown came from the picked technikum (not typed by the user), so it goes when that pick goes. */
+  const innFromPick = (x: Technikum | undefined) => !!x?.inn && inn === x.inn
+  /** A picked technikum fills the region, the type and (when known) the TIN; the user can still change them. */
+  const applyTechnikum = (x: Technikum) => {
+    setRegion(x.region)
+    setOwnership(x.ownership)
+    const fillInn = !!x.inn && (!inn || innFromPick(pickedTechnikum))
+    if (fillInn) setInn(x.inn!)
+    setFieldErrors((f) => ({ ...f, region: undefined, ownership: undefined, inn: fillInn ? undefined : f.inn }))
+  }
+  /** Leaving a picked technikum (typing another name, or a region or type it does not match) clears what it filled in. */
+  const dropTechnikum = (name: string) => {
+    if (innFromPick(pickedTechnikum)) setInn('')
+    setTechnikumId(null)
+    setOrgName(name)
+  }
+  const keepTechnikumIf = (ok: (x: Technikum) => boolean) => {
+    if (pickedTechnikum && !ok(pickedTechnikum)) dropTechnikum('')
+  }
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return
@@ -171,7 +194,13 @@ export function LoginPage() {
           phone: phone.trim() || undefined,
           centerName: role === 'CENTER' ? centerName.trim() : undefined,
           organization: isOrgRole(role)
-            ? { name: orgName.trim(), region, inn: inn.replace(/\D/g, ''), ownership: role === 'TECHNIKUM' ? ownership ?? undefined : undefined }
+            ? {
+                name: orgName.trim(),
+                region,
+                inn: inn.replace(/\D/g, ''),
+                ownership: role === 'TECHNIKUM' ? ownership ?? undefined : undefined,
+                technikumId: role === 'TECHNIKUM' ? technikumId ?? undefined : undefined,
+              }
             : undefined,
           acceptOffer: true,
           consentPersonalData: true,
@@ -316,16 +345,18 @@ export function LoginPage() {
                   {t('auth.org.title')}
                 </h2>
 
-                <Field label={t(role === 'TECHNIKUM' ? 'auth.org.technikumName' : 'auth.org.companyName')} required>
-                  <Input
-                    maxLength={120}
-                    placeholder={t(role === 'TECHNIKUM' ? 'auth.org.technikumNamePlaceholder' : 'auth.org.companyNamePlaceholder')}
-                    value={orgName}
-                    onChange={(e) => { setOrgName(e.target.value); clearError('orgName') }}
-                    aria-invalid={!!fieldErrors.orgName}
-                  />
-                  {fieldErrors.orgName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.orgName}</p>}
-                </Field>
+                {role === 'COMPANY' && (
+                  <Field label={t('auth.org.companyName')} required>
+                    <Input
+                      maxLength={120}
+                      placeholder={t('auth.org.companyNamePlaceholder')}
+                      value={orgName}
+                      onChange={(e) => { setOrgName(e.target.value); clearError('orgName') }}
+                      aria-invalid={!!fieldErrors.orgName}
+                    />
+                    {fieldErrors.orgName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.orgName}</p>}
+                  </Field>
+                )}
 
                 {role === 'TECHNIKUM' && (
                   <fieldset>
@@ -338,7 +369,7 @@ export function LoginPage() {
                           key={o}
                           type="button"
                           aria-pressed={ownership === o}
-                          onClick={() => { setOwnership(o); clearError('ownership') }}
+                          onClick={() => { setOwnership(o); clearError('ownership'); keepTechnikumIf((x) => x.ownership === o) }}
                           className={cx('flex items-start gap-2.5 rounded-control border bg-paper p-3 text-left transition', ownership === o ? 'border-forest ring-2 ring-forest/15' : 'border-charcoal/15 hover:border-forest/50')}
                         >
                           <span className={cx('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border', ownership === o ? 'border-forest' : 'border-charcoal/30')}>
@@ -358,7 +389,7 @@ export function LoginPage() {
                 <Field label={t('auth.org.region')} required>
                   <Select
                     value={region}
-                    onChange={(e) => { setRegion(e.target.value); clearError('region') }}
+                    onChange={(e) => { const r = e.target.value; setRegion(r); clearError('region'); keepTechnikumIf((x) => x.region === r) }}
                     aria-invalid={!!fieldErrors.region}
                     className={region ? undefined : 'text-charcoal/40'}
                   >
@@ -367,6 +398,25 @@ export function LoginPage() {
                   </Select>
                   {fieldErrors.region && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.region}</p>}
                 </Field>
+
+                {role === 'TECHNIKUM' && (
+                  <div>
+                    <label htmlFor="technikum-name" className="mb-1.5 flex items-baseline justify-between gap-3 text-xs font-medium text-charcoal/70">
+                      <span>{t('auth.org.technikumName')}<span className="ml-0.5 text-champagne">*</span></span>
+                      {TECHNIKUMS.length > 0 && <span className="text-[11px] font-normal text-charcoal/45">{t('auth.org.technikumFilterHint')}</span>}
+                    </label>
+                    <TechnikumPicker
+                      id="technikum-name"
+                      list={TECHNIKUMS}
+                      value={{ id: technikumId, name: orgName }}
+                      region={region}
+                      ownership={ownership}
+                      invalid={!!fieldErrors.orgName}
+                      onChange={(v, picked) => { clearError('orgName'); if (picked) { applyTechnikum(picked); setTechnikumId(v.id); setOrgName(v.name) } else if (technikumId) dropTechnikum(v.name); else setOrgName(v.name) }}
+                    />
+                    {fieldErrors.orgName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.orgName}</p>}
+                  </div>
+                )}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t('auth.org.inn')} hint={t('auth.org.innHint')} required>
