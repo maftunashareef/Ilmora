@@ -79,7 +79,9 @@ case "$ROLE" in
     # The live database is dumped before the schema moves (restore path: admin/backup.sh --restore).
     if backup_configured; then
       echo "== backup before migrations"
-      $COMPOSE run --rm --no-deps --build backup backup.sh --now
+      # --entrypoint: the service's own entrypoint is `backup.sh --schedule`; a plain `run backup backup.sh --now` only
+      # appends to it, so the script slept until the nightly time and the release hung (9 Nov 2026, run 44).
+      $COMPOSE run --rm --no-deps --build --entrypoint /usr/local/bin/backup.sh backup --now
     else
       echo "== BACKUP_PASSPHRASE is not set in admin/.env: no backup before migrations (set up admin/backup.sh)"
     fi
