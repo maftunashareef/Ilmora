@@ -34,11 +34,4 @@ describe('demo sign-in is off in production builds', () => {
     expect(store.getState().auth.status).not.toBe('authenticated')
     expect(store.getState().role).toBe('visitor')
   })
-
-  it('a mock Google token no longer falls back to a local session when the API fails', async () => {
-    const store = createIlmoraStore(initialMock)
-    await expect(store.getState().loginWithGoogle({ idToken: 'mock-google-token:gid-1:a%40b.uz:Name', role: 'STUDENT' })).rejects.toThrow('offline')
-    expect(store.getState().auth.status).not.toBe('authenticated')
-    expect(store.getState().role).toBe('visitor')
-  })
 })

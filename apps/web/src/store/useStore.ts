@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, type InstitutionType, type OrgOwnership, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
@@ -47,8 +47,15 @@ export interface AuthUser {
 }
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad?: boolean; marketing?: boolean }
-/** CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center. */
-export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER' | 'CENTER'; login: string; password: string; displayName?: string; phone?: string; centerName?: string }
+export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'COMPANY'
+/**
+ * CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center.
+ * INSTITUTION (ТЗ 4.2) and COMPANY (ТЗ 4.3) sign up as their contact person (`position`; a company also gives `email`)
+ * with the STIR (`inn`); an institution also sends `institution`. The rest of the profile is completed in the workspace.
+ */
+/** What an institution says about itself at sign-up: picked from the registry (`id`) or typed (name + region). */
+export interface InstitutionSignup { type: InstitutionType; ownership: OrgOwnership; id?: string; name: string; region: string }
+export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; position?: string; email?: string; inn?: string; institution?: InstitutionSignup }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string
@@ -89,7 +96,6 @@ interface Actions {
   bootstrap: () => Promise<void>
   register: (input: RegisterInput) => Promise<AuthUser>
   login: (login: string, password: string) => Promise<AuthUser>
-  loginWithGoogle: (input: { idToken?: string; code?: string; redirectUri?: string; role?: 'STUDENT' | 'TEACHER'; lang?: Lang }) => Promise<AuthUser>
   loginAsDemo: (role: 'STUDENT' | 'TEACHER', customUser?: Partial<AuthUser>) => Promise<AuthUser>
   giveConsent: (input: ConsentInput) => Promise<AuthUser>
   logout: () => Promise<void>
@@ -528,35 +534,6 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       register: (input) => api<{ accessToken: string; user: AuthUser }>('/auth/register', { method: 'POST', body: { ...input, lang: get().lang }, credentials: true, auth: false }).then(openSession),
       login: (login, password) => api<{ accessToken: string; user: AuthUser }>('/auth/login', { method: 'POST', body: { login, password }, credentials: true, auth: false }).then(openSession),
-      loginWithGoogle: (input) => {
-        const payload = { lang: get().lang, ...input }
-        return api<{ accessToken: string; user: AuthUser }>('/auth/google', { method: 'POST', body: payload, credentials: true, auth: false })
-          .then(openSession)
-          .catch((err) => {
-            if (DEMO_LOGIN_ENABLED && input.idToken && input.idToken.startsWith('mock-google-token:')) {
-              const parts = input.idToken.split(':')
-              const chosenLang = input.lang || get().lang
-              const demoUser: AuthUser = {
-                id: 'google-demo-student',
-                login: 'google.demo',
-                phone: null,
-                displayName: parts[3] ? decodeURIComponent(parts[3]) : 'Google Demo User',
-                district: 'Yunusobod',
-                preferredLang: chosenLang,
-                reminders: true,
-                roles: [input.role ?? 'STUDENT'],
-                centerId: null,
-                teacherProfileId: null,
-                offerAcceptedAt: new Date().toISOString(),
-                offerVersion: '1.0',
-                consentAt: new Date().toISOString(),
-                marketing: false,
-              }
-              return openSession({ accessToken: 'mock-google-access-token', user: demoUser })
-            }
-            throw err
-          })
-      },
       loginAsDemo: async (role, customUser) => {
         if (!DEMO_LOGIN_ENABLED) throw new Error('demo_login_disabled')
         const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'
