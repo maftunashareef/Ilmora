@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, type OrgKind, type OrgOwnership, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
@@ -47,8 +47,14 @@ export interface AuthUser {
 }
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad?: boolean; marketing?: boolean }
-/** CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center. */
-export interface RegisterInput extends ConsentInput { role: 'STUDENT' | 'TEACHER' | 'CENTER'; login: string; password: string; displayName?: string; phone?: string; centerName?: string }
+export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | OrgKind
+/** A technikum or a company registers with its details; `phone` (top level) is the organization's contact phone. */
+export interface OrganizationInput { name: string; region: string; inn: string; ownership?: OrgOwnership }
+/**
+ * CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center.
+ * TECHNIKUM and COMPANY send `organization` (a technikum also sends `ownership`).
+ */
+export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; organization?: OrganizationInput }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string

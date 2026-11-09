@@ -1,18 +1,34 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { normalizeUzPhone } from '@ilmora/shared'
+import { isUzRegion, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, UZ_REGIONS, type OrgOwnership } from '@ilmora/shared'
 import { ConsentFields, consentComplete, EMPTY_CONSENT, type ConsentState } from '../../components/ConsentGate'
-import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../../components/ui'
+import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Select, Tabs } from '../../components/ui'
+import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../../lib/demoMode'
 import { Link, useLocale, useNavigate, useSearchParams } from '../../lib/router'
 import { canOpen, homeFor } from '../../lib/workspaceHome'
-import { useStore } from '../../store/useStore'
+import { useStore, type RegisterRole } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
+type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'orgName' | 'ownership' | 'region' | 'inn'
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
+
+/** Self-service roles shown at registration: people first, then organizations. */
+const ROLE_GROUPS: { label: TKey; cols: string; roles: RegisterRole[] }[] = [
+  { label: 'auth.group.person', cols: 'sm:grid-cols-2', roles: ['STUDENT', 'TEACHER'] },
+  { label: 'auth.group.org', cols: 'sm:grid-cols-3', roles: ['CENTER', 'TECHNIKUM', 'COMPANY'] },
+]
+const ROLE_META: Record<RegisterRole, { icon: string; label: TKey; hint: TKey }> = {
+  STUDENT: { icon: 'user', label: 'role.student', hint: 'auth.role.studentHint' },
+  TEACHER: { icon: 'edit', label: 'role.teacher', hint: 'auth.role.teacherHint' },
+  CENTER: { icon: 'building', label: 'auth.role.center', hint: 'auth.role.centerHint' },
+  TECHNIKUM: { icon: 'cap', label: 'auth.role.technikum', hint: 'auth.role.technikumHint' },
+  COMPANY: { icon: 'briefcase', label: 'auth.role.company', hint: 'auth.role.companyHint' },
+}
+const isOrgRole = (r: RegisterRole | null): r is 'TECHNIKUM' | 'COMPANY' => r === 'TECHNIKUM' || r === 'COMPANY'
 
 export function LoginPage() {
   const { t } = useT()
@@ -30,8 +46,12 @@ export function LoginPage() {
   const notify = useStore((s) => s.notify)
 
   const [mode, setMode] = useState<Mode>(params.get('mode') === 'register' ? 'register' : 'signin')
-  const [role, setRole] = useState<'STUDENT' | 'TEACHER' | 'CENTER' | null>(null)
+  const [role, setRole] = useState<RegisterRole | null>(null)
   const [centerName, setCenterName] = useState('')
+  const [orgName, setOrgName] = useState('')
+  const [ownership, setOwnership] = useState<OrgOwnership | null>(null)
+  const [region, setRegion] = useState('')
+  const [inn, setInn] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [loginName, setLoginName] = useState('')
@@ -45,7 +65,9 @@ export function LoginPage() {
   const [googleBusy, setGoogleBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [networkOffline, setNetworkOffline] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName', string>>>({})
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({})
+  const isOrg = mode === 'register' && isOrgRole(role)
+  const clearError = (key: FieldKey) => { if (fieldErrors[key]) setFieldErrors((f) => ({ ...f, [key]: undefined })) }
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return
@@ -76,6 +98,11 @@ export function LoginPage() {
       case 'weak_password': return t('auth.err.password')
       case 'invalid_role': return t('auth.err.role')
       case 'invalid_center_name': return t('auth.err.centerName')
+      case 'invalid_organization_name': return t('auth.err.orgName')
+      case 'invalid_ownership': return t('auth.err.ownership')
+      case 'invalid_region': return t('auth.err.region')
+      case 'invalid_inn': return t('auth.err.inn')
+      case 'inn_taken': return t('auth.err.innTaken')
       case 'account_disabled': return t('auth.err.disabled')
       case 'unverified_email': return t('auth.err.google')
       case 'invalid_google_token': return t('auth.err.google')
@@ -104,8 +131,15 @@ export function LoginPage() {
     } else {
       if (!role) next.role = t('auth.err.role')
       if (role === 'CENTER' && centerName.trim().length < 2) next.centerName = t('auth.err.centerName')
+      if (isOrgRole(role)) {
+        if (orgName.trim().length < 2) next.orgName = t('auth.err.orgName')
+        if (role === 'TECHNIKUM' && !ownership) next.ownership = t('auth.err.ownership')
+        if (!isUzRegion(region)) next.region = t('auth.err.region')
+        if (!normalizeUzInn(inn).ok) next.inn = t('auth.err.inn')
+      }
       if (!name.trim() || name.trim().length < 2) next.name = t('auth.err.name')
-      if (phone.trim()) {
+      // An organization must leave a contact phone; for a person the phone is optional.
+      if (phone.trim() || isOrgRole(role)) {
         const phoneCheck = normalizeUzPhone(phone)
         if (!phoneCheck.ok) next.phone = t('auth.err.phone')
       }
@@ -136,6 +170,9 @@ export function LoginPage() {
           displayName: name.trim() || undefined,
           phone: phone.trim() || undefined,
           centerName: role === 'CENTER' ? centerName.trim() : undefined,
+          organization: isOrgRole(role)
+            ? { name: orgName.trim(), region, inn: inn.replace(/\D/g, ''), ownership: role === 'TECHNIKUM' ? ownership ?? undefined : undefined }
+            : undefined,
           acceptOffer: true,
           consentPersonalData: true,
         })
@@ -161,8 +198,8 @@ export function LoginPage() {
         const redirectUri = `${window.location.origin}/auth/google/callback`
         const statePayload = {
           lang: currentLang,
-          // Google Sign-In creates student or teacher accounts; a center registers with a login and password.
-          role: mode === 'register' && role && role !== 'CENTER' ? role : undefined,
+          // Google Sign-In creates student or teacher accounts; an organization registers with a login and password.
+          role: mode === 'register' && (role === 'STUDENT' || role === 'TEACHER') ? role : undefined,
           next: safeNext || undefined,
         }
         const state = encodeURIComponent(JSON.stringify(statePayload))
@@ -195,7 +232,7 @@ export function LoginPage() {
 
   return (
     <div className="container-x py-14 lg:py-20">
-      <div className="mx-auto max-w-md">
+      <div className={cx('mx-auto', mode === 'register' ? 'max-w-lg' : 'max-w-md')}>
         <Eyebrow className="mb-2">ILMORA</Eyebrow>
         <Card className="px-5 py-7 sm:px-7 sm:py-8 shadow-card border-charcoal/10 bg-white">
           <h1 className="font-display text-3xl text-charcoal">{t('auth.title')}</h1>
@@ -244,27 +281,120 @@ export function LoginPage() {
             {mode === 'register' && (
               <fieldset>
                 <legend className="mb-2 text-xs font-medium text-charcoal/70">{t('auth.whoAreYou')}</legend>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {(['STUDENT', 'TEACHER', 'CENTER'] as const).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      aria-pressed={role === r}
-                      onClick={() => { setRole(r); setFieldErrors((f) => ({ ...f, role: undefined })) }}
-                      className={cx('rounded-control border p-3 text-left transition', role === r ? 'border-forest bg-sage/60 shadow-lift' : 'border-charcoal/12 bg-ivory/60 hover:border-forest/50')}
-                    >
-                      <div className="flex items-center gap-2 text-sm font-semibold text-charcoal">
-                        <Icon name={r === 'STUDENT' ? 'user' : r === 'TEACHER' ? 'edit' : 'building'} className="h-4 w-4 text-forest" />
-                        {t(r === 'STUDENT' ? 'role.student' : r === 'TEACHER' ? 'role.teacher' : 'auth.role.center')}
+                <div className="space-y-3">
+                  {ROLE_GROUPS.map((group) => (
+                    <div key={group.label}>
+                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-charcoal/45">{t(group.label)}</p>
+                      <div className={cx('grid gap-2', group.cols)}>
+                        {group.roles.map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            aria-pressed={role === r}
+                            onClick={() => { setRole(r); clearError('role') }}
+                            className={cx('flex flex-col items-start justify-start rounded-control border p-3 text-left transition', role === r ? 'border-forest bg-sage/60 shadow-lift' : 'border-charcoal/12 bg-ivory/60 hover:border-forest/50')}
+                          >
+                            <div className="flex items-center gap-2 text-sm font-semibold text-charcoal">
+                              <Icon name={ROLE_META[r].icon} className="h-4 w-4 shrink-0 text-forest" />
+                              {t(ROLE_META[r].label)}
+                            </div>
+                            <div className="mt-1 text-[11px] leading-relaxed text-charcoal/60">{t(ROLE_META[r].hint)}</div>
+                          </button>
+                        ))}
                       </div>
-                      <div className="mt-1 text-[11px] leading-relaxed text-charcoal/60">
-                        {t(r === 'STUDENT' ? 'auth.role.studentHint' : r === 'TEACHER' ? 'auth.role.teacherHint' : 'auth.role.centerHint')}
-                      </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
                 {fieldErrors.role && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.role}</p>}
               </fieldset>
+            )}
+
+            {isOrg && (
+              <section aria-labelledby="org-details-title" className="space-y-4 rounded-control border border-forest/15 bg-sage/20 p-4">
+                <h2 id="org-details-title" className="flex items-center gap-2 font-body text-sm font-semibold text-charcoal">
+                  <Icon name={role === 'TECHNIKUM' ? 'cap' : 'briefcase'} className="h-4 w-4 text-forest" />
+                  {t('auth.org.title')}
+                </h2>
+
+                <Field label={t(role === 'TECHNIKUM' ? 'auth.org.technikumName' : 'auth.org.companyName')} required>
+                  <Input
+                    maxLength={120}
+                    placeholder={t(role === 'TECHNIKUM' ? 'auth.org.technikumNamePlaceholder' : 'auth.org.companyNamePlaceholder')}
+                    value={orgName}
+                    onChange={(e) => { setOrgName(e.target.value); clearError('orgName') }}
+                    aria-invalid={!!fieldErrors.orgName}
+                  />
+                  {fieldErrors.orgName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.orgName}</p>}
+                </Field>
+
+                {role === 'TECHNIKUM' && (
+                  <fieldset>
+                    <legend className="mb-1.5 text-xs font-medium text-charcoal/70">
+                      {t('auth.org.ownership')}<span className="ml-0.5 text-champagne">*</span>
+                    </legend>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {ORG_OWNERSHIPS.map((o) => (
+                        <button
+                          key={o}
+                          type="button"
+                          aria-pressed={ownership === o}
+                          onClick={() => { setOwnership(o); clearError('ownership') }}
+                          className={cx('flex items-start gap-2.5 rounded-control border bg-paper p-3 text-left transition', ownership === o ? 'border-forest ring-2 ring-forest/15' : 'border-charcoal/15 hover:border-forest/50')}
+                        >
+                          <span className={cx('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border', ownership === o ? 'border-forest' : 'border-charcoal/30')}>
+                            {ownership === o && <span className="h-2 w-2 rounded-full bg-forest" />}
+                          </span>
+                          <span>
+                            <span className="block text-sm font-semibold text-charcoal">{t(o === 'STATE' ? 'auth.org.state' : 'auth.org.private')}</span>
+                            <span className="mt-0.5 block text-[11px] leading-snug text-charcoal/55">{t(o === 'STATE' ? 'auth.org.stateHint' : 'auth.org.privateHint')}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    {fieldErrors.ownership && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.ownership}</p>}
+                  </fieldset>
+                )}
+
+                <Field label={t('auth.org.region')} required>
+                  <Select
+                    value={region}
+                    onChange={(e) => { setRegion(e.target.value); clearError('region') }}
+                    aria-invalid={!!fieldErrors.region}
+                    className={region ? undefined : 'text-charcoal/40'}
+                  >
+                    <option value="" disabled>{t('auth.org.regionPlaceholder')}</option>
+                    {UZ_REGIONS.map((r) => <option key={r.id} value={r.id} className="text-charcoal">{r.name[currentLang]}</option>)}
+                  </Select>
+                  {fieldErrors.region && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.region}</p>}
+                </Field>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t('auth.org.inn')} hint={t('auth.org.innHint')} required>
+                    <Input
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="123456789"
+                      value={inn}
+                      onChange={(e) => { setInn(e.target.value.replace(/\D/g, '').slice(0, 9)); clearError('inn') }}
+                      aria-invalid={!!fieldErrors.inn}
+                      className="tabular-nums tracking-wider"
+                    />
+                    {fieldErrors.inn && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.inn}</p>}
+                  </Field>
+                  <Field label={t('auth.org.phone')} required>
+                    <Input
+                      type="tel"
+                      autoComplete="tel"
+                      placeholder="+998 71 123 45 67"
+                      maxLength={20}
+                      value={phone}
+                      onChange={(e) => { setPhone(e.target.value); clearError('phone') }}
+                      aria-invalid={!!fieldErrors.phone}
+                    />
+                    {fieldErrors.phone && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.phone}</p>}
+                  </Field>
+                </div>
+              </section>
             )}
 
             {mode === 'register' && role === 'CENTER' && (
@@ -283,7 +413,7 @@ export function LoginPage() {
             )}
 
             {mode === 'register' && (
-              <Field label={t('auth.fullName')} hint={t('auth.fullNamePlaceholder')}>
+              <Field label={t(isOrg ? 'auth.org.contactName' : 'auth.fullName')} hint={t('auth.fullNamePlaceholder')}>
                 <Input
                   autoComplete="name"
                   maxLength={60}
@@ -299,7 +429,7 @@ export function LoginPage() {
               </Field>
             )}
 
-            {mode === 'register' && (
+            {mode === 'register' && !isOrg && (
               <Field label={t('auth.phone')} hint={t('auth.phonePlaceholder')}>
                 <Input
                   type="tel"
