@@ -162,3 +162,61 @@ export interface InstitutionAddResult {
   institution: InstitutionSearchItemDto
   created: boolean
 }
+
+// ───────────── Institution profile («паспорт учреждения», ТЗ 4.2) ─────────────
+
+/** UNCLAIMED → DRAFT → PENDING → APPROVED / REJECTED (docs/registry/data-model.md). */
+export type RegistryInstitutionStatus = 'UNCLAIMED' | 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED'
+
+/** After approval, changing one of these sends the profile back to the ministry (the workspace keeps working). */
+export const INSTITUTION_REVIEW_FIELDS = ['name', 'stir', 'type', 'ownership', 'regionId'] as const
+
+/** What must be filled in before «Отправить на проверку»; the API answers the missing ones in `details.missing`. */
+export const INSTITUTION_REQUIRED_FIELDS = [
+  'type', 'ownership', 'name', 'stir', 'regionId', 'districtId', 'address', 'phone', 'directorName', 'directions', 'representativeName', 'representativeJobTitle',
+] as const
+export type InstitutionRequiredField = (typeof INSTITUTION_REQUIRED_FIELDS)[number]
+
+export const STUDENTS_PER_DIRECTION_MAX = 100_000
+export const INSTITUTION_DIRECTIONS_MAX = 200
+
+export interface InstitutionDirectionDto {
+  id: string
+  direction: DirectionDto
+  department: string | null
+  studentsCount: number
+}
+
+/** The institution's own profile, as its representative sees it. */
+export interface InstitutionPassportDto {
+  id: string
+  type: RegistryInstitutionType
+  ownership: RegistryOwnership | null
+  name: string
+  stir: string | null
+  region: { id: string; name: L } | null
+  district: { id: string; name: L } | null
+  address: string | null
+  phone: string | null
+  email: string | null
+  website: string | null
+  directorName: string | null
+  status: RegistryInstitutionStatus
+  rejectReason: string | null
+  submittedAt: string | null
+  approvedAt: string | null
+  /** Approved once: students, announcements and requests are open (ТЗ 4.2 step 6). */
+  workspaceOpen: boolean
+  /** False only while the first review is pending: the ministry is looking at exactly this version. */
+  editable: boolean
+  directions: InstitutionDirectionDto[]
+  /** «Всего студентов» and «Всего направлений» are computed, not typed in. */
+  totals: { students: number; directions: number }
+  representative: { name: string; jobTitle: string | null }
+}
+
+export interface InstitutionClaimResult {
+  institution: InstitutionPassportDto
+  /** True when the STIR was not in the registry and a new record was started. */
+  created: boolean
+}

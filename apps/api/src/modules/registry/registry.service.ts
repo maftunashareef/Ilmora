@@ -8,6 +8,7 @@ import type { InstitutionType } from '../../generated/prisma/enums'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
+import { DIRECTION_SELECT, DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, toDirection, toIndustry } from './registry.mappers'
 import type { DirectionInput, DirectionsQuery, InstitutionsQuery, StudentInstitutionInput } from './registry.schemas'
 
 // The shared contract and the database enum must name the same institution types.
@@ -15,30 +16,20 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never
 const typesMatch: Same<RegistryInstitutionType, InstitutionType> = true
 void typesMatch
 
-const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === 'P2002'
 /** Rows read for suggestions before aliases are resolved and the list is cut to SUGGEST_LIMIT. */
 const SUGGEST_SCAN = 100
 
-const INDUSTRY_SELECT = { id: true, slug: true, name: true } as const
-const DIRECTION_SELECT = { id: true, name: true, origin: true, code: true, industry: { select: INDUSTRY_SELECT } } as const
-/** A direction with its main direction when it is a merged alias (ТЗ 3.2 step 4; docs/registry/data-model.md). */
-const DIRECTION_WITH_MAIN = { ...DIRECTION_SELECT, mergedInto: { select: DIRECTION_SELECT } } as const
 /** Public fields of an institution only (ТЗ 9.4): no STIR, director, phone, e-mail or address. */
 const INSTITUTION_PUBLIC = {
   id: true, name: true, type: true, ownership: true, source: true,
   region: { select: { id: true, name: true } }, district: { select: { id: true, name: true } },
 } as const
 
-type IndustryRow = { id: string; slug: string; name: unknown }
-type DirectionRow = { id: string; name: string; origin: string; code: string | null; industry: IndustryRow }
 type InstitutionRow = {
   id: string; name: string; type: InstitutionType; ownership: 'STATE' | 'PRIVATE' | null; source: string
   region: { id: string; name: unknown } | null; district: { id: string; name: unknown } | null
 }
 
-const toIndustry = (i: IndustryRow): IndustryDto => ({ id: i.id, slug: i.slug, name: i.name as L })
-const toDirection = (d: DirectionRow): DirectionDto => ({ id: d.id, name: d.name, industry: toIndustry(d.industry), official: d.origin === 'OFFICIAL', code: d.code })
-const mainOf = (d: DirectionRow & { mergedInto: DirectionRow | null }): DirectionDto => toDirection(d.mergedInto ?? d)
 const toInstitution = (i: InstitutionRow): InstitutionSearchItemDto => ({
   id: i.id, name: i.name, type: i.type, ownership: i.ownership,
   region: i.region ? { id: i.region.id, name: i.region.name as L } : null,

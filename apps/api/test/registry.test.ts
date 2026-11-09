@@ -3,7 +3,7 @@ import type { ExecutionContext } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { registrySearchKey } from '@ilmora/shared'
 import { seedRegistryReference } from '../prisma/registry-reference'
-import { ApprovedGuard, APPROVED_KEY, type OrgKind, ownCompanyId, ownInstitutionId } from '../src/common/registry-access'
+import { ApprovedGuard, APPROVED_KEY, type OrgKind } from '../src/common/registry-access'
 import { ZodValidationPipe } from '../src/common/zod.pipe'
 import type { PrismaService } from '../src/infra/prisma/prisma.service'
 import { TenantContext, type RequestActor } from '../src/infra/tenancy/tenant-context'
@@ -167,38 +167,31 @@ describe('Registry input validation', () => {
   })
 })
 
-describe('Registry access: @Approved and own scope', () => {
+describe('Registry access: @Approved', () => {
   const ctxFor = (kind: OrgKind | undefined, actor: RequestActor | undefined) => {
     const handler = () => undefined
     if (kind) Reflect.defineMetadata(APPROVED_KEY, kind, handler)
     return { getHandler: () => handler, getClass: () => class {}, switchToHttp: () => ({ getRequest: () => ({ actor }) }) } as unknown as ExecutionContext
   }
-  /** Approved organizations by id; records the filter the guard asked for. */
-  const prismaWith = (approved: string[]) => {
+  /** Approved organizations by representative; records the filter the guard asked for. */
+  const prismaWith = (approved: { institution?: string[]; company?: string[] }) => {
     const seen: unknown[] = []
-    const findFirst = async ({ where }: { where: { id: string; approvedAt?: unknown } }) => (seen.push(where), approved.includes(where.id) ? { id: where.id } : null)
-    return { prisma: { client: { institution: { findFirst }, company: { findFirst } } } as unknown as PrismaService, seen }
+    const finder = (ids: string[] = []) => async ({ where }: { where: { representative: { is: { id: string } } } }) => (seen.push(where), ids.includes(where.representative.is.id) ? { id: 'org' } : null)
+    return { prisma: { client: { institution: { findFirst: finder(approved.institution) }, company: { findFirst: finder(approved.company) } } } as unknown as PrismaService, seen }
   }
-  const inst: RequestActor = { id: 'u-i', roles: ['INSTITUTION_ADMIN'], institutionId: 'inst-1' }
+  const rep: RequestActor = { id: 'u-rep', roles: ['INSTITUTION_ADMIN'] }
 
   it('lets routes without @Approved through', async () => {
-    await expect(new ApprovedGuard(new Reflector(), prismaWith([]).prisma).canActivate(ctxFor(undefined, inst))).resolves.toBe(true)
+    await expect(new ApprovedGuard(new Reflector(), prismaWith({}).prisma).canActivate(ctxFor(undefined, rep))).resolves.toBe(true)
   })
 
-  it('needs an approved organization of the right kind, read by approvedAt', async () => {
-    const { prisma, seen } = prismaWith(['inst-1'])
-    await expect(new ApprovedGuard(new Reflector(), prisma).canActivate(ctxFor('institution', inst))).resolves.toBe(true)
-    expect(seen[0]).toEqual({ id: 'inst-1', approvedAt: { not: null }, mergedIntoId: null })
-    await expect(new ApprovedGuard(new Reflector(), prismaWith([]).prisma).canActivate(ctxFor('institution', inst))).rejects.toMatchObject({ code: 'not_approved' })
+  it('finds the organization by its representative in the database and needs approvedAt', async () => {
+    const { prisma, seen } = prismaWith({ institution: ['u-rep'] })
+    await expect(new ApprovedGuard(new Reflector(), prisma).canActivate(ctxFor('institution', rep))).resolves.toBe(true)
+    expect(seen[0]).toEqual({ representative: { is: { id: 'u-rep' } }, approvedAt: { not: null }, mergedIntoId: null })
+    await expect(new ApprovedGuard(new Reflector(), prismaWith({}).prisma).canActivate(ctxFor('institution', rep))).rejects.toMatchObject({ code: 'not_approved' })
     // An institution account is not a company, even when its institution is approved.
-    await expect(new ApprovedGuard(new Reflector(), prisma).canActivate(ctxFor('company', inst))).rejects.toMatchObject({ code: 'not_approved' })
+    await expect(new ApprovedGuard(new Reflector(), prisma).canActivate(ctxFor('company', rep))).rejects.toMatchObject({ code: 'not_approved' })
     await expect(new ApprovedGuard(new Reflector(), prisma).canActivate(ctxFor('institution', undefined))).rejects.toMatchObject({ code: 'not_approved' })
-  })
-
-  it('own scope comes from the session and reads as not found when missing', () => {
-    expect(ownInstitutionId(inst)).toBe('inst-1')
-    const student: RequestActor = { id: 'u', roles: ['STUDENT'] }
-    expect(() => ownInstitutionId(student)).toThrow(expect.objectContaining({ code: 'not_found' }))
-    expect(() => ownCompanyId(student)).toThrow(expect.objectContaining({ code: 'not_found' }))
   })
 })
