@@ -20,7 +20,7 @@ export const OFFER_UZ: LegalBlock[] = [
 },
 {
 "t": "p",
-"text": "«ANJIR-GROUP» masʼuliyati cheklangan jamiyati, STIR 312525684, manzili: Toshkent shahri, Shayxontohur tumani, Hadra MFY, Hadra mavzesi, 5-uy, 54-xonadon (bundan buyon — «Operator»), Ustav asosida ish yurituvchi direktor ABDUHAMIDOV ABDURASHID ABDUVOHID OʻGʻLI timsolida, https://ilmora-ten.vercel.app manzilidagi ILMORA platformasining (bundan buyon — «Platforma») egasi va operatori sifatida Oʻzbekiston Respublikasi Fuqarolik kodeksining 369- va 370-moddalariga muvofiq ushbu ommaviy ofertani (bundan buyon — «Oferta») eʼlon qiladi va har qanday muomalaga layoqatli jismoniy shaxsga quyida bayon etilgan shartlarda shartnoma tuzishni taklif qiladi."
+"text": "«ANJIR-GROUP» masʼuliyati cheklangan jamiyati, STIR 312525684, manzili: Toshkent shahri, Shayxontohur tumani, Hadra MFY, Hadra mavzesi, 5-uy, 54-xonadon (bundan buyon — «Operator»), Ustav asosida ish yurituvchi direktor ABDUHAMIDOV ABDURASHID ABDUVOHID OʻGʻLI timsolida, https://ilmoraa.uz manzilidagi ILMORA platformasining (bundan buyon — «Platforma») egasi va operatori sifatida Oʻzbekiston Respublikasi Fuqarolik kodeksining 369- va 370-moddalariga muvofiq ushbu ommaviy ofertani (bundan buyon — «Oferta») eʼlon qiladi va har qanday muomalaga layoqatli jismoniy shaxsga quyida bayon etilgan shartlarda shartnoma tuzishni taklif qiladi."
 },
 {
 "t": "p",
@@ -781,7 +781,7 @@ export const OFFER_UZ: LegalBlock[] = [
 {
 "t": "kv",
 "label": "Sayt",
-"value": "https://ilmora-ten.vercel.app [ishga tushirilganda asosiy domenga almashtirish]"
+"value": "https://ilmoraa.uz"
 },
 {
 "t": "kv",

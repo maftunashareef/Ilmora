@@ -2,7 +2,7 @@
 
 One monthly subscription across education centers in Tashkent: students pick a Duo (2 courses) or Trio (3 courses) package, join specific groups without schedule conflicts, pay once, and check in to every lesson with a per-session QR code. Three workspaces: Super Admin (site template, catalog, people, finance), Teacher Studio (courses, groups, content, attendance) and the Student workspace.
 
-> The repository started as a React/Vite prototype with all state in `localStorage`. It is now a production architecture: **Next.js 16** web app, **NestJS 12** API, **Prisma 7 / PostgreSQL**, **Redis + BullMQ**, Payme and Click adapters, Docker/nginx deployment and GitHub Actions CI/CD. The sample catalog (fictional centers, teachers, courses) is kept as seed data.
+> The repository started as a React/Vite prototype with all state in `localStorage`. It is now a production architecture: **Next.js 16** web app, **NestJS 12** API, **Prisma 7 / PostgreSQL**, **Redis + BullMQ**, Payme and Click adapters, Docker deployment on UzCloud (Caddy) and GitHub Actions CI/CD. The sample catalog (fictional centers, teachers, courses) is kept as seed data.
 
 ## Repository layout
 
@@ -10,9 +10,9 @@ One monthly subscription across education centers in Tashkent: students pick a D
 apps/web        Next.js app (App Router, locale routes /uz /ru /en, SEO, dashboards)
 apps/api        NestJS API + worker (Prisma schema, migrations, seed, tests)
 packages/shared Domain types, pure rules (access, schedule, capacity, sessions, check-in), UZ/RU/EN dictionary, sample data
-infra/          docker-compose.prod.yml, nginx, redis.conf, backup/restore/deploy scripts
-docs/           deployment runbook, payment protocol references, legal notes
-.github/        CI (typecheck, lint, tests with Postgres/Redis services, builds, migration drift check) and deploy workflows
+infra/          uzcloud/ (two-machine Docker Compose, Caddy, nightly backups, release scripts, runbook), redis/redis.conf
+docs/           deployment notes, payment protocol references and onboarding, legal notes
+.github/        CI (typecheck, lint, tests with Postgres/Redis services, builds, migration drift check) and the release workflow
 ```
 
 ## Local development
@@ -36,7 +36,7 @@ Sign-in is login + password. Registration offers two roles only, Student and Tea
 
 ```bash
 npm run owner:setup -- --login <your-login>          # local / staging checkout
-docker compose -f infra/docker-compose.prod.yml exec api node dist/cli/owner-setup.js --login <your-login>   # production container
+sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate node dist/cli/owner-setup.js --login <your-login>   # production, on ilmora-admin
 ```
 
 The command first lists the owners and every account that carries privileged roles. When owners already exist it changes nothing unless told how: `--add` adds the login as another owner, `--replace` makes it the only owner (the others lose Super Admin and are signed out), `--remove` takes Super Admin away from a login (never from the last owner). Roles of non-owner accounts are stripped only with `--demote-others`. Admin claims are derived from the owner flag at every sign-in and refresh, so a roles column alone can never grant them.
@@ -69,21 +69,7 @@ API test suites (`apps/api/test`) cover: Payme create/perform/cancel with concur
 
 ## Deployment
 
-See `docs/deployment.md` (single Tashkent VPS with Docker Compose, nginx, Let's Encrypt, backups, rollback, availability statement) and `infra/.env.prod.example` for every variable. Images are built by CI from `apps/api/Dockerfile` and `apps/web/Dockerfile`.
-
-## API on Render (without Docker)
-
-A demo or staging API that needs no server of its own. The web app is deployed from its Docker image (`apps/web/Dockerfile`, see `docs/deployment.md`); in same-origin mode (`NEXT_PUBLIC_API_URL=/`, `API_INTERNAL_URL=<Render API URL>`) it proxies `/v1/*` to Render, so the refresh cookie stays first-party and no CORS preflight is needed.
-
-| Part | Host | Configuration |
-| --- | --- | --- |
-| API + worker | Render free web service (`APP_ROLE=all`) | `render.yaml` blueprint; `infra/render-start.sh` migrates, seeds while `SEED_ON_DEPLOY=true`, then serves |
-| Redis | Render Key Value, free, `noeviction` | wired by the blueprint |
-| PostgreSQL | Render Postgres free plan (1 GB, deleted after 30 days unless upgraded) or Neon | wired by the blueprint; for Neon replace `DATABASE_URL` with its connection string |
-
-Steps: (1) on Render choose *New → Blueprint*, pick this repository and apply; set `PUBLIC_WEB_URL` and `CORS_ORIGINS` in `render.yaml` to the web app's domain; (2) designate the owner once by adding `OWNER_LOGIN` and `OWNER_PASSWORD` to the Render service environment, redeploying, then deleting both variables; (3) after the first successful deploy set `SEED_ON_DEPLOY=false` so later deploys never overwrite catalog edits.
-
-Limits of this setup: the free Render service sleeps after 15 minutes without traffic and the next request can take up to a minute (an external uptime ping every 10 minutes keeps it warm); the free database expires after 30 days; SMS uses the console provider (`SMS_ALLOW_CONSOLE_IN_PRODUCTION=true`), so codes and receipts are logged, not sent; the hosts are outside Uzbekistan, which matters once real personal data is involved (see the compliance notes below).
+Production runs on UzCloud in Tashkent, on two machines: `ilmora-web` (Caddy, site, API) and `ilmora-admin` (admin panel, worker, PostgreSQL, Redis, nightly encrypted backups to UzCloud Object Storage). Installation, secrets, release, owners, backups and restore, rollback and team access are in `infra/uzcloud/README.md` (in Russian); topology, the availability statement, the migration convention and an operations reference are in `docs/deployment.md`; Payme and Click onboarding is in `docs/payments/onboarding-checklist.md`. CI builds the images from `apps/api/Dockerfile` and `apps/web/Dockerfile`; a release is started by hand with Actions → «Release (UzCloud)».
 
 ## Legal and data-residency notes
 
