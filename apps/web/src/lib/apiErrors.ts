@@ -41,6 +41,12 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   invalid_center_name: 'apiError.centerName',
   teacher_center_required: 'apiError.teacherCenterRequired',
   subscription_closed: 'apiError.subscriptionClosed',
+  // registry
+  not_approved: 'apiError.notApproved',
+  invalid_industry: 'apiError.invalidIndustry',
+  invalid_name: 'apiError.invalidName',
+  invalid_region: 'apiError.invalidRegion',
+  invalid_district: 'apiError.invalidDistrict',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

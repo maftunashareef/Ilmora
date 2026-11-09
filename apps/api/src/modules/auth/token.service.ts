@@ -15,6 +15,9 @@ export interface AccessClaims {
   roles: Role[]
   cid?: string | null
   tpid?: string | null
+  /** Registry: institution and company of the account (INSTITUTION_ADMIN / COMPANY_ADMIN). */
+  iid?: string | null
+  coid?: string | null
   iat: number
   exp: number
 }
@@ -30,9 +33,9 @@ export const SESSION_FLAG = 'ilmora_session'
 export class TokenService {
   constructor(private readonly jwt: JwtService, @Inject(ENV) private readonly env: Env, private readonly prisma: PrismaService) {}
 
-  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null }): Promise<string> {
+  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null }): Promise<string> {
     return this.jwt.signAsync(
-      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined },
+      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined },
       { subject: user.id, expiresIn: this.env.JWT_ACCESS_TTL_SECONDS },
     )
   }

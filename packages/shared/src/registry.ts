@@ -89,3 +89,76 @@ export const REGISTRY_REGIONS: RegistryRegion[] = [
   { code: '1733', name: { uz: 'Xorazm viloyati', ru: 'Хорезмская область', en: 'Khorezm Region' } },
   { code: '1726', name: { uz: 'Toşkent şahri', ru: 'город Ташкент', en: 'Tashkent City' } },
 ]
+
+// ───────────── Registry API: rules and response contract (ТЗ 3, 9.2, 9.4) ─────────────
+
+/** Institution types — the same values as the database enum `InstitutionType` (the API checks they match). */
+export type RegistryInstitutionType = 'TECHNIKUM' | 'COLLEGE' | 'LYCEUM' | 'SCHOOL' | 'UNIVERSITY' | 'TRAINING_CENTER'
+export type RegistryOwnership = 'STATE' | 'PRIVATE'
+
+/** Institution types a student may pick (ТЗ 3.3): «уже учусь» and «хочу поступить». */
+export const STUDENT_INSTITUTION_TYPES = {
+  studying: ['TECHNIKUM', 'UNIVERSITY', 'SCHOOL'],
+  applying: ['TECHNIKUM', 'LYCEUM', 'UNIVERSITY'],
+} as const satisfies Record<string, readonly RegistryInstitutionType[]>
+
+/** Types a student may add to the registry when the institution is missing (both lists above). */
+export const STUDENT_ADDABLE_TYPES: readonly RegistryInstitutionType[] = [...new Set<RegistryInstitutionType>([...STUDENT_INSTITUTION_TYPES.studying, ...STUDENT_INSTITUTION_TYPES.applying])]
+
+/** Suggestions start after 2 characters (ТЗ 3.2) and show at most 20 rows. */
+export const SUGGEST_MIN_CHARS = 2
+export const SUGGEST_LIMIT = 20
+export const DIRECTION_NAME_MAX = 100
+export const INSTITUTION_NAME_MAX = 200
+/** Free text shown to other users must not carry markup (ТЗ 9.4, XSS). */
+export const hasMarkup = (s: string): boolean => /[<>]/.test(s)
+
+export interface IndustryDto {
+  id: string
+  slug: string
+  name: L
+}
+
+export interface RegionDto {
+  id: string
+  /** SOATO code. */
+  code: string
+  name: L
+}
+
+export interface DistrictDto extends RegionDto {
+  regionId: string
+}
+
+/** One suggestion of the direction field: the chip shows the name and its industry. A merged alias answers its main direction. */
+export interface DirectionDto {
+  id: string
+  name: string
+  industry: IndustryDto
+  /** From the ministry's classifier — otherwise added by a user or the Super Admin. */
+  official: boolean
+  code: string | null
+}
+
+/** Answer to «Добавить „…“»: the direction and whether it was created or an existing one with the same key. */
+export interface DirectionAddResult {
+  direction: DirectionDto
+  created: boolean
+}
+
+/** An institution as the public search shows it (ТЗ 9.4): name, type, region — no STIR, director or phone. */
+export interface InstitutionSearchItemDto {
+  id: string
+  name: string
+  type: RegistryInstitutionType
+  ownership: RegistryOwnership | null
+  region: { id: string; name: L } | null
+  district: { id: string; name: L } | null
+  /** Added by a student — shown with a mark, outside the ministry's official figures. */
+  addedByStudent: boolean
+}
+
+export interface InstitutionAddResult {
+  institution: InstitutionSearchItemDto
+  created: boolean
+}

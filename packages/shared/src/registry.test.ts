@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isStir, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey } from './registry.js'
+import { hasMarkup, isStir, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey, STUDENT_ADDABLE_TYPES } from './registry.js'
 
 describe('registrySearchKey', () => {
   const same = (...names: string[]) => {
@@ -51,5 +51,15 @@ describe('registry reference data', () => {
     expect(isStir('12345678')).toBe(false)
     expect(isStir('1234567890')).toBe(false)
     expect(isStir('12345678a')).toBe(false)
+  })
+})
+
+describe('registry API rules', () => {
+  it('lets a student add only the types they can choose', () => {
+    expect([...STUDENT_ADDABLE_TYPES].sort()).toEqual(['LYCEUM', 'SCHOOL', 'TECHNIKUM', 'UNIVERSITY'])
+  })
+  it('flags markup in free text', () => {
+    expect(hasMarkup('<script>')).toBe(true)
+    expect(hasMarkup('IT va aloqa')).toBe(false)
   })
 })
