@@ -5,11 +5,12 @@ import { SessionsModule } from '../sessions/sessions.module'
 import { AdminCenterController } from './admin-center.controller'
 import { CenterController } from './center.controller'
 import { CenterService } from './center.service'
+import { TeacherInvitesController } from './teacher-invites.controller'
 
 /** Educational Center workspace (role CENTER_ADMIN) and the Super Admin's view of any center (PLATFORM_ADMIN). */
 @Module({
   imports: [AttendanceModule, ManageModule, SessionsModule],
-  controllers: [CenterController, AdminCenterController],
+  controllers: [CenterController, AdminCenterController, TeacherInvitesController],
   providers: [CenterService],
 })
 export class CenterModule {}

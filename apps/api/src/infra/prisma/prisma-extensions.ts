@@ -5,7 +5,7 @@ import { TenantContext } from '../tenancy/tenant-context'
 export const TENANT_SCOPED_MODELS = new Set<string>([
   'User', 'RefreshSession', 'OtpCode', 'Center', 'Category', 'TeacherProfile', 'Subject', 'Course', 'Group', 'Package',
   'Video', 'Playlist', 'Resource', 'SavedItem', 'Subscription', 'Enrollment', 'LessonSession', 'AttendanceRecord',
-  'Payment', 'PaymentTransaction', 'LedgerJournal', 'LedgerEntry', 'Receipt', 'AuditEvent', 'SmsMessage', 'CenterInquiry', 'Notification',
+  'Payment', 'PaymentTransaction', 'LedgerJournal', 'LedgerEntry', 'Receipt', 'AuditEvent', 'SmsMessage', 'CenterInquiry', 'Notification', 'TeacherInvite',
 ])
 
 /** Models with `deletedAt`: deletes become soft deletes and normal reads exclude deleted rows. */

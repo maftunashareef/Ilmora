@@ -241,6 +241,7 @@ model Tenant {
   savedItems      SavedItem[]
   callbackLogs    ProviderCallbackLog[]
   notifications   Notification[]
+  teacherInvites  TeacherInvite[]
 }
 
 /// Template-driven site configuration (sections, theme, nav, features, permissions, media…) edited by Super Admin.
@@ -300,6 +301,7 @@ model User {
   auditEvents     AuditEvent[]
   ownedTenant     Tenant?   @relation("TenantOwner")
   notifications   Notification[]
+  centerInvites   TeacherInvite[]
 
   @@unique([tenantId, phoneE164])
   @@unique([tenantId, login])
@@ -369,6 +371,9 @@ model Center {
   approvedAt  DateTime?
   blockedAt   DateTime?
   blockReason String?
+  /** A new name asked for after approval: the public name changes only when the Super Admin approves it. */
+  pendingName   String?
+  pendingNameAt DateTime?
   /** Opaque code inside the center's standing QR code (/attend/c/<code>); rotating it voids printed codes. */
   checkInCode          String?   @unique
   checkInCodeRotatedAt DateTime?
@@ -386,6 +391,7 @@ model Center {
   staff    User[]
   teachers TeacherProfile[]
   courses  Course[]
+  teacherInvites TeacherInvite[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, deletedAt])
@@ -1075,6 +1081,30 @@ model Notification {
 
   @@index([tenantId, userId, readAt, createdAt])
   @@index([userId, createdAt])
+}
+
+enum TeacherInviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+/// A center's invitation to a registered teacher: the teacher joins the center only after accepting it.
+model TeacherInvite {
+  id          String              @id @default(cuid())
+  tenantId    String
+  tenant      Tenant              @relation(fields: [tenantId], references: [id])
+  centerId    String
+  center      Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      TeacherInviteStatus @default(PENDING)
+  invitedById String?
+  createdAt   DateTime            @default(now())
+  respondedAt DateTime?
+
+  @@unique([centerId, userId])
+  @@index([tenantId, userId, status])
 }
 
 model CenterInquiry {

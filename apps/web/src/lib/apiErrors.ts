@@ -92,6 +92,9 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   teacher_not_in_center: 'center.err.teacherNotInCenter',
   teacher_login_not_found: 'center.err.teacherNotFound',
   teacher_elsewhere: 'center.err.teacherElsewhere',
+  no_pending_name: 'apiError.versionConflict',
+  invalid_course: 'apiError.validation',
+  wrong_course: 'apiError.forbidden',
   // Super Admin
   owner_protected: 'admin.accounts.ownerProtected',
   self_roles: 'admin.accounts.selfRoles',
