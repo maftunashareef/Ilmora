@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import type { ReactNode } from 'react'
 import { isLang, pick } from '@ilmora/shared'
 import { AppProviders } from '@/components/AppProviders'
+import { JsonLd } from '@/components/JsonLd'
 import { getCatalog, getSite } from '@/lib/server-api'
 import { organizationJsonLd, pageMetadata } from '@/lib/seo'
 import '../globals.css'
@@ -50,7 +51,7 @@ export default async function LocaleLayout({ children, params }: { children: Rea
   return (
     <html lang={locale}>
       <body>
-        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+        <JsonLd data={jsonLd} />
         <AppProviders initial={{ lang: locale, site: { ...siteData, version }, catalog }}>{children}</AppProviders>
       </body>
     </html>

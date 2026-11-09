@@ -43,7 +43,7 @@ export function AdminOverview() {
           <Link to="/admin/content" className="font-medium underline">{t('common.open')}</Link>
         </Notice>
       )}
-      <div className="mt-10"><PendingCentersPanel list={centers.list} busy={centers.busy} setStatus={centers.setStatus} linkToAll /></div>
+      <div className="mt-10"><PendingCentersPanel list={centers.list} busy={centers.busy} setStatus={centers.setStatus} reviewName={centers.reviewName} linkToAll /></div>
       <div className="mt-10 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
         <section>
           <Eyebrow className="mb-4">{t('admin.overview.quick')}</Eyebrow>

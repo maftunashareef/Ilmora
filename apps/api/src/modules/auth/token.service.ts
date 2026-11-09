@@ -15,6 +15,9 @@ export interface AccessClaims {
   roles: Role[]
   cid?: string | null
   tpid?: string | null
+  /** Registry: institution and company of the account (INSTITUTION_ADMIN / COMPANY_ADMIN). */
+  iid?: string | null
+  coid?: string | null
   iat: number
   exp: number
 }
@@ -30,9 +33,9 @@ export const SESSION_FLAG = 'ilmora_session'
 export class TokenService {
   constructor(private readonly jwt: JwtService, @Inject(ENV) private readonly env: Env, private readonly prisma: PrismaService) {}
 
-  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null }): Promise<string> {
+  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null }): Promise<string> {
     return this.jwt.signAsync(
-      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined },
+      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined },
       { subject: user.id, expiresIn: this.env.JWT_ACCESS_TTL_SECONDS },
     )
   }
@@ -62,7 +65,9 @@ export class TokenService {
    */
   async rotate(raw: string, meta: SessionMeta): Promise<{ userId: string; tenantId: string; raw: string; expiresAt: Date; familyId: string }> {
     const hash = sha256(raw)
-    const session = await TenantContext.system(() => this.prisma.client.refreshSession.findUnique({ where: { tokenHash: hash } }))
+    // The token hash is globally unique and not yet tied to a tenant, so look it up without tenant scoping; all
+    // writes below run under the session's own tenant. (Ж13: a request-tenant-scoped lookup only matched one org.)
+    const session = await TenantContext.crossTenant(() => this.prisma.client.refreshSession.findUnique({ where: { tokenHash: hash } }))
     if (!session) throw AppError.unauthorized('Refresh session not found', 'invalid_refresh')
     const now = new Date()
     if (session.revokedAt || session.rotatedAt) {
@@ -90,7 +95,9 @@ export class TokenService {
 
   async revoke(raw: string, reason: string): Promise<void> {
     const hash = sha256(raw)
-    await TenantContext.system(() => this.prisma.client.refreshSession.updateMany({ where: { tokenHash: hash, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: reason } }))
+    // Same as rotate: find the session by its globally-unique hash without tenant scoping, so logout revokes it
+    // regardless of which org's host made the request (Ж13).
+    await TenantContext.crossTenant(() => this.prisma.client.refreshSession.updateMany({ where: { tokenHash: hash, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: reason } }))
   }
 
   async revokeFamily(tenantId: string, familyId: string, reason: string): Promise<void> {

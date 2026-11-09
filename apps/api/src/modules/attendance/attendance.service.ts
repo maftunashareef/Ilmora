@@ -66,6 +66,19 @@ export class AttendanceService {
     return session
   }
 
+  /** Same as sessionForTeacher, for changes: a blocked or rejected center no longer runs lessons (the Super Admin still can). */
+  private async sessionForWrite(sessionId: string, actor: RequestActor) {
+    const session = await this.sessionForTeacher(sessionId, actor)
+    await this.assertCenterWritable(session.course.centerId, actor)
+    return session
+  }
+
+  private async assertCenterWritable(centerId: string, actor: RequestActor) {
+    if (actor.roles.includes('PLATFORM_ADMIN')) return
+    const center = await this.prisma.client.center.findFirst({ where: { id: centerId }, select: { status: true } })
+    if (center && (center.status === 'BLOCKED' || center.status === 'REJECTED')) throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
+  }
+
   private assertOwnership(course: { teacherId: string; centerId: string }, actor: RequestActor) {
     if (actor.roles.includes('PLATFORM_ADMIN')) return
     if (actor.roles.includes('CENTER_ADMIN') && actor.centerId === course.centerId) return
@@ -74,7 +87,7 @@ export class AttendanceService {
   }
 
   async open(sessionId: string, actor: RequestActor) {
-    const session = await this.sessionForTeacher(sessionId, actor)
+    const session = await this.sessionForWrite(sessionId, actor)
     if (session.status === 'CANCELLED') throw AppError.invalid('session_cancelled', 'A cancelled session cannot take attendance')
     const token = randomToken(24)
     const expiresAt = new Date(Math.max(session.endsAt.getTime() + this.env.ATTENDANCE_TOKEN_GRACE_MINUTES * 60_000, Date.now() + 2 * 3_600_000))
@@ -100,7 +113,7 @@ export class AttendanceService {
 
   /** The QR content is the check-in URL on the tenant's web origin. Only available while attendance is open and unexpired. */
   async qr(sessionId: string, actor: RequestActor) {
-    const session = await this.sessionForTeacher(sessionId, actor)
+    const session = await this.sessionForWrite(sessionId, actor)
     if (!session.attendanceOpen) throw AppError.invalid('attendance_closed', 'Open attendance to show the QR code')
     if (session.attendanceTokenExpiresAt && session.attendanceTokenExpiresAt < new Date()) {
       await this.prisma.client.lessonSession.update({
@@ -147,7 +160,7 @@ export class AttendanceService {
   }
 
   async setStatus(sessionId: string, status: 'scheduled' | 'cancelled' | 'completed', actor: RequestActor, reason?: string) {
-    const session = await this.sessionForTeacher(sessionId, actor)
+    const session = await this.sessionForWrite(sessionId, actor)
     const next = status.toUpperCase() as 'SCHEDULED' | 'CANCELLED' | 'COMPLETED'
     const updated = await this.prisma.client.lessonSession.update({
       where: { id: session.id },
@@ -173,7 +186,7 @@ export class AttendanceService {
 
   /** Teacher correction: creates or updates a record with a reason; the original check-in time is never overwritten. */
   async correct(sessionId: string, actor: RequestActor, input: { studentId: string; status: AttendanceStatus; reason: string }) {
-    const session = await this.sessionForTeacher(sessionId, actor)
+    const session = await this.sessionForWrite(sessionId, actor)
     if (session.status === 'CANCELLED') throw AppError.invalid('session_cancelled', 'A cancelled lesson has no attendance')
     const enrolled = await this.prisma.client.enrollment.findFirst({ where: { groupId: session.groupId, studentId: input.studentId, status: { in: ['ACTIVE', 'COMPLETED'] } } })
     if (!enrolled) throw AppError.invalid('not_enrolled', 'This student is not enrolled in the group')
@@ -422,6 +435,7 @@ export class AttendanceService {
   /** A one-off lesson outside the weekly pattern (or on a weekly day that has no session yet). */
   async addExtraSession(groupId: string, actor: RequestActor, input: { date: string; start: string; end: string; note?: string }) {
     const group = await this.groupForManager(groupId, actor)
+    await this.assertCenterWritable(group.course.centerId, actor)
     const { startsAt, endsAt } = this.instants(input.date, input.start, input.end, group.timezone)
     const clash = await this.prisma.client.lessonSession.findFirst({ where: { groupId, date: isoToDateColumn(input.date) }, select: { id: true, status: true } })
     if (clash) throw AppError.conflict('session_exists', 'The group already has a lesson on that date; move or restore it instead', { sessionId: clash.id, status: clash.status.toLowerCase() })
@@ -439,7 +453,7 @@ export class AttendanceService {
    * and a new lesson is created that points back to it. Lessons that already have attendance cannot be moved.
    */
   async rescheduleSession(sessionId: string, actor: RequestActor, input: { date?: string; start?: string; end?: string; note?: string }) {
-    const session = await this.sessionForTeacher(sessionId, actor)
+    const session = await this.sessionForWrite(sessionId, actor)
     if (session.status === 'CANCELLED') throw AppError.invalid('session_cancelled', 'Restore the lesson before moving it')
     if ((await this.prisma.client.attendanceRecord.count({ where: { sessionId: session.id } })) > 0) throw AppError.conflict('has_attendance', 'A lesson with attendance records cannot be moved')
     const tz = session.group.timezone

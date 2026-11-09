@@ -49,6 +49,9 @@ export type UserRow = {
   roles: Role[]
   isOwner: boolean
   centerId: string | null
+  /** Registry: the institution / company this account represents (INSTITUTION_ADMIN / COMPANY_ADMIN). */
+  institutionId: string | null
+  companyId: string | null
   isActive: boolean
   offerAcceptedAt: Date | null
   offerVersion: string | null
@@ -208,7 +211,8 @@ export class AccountService {
       await this.recordFailure(key)
       throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     }
-    if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+    // Do not reveal that the password was correct for a disabled account: answer exactly as for a wrong password (Ж15).
+    if (!user.isActive) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     await this.clearFailures(key)
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'password' } })
@@ -281,6 +285,9 @@ export class AccountService {
           preferredLang,
           roles,
           lastLoginAt: now,
+          // Google sign-in shows no offer/consent checkboxes, so consent must NOT be stamped here — recording it
+          // would be recording a consent the user never gave (Ж11). Left null, the client's ConsentGate
+          // (needsConsent) requires the two marks before the workspace opens, via /auth/consent.
         },
         include: USER_INCLUDE,
       })
@@ -320,7 +327,7 @@ export class AccountService {
 
   async openSession(user: UserRow, meta: SessionMeta): Promise<LoginResult> {
     const roles = await this.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null })
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
     const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta)
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: this.toPublic(user, roles) }
   }

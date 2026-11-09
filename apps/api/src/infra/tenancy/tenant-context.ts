@@ -6,6 +6,9 @@ export interface RequestActor {
   roles: Role[]
   centerId?: string | null
   teacherProfileId?: string | null
+  /** Registry: the institution (INSTITUTION_ADMIN) or company (COMPANY_ADMIN) this account represents — one each. */
+  institutionId?: string | null
+  companyId?: string | null
 }
 
 export interface TenantContextValue {
@@ -50,6 +53,16 @@ export class TenantContext {
   static system<T>(fn: () => T, extra: Partial<TenantContextValue> = {}): T {
     const parent = TenantContext.als.getStore()
     return TenantContext.als.run({ tenantId: extra.tenantId ?? parent?.tenantId ?? null, system: true, requestId: parent?.requestId, ...extra }, () => settle(fn()))
+  }
+
+  /**
+   * Run with NO tenant scoping at all, for a lookup keyed by a globally-unique secret that is not yet tied to a
+   * tenant — e.g. finding a refresh session by its token hash. Unlike `system()`, this never inherits the parent's
+   * tenantId, so the query is not silently narrowed to the request's tenant (Ж13: refresh worked for one org only).
+   */
+  static crossTenant<T>(fn: () => T): T {
+    const parent = TenantContext.als.getStore()
+    return TenantContext.als.run({ tenantId: null, system: true, requestId: parent?.requestId }, () => settle(fn()))
   }
 
   /** Narrow a system context to one tenant (used by jobs iterating over tenants). */

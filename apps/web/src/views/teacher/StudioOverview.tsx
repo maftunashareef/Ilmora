@@ -6,6 +6,7 @@ import { useT } from '../../i18n/useT'
 import { useCurrentTeacher } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import { enrolledCount } from '../../lib/enrollment'
+import { TeacherInvites } from './TeacherInvites'
 
 export function StudioOverview() {
   const { t, tr, lang } = useT()
@@ -34,6 +35,7 @@ export function StudioOverview() {
         <Stat label={t('studio.stat.drafts')} value={mine.filter((x) => x.status === 'draft').length} hint={mine.some((x) => x.reviewRequested) ? t('studio.reviewPending') : undefined} />
         <Stat label={t('studio.stat.students')} value={studentsInGroups} hint={countLabel(lang, groups.length, NOUNS.group)} />
       </div>
+      <TeacherInvites />
       {s.site.features.announcements && anns.length > 0 && (
         <div className="mt-6 grid gap-3 md:grid-cols-2">{anns.map((a) => <Notice key={a.id} tone="info"><span className="font-medium">{tr(a.title)}</span> — {tr(a.body)}</Notice>)}</div>
       )}

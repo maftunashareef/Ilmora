@@ -57,7 +57,7 @@ export class AuthService {
     const user = await TenantContext.forTenant(rotated.tenantId, () => this.prisma.client.user.findUnique({ where: { id: rotated.userId }, include: USER_INCLUDE }))
     if (!user || !user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
     const roles = await this.accounts.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null })
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: this.accounts.toPublic(user, roles) }
   }
 

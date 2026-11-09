@@ -15,7 +15,7 @@ import type { Category, Center } from '../../types'
 export function AdminCenters() {
   const { t, tr, lang } = useT()
   const s = useStore()
-  const { list, busy: statusBusy, reload, setStatus } = useAdminCenters()
+  const { list, busy: statusBusy, reload, setStatus, reviewName } = useAdminCenters()
   const [center, setCenter] = useState<Center | null>(null)
   const [cat, setCat] = useState<Category | null>(null)
   const [adminsFor, setAdminsFor] = useState<Center | null>(null)
@@ -42,7 +42,7 @@ export function AdminCenters() {
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.centers')} subtitle={t('centers.partnersNote')} />
       {pending > 0 && <Notice tone="warn" className="mb-4">{t('admin.centers.pendingCount', { n: pending })}</Notice>}
-      <div className="mb-8"><PendingCentersPanel list={list} busy={busy} setStatus={setStatus} /></div>
+      <div className="mb-8"><PendingCentersPanel list={list} busy={busy} setStatus={setStatus} reviewName={reviewName} /></div>
       <div className="grid gap-8 lg:grid-cols-2">
         <section>
           <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('common.centers')} · {list?.length ?? 0}</Eyebrow><Button size="sm" onClick={() => setCenter({ id: uid('ce'), name: '', district: emptyL(), description: emptyL(), tone: '#163C35' })}><Icon name="plus" className="h-3.5 w-3.5" />{t('admin.centers.addCenter')}</Button></div>

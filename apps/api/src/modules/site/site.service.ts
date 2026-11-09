@@ -110,7 +110,10 @@ export class SiteService {
     const presets = (data.presets ?? []).filter((p) => includeDisabledPresets || p.enabled)
     // The public site lists the universities marked published or with a published package; the Super Admin sees them all.
     const universities = (data.universities ?? []).filter((u) => includeDisabledPresets || isUniversityListed(u, presets))
-    return { ...data, presets, universities, version: row.version, packages: packages.map(toPackageDto) }
+    // Disabled packages are internal (not offered yet); the public read hides them and only the Super Admin read
+    // (includeDisabledPresets) returns them — the same rule already applied to presets and universities above (Ж17).
+    const visiblePackages = includeDisabledPresets ? packages : packages.filter((p) => p.enabled)
+    return { ...data, presets, universities, version: row.version, packages: visiblePackages.map(toPackageDto) }
   }
 
   async update(tenantId: string, input: unknown, expectedVersion?: number): Promise<{ version: number }> {

@@ -42,6 +42,12 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   invalid_center_name: 'apiError.centerName',
   teacher_center_required: 'apiError.teacherCenterRequired',
   subscription_closed: 'apiError.subscriptionClosed',
+  // registry
+  not_approved: 'apiError.notApproved',
+  invalid_industry: 'apiError.invalidIndustry',
+  invalid_name: 'apiError.invalidName',
+  invalid_region: 'apiError.invalidRegion',
+  invalid_district: 'apiError.invalidDistrict',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
@@ -93,6 +99,9 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   teacher_not_in_center: 'center.err.teacherNotInCenter',
   teacher_login_not_found: 'center.err.teacherNotFound',
   teacher_elsewhere: 'center.err.teacherElsewhere',
+  no_pending_name: 'apiError.versionConflict',
+  invalid_course: 'apiError.validation',
+  wrong_course: 'apiError.forbidden',
   // Super Admin
   owner_protected: 'admin.accounts.ownerProtected',
   self_roles: 'admin.accounts.selfRoles',
