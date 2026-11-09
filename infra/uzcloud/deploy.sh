@@ -14,6 +14,9 @@ cd "$(dirname "$0")/$ROLE"
 [ -f .env ] && [ -f ../api.env ] || { echo "missing $ROLE/.env or api.env (see the .example files)"; exit 1; }
 COMPOSE="docker compose --env-file ../api.env --env-file .env"
 DOCKER_ROOT=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+# The backup passphrase lives in admin/.env (README, first install, step 7); api.env is checked too. An empty value
+# counts as not set. (Checking only api.env skipped every pre-migration backup and would keep the backup service off.)
+backup_configured() { grep -qsE '^BACKUP_PASSPHRASE=.+' .env ../api.env; }
 
 # Releases are pulled by digest (untagged), so a plain prune would delete the previous one: keep two weeks for rollback.
 # Runs before the pull and again when the script ends, also after a failure (it used to run only after a successful
@@ -74,11 +77,11 @@ case "$ROLE" in
     $COMPOSE up -d postgres redis
     wait_healthy postgres
     # The live database is dumped before the schema moves (restore path: admin/backup.sh --restore).
-    if grep -q '^BACKUP_PASSPHRASE=' ../api.env; then
+    if backup_configured; then
       echo "== backup before migrations"
       $COMPOSE run --rm --no-deps --build backup backup.sh --now
     else
-      echo "== BACKUP_PASSPHRASE is not set in api.env: no backup before migrations (set up admin/backup.sh)"
+      echo "== BACKUP_PASSPHRASE is not set in admin/.env: no backup before migrations (set up admin/backup.sh)"
     fi
     echo "== migrations"
     $COMPOSE --profile migrate run --rm migrate
@@ -89,11 +92,11 @@ case "$ROLE" in
       echo "== first release: initial data (seed; SEED_CATALOG from api.env)"
       $COMPOSE --profile migrate run --rm migrate npx tsx prisma/seed.ts
     fi
-    if grep -q '^BACKUP_PASSPHRASE=' ../api.env; then
+    if backup_configured; then
       $COMPOSE up -d --build worker admin backup
     else
       # Without the passphrase the service could not encrypt a dump anyway: its image is not built and it stays off.
-      echo "== BACKUP_PASSPHRASE is not set in api.env: backup service not started (set up admin/backup.sh)"
+      echo "== BACKUP_PASSPHRASE is not set in admin/.env: backup service not started (set up admin/backup.sh)"
       $COMPOSE up -d worker admin
     fi
     wait_healthy admin
