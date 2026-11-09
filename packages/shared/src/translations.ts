@@ -1300,6 +1300,12 @@ export const dict = {
   'apiError.teacherCenterRequired': d('Profilingiz hali öquv markaziga boğlanmagan. Markaz sizni öqituvçi sifatida qöşgandan keyin kurs yarata olasiz.', 'Ваш профиль ещё не привязан к учебному центру. Создавать курсы можно после того, как центр добавит вас как преподавателя.', 'Your profile is not linked to a center yet. You can create courses once a center adds you as its teacher.'),
   'apiError.wrongCenter': d('Kursni faqat öz markazingiz uçun yaratiş mumkin.', 'Курс можно создать только для своего центра.', 'A course can only be created for your own center.'),
   'apiError.centerName': d('Markaz nomini kiriting (kamida 2 ta belgi).', 'Введите название центра (не менее 2 символов).', 'Enter the center name (at least 2 characters).'),
+  // registry of institutions, companies and students
+  'apiError.notApproved': d('Anketangiz hali tasdiqlanmagan. Bu bölim tekşiruvdan keyin oçiladi.', 'Анкета ещё не одобрена. Раздел откроется после проверки.', 'Your profile is not approved yet. This section opens after the review.'),
+  'apiError.invalidIndustry': d('Röyxatdan sohani tanlang.', 'Выберите отрасль из списка.', 'Choose an industry from the list.'),
+  'apiError.invalidName': d('Nomini kiriting (kamida 2 ta belgi).', 'Введите название (не менее 2 символов).', 'Enter the name (at least 2 characters).'),
+  'apiError.invalidRegion': d('Röyxatdan viloyatni tanlang.', 'Выберите регион из списка.', 'Choose a region from the list.'),
+  'apiError.invalidDistrict': d('Tanlangan viloyatdagi tumanni tanlang.', 'Выберите район выбранного региона.', 'Choose a district of the selected region.'),
   'apiError.incomplete': d('Davom etiş uçun paket va kurslarni tanlang.', 'Чтобы продолжить, выберите пакет и курсы.', 'Choose a package and courses to continue.'),
   'apiError.limit': d('Tanlangan kurslar soni ruxsat etilgan çegaradan oşib ketdi.', 'Выбрано больше курсов, чем разрешено.', 'More courses are selected than allowed.'),
   'apiError.disabled': d('Tanlangan paket yoki kurslardan biri hozir yoziliş uçun oçiq emas.', 'Выбранный пакет или один из курсов сейчас закрыт для записи.', 'The chosen package or one of the courses is not open for enrollment.'),
