@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { normalizeUzPhone } from '@ilmora/shared'
+import { INSTITUTION_REGISTRY, INSTITUTION_TYPES, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, isUzRegion, type InstitutionChoice, type InstitutionType, type OrgOwnership } from '@ilmora/shared'
 import { ConsentFields, consentComplete, EMPTY_CONSENT, type ConsentState } from '../../components/ConsentGate'
+import { InstitutionSearch } from '../../components/InstitutionSearch'
 import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../../components/ui'
 import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
@@ -13,7 +14,7 @@ import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { useStore, type RegisterRole } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
-type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'position' | 'email'
+type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'position' | 'email' | 'instType' | 'ownership' | 'institution' | 'inn'
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
@@ -30,8 +31,9 @@ const ROLE_META: Record<RegisterRole, { icon: string; label: TKey; hint: TKey }>
   COMPANY: { icon: 'briefcase', label: 'auth.role.company', hint: 'auth.role.companyHint' },
 }
 /**
- * An institution (ТЗ 4.2) or a company (ТЗ 4.3) signs up as its contact person; the STIR, the profile and the documents
- * are filled in afterwards in its workspace and sent for review there.
+ * An institution (ТЗ 4.2) or a company (ТЗ 4.3) signs up as its contact person with its STIR (TIN); an institution also
+ * says what it is (type, ownership) and picks itself from the registry or types its name. The profile and documents are
+ * completed in the workspace and sent for review there.
  */
 const isOrgRole = (r: RegisterRole | null): r is 'INSTITUTION' | 'COMPANY' => r === 'INSTITUTION' || r === 'COMPANY'
 /** Where a new account goes first: a student starts the questionnaire (ТЗ 4.1). */
@@ -60,6 +62,10 @@ export function LoginPage() {
   const [position, setPosition] = useState('')
   const [email, setEmail] = useState('')
   const firstStop = useRef<string | null>(null)
+  const [instType, setInstType] = useState<InstitutionType | null>(null)
+  const [ownership, setOwnership] = useState<OrgOwnership | null>(null)
+  const [institution, setInstitution] = useState<InstitutionChoice | null>(null)
+  const [inn, setInn] = useState('')
   const [loginName, setLoginName] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -72,9 +78,21 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [networkOffline, setNetworkOffline] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({})
-  const isOrg = mode === 'register' && isOrgRole(role)
   const clearError = (key: FieldKey) => { if (fieldErrors[key]) setFieldErrors((f) => ({ ...f, [key]: undefined })) }
-
+  const registryEntry = (c: InstitutionChoice | null) => (c?.id ? INSTITUTION_REGISTRY.find((x) => x.id === c.id) : undefined)
+  const picked = registryEntry(institution)
+  /** The STIR shown came from the picked registry entry (not typed), so it goes when that pick goes. */
+  const innFromPick = !!picked?.inn && inn === picked.inn
+  const chooseInstitution = (v: InstitutionChoice | null) => {
+    const entry = registryEntry(v)
+    setInstitution(v)
+    clearError('institution')
+    if (entry?.ownership) setOwnership(entry.ownership)
+    if (entry?.inn && (!inn || innFromPick)) { setInn(entry.inn); clearError('inn') }
+    else if (!entry?.inn && innFromPick) setInn('')
+  }
+  const isOrg = mode === 'register' && isOrgRole(role)
+  
   useEffect(() => {
     if (auth.status !== 'authenticated') return
     const roles = auth.user?.roles ?? []
@@ -106,6 +124,9 @@ export function LoginPage() {
       case 'invalid_center_name': return t('auth.err.centerName')
       case 'invalid_position': return t('auth.err.position')
       case 'invalid_email': return t('q.err.email')
+      case 'invalid_inn': return t('auth.err.inn')
+      case 'inn_taken': return t('auth.err.innTaken')
+      case 'invalid_institution': return t('q.err.institution')
       case 'account_disabled': return t('auth.err.disabled')
       case 'unverified_email': return t('auth.err.google')
       case 'invalid_google_token': return t('auth.err.google')
@@ -135,6 +156,12 @@ export function LoginPage() {
       if (!role) next.role = t('auth.err.role')
       if (role === 'CENTER' && centerName.trim().length < 2) next.centerName = t('auth.err.centerName')
       if (isOrgRole(role) && position.trim().length < 2) next.position = t('auth.err.position')
+      if (role === 'INSTITUTION') {
+        if (!instType) next.instType = t('q.err.institutionType')
+        if (!ownership) next.ownership = t('auth.err.ownership')
+        if (!institution || institution.name.trim().length < 2 || !isUzRegion(institution.region)) next.institution = t('q.err.institution')
+      }
+      if (isOrgRole(role) && !normalizeUzInn(inn).ok) next.inn = t('auth.err.inn')
       if (role === 'COMPANY' && !EMAIL_RE.test(email.trim())) next.email = t('q.err.email')
       if (!name.trim() || name.trim().length < 2) next.name = t('auth.err.name')
       // An organization must leave a contact phone; for a person the phone is optional.
@@ -172,6 +199,10 @@ export function LoginPage() {
           centerName: role === 'CENTER' ? centerName.trim() : undefined,
           position: isOrgRole(role) ? position.trim() : undefined,
           email: role === 'COMPANY' ? email.trim() : undefined,
+          inn: isOrgRole(role) ? inn.replace(/\D/g, '') : undefined,
+          institution: role === 'INSTITUTION' && instType && ownership && institution
+            ? { type: instType, ownership, id: institution.id, name: institution.name.trim(), region: institution.region }
+            : undefined,
           acceptOffer: true,
           consentPersonalData: true,
         })
@@ -237,7 +268,8 @@ export function LoginPage() {
           <h1 className="font-display text-3xl text-charcoal">{t('auth.title')}</h1>
           <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t('auth.subtitle')}</p>
 
-          {/* Social Sign-In (Google) */}
+          {/* Social Sign-In (Google): sign-in only; new accounts register with a login and password. */}
+          {mode === 'signin' && (
           <div className="mt-6">
             <button
               type="button"
@@ -266,8 +298,10 @@ export function LoginPage() {
               </span>
             </div>
           </div>
+          )}
 
           <Tabs<Mode>
+            className={mode === 'register' ? 'mt-6' : undefined}
             value={mode}
             onChange={switchMode}
             tabs={[
@@ -306,6 +340,55 @@ export function LoginPage() {
                 </div>
                 {fieldErrors.role && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.role}</p>}
               </fieldset>
+            )}
+
+            {mode === 'register' && role === 'INSTITUTION' && (
+              <section aria-labelledby="org-details-title" className="space-y-4 rounded-control border border-forest/15 bg-sage/20 p-4">
+                <h2 id="org-details-title" className="flex items-center gap-2 font-body text-sm font-semibold text-charcoal">
+                  <Icon name="cap" className="h-4 w-4 text-forest" />{t('auth.org.institutionTitle')}
+                </h2>
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-medium text-charcoal/70">{t('q.institutionType')}<span className="ml-0.5 text-champagne">*</span></legend>
+                  <div className="flex flex-wrap gap-2">
+                    {INSTITUTION_TYPES.map((x) => (
+                      <button key={x} type="button" aria-pressed={instType === x}
+                        onClick={() => { setInstType(x); clearError('instType'); if (picked && picked.type !== x) chooseInstitution(null) }}
+                        className={cx('min-h-[38px] rounded-control border px-3.5 py-1.5 text-sm font-medium transition', instType === x ? 'border-forest bg-forest text-ivory' : 'border-charcoal/15 bg-paper text-charcoal/75 hover:border-forest/50')}>
+                        {t(`inst.type.${x}`)}
+                      </button>
+                    ))}
+                  </div>
+                  {fieldErrors.instType && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.instType}</p>}
+                </fieldset>
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-medium text-charcoal/70">{t('auth.org.ownershipLabel')}<span className="ml-0.5 text-champagne">*</span></legend>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {ORG_OWNERSHIPS.map((o) => (
+                      <button key={o} type="button" aria-pressed={ownership === o}
+                        onClick={() => { setOwnership(o); clearError('ownership'); if (picked?.ownership && picked.ownership !== o) chooseInstitution(null) }}
+                        className={cx('flex items-start gap-2.5 rounded-control border bg-paper p-3 text-left transition', ownership === o ? 'border-forest ring-2 ring-forest/15' : 'border-charcoal/15 hover:border-forest/50')}>
+                        <span className={cx('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border', ownership === o ? 'border-forest' : 'border-charcoal/30')}>
+                          {ownership === o && <span className="h-2 w-2 rounded-full bg-forest" />}
+                        </span>
+                        <span>
+                          <span className="block text-sm font-semibold text-charcoal">{t(o === 'STATE' ? 'auth.org.stateInst' : 'auth.org.privateInst')}</span>
+                          <span className="mt-0.5 block text-[11px] leading-snug text-charcoal/55">{t(o === 'STATE' ? 'auth.org.stateHint' : 'auth.org.privateHint')}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {fieldErrors.ownership && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.ownership}</p>}
+                </fieldset>
+                <div>
+                  <label htmlFor="reg-institution" className="mb-1.5 flex items-baseline justify-between gap-3 text-xs font-medium text-charcoal/70">
+                    <span>{t('auth.org.institution')}<span className="ml-0.5 text-champagne">*</span></span>
+                    <span className="text-[11px] font-normal text-charcoal/45">{t('auth.org.technikumFilterHint')}</span>
+                  </label>
+                  <InstitutionSearch id="reg-institution" list={INSTITUTION_REGISTRY} type={instType} ownership={ownership} value={institution} invalid={!!fieldErrors.institution} onChange={chooseInstitution} />
+                  {fieldErrors.institution && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.institution}</p>}
+                </div>
+                <InnField value={inn} error={fieldErrors.inn} fromList={innFromPick} onChange={(v) => { setInn(v); clearError('inn') }} />
+              </section>
             )}
 
             {mode === 'register' && role === 'CENTER' && (
@@ -385,6 +468,10 @@ export function LoginPage() {
                 />
                 {fieldErrors.email && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.email}</p>}
               </Field>
+            )}
+
+            {role === 'COMPANY' && mode === 'register' && (
+              <InnField value={inn} error={fieldErrors.inn} onChange={(v) => { setInn(v); clearError('inn') }} />
             )}
 
             {isOrg && (
@@ -533,5 +620,22 @@ export function LoginPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+/** STIR (TIN): digits only, nine of them; spaces and dashes typed or pasted are dropped. */
+function InnField({ value, onChange, error, fromList }: { value: string; onChange: (v: string) => void; error?: string; fromList?: boolean }) {
+  const { t } = useT()
+  return (
+    <Field label={t('auth.org.stir')} hint={t('auth.org.innHint')} required>
+      <Input inputMode="numeric" autoComplete="off" placeholder="123456789" value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 9))} aria-invalid={!!error} className="tabular-nums tracking-wider" />
+      {error && <p className="mt-1.5 text-xs text-red-700" role="alert">{error}</p>}
+      {!error && fromList && (
+        <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-charcoal/55">
+          <Icon name="info" className="mt-px h-3.5 w-3.5 shrink-0 text-champagne" />{t('auth.org.innFromList')}
+        </p>
+      )}
+    </Field>
   )
 }

@@ -34,7 +34,7 @@ export function searchInstitutions<T extends Searchable>(
   for (const t of list) {
     if (filter.type && t.type && t.type !== filter.type) continue
     if (filter.region && t.region !== filter.region) continue
-    if (filter.ownership && t.ownership !== filter.ownership) continue
+    if (filter.ownership && t.ownership && t.ownership !== filter.ownership) continue
     if (words.length) {
       const hay = foldForSearch(`${t.name} ${t.nameRu ?? ''} ${t.formerName ?? ''} ${t.district ?? ''}`)
       if (!words.every((w) => hay.includes(w))) continue

@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, type InstitutionType, type OrgOwnership, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
@@ -50,10 +50,12 @@ export interface ConsentInput { acceptOffer: true; consentPersonalData: true; co
 export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'COMPANY'
 /**
  * CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center.
- * INSTITUTION (ТЗ 4.2) and COMPANY (ТЗ 4.3) sign up as their contact person (`position`; a company also gives `email`);
- * the STIR and the profile are filled in in their workspace.
+ * INSTITUTION (ТЗ 4.2) and COMPANY (ТЗ 4.3) sign up as their contact person (`position`; a company also gives `email`)
+ * with the STIR (`inn`); an institution also sends `institution`. The rest of the profile is completed in the workspace.
  */
-export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; position?: string; email?: string }
+/** What an institution says about itself at sign-up: picked from the registry (`id`) or typed (name + region). */
+export interface InstitutionSignup { type: InstitutionType; ownership: OrgOwnership; id?: string; name: string; region: string }
+export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; position?: string; email?: string; inn?: string; institution?: InstitutionSignup }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string

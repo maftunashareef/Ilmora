@@ -1,20 +1,21 @@
 'use client'
 import { useId, useState, type KeyboardEvent } from 'react'
-import { matchesFormerNameOnly, searchInstitutions, UZ_REGIONS, type Institution, type InstitutionChoice, type InstitutionType } from '@ilmora/shared'
+import { matchesFormerNameOnly, searchInstitutions, UZ_REGIONS, type Institution, type InstitutionChoice, type InstitutionType, type OrgOwnership } from '@ilmora/shared'
 import { useT } from '@/i18n/useT'
 import { Badge, cx, Icon, Input, Select } from './ui'
 
 const SHOWN = 50
 
 /**
- * Institution search over the registry (ТЗ 3.5): narrowed by the type chosen outside and an optional region filter here,
+ * Institution search over the registry (ТЗ 3.5): narrowed by the type (and ownership) chosen outside and a region filter here,
  * search-as-you-type in any spelling, and "not in the list — add it" with a name and region (saved to the registry
  * by the server, marked "added by a student"). One component for the student questionnaire and wherever an institution is picked.
  */
-export function InstitutionSearch({ id, list, type, value, onChange, invalid }: {
+export function InstitutionSearch({ id, list, type, ownership, value, onChange, invalid }: {
   id?: string
   list: readonly Institution[]
   type: InstitutionType | null
+  ownership?: OrgOwnership | null
   value: InstitutionChoice | null
   onChange: (v: InstitutionChoice | null) => void
   invalid?: boolean
@@ -29,7 +30,7 @@ export function InstitutionSearch({ id, list, type, value, onChange, invalid }: 
   const regionName = (r: string) => UZ_REGIONS.find((x) => x.id === r)?.name[lang] ?? r
   const picked = value?.id ? list.find((x) => x.id === value.id) : undefined
 
-  const found = searchInstitutions(list, query, { type, region }, SHOWN + 1)
+  const found = searchInstitutions(list, query, { type, region, ownership }, SHOWN + 1)
   const matches = found.slice(0, SHOWN)
   const count = matches.length + 1
   const show = open && !picked
