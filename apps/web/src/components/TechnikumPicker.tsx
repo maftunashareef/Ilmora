@@ -4,6 +4,8 @@ import { searchTechnikums, UZ_REGIONS, type OrgOwnership, type Technikum } from 
 import { useT } from '@/i18n/useT'
 import { cx, Icon, Input } from './ui'
 
+const SHOWN = 50
+
 /** The technikum being registered: `id` when it was picked from the list, `null` when its name was typed by hand. */
 export interface TechnikumChoice { id: string | null; name: string }
 
@@ -26,7 +28,8 @@ export function TechnikumPicker({ id, list, value, onChange, region, ownership, 
   const [active, setActive] = useState(0)
   const hasList = list.length > 0
   // Once a listed technikum is picked, reopening shows the whole narrowed list so another one can be chosen.
-  const matches = hasList ? searchTechnikums(list, value.id ? '' : value.name, { region, ownership }) : []
+  const found = hasList ? searchTechnikums(list, value.id ? '' : value.name, { region, ownership }, SHOWN + 1) : []
+  const matches = found.slice(0, SHOWN)
   const count = matches.length + (matches.length ? 1 : 0)
   const show = open && hasList
   const regionName = (id: string) => UZ_REGIONS.find((r) => r.id === id)?.name[lang] ?? id
@@ -83,7 +86,10 @@ export function TechnikumPicker({ id, list, value, onChange, region, ownership, 
               className={cx('cursor-pointer px-3.5 py-2', i === active && 'bg-sage/50')}
             >
               <div className="flex items-start gap-2 text-sm text-charcoal">
-                <span className="min-w-0 flex-1">{m.name}</span>
+                <span className="min-w-0 flex-1">
+                  {m.name}
+                  {lang === 'ru' && m.nameRu && <span className="block text-xs text-charcoal/60">{m.nameRu}</span>}
+                </span>
                 {value.id === m.id && <Icon name="check" className="mt-0.5 h-4 w-4 shrink-0 text-forest" />}
               </div>
               <div className="mt-0.5 text-[11px] text-charcoal/50">
@@ -91,6 +97,7 @@ export function TechnikumPicker({ id, list, value, onChange, region, ownership, 
               </div>
             </li>
           ))}
+          {found.length > SHOWN && <li className="px-3.5 py-2 text-[11px] leading-relaxed text-charcoal/50">{t('auth.org.technikumMore', { n: SHOWN })}</li>}
           {matches.length === 0 && <li className="px-3.5 py-2.5 text-xs leading-relaxed text-charcoal/60">{t('auth.org.technikumNoMatch')}</li>}
           {matches.length > 0 && (
             <li
