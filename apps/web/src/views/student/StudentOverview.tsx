@@ -9,6 +9,7 @@ import { expandLessons, resolveGroups, upcomingLessons } from '../../lib/schedul
 import { useCurrentStudent, useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import { OnlineCoursesSection } from './OnlineCourses'
+import { QuestionnaireBanner } from './QuestionnaireBanner'
 
 export function StudentOverview() {
   const { t, tr, lang } = useT()
@@ -31,6 +32,7 @@ export function StudentOverview() {
 
   return (
     <div>
+      <QuestionnaireBanner />
       <PageTitle eyebrow={t('dash.studentSpace')} title={<>{t('student.overview.hello')} {student.profile.displayName}</>} subtitle={active && pkg ? `${tr(pkg.name)} · ${groups.length} ${t('common.courses').toLowerCase()} · ${formatSom(total, lang)} ${t('common.perMonth')}` : t('student.overview.noSub')} action={!active && <LinkButton to="/builder">{t('student.overview.buildOne')} <Icon name="arrowRight" className="h-4 w-4" /></LinkButton>} />
       {s.site.features.announcements && anns.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-2">{anns.map((a) => <Notice key={a.id} tone="info"><span className="font-medium">{tr(a.title)}</span> — {tr(a.body)}</Notice>)}</div>}
       {!active ? (

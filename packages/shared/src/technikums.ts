@@ -1,4 +1,5 @@
 import { foldForSearch } from './format.js'
+import { searchInstitutions } from './registry-search.js'
 import type { OrgOwnership } from './organization.js'
 import { TECHNIKUM_DATA } from './technikums.data.js'
 
@@ -27,28 +28,12 @@ export interface TechnikumFilter {
   ownership?: OrgOwnership | null
 }
 
-/**
- * Technikums matching every word of the query in the current, Russian or former name or the district (any spelling: ö / o‘ / o',
- * ş / sh …), narrowed by region and ownership.
- */
-export function searchTechnikums(list: readonly Technikum[], query: string, filter: TechnikumFilter = {}, limit = 50): Technikum[] {
-  const words = foldForSearch(query).split(/\s+/).filter(Boolean)
-  const out: Technikum[] = []
-  for (const t of list) {
-    if (filter.region && t.region !== filter.region) continue
-    if (filter.ownership && t.ownership !== filter.ownership) continue
-    if (words.length) {
-      const hay = foldForSearch(`${t.name} ${t.nameRu ?? ''} ${t.formerName ?? ''} ${t.district ?? ''}`)
-      if (!words.every((w) => hay.includes(w))) continue
-    }
-    out.push(t)
-    if (out.length >= limit) break
-  }
-  return out
-}
+/** Technikums matching the query, narrowed by region and ownership (see searchInstitutions). */
+export const searchTechnikums = (list: readonly Technikum[], query: string, filter: TechnikumFilter = {}, limit = 50): Technikum[] =>
+  searchInstitutions(list, query, filter, limit)
 
 /** Whether the query names the technikum only by its former name (the picker then shows that name too). */
-export function matchesFormerNameOnly(t: Technikum, query: string): boolean {
+export function matchesFormerNameOnly(t: Pick<Technikum, 'name' | 'nameRu' | 'formerName'>, query: string): boolean {
   const words = foldForSearch(query).split(/\s+/).filter(Boolean)
   if (!words.length || !t.formerName) return false
   const now = foldForSearch(`${t.name} ${t.nameRu ?? ''}`)

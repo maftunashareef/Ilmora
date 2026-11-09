@@ -10,6 +10,7 @@ export function StudentLayout() {
   const savedOn = useStore((s) => s.site.features.savedItems)
   const all: DashNavItem[] = [
     { id: 'overview', to: '/student', end: true, label: t('dash.overview'), icon: 'grid' },
+    { id: 'questionnaire', to: '/student/questionnaire', label: t('q.title'), icon: 'edit' },
     { id: 'notifications', to: '/student/notifications', label: t('notif.title'), icon: 'bell' },
     { id: 'subscription', to: '/student/subscription', label: t('student.subscription'), icon: 'package' },
     { id: 'courses', to: '/student/courses', label: t('student.courses'), icon: 'book' },

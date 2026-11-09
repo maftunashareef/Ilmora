@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, type OrgKind, type OrgOwnership, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, isApiError, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
@@ -47,17 +47,13 @@ export interface AuthUser {
 }
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad?: boolean; marketing?: boolean }
-export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | OrgKind
-/**
- * A technikum or a company registers with its details; `phone` (top level) is the organization's contact phone.
- * `technikumId` is set when the technikum was picked from the list (TECHNIKUMS), absent when its name was typed.
- */
-export interface OrganizationInput { name: string; region: string; inn: string; ownership?: OrgOwnership; technikumId?: string }
+export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'COMPANY'
 /**
  * CENTER registers an Educational Center: the account becomes its first administrator and `centerName` names the center.
- * TECHNIKUM and COMPANY send `organization` (a technikum also sends `ownership`).
+ * INSTITUTION (ТЗ 4.2) and COMPANY (ТЗ 4.3) sign up as their contact person (`position`; a company also gives `email`);
+ * the STIR and the profile are filled in in their workspace.
  */
-export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; organization?: OrganizationInput }
+export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; position?: string; email?: string }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string

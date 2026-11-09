@@ -1,9 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { isUzRegion, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, TECHNIKUMS, UZ_REGIONS, type OrgOwnership, type Technikum } from '@ilmora/shared'
+import { useEffect, useRef, useState } from 'react'
+import { normalizeUzPhone } from '@ilmora/shared'
 import { ConsentFields, consentComplete, EMPTY_CONSENT, type ConsentState } from '../../components/ConsentGate'
-import { TechnikumPicker } from '../../components/TechnikumPicker'
-import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Select, Tabs } from '../../components/ui'
+import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../../components/ui'
 import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
@@ -14,22 +13,29 @@ import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { useStore, type RegisterRole } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
-type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'orgName' | 'ownership' | 'region' | 'inn'
+type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'position' | 'email'
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /** Self-service roles shown at registration: people first, then organizations. */
 const ROLE_GROUPS: { label: TKey; cols: string; roles: RegisterRole[] }[] = [
   { label: 'auth.group.person', cols: 'sm:grid-cols-2', roles: ['STUDENT', 'TEACHER'] },
-  { label: 'auth.group.org', cols: 'sm:grid-cols-3', roles: ['CENTER', 'TECHNIKUM', 'COMPANY'] },
+  { label: 'auth.group.org', cols: 'sm:grid-cols-3', roles: ['CENTER', 'INSTITUTION', 'COMPANY'] },
 ]
 const ROLE_META: Record<RegisterRole, { icon: string; label: TKey; hint: TKey }> = {
   STUDENT: { icon: 'user', label: 'role.student', hint: 'auth.role.studentHint' },
   TEACHER: { icon: 'edit', label: 'role.teacher', hint: 'auth.role.teacherHint' },
   CENTER: { icon: 'building', label: 'auth.role.center', hint: 'auth.role.centerHint' },
-  TECHNIKUM: { icon: 'cap', label: 'auth.role.technikum', hint: 'auth.role.technikumHint' },
+  INSTITUTION: { icon: 'cap', label: 'auth.role.institution', hint: 'auth.role.institutionHint' },
   COMPANY: { icon: 'briefcase', label: 'auth.role.company', hint: 'auth.role.companyHint' },
 }
-const isOrgRole = (r: RegisterRole | null): r is 'TECHNIKUM' | 'COMPANY' => r === 'TECHNIKUM' || r === 'COMPANY'
+/**
+ * An institution (ТЗ 4.2) or a company (ТЗ 4.3) signs up as its contact person; the STIR, the profile and the documents
+ * are filled in afterwards in its workspace and sent for review there.
+ */
+const isOrgRole = (r: RegisterRole | null): r is 'INSTITUTION' | 'COMPANY' => r === 'INSTITUTION' || r === 'COMPANY'
+/** Where a new account goes first: a student starts the questionnaire (ТЗ 4.1). */
+const FIRST_STOP: Partial<Record<RegisterRole, string>> = { STUDENT: '/student/questionnaire' }
 
 export function LoginPage() {
   const { t } = useT()
@@ -49,13 +55,11 @@ export function LoginPage() {
   const [mode, setMode] = useState<Mode>(params.get('mode') === 'register' ? 'register' : 'signin')
   const [role, setRole] = useState<RegisterRole | null>(null)
   const [centerName, setCenterName] = useState('')
-  const [orgName, setOrgName] = useState('')
-  const [technikumId, setTechnikumId] = useState<string | null>(null)
-  const [ownership, setOwnership] = useState<OrgOwnership | null>(null)
-  const [region, setRegion] = useState('')
-  const [inn, setInn] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [position, setPosition] = useState('')
+  const [email, setEmail] = useState('')
+  const firstStop = useRef<string | null>(null)
   const [loginName, setLoginName] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -71,31 +75,10 @@ export function LoginPage() {
   const isOrg = mode === 'register' && isOrgRole(role)
   const clearError = (key: FieldKey) => { if (fieldErrors[key]) setFieldErrors((f) => ({ ...f, [key]: undefined })) }
 
-  const pickedTechnikum = technikumId ? TECHNIKUMS.find((x) => x.id === technikumId) : undefined
-  /** The TIN shown came from the picked technikum (not typed by the user), so it goes when that pick goes. */
-  const innFromPick = (x: Technikum | undefined) => !!x?.inn && inn === x.inn
-  /** A picked technikum fills the region, the type and (when known) the TIN; the user can still change them. */
-  const applyTechnikum = (x: Technikum) => {
-    setRegion(x.region)
-    setOwnership(x.ownership)
-    const fillInn = !!x.inn && (!inn || innFromPick(pickedTechnikum))
-    if (fillInn) setInn(x.inn!)
-    setFieldErrors((f) => ({ ...f, region: undefined, ownership: undefined, inn: fillInn ? undefined : f.inn }))
-  }
-  /** Leaving a picked technikum (typing another name, or a region or type it does not match) clears what it filled in. */
-  const dropTechnikum = (name: string) => {
-    if (innFromPick(pickedTechnikum)) setInn('')
-    setTechnikumId(null)
-    setOrgName(name)
-  }
-  const keepTechnikumIf = (ok: (x: Technikum) => boolean) => {
-    if (pickedTechnikum && !ok(pickedTechnikum)) dropTechnikum('')
-  }
-
   useEffect(() => {
     if (auth.status !== 'authenticated') return
     const roles = auth.user?.roles ?? []
-    nav(safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles), { replace: true })
+    nav(firstStop.current ?? (safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles)), { replace: true })
   }, [auth.status, auth.user, nav, safeNext])
 
   const switchMode = (m: Mode) => {
@@ -121,11 +104,8 @@ export function LoginPage() {
       case 'weak_password': return t('auth.err.password')
       case 'invalid_role': return t('auth.err.role')
       case 'invalid_center_name': return t('auth.err.centerName')
-      case 'invalid_organization_name': return t('auth.err.orgName')
-      case 'invalid_ownership': return t('auth.err.ownership')
-      case 'invalid_region': return t('auth.err.region')
-      case 'invalid_inn': return t('auth.err.inn')
-      case 'inn_taken': return t('auth.err.innTaken')
+      case 'invalid_position': return t('auth.err.position')
+      case 'invalid_email': return t('q.err.email')
       case 'account_disabled': return t('auth.err.disabled')
       case 'unverified_email': return t('auth.err.google')
       case 'invalid_google_token': return t('auth.err.google')
@@ -154,12 +134,8 @@ export function LoginPage() {
     } else {
       if (!role) next.role = t('auth.err.role')
       if (role === 'CENTER' && centerName.trim().length < 2) next.centerName = t('auth.err.centerName')
-      if (isOrgRole(role)) {
-        if (orgName.trim().length < 2) next.orgName = t('auth.err.orgName')
-        if (role === 'TECHNIKUM' && !ownership) next.ownership = t('auth.err.ownership')
-        if (!isUzRegion(region)) next.region = t('auth.err.region')
-        if (!normalizeUzInn(inn).ok) next.inn = t('auth.err.inn')
-      }
+      if (isOrgRole(role) && position.trim().length < 2) next.position = t('auth.err.position')
+      if (role === 'COMPANY' && !EMAIL_RE.test(email.trim())) next.email = t('q.err.email')
       if (!name.trim() || name.trim().length < 2) next.name = t('auth.err.name')
       // An organization must leave a contact phone; for a person the phone is optional.
       if (phone.trim() || isOrgRole(role)) {
@@ -186,6 +162,7 @@ export function LoginPage() {
     try {
       const normalizedLogin = loginName.trim().toLowerCase()
       if (mode === 'register' && role) {
+        firstStop.current = FIRST_STOP[role] ?? null
         const user = await register({
           role,
           login: normalizedLogin,
@@ -193,15 +170,8 @@ export function LoginPage() {
           displayName: name.trim() || undefined,
           phone: phone.trim() || undefined,
           centerName: role === 'CENTER' ? centerName.trim() : undefined,
-          organization: isOrgRole(role)
-            ? {
-                name: orgName.trim(),
-                region,
-                inn: inn.replace(/\D/g, ''),
-                ownership: role === 'TECHNIKUM' ? ownership ?? undefined : undefined,
-                technikumId: role === 'TECHNIKUM' ? technikumId ?? undefined : undefined,
-              }
-            : undefined,
+          position: isOrgRole(role) ? position.trim() : undefined,
+          email: role === 'COMPANY' ? email.trim() : undefined,
           acceptOffer: true,
           consentPersonalData: true,
         })
@@ -338,121 +308,6 @@ export function LoginPage() {
               </fieldset>
             )}
 
-            {isOrg && (
-              <section aria-labelledby="org-details-title" className="space-y-4 rounded-control border border-forest/15 bg-sage/20 p-4">
-                <h2 id="org-details-title" className="flex items-center gap-2 font-body text-sm font-semibold text-charcoal">
-                  <Icon name={role === 'TECHNIKUM' ? 'cap' : 'briefcase'} className="h-4 w-4 text-forest" />
-                  {t('auth.org.title')}
-                </h2>
-
-                {role === 'COMPANY' && (
-                  <Field label={t('auth.org.companyName')} required>
-                    <Input
-                      maxLength={120}
-                      placeholder={t('auth.org.companyNamePlaceholder')}
-                      value={orgName}
-                      onChange={(e) => { setOrgName(e.target.value); clearError('orgName') }}
-                      aria-invalid={!!fieldErrors.orgName}
-                    />
-                    {fieldErrors.orgName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.orgName}</p>}
-                  </Field>
-                )}
-
-                {role === 'TECHNIKUM' && (
-                  <fieldset>
-                    <legend className="mb-1.5 text-xs font-medium text-charcoal/70">
-                      {t('auth.org.ownership')}<span className="ml-0.5 text-champagne">*</span>
-                    </legend>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {ORG_OWNERSHIPS.map((o) => (
-                        <button
-                          key={o}
-                          type="button"
-                          aria-pressed={ownership === o}
-                          onClick={() => { setOwnership(o); clearError('ownership'); keepTechnikumIf((x) => x.ownership === o) }}
-                          className={cx('flex items-start gap-2.5 rounded-control border bg-paper p-3 text-left transition', ownership === o ? 'border-forest ring-2 ring-forest/15' : 'border-charcoal/15 hover:border-forest/50')}
-                        >
-                          <span className={cx('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border', ownership === o ? 'border-forest' : 'border-charcoal/30')}>
-                            {ownership === o && <span className="h-2 w-2 rounded-full bg-forest" />}
-                          </span>
-                          <span>
-                            <span className="block text-sm font-semibold text-charcoal">{t(o === 'STATE' ? 'auth.org.state' : 'auth.org.private')}</span>
-                            <span className="mt-0.5 block text-[11px] leading-snug text-charcoal/55">{t(o === 'STATE' ? 'auth.org.stateHint' : 'auth.org.privateHint')}</span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    {fieldErrors.ownership && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.ownership}</p>}
-                  </fieldset>
-                )}
-
-                <Field label={t('auth.org.region')} required>
-                  <Select
-                    value={region}
-                    onChange={(e) => { const r = e.target.value; setRegion(r); clearError('region'); keepTechnikumIf((x) => x.region === r) }}
-                    aria-invalid={!!fieldErrors.region}
-                    className={region ? undefined : 'text-charcoal/40'}
-                  >
-                    <option value="" disabled>{t('auth.org.regionPlaceholder')}</option>
-                    {UZ_REGIONS.map((r) => <option key={r.id} value={r.id} className="text-charcoal">{r.name[currentLang]}</option>)}
-                  </Select>
-                  {fieldErrors.region && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.region}</p>}
-                </Field>
-
-                {role === 'TECHNIKUM' && (
-                  <div>
-                    <label htmlFor="technikum-name" className="mb-1.5 flex items-baseline justify-between gap-3 text-xs font-medium text-charcoal/70">
-                      <span>{t('auth.org.technikumName')}<span className="ml-0.5 text-champagne">*</span></span>
-                      {TECHNIKUMS.length > 0 && <span className="text-[11px] font-normal text-charcoal/45">{t('auth.org.technikumFilterHint')}</span>}
-                    </label>
-                    <TechnikumPicker
-                      id="technikum-name"
-                      list={TECHNIKUMS}
-                      value={{ id: technikumId, name: orgName }}
-                      region={region}
-                      ownership={ownership}
-                      invalid={!!fieldErrors.orgName}
-                      onChange={(v, picked) => { clearError('orgName'); if (picked) { applyTechnikum(picked); setTechnikumId(v.id); setOrgName(v.name) } else if (technikumId) dropTechnikum(v.name); else setOrgName(v.name) }}
-                    />
-                    {fieldErrors.orgName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.orgName}</p>}
-                  </div>
-                )}
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={t('auth.org.inn')} hint={t('auth.org.innHint')} required>
-                    <Input
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="123456789"
-                      value={inn}
-                      onChange={(e) => { setInn(e.target.value.replace(/\D/g, '').slice(0, 9)); clearError('inn') }}
-                      aria-invalid={!!fieldErrors.inn}
-                      className="tabular-nums tracking-wider"
-                    />
-                    {fieldErrors.inn && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.inn}</p>}
-                    {!fieldErrors.inn && innFromPick(pickedTechnikum) && (
-                      <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-charcoal/55">
-                        <Icon name="info" className="mt-px h-3.5 w-3.5 shrink-0 text-champagne" />
-                        {t('auth.org.innFromList')}
-                      </p>
-                    )}
-                  </Field>
-                  <Field label={t('auth.org.phone')} required>
-                    <Input
-                      type="tel"
-                      autoComplete="tel"
-                      placeholder="+998 71 123 45 67"
-                      maxLength={20}
-                      value={phone}
-                      onChange={(e) => { setPhone(e.target.value); clearError('phone') }}
-                      aria-invalid={!!fieldErrors.phone}
-                    />
-                    {fieldErrors.phone && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.phone}</p>}
-                  </Field>
-                </div>
-              </section>
-            )}
-
             {mode === 'register' && role === 'CENTER' && (
               <Field label={t('auth.centerName')} required>
                 <Input
@@ -469,7 +324,7 @@ export function LoginPage() {
             )}
 
             {mode === 'register' && (
-              <Field label={t(isOrg ? 'auth.org.contactName' : 'auth.fullName')} hint={t('auth.fullNamePlaceholder')}>
+              <Field label={t(role === 'INSTITUTION' ? 'auth.org.repName' : role === 'COMPANY' ? 'auth.org.contactName' : 'auth.fullName')} hint={t('auth.fullNamePlaceholder')} required={isOrg}>
                 <Input
                   autoComplete="name"
                   maxLength={60}
@@ -485,8 +340,22 @@ export function LoginPage() {
               </Field>
             )}
 
-            {mode === 'register' && !isOrg && (
-              <Field label={t('auth.phone')} hint={t('auth.phonePlaceholder')}>
+            {isOrg && (
+              <Field label={t('auth.position')} required>
+                <Input
+                  autoComplete="organization-title"
+                  maxLength={80}
+                  placeholder={t('auth.positionPlaceholder')}
+                  value={position}
+                  onChange={(e) => { setPosition(e.target.value); if (fieldErrors.position) setFieldErrors((f) => ({ ...f, position: undefined })) }}
+                  aria-invalid={!!fieldErrors.position}
+                />
+                {fieldErrors.position && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.position}</p>}
+              </Field>
+            )}
+
+            {mode === 'register' && (
+              <Field label={t('auth.phone')} hint={t('auth.phonePlaceholder')} required={isOrg}>
                 <Input
                   type="tel"
                   autoComplete="tel"
@@ -501,6 +370,28 @@ export function LoginPage() {
                 />
                 {fieldErrors.phone && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.phone}</p>}
               </Field>
+            )}
+
+            {role === 'COMPANY' && mode === 'register' && (
+              <Field label={t('q.email')} required>
+                <Input
+                  type="email"
+                  autoComplete="email"
+                  maxLength={120}
+                  placeholder="info@company.uz"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); if (fieldErrors.email) setFieldErrors((f) => ({ ...f, email: undefined })) }}
+                  aria-invalid={!!fieldErrors.email}
+                />
+                {fieldErrors.email && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.email}</p>}
+              </Field>
+            )}
+
+            {isOrg && (
+              <p className="flex items-start gap-2 rounded-control bg-sage/30 px-3 py-2.5 text-xs leading-relaxed text-charcoal/70">
+                <Icon name="info" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-forest" />
+                {t(role === 'INSTITUTION' ? 'auth.institutionNext' : 'auth.companyNext')}
+              </p>
             )}
 
             <Field
