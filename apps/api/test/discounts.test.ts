@@ -44,7 +44,7 @@ describe('who may set a discount (stubbed storage)', () => {
 
   function setup(stored: Record<string, unknown> = {}) {
     const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => row({ ...stored, ...data }))
-    const prisma = { client: { course: { findFirst: async () => row(stored), update } } }
+    const prisma = { client: { course: { findFirst: async () => row(stored), update }, center: { findFirst: async () => ({ status: 'ACTIVE' }) } } }
     const service = new ManageService(
       prisma as unknown as PrismaService,
       { record: async () => undefined } as unknown as AuditService,

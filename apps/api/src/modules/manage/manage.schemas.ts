@@ -108,6 +108,8 @@ export const CenterInput = z.object({ name: z.string().min(1).max(120), district
 /** Super Admin: approval state of a center. */
 export const CenterStatusInput = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'BLOCKED', 'REJECTED']), reason: z.string().trim().max(300).optional() }).strict()
 export type CenterStatusInput = z.infer<typeof CenterStatusInput>
+/** Super Admin: apply (true) or discard (false) the new name a center asked for. */
+export const CenterNameReviewInput = z.object({ approve: z.boolean() }).strict()
 export const DeleteUserInput = z.object({ reason: z.string().trim().min(3).max(300) }).strict()
 /** Center workspace: the center's own profile and check-in settings (all optional; only sent fields change). */
 export const CenterProfileInput = z.object({

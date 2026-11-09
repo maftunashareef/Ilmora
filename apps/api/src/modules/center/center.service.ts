@@ -42,9 +42,23 @@ export class CenterService {
     if (center.status === 'BLOCKED' || center.status === 'REJECTED') throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
   }
 
-  private profile(c: { id: string; slug: string; name: string; district: unknown; description: unknown; tone: string; address: string | null; phoneE164: string | null; status: string; approvedAt: Date | null; blockedAt: Date | null; blockReason: string | null; lat: number | null; lng: number | null; geoRadiusM: number | null; checkInBeforeMin: number; absenceAfterMin: number; createdAt: Date }) {
+  /** The Super Admin acts on any center through its own twin routes (admin-center.controller.ts) and is trusted. */
+  private isPlatformAdmin(actor: RequestActor) {
+    return actor.roles.includes('PLATFORM_ADMIN')
+  }
+
+  /**
+   * Touching a registered teacher's account (inviting, editing a linked profile) needs a center the Super Admin has
+   * approved: a center that is still waiting can be registered by anyone and must not reach other people's accounts.
+   */
+  private assertApproved(center: { status: string }, actor: RequestActor) {
+    this.assertWritable(center)
+    if (center.status !== 'ACTIVE' && !this.isPlatformAdmin(actor)) throw AppError.forbidden('The center is not approved yet', { code: 'center_not_approved' })
+  }
+
+  private profile(c: { id: string; slug: string; name: string; pendingName?: string | null; district: unknown; description: unknown; tone: string; address: string | null; phoneE164: string | null; status: string; approvedAt: Date | null; blockedAt: Date | null; blockReason: string | null; lat: number | null; lng: number | null; geoRadiusM: number | null; checkInBeforeMin: number; absenceAfterMin: number; createdAt: Date }) {
     return {
-      id: c.id, slug: c.slug, name: c.name, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
+      id: c.id, slug: c.slug, name: c.name, pendingName: c.pendingName ?? null, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
       status: c.status, approvedAt: c.approvedAt, blockedAt: c.blockedAt, blockReason: c.blockReason, createdAt: c.createdAt,
       checkIn: { lat: c.lat, lng: c.lng, geoRadiusM: c.geoRadiusM, checkInBeforeMin: c.checkInBeforeMin, absenceAfterMin: c.absenceAfterMin },
     }
@@ -95,7 +109,16 @@ export class CenterService {
     const center = await this.own(tenantId, actor)
     this.assertWritable(center)
     const data: Record<string, unknown> = {}
-    for (const k of ['name', 'tone', 'address', 'lat', 'lng', 'geoRadiusM', 'checkInBeforeMin', 'absenceAfterMin'] as const) if (input[k] !== undefined) data[k] = input[k]
+    for (const k of ['tone', 'address', 'lat', 'lng', 'geoRadiusM', 'checkInBeforeMin', 'absenceAfterMin'] as const) if (input[k] !== undefined) data[k] = input[k]
+    // After approval the public name is part of what the Super Admin vouched for: a new name waits for approval (the
+    // current one stays on the site), so an approved center cannot rename itself into a well-known one.
+    let renameRequested = false
+    if (input.name !== undefined && input.name !== center.name) {
+      if (center.status === 'ACTIVE' && !this.isPlatformAdmin(actor)) {
+        if (input.name !== center.pendingName) Object.assign(data, { pendingName: input.name, pendingNameAt: new Date() })
+        renameRequested = input.name !== center.pendingName
+      } else Object.assign(data, { name: input.name, pendingName: null, pendingNameAt: null })
+    } else if (input.name !== undefined && center.pendingName) Object.assign(data, { pendingName: null, pendingNameAt: null })
     for (const k of ['district', 'description'] as const) if (input[k] !== undefined) data[k] = input[k] as Json
     if (input.phone !== undefined) {
       if (input.phone === null || input.phone === '') data.phoneE164 = null
@@ -111,7 +134,21 @@ export class CenterService {
     const radius = input.geoRadiusM !== undefined ? input.geoRadiusM : center.geoRadiusM
     if ((lat == null || lng == null || radius == null) && (input.lat !== undefined || input.lng !== undefined || input.geoRadiusM !== undefined)) Object.assign(data, { lat: lat ?? null, lng: lng ?? null, geoRadiusM: lat != null && lng != null ? radius : null })
     const updated = await this.prisma.client.center.update({ where: { id: center.id }, data: data as Prisma.CenterUncheckedUpdateInput })
-    await this.audit.record({ action: 'center.profile', entityType: 'Center', entityId: center.id, before: { checkInBeforeMin: center.checkInBeforeMin, absenceAfterMin: center.absenceAfterMin, geoRadiusM: center.geoRadiusM }, after: { checkInBeforeMin: updated.checkInBeforeMin, absenceAfterMin: updated.absenceAfterMin, geoRadiusM: updated.geoRadiusM } })
+    // Every field that changed goes to the audit log, not only the check-in settings.
+    const before: Record<string, unknown> = {}
+    const after: Record<string, unknown> = {}
+    for (const k of Object.keys(data)) {
+      const was = (center as Record<string, unknown>)[k]
+      const now = (updated as Record<string, unknown>)[k]
+      if (JSON.stringify(was) !== JSON.stringify(now)) { before[k] = was ?? null; after[k] = now ?? null }
+    }
+    await this.audit.record({ action: 'center.profile', entityType: 'Center', entityId: center.id, before: before as Json, after: after as Json })
+    if (renameRequested) {
+      await this.notifications.safely('center.renameRequested', async () => {
+        const owners = await this.notifications.ownerIds(tenantId)
+        await this.notifications.notify({ tenantId, userIds: owners, type: 'center.renameRequested', params: { centerName: center.name, newName: input.name ?? '', centerId: center.id }, dedupeKey: `center-rename:${center.id}:${updated.pendingNameAt?.toISOString() ?? ''}` })
+      })
+    }
     return this.profile(updated)
   }
 
@@ -144,29 +181,99 @@ export class CenterService {
   }
 
   /**
-   * Adds a teacher. With `login`, the registered teacher account is linked: its profile joins the center (a profile that
-   * already belongs to another center is refused). Without a login, a profile is created to be linked later.
+   * Adds a teacher. Without a login, a profile is created to be linked later. With `login`, a center administrator only
+   * sends an invitation: the registered teacher joins after accepting it (respondInvite), so nobody can take a teacher
+   * or rewrite their profile without consent. The answer is the same whether the login exists, is taken or disabled, so
+   * the form cannot be used to find out who is registered. Needs an approved center. The Super Admin links directly.
    */
   async addTeacher(tenantId: string, actor: RequestActor, input: CenterTeacherInput) {
     const center = await this.own(tenantId, actor)
     this.assertWritable(center)
     const base = { name: input.name, title: (input.title ?? {}) as Json, bio: (input.bio ?? {}) as Json, tagline: (input.tagline ?? {}) as Json, expertise: input.expertise ?? [], avatarUrl: input.avatarUrl ?? null }
     if (input.login) {
+      this.assertApproved(center, actor)
       const login = input.login.normalize('NFKC').trim().toLowerCase()
       const user = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: { teacherProfile: true } })
-      if (!user || !user.roles.includes('TEACHER')) throw AppError.notFound('Teacher account', { code: 'teacher_login_not_found' })
-      if (!user.isActive) throw AppError.invalid('account_disabled', 'This account is disabled')
-      if (user.teacherProfile?.centerId && user.teacherProfile.centerId !== center.id) throw AppError.conflict('teacher_elsewhere', 'This teacher already belongs to another center')
-      const profile = user.teacherProfile
-        ? await this.prisma.client.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { centerId: center.id, ...(input.title ? { title: input.title as Json } : {}), ...(input.expertise ? { expertise: input.expertise } : {}) } })
-        : await this.prisma.client.teacherProfile.create({ data: { tenantId, userId: user.id, centerId: center.id, slug: await this.freeSlug(tenantId, login), ...base } })
-      await this.prisma.client.user.update({ where: { id: user.id }, data: { centerId: user.centerId ?? center.id } })
-      await this.audit.record({ action: 'center.teacher_link', entityType: 'TeacherProfile', entityId: profile.id, after: { centerId: center.id, userId: user.id } })
-      await this.notifications.safely('center.teacherLinked', () => this.notifications.notify({ tenantId, userIds: [user.id], type: 'center.teacherLinked', params: { centerName: center.name, centerId: center.id }, dedupeKey: `teacher-linked:${profile.id}:${center.id}` }))
-      return toTeacher(profile)
+      if (this.isPlatformAdmin(actor)) return this.linkDirectly(tenantId, center, user, login, input, base)
+      // A center administrator only invites; the answer is the same whatever the login turned out to be.
+      const eligible = !!user && user.roles.includes('TEACHER') && user.isActive && !user.teacherProfile?.centerId
+      if (user && eligible) await this.invite(tenantId, actor, center, user.id)
+      return { invited: true as const }
     }
     const profile = await this.prisma.client.teacherProfile.create({ data: { tenantId, centerId: center.id, slug: await this.freeSlug(tenantId, input.name), ...base } })
     await this.audit.record({ action: 'center.teacher_create', entityType: 'TeacherProfile', entityId: profile.id, after: { centerId: center.id } })
+    return toTeacher(profile)
+  }
+
+  /** One invitation per center and teacher: a pending or declined one is not sent again (no notification spam). */
+  private async invite(tenantId: string, actor: RequestActor, center: { id: string; name: string }, userId: string) {
+    const existing = await this.prisma.client.teacherInvite.findFirst({ where: { tenantId, centerId: center.id, userId } })
+    if (existing && existing.status !== 'ACCEPTED') return
+    const invite = existing
+      ? await this.prisma.client.teacherInvite.update({ where: { id: existing.id }, data: { status: 'PENDING', respondedAt: null, invitedById: actor.id, createdAt: new Date() } })
+      : await this.prisma.client.teacherInvite.create({ data: { tenantId, centerId: center.id, userId, invitedById: actor.id } })
+    await this.audit.record({ action: 'center.teacher_invite', entityType: 'TeacherInvite', entityId: invite.id, after: { centerId: center.id, userId } })
+    await this.notifications.safely('center.teacherInvited', () => this.notifications.notify({ tenantId, userIds: [userId], type: 'center.teacherInvited', params: { centerName: center.name, centerId: center.id, inviteId: invite.id }, dedupeKey: `teacher-invite:${invite.id}:${invite.createdAt.toISOString()}` }))
+  }
+
+  /** The Super Admin links a registered teacher at once (the earlier behaviour, kept for the owner only). */
+  private async linkDirectly(
+    tenantId: string,
+    center: { id: string; name: string },
+    user: Prisma.UserGetPayload<{ include: { teacherProfile: true } }> | null,
+    login: string,
+    input: CenterTeacherInput,
+    base: { name: string; title: Json; bio: Json; tagline: Json; expertise: string[]; avatarUrl: string | null },
+  ) {
+    if (!user || !user.roles.includes('TEACHER')) throw AppError.notFound('Teacher account', { code: 'teacher_login_not_found' })
+    if (!user.isActive) throw AppError.invalid('account_disabled', 'This account is disabled')
+    if (user.teacherProfile?.centerId && user.teacherProfile.centerId !== center.id) throw AppError.conflict('teacher_elsewhere', 'This teacher already belongs to another center')
+    const profile = user.teacherProfile
+      ? await this.prisma.client.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { centerId: center.id, ...(input.title ? { title: input.title as Json } : {}), ...(input.expertise ? { expertise: input.expertise } : {}) } })
+      : await this.prisma.client.teacherProfile.create({ data: { tenantId, userId: user.id, centerId: center.id, slug: await this.freeSlug(tenantId, login), ...base } })
+    await this.prisma.client.user.update({ where: { id: user.id }, data: { centerId: user.centerId ?? center.id } })
+    await this.audit.record({ action: 'center.teacher_link', entityType: 'TeacherProfile', entityId: profile.id, after: { centerId: center.id, userId: user.id } })
+    await this.notifications.safely('center.teacherLinked', () => this.notifications.notify({ tenantId, userIds: [user.id], type: 'center.teacherLinked', params: { centerName: center.name, centerId: center.id }, dedupeKey: `teacher-linked:${profile.id}:${center.id}` }))
+    return toTeacher(profile)
+  }
+
+  // ───────── the teacher's side of an invitation ─────────
+
+  /** Pending invitations of the signed-in teacher from approved centers. */
+  async myInvites(tenantId: string, actor: RequestActor) {
+    const rows = await this.prisma.client.teacherInvite.findMany({
+      where: { tenantId, userId: actor.id, status: 'PENDING', center: { status: 'ACTIVE', deletedAt: null } },
+      include: { center: { select: { id: true, name: true, slug: true } } },
+      orderBy: { createdAt: 'desc' },
+    })
+    return rows.map((r) => ({ id: r.id, centerId: r.center.id, centerName: r.center.name, centerSlug: r.center.slug, createdAt: r.createdAt }))
+  }
+
+  /** The teacher accepts (joins the center) or declines an invitation addressed to them. */
+  async respondInvite(tenantId: string, actor: RequestActor, id: string, accept: boolean) {
+    const invite = await this.prisma.client.teacherInvite.findFirst({ where: { tenantId, id, userId: actor.id, status: 'PENDING' }, include: { center: true } })
+    if (!invite) throw AppError.notFound('Invitation')
+    const now = new Date()
+    if (!accept) {
+      await this.prisma.client.teacherInvite.update({ where: { id }, data: { status: 'DECLINED', respondedAt: now } })
+      await this.audit.record({ action: 'center.teacher_invite_decline', entityType: 'TeacherInvite', entityId: id, after: { centerId: invite.centerId } })
+      return { ok: true }
+    }
+    const center = invite.center
+    if (center.status !== 'ACTIVE' || center.deletedAt) throw AppError.forbidden('The center is not approved', { code: 'center_not_approved' })
+    const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: actor.id }, include: { teacherProfile: true } })
+    if (!user || !user.isActive || !user.roles.includes('TEACHER')) throw AppError.forbidden('Only a teacher account can accept an invitation')
+    if (user.teacherProfile?.centerId && user.teacherProfile.centerId !== center.id) throw AppError.conflict('teacher_elsewhere', 'You already belong to another center')
+    const profile = user.teacherProfile
+      ? await this.prisma.client.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { centerId: center.id } })
+      : await this.prisma.client.teacherProfile.create({ data: { tenantId, userId: user.id, centerId: center.id, slug: await this.freeSlug(tenantId, user.login ?? user.displayName), name: user.displayName, title: {}, bio: {}, tagline: {}, expertise: [] } })
+    await this.prisma.client.user.update({ where: { id: user.id }, data: { centerId: user.centerId ?? center.id } })
+    await this.prisma.client.teacherInvite.update({ where: { id }, data: { status: 'ACCEPTED', respondedAt: now } })
+    await this.audit.record({ action: 'center.teacher_link', entityType: 'TeacherProfile', entityId: profile.id, after: { centerId: center.id, userId: user.id, inviteId: id } })
+    await this.notifications.safely('center.teacherJoined', async () => {
+      const admins = await this.notifications.centerAdminIds(tenantId, center.id)
+      await this.notifications.notify({ tenantId, userIds: admins, type: 'center.teacherJoined', params: { teacherName: profile.name, centerId: center.id }, dedupeKey: `teacher-joined:${id}:${now.toISOString()}` })
+    })
     return toTeacher(profile)
   }
 
@@ -175,11 +282,14 @@ export class CenterService {
     this.assertWritable(center)
     const existing = await this.prisma.client.teacherProfile.findFirst({ where: { tenantId, id, centerId: center.id } })
     if (!existing) throw AppError.notFound('Teacher')
+    // A profile behind somebody's own account is edited only by an approved center; placeholders can be prepared before.
+    if (existing.userId) this.assertApproved(center, actor)
     const data: Record<string, unknown> = {}
     for (const k of ['name', 'expertise', 'avatarUrl'] as const) if (input[k] !== undefined) data[k] = input[k]
     for (const k of ['title', 'bio', 'tagline'] as const) if (input[k] !== undefined) data[k] = input[k] as Json
     const updated = await this.prisma.client.teacherProfile.update({ where: { id }, data: data as Prisma.TeacherProfileUncheckedUpdateInput })
-    if (input.name && existing.userId) await this.prisma.client.user.update({ where: { id: existing.userId }, data: { displayName: input.name } }).catch(() => undefined)
+    // The account name belongs to the person: the center edits the public profile, never the name of the account.
+    await this.audit.record({ action: 'center.teacher_update', entityType: 'TeacherProfile', entityId: id, after: { fields: Object.keys(data) } })
     return toTeacher(updated)
   }
 

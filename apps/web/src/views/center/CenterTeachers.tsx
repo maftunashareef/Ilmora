@@ -33,7 +33,14 @@ export function CenterTeachers() {
     try {
       const body = { name: draft.name.trim(), title: draft.title, bio: draft.bio, expertise: draft.expertise.split(',').map((x) => x.trim()).filter(Boolean) }
       if (draft.id) await api(`${scope.base}/teachers/${draft.id}`, { method: 'PATCH', body })
-      else await api(`${scope.base}/teachers`, { method: 'POST', body: { ...body, ...(draft.login.trim() ? { login: draft.login.trim() } : {}) } })
+      else if (draft.login.trim()) {
+        // A registered teacher is invited, not linked: they join after accepting. The answer never says whether the login exists.
+        await api(`${scope.base}/teachers`, { method: 'POST', body: { ...body, login: draft.login.trim() } })
+        notify(t('center.inviteSent'))
+        setDraft(null)
+        await load()
+        return
+      } else await api(`${scope.base}/teachers`, { method: 'POST', body })
       notify(t('common.saved'))
       setDraft(null)
       await load()

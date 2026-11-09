@@ -75,7 +75,9 @@ export class CatalogController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('inquiries')
   async inquiry(@CurrentTenantId() tenantId: string, @Body() dto: InquiryDto) {
-    if (dto.consent === false) throw AppError.invalid('consent_required', 'Consent to processing is required')
+    // Consent must be given EXPLICITLY (true). Rejecting only `=== false` let a client omit the field and still get
+    // consentAt stamped below — recording a consent that was never given (Ж11).
+    if (dto.consent !== true) throw AppError.invalid('consent_required', 'Consent to processing is required')
 
     const centerName = (dto.centerName || dto.center || '').trim()
     if (!centerName || centerName.length < 2) {

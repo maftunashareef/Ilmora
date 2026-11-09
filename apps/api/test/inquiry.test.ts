@@ -108,6 +108,7 @@ describe('Inquiry endpoint and validation', () => {
       centerName: 'Ilm Markazi',
       contactName: 'Maftuna Karimova',
       phone: '+998 97 541 41 41',
+      consent: true,
     })
 
     expect(result).toEqual({ id: 'inq-already-saved', receivedAt: existing.createdAt })
@@ -123,6 +124,7 @@ describe('Inquiry endpoint and validation', () => {
         centerName: 'Ilm Markazi',
         contactName: 'Maftuna',
         phone: '12345',
+        consent: true,
       }),
     ).rejects.toMatchObject({ code: 'invalid_phone' })
   })

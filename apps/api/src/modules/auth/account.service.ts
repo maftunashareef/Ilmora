@@ -208,7 +208,8 @@ export class AccountService {
       await this.recordFailure(key)
       throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     }
-    if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+    // Do not reveal that the password was correct for a disabled account: answer exactly as for a wrong password (Ж15).
+    if (!user.isActive) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     await this.clearFailures(key)
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'password' } })
@@ -281,6 +282,9 @@ export class AccountService {
           preferredLang,
           roles,
           lastLoginAt: now,
+          // Google sign-in shows no offer/consent checkboxes, so consent must NOT be stamped here — recording it
+          // would be recording a consent the user never gave (Ж11). Left null, the client's ConsentGate
+          // (needsConsent) requires the two marks before the workspace opens, via /auth/consent.
         },
         include: USER_INCLUDE,
       })

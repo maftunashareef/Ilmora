@@ -62,7 +62,9 @@ export class TokenService {
    */
   async rotate(raw: string, meta: SessionMeta): Promise<{ userId: string; tenantId: string; raw: string; expiresAt: Date; familyId: string }> {
     const hash = sha256(raw)
-    const session = await TenantContext.system(() => this.prisma.client.refreshSession.findUnique({ where: { tokenHash: hash } }))
+    // The token hash is globally unique and not yet tied to a tenant, so look it up without tenant scoping; all
+    // writes below run under the session's own tenant. (Ж13: a request-tenant-scoped lookup only matched one org.)
+    const session = await TenantContext.crossTenant(() => this.prisma.client.refreshSession.findUnique({ where: { tokenHash: hash } }))
     if (!session) throw AppError.unauthorized('Refresh session not found', 'invalid_refresh')
     const now = new Date()
     if (session.revokedAt || session.rotatedAt) {
@@ -90,7 +92,9 @@ export class TokenService {
 
   async revoke(raw: string, reason: string): Promise<void> {
     const hash = sha256(raw)
-    await TenantContext.system(() => this.prisma.client.refreshSession.updateMany({ where: { tokenHash: hash, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: reason } }))
+    // Same as rotate: find the session by its globally-unique hash without tenant scoping, so logout revokes it
+    // regardless of which org's host made the request (Ж13).
+    await TenantContext.crossTenant(() => this.prisma.client.refreshSession.updateMany({ where: { tokenHash: hash, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: reason } }))
   }
 
   async revokeFamily(tenantId: string, familyId: string, reason: string): Promise<void> {

@@ -10,6 +10,7 @@ import { DEMO_LOGIN_ENABLED } from '../../lib/demoMode'
 import { Link, useLocale, useNavigate, useSearchParams } from '../../lib/router'
 import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { useStore } from '../../store/useStore'
+import { issueOAuthNonce } from '../../lib/oauthState'
 
 type Mode = 'signin' | 'register'
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
@@ -164,6 +165,8 @@ export function LoginPage() {
           // Google Sign-In creates student or teacher accounts; a center registers with a login and password.
           role: mode === 'register' && role && role !== 'CENTER' ? role : undefined,
           next: safeNext || undefined,
+          // One-time mark checked by the callback: a code that this tab did not ask for is never exchanged (Ж8).
+          nonce: issueOAuthNonce(),
         }
         const state = encodeURIComponent(JSON.stringify(statePayload))
         const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(googleClientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid%20email%20profile&prompt=select_account&state=${state}&hl=${currentLang}`
