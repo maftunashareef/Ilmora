@@ -49,16 +49,25 @@ export class UpdateProfileDto {
   reminders?: boolean
 }
 
-/** Public registration: the three self-service roles (a center registers as its first administrator); anything else is rejected by validation. */
+/**
+ * Public registration: the self-service roles (a center registers as its first administrator, an institution as its
+ * representative); anything else — MINISTRY above all — is rejected by validation.
+ */
 export class RegisterDto {
-  @IsIn(['STUDENT', 'TEACHER', 'CENTER'])
-  role!: 'STUDENT' | 'TEACHER' | 'CENTER'
+  @IsIn(['STUDENT', 'TEACHER', 'CENTER', 'INSTITUTION'])
+  role!: 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION'
 
   /** Educational Center only: the center's name (it starts as PENDING until the Super Admin approves it). */
   @ValidateIf((o: RegisterDto) => o.role === 'CENTER')
   @IsString()
   @Length(2, 120)
   centerName?: string
+
+  /** Institution representative only: their position (ТЗ 4.2 step 1). */
+  @ValidateIf((o: RegisterDto) => o.role === 'INSTITUTION')
+  @IsString()
+  @Length(2, 80)
+  jobTitle?: string
 
   @IsString()
   @Length(3, 32)
