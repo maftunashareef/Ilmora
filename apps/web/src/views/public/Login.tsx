@@ -9,7 +9,7 @@ import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../../lib/demoMode'
-import { Link, useLocale, useNavigate, useSearchParams } from '../../lib/router'
+import { Link, useNavigate, useSearchParams } from '../../lib/router'
 import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { useStore, type RegisterRole } from '../../store/useStore'
 
@@ -41,14 +41,12 @@ const FIRST_STOP: Partial<Record<RegisterRole, string>> = { STUDENT: '/student/q
 
 export function LoginPage() {
   const { t } = useT()
-  const locale = useLocale()
   const nav = useNavigate()
   const [params] = useSearchParams()
   const rawNext = params.get('next') ?? ''
   const safeNext = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null
   const auth = useStore((s) => s.auth)
   const lang = useStore((s) => s.lang)
-  const currentLang = locale || lang || 'uz'
   const login = useStore((s) => s.login)
   const register = useStore((s) => s.register)
   const loginAsDemo = useStore((s) => s.loginAsDemo)
@@ -74,7 +72,6 @@ export function LoginPage() {
   const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT)
   const [consentInvalid, setConsentInvalid] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [googleBusy, setGoogleBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [networkOffline, setNetworkOffline] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({})
@@ -128,10 +125,6 @@ export function LoginPage() {
       case 'inn_taken': return t('auth.err.innTaken')
       case 'invalid_institution': return t('q.err.institution')
       case 'account_disabled': return t('auth.err.disabled')
-      case 'unverified_email': return t('auth.err.google')
-      case 'invalid_google_token': return t('auth.err.google')
-      case 'google_cancelled': return t('auth.err.googleCancelled')
-      case 'google_unconfigured': return t('auth.err.googleUnconfigured')
       case 'network_error':
         setNetworkOffline(true)
         return t('auth.err.network')
@@ -218,35 +211,6 @@ export function LoginPage() {
     }
   }
 
-  const handleGoogleSignIn = async () => {
-    setError(null)
-    setNetworkOffline(false)
-    setGoogleBusy(true)
-    try {
-      const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
-      if (googleClientId && typeof window !== 'undefined') {
-        const redirectUri = `${window.location.origin}/auth/google/callback`
-        const statePayload = {
-          lang: currentLang,
-          // Google Sign-In creates student or teacher accounts; an organization registers with a login and password.
-          role: mode === 'register' && (role === 'STUDENT' || role === 'TEACHER') ? role : undefined,
-          next: safeNext || undefined,
-        }
-        const state = encodeURIComponent(JSON.stringify(statePayload))
-        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(googleClientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid%20email%20profile&prompt=select_account&state=${state}&hl=${currentLang}`
-        window.location.href = authUrl
-        return
-      }
-
-      // Do not pretend OAuth works when credentials are not configured
-      setError(t('auth.err.googleUnconfigured'))
-    } catch (err) {
-      setError(describe(err))
-    } finally {
-      setGoogleBusy(false)
-    }
-  }
-
   const handleDemoLogin = async (selectedRole: 'STUDENT' | 'TEACHER') => {
     setBusy(true)
     setError(null)
@@ -268,40 +232,8 @@ export function LoginPage() {
           <h1 className="font-display text-3xl text-charcoal">{t('auth.title')}</h1>
           <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t('auth.subtitle')}</p>
 
-          {/* Social Sign-In (Google): sign-in only; new accounts register with a login and password. */}
-          {mode === 'signin' && (
-          <div className="mt-6">
-            <button
-              type="button"
-              id="google-signin-button"
-              onClick={handleGoogleSignIn}
-              disabled={busy || googleBusy}
-              className="flex w-full items-center justify-center gap-3 rounded-control border border-charcoal/15 bg-white px-4 py-3 text-sm font-semibold text-charcoal shadow-sm transition hover:border-forest/50 hover:bg-ivory/60 hover:shadow-lift active:scale-[0.99] disabled:opacity-50"
-            >
-              {googleBusy ? (
-                <Icon name="refresh" className="h-4 w-4 animate-spin text-forest" />
-              ) : (
-                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                </svg>
-              )}
-              <span>{t('auth.google')}</span>
-            </button>
-
-            <div className="relative my-5 flex items-center justify-center">
-              <div className="w-full border-t border-charcoal/10" />
-              <span className="absolute bg-white px-3 text-[11px] font-medium uppercase tracking-wider text-charcoal/40">
-                {t('auth.or')}
-              </span>
-            </div>
-          </div>
-          )}
-
           <Tabs<Mode>
-            className={mode === 'register' ? 'mt-6' : undefined}
+            className="mt-6"
             value={mode}
             onChange={switchMode}
             tabs={[
@@ -596,7 +528,7 @@ export function LoginPage() {
               </div>
             )}
 
-            <Button type="submit" className="w-full" size="lg" disabled={busy || googleBusy}>
+            <Button type="submit" className="w-full" size="lg" disabled={busy}>
               {busy ? <Icon name="refresh" className="h-4 w-4 animate-spin" /> : <Icon name={mode === 'register' ? 'check' : 'arrowRight'} className="h-4 w-4" />}
               {mode === 'register' ? t('auth.createAccount') : t('auth.signIn')}
             </Button>

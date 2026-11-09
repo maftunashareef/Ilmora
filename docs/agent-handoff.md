@@ -250,6 +250,7 @@ Stack: Node 24, TypeScript ~6, oxlint, vitest. No tsc in PATH — use `node_modu
 ## Blockers
 
 - **S3 Object Storage for Profile Photo Uploads**: S3 credentials (`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`) are unconfigured in `.env`. Server returns `storage_not_configured` on presign requests. Teacher Studio allows instant local image preview and URL configuration; cloud persistence activates as soon as S3 credentials are provided.
+- **Google sign-in removed from the web app (2026-11-09)**: the login page, the `/auth/google/callback` pages and the store's `loginWithGoogle` are gone; accounts sign in with a login and password only. The API's `POST /v1/auth/google` is still there for the API team to remove. The note below is kept for history.
 - **Google OAuth Production Credentials**: When unconfigured, login UI cleanly displays `auth.err.googleUnconfigured` instead of faking tokens. To enable Google Sign-In:
   - **Backend Environment (`apps/api/.env`)**:
     - `GOOGLE_CLIENT_ID`: `<google-client-id>.apps.googleusercontent.com`

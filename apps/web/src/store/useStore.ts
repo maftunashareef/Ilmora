@@ -96,7 +96,6 @@ interface Actions {
   bootstrap: () => Promise<void>
   register: (input: RegisterInput) => Promise<AuthUser>
   login: (login: string, password: string) => Promise<AuthUser>
-  loginWithGoogle: (input: { idToken?: string; code?: string; redirectUri?: string; role?: 'STUDENT' | 'TEACHER'; lang?: Lang }) => Promise<AuthUser>
   loginAsDemo: (role: 'STUDENT' | 'TEACHER', customUser?: Partial<AuthUser>) => Promise<AuthUser>
   giveConsent: (input: ConsentInput) => Promise<AuthUser>
   logout: () => Promise<void>
@@ -535,35 +534,6 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       register: (input) => api<{ accessToken: string; user: AuthUser }>('/auth/register', { method: 'POST', body: { ...input, lang: get().lang }, credentials: true, auth: false }).then(openSession),
       login: (login, password) => api<{ accessToken: string; user: AuthUser }>('/auth/login', { method: 'POST', body: { login, password }, credentials: true, auth: false }).then(openSession),
-      loginWithGoogle: (input) => {
-        const payload = { lang: get().lang, ...input }
-        return api<{ accessToken: string; user: AuthUser }>('/auth/google', { method: 'POST', body: payload, credentials: true, auth: false })
-          .then(openSession)
-          .catch((err) => {
-            if (DEMO_LOGIN_ENABLED && input.idToken && input.idToken.startsWith('mock-google-token:')) {
-              const parts = input.idToken.split(':')
-              const chosenLang = input.lang || get().lang
-              const demoUser: AuthUser = {
-                id: 'google-demo-student',
-                login: 'google.demo',
-                phone: null,
-                displayName: parts[3] ? decodeURIComponent(parts[3]) : 'Google Demo User',
-                district: 'Yunusobod',
-                preferredLang: chosenLang,
-                reminders: true,
-                roles: [input.role ?? 'STUDENT'],
-                centerId: null,
-                teacherProfileId: null,
-                offerAcceptedAt: new Date().toISOString(),
-                offerVersion: '1.0',
-                consentAt: new Date().toISOString(),
-                marketing: false,
-              }
-              return openSession({ accessToken: 'mock-google-access-token', user: demoUser })
-            }
-            throw err
-          })
-      },
       loginAsDemo: async (role, customUser) => {
         if (!DEMO_LOGIN_ENABLED) throw new Error('demo_login_disabled')
         const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'
