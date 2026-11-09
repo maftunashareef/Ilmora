@@ -26,6 +26,12 @@ enum Role {
   CENTER_ADMIN
   TEACHER
   STUDENT
+  /** Representative of a registry institution (User.institutionId). */
+  INSTITUTION_ADMIN
+  /** Representative of a registry company (User.companyId). */
+  COMPANY_ADMIN
+  /** Ministry staff: reviews institutions, sees the numbers. Granted only by the Super Admin, never at registration. */
+  MINISTRY
 }
 
 enum Lang {
@@ -242,6 +248,26 @@ model Tenant {
   callbackLogs    ProviderCallbackLog[]
   notifications   Notification[]
   teacherInvites  TeacherInvite[]
+
+  industries             Industry[]
+  regions                Region[]
+  districts              District[]
+  directions             Direction[]
+  institutions           Institution[]
+  institutionDirections  InstitutionDirection[]
+  companies              Company[]
+  studentProfiles        StudentProfile[]
+  studentConsents        StudentConsent[]
+  studentCertificates    StudentCertificate[]
+  announcements          GraduationAnnouncement[]
+  announcementResponses  AnnouncementResponse[]
+  trainingRequests       TrainingRequest[]
+  trainingOffers         TrainingOffer[]
+  contractHelpRequests   ContractHelpRequest[]
+  contactRequests        ContactRequest[]
+  vacancies              Vacancy[]
+  vacancyApplications    VacancyApplication[]
+  totpRecoveryCodes      TotpRecoveryCode[]
 }
 
 /// Template-driven site configuration (sections, theme, nav, features, permissions, media…) edited by Super Admin.
@@ -279,6 +305,18 @@ model User {
   isActive        Boolean   @default(true)
   /** Super Admin (owner). Set only by the owner-setup command on the server; a tenant may have several owners. */
   isOwner         Boolean   @default(false)
+  /** Contact e-mail (registry: students, institution and company representatives). Not used for sign-in. */
+  email           String?
+  /** Position of an institution or company representative. */
+  jobTitle        String?
+  /** Registry representative: one account represents one institution or one company, and each has one representative. */
+  institutionId   String?   @unique
+  institution     Institution? @relation(fields: [institutionId], references: [id])
+  companyId       String?   @unique
+  company         Company?  @relation(fields: [companyId], references: [id])
+  /** Second factor (TOTP, RFC 6238) for ministry staff and ILMORA moderators: the secret encrypted by the API, never plain. */
+  totpSecretEnc   String?
+  totpEnabledAt   DateTime?
   lastLoginAt     DateTime?
   /** Acceptance of the public offer (edition in offerVersion) and personal-data consent; see shared/legal. */
   offerAcceptedAt DateTime?
@@ -302,6 +340,14 @@ model User {
   ownedTenant     Tenant?   @relation("TenantOwner")
   notifications   Notification[]
   centerInvites   TeacherInvite[]
+  totpRecoveryCodes      TotpRecoveryCode[]
+  studentProfile         StudentProfile?
+  studentConsents        StudentConsent[]
+  studentCertificates    StudentCertificate[]
+  announcementExclusions AnnouncementExclusion[]
+  contractHelpRequests   ContractHelpRequest[]
+  contactRequests        ContactRequest[]
+  vacancyApplications    VacancyApplication[]
 
   @@unique([tenantId, phoneE164])
   @@unique([tenantId, login])
@@ -392,6 +438,8 @@ model Center {
   teachers TeacherProfile[]
   courses  Course[]
   teacherInvites TeacherInvite[]
+  /** The registry record of this learning center, when the Super Admin has linked one. */
+  registryInstitution Institution?
 
   @@unique([tenantId, slug])
   @@index([tenantId, deletedAt])
@@ -1120,4 +1168,726 @@ model CenterInquiry {
   createdAt   DateTime  @default(now())
 
   @@index([tenantId, createdAt])
+}
+
+// ───────────────────────────── Registry: institutions, companies, students ─────────────────────────────
+//
+// The ministry registry (TZ «ILMORA — реестр учреждений, компании, студенты», 9 Nov 2026). It sits beside the
+// learning-center marketplace above and changes nothing in it. What ties institutions, companies and students together
+// is the direction (Direction) with its required industry (Industry): matching and the ministry's numbers go by industry
+// through the direction, so moving a direction to another industry moves everything that points at it.
+// Duplicates are stopped by unique indexes, not only by code: one direction per normalized name, one institution and
+// one company per STIR, one representative per institution or company (User.institutionId / User.companyId).
+// Child rows without `tenantId` (CompanyIndustry, AnnouncementLine, …) are reached only through their parent.
+
+enum InstitutionType {
+  TECHNIKUM
+  COLLEGE
+  LYCEUM
+  SCHOOL
+  UNIVERSITY
+  TRAINING_CENTER
+}
+
+enum Ownership {
+  STATE
+  PRIVATE
+}
+
+/// Where a registry record came from: the ministry's Excel, the institution itself, or a student who did not find it.
+enum InstitutionSource {
+  IMPORT
+  SELF
+  STUDENT
+}
+
+/// UNCLAIMED: in the registry (import or added by a student) with nobody representing it yet.
+enum InstitutionStatus {
+  UNCLAIMED
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CompanyStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// OFFICIAL: from the ministry's classifier; USER: typed by an institution, student or company; ADMIN: added by the Super Admin.
+enum DirectionOrigin {
+  OFFICIAL
+  USER
+  ADMIN
+}
+
+enum StudentMode {
+  STUDYING
+  APPLYING
+}
+
+enum StudyForm {
+  GRANT
+  CONTRACT
+  UNDECIDED
+}
+
+enum StudyConfirmation {
+  NONE
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+/// GRADUATE_CARD: show my card in my institution's graduation announcements. CONTRACT_HELP_CARD: send my anonymised
+/// card to companies. COMPANY_CONTACTS: open my contacts to one company (StudentConsent.companyId). PARENT_CONSENT:
+/// the parent or legal representative of a minor agreed.
+enum ConsentKind {
+  GRADUATE_CARD
+  CONTRACT_HELP_CARD
+  COMPANY_CONTACTS
+  PARENT_CONSENT
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+/// Answer to a response, an offer or a contact request.
+enum MatchStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+enum TrainingRequestStatus {
+  OPEN
+  CLOSED
+}
+
+enum ContractHelpStatus {
+  ACTIVE
+  INTERESTED
+  SIGNED
+  WITHDRAWN
+}
+
+enum ContactSource {
+  GRADUATE
+  CONTRACT_HELP
+}
+
+enum VacancyKind {
+  PRACTICE
+  INTERNSHIP
+}
+
+enum WorkFormat {
+  ONSITE
+  REMOTE
+  HYBRID
+}
+
+enum VacancyStatus {
+  OPEN
+  CLOSED
+}
+
+enum ApplicationStatus {
+  NEW
+  VIEWED
+  INVITED
+  REJECTED
+}
+
+/// One-time recovery code for the TOTP second factor (10 per enrolment); only the hash is stored.
+model TotpRecoveryCode {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, usedAt])
+}
+
+/// Industry (отрасль): a short fixed list edited by the Super Admin; every direction belongs to one.
+model Industry {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  slug      String
+  /** { uz, ru, en } */
+  name      Json
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  directions Direction[]
+  companies  CompanyIndustry[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, sortOrder])
+}
+
+/// Region: 12 regions, the Republic of Karakalpakstan and Tashkent city. `code` is the official SOATO code.
+model Region {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  code      String
+  /** { uz, ru, en } */
+  name      Json
+  sortOrder Int      @default(0)
+
+  districts        District[]
+  institutions     Institution[]
+  companies        Company[]
+  students         StudentProfile[]
+  trainingRequests TrainingRequest[]
+  vacancies        Vacancy[]
+  contractHelpWork ContractHelpRequest[]
+
+  @@unique([tenantId, code])
+}
+
+/// District (туман/шаҳар) of a region. Only official SOATO codes, never invented ones.
+model District {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  regionId String
+  region   Region @relation(fields: [regionId], references: [id])
+  code     String
+  /** { uz, ru, en } */
+  name     Json
+
+  institutions Institution[]
+  companies    Company[]
+  students     StudentProfile[]
+  vacancies    Vacancy[]
+
+  @@unique([tenantId, code])
+  @@index([regionId])
+}
+
+/// Direction (направление): one shared list that grows as people type. `searchKey` is the normalized name
+/// (`registrySearchKey` in @ilmora/shared: lower case, Uzbek Cyrillic → Latin, ILMORA letters and apostrophes folded, no punctuation) and is
+/// unique, so the same name typed twice finds the existing row. A merged duplicate keeps its row and key as an alias
+/// pointing at the main direction (`mergedIntoId`); all references move to the main one, and a search that hits the
+/// alias returns the main direction.
+model Direction {
+  id           String          @id @default(cuid())
+  tenantId     String
+  tenant       Tenant          @relation(fields: [tenantId], references: [id])
+  name         String
+  searchKey    String
+  industryId   String
+  industry     Industry        @relation(fields: [industryId], references: [id])
+  origin       DirectionOrigin @default(USER)
+  /** Code from the ministry's classifier, when there is one. */
+  code         String?
+  mergedIntoId String?
+  mergedInto   Direction?      @relation("DirectionMerge", fields: [mergedIntoId], references: [id])
+  aliases      Direction[]     @relation("DirectionMerge")
+  createdById  String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  institutionDirections InstitutionDirection[]
+  students              StudentProfile[]
+  companies             CompanyDirection[]
+  announcementLines     AnnouncementLine[]
+  trainingRequests      TrainingRequest[]
+  vacancies             VacancyDirection[]
+
+  @@unique([tenantId, searchKey])
+  @@index([tenantId, industryId])
+  @@index([tenantId, mergedIntoId])
+}
+
+/// An educational institution in the ministry registry. The cabinet opens once the ministry has approved it
+/// (`approvedAt` is set); a later change of name, STIR, type, ownership or region sends it back to PENDING while the
+/// cabinet keeps working. Required passport fields are checked when the representative submits, not by the database,
+/// so a draft can be saved half-filled.
+model Institution {
+  id           String            @id @default(cuid())
+  tenantId     String
+  tenant       Tenant            @relation(fields: [tenantId], references: [id])
+  type         InstitutionType
+  ownership    Ownership?
+  name         String
+  /** Normalized name for search (`registrySearchKey`). */
+  searchKey    String
+  /** Taxpayer number, 9 digits; unique when present (records added by students have none). */
+  stir         String?
+  /** Head organization of a branch, in case branches turn out to share the head's STIR (asked of the ministry). */
+  parentId     String?
+  parent       Institution?      @relation("InstitutionBranch", fields: [parentId], references: [id])
+  branches     Institution[]     @relation("InstitutionBranch")
+  regionId     String?
+  region       Region?           @relation(fields: [regionId], references: [id])
+  districtId   String?
+  district     District?         @relation(fields: [districtId], references: [id])
+  address      String?
+  phone        String?
+  email        String?
+  website      String?
+  directorName String?
+  status       InstitutionStatus @default(UNCLAIMED)
+  source       InstitutionSource
+  submittedAt  DateTime?
+  approvedAt   DateTime?
+  reviewedAt   DateTime?
+  reviewedById String?
+  rejectReason String?
+  /** The learning center that already works in ILMORA, when the Super Admin links one. */
+  centerId     String?           @unique
+  center       Center?           @relation(fields: [centerId], references: [id])
+  /** A student-added record merged by the Super Admin into the real one; references move to the target. */
+  mergedIntoId String?
+  mergedInto   Institution?      @relation("InstitutionMerge", fields: [mergedIntoId], references: [id])
+  mergedFrom   Institution[]     @relation("InstitutionMerge")
+  createdById  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  representative User?
+  directions     InstitutionDirection[]
+  students       StudentProfile[]
+  announcements  GraduationAnnouncement[]
+  trainingOffers TrainingOffer[]
+
+  @@unique([tenantId, stir])
+  @@index([tenantId, status])
+  @@index([tenantId, regionId, districtId])
+  @@index([tenantId, type, ownership])
+  @@index([tenantId, searchKey])
+}
+
+/// A direction an institution teaches, with how many students are on it (the institution's own figure).
+model InstitutionDirection {
+  id            String      @id @default(cuid())
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  directionId   String
+  direction     Direction   @relation(fields: [directionId], references: [id])
+  /** Department or faculty, optional. */
+  department    String?
+  studentsCount Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([institutionId, directionId])
+  @@index([tenantId, directionId])
+}
+
+/// An employer, checked by ILMORA. Free for companies. The certificate file sits in the private documents bucket.
+model Company {
+  id                 String        @id @default(cuid())
+  tenantId           String
+  tenant             Tenant        @relation(fields: [tenantId], references: [id])
+  /** Taxpayer number, 9 digits. */
+  stir               String
+  name               String
+  /** Normalized name for search (`registrySearchKey`). */
+  searchKey          String
+  regionId           String?
+  region             Region?       @relation(fields: [regionId], references: [id])
+  districtId         String?
+  district           District?     @relation(fields: [districtId], references: [id])
+  address            String?
+  website            String?
+  about              String?
+  /** Object key of the state-registration certificate in the private bucket (ilmora-docs); only moderators read it. */
+  certificateFileKey String?
+  status             CompanyStatus @default(DRAFT)
+  submittedAt        DateTime?
+  approvedAt         DateTime?
+  reviewedAt         DateTime?
+  reviewedById       String?
+  rejectReason       String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  representative        User?
+  industries            CompanyIndustry[]
+  directions            CompanyDirection[]
+  announcementResponses AnnouncementResponse[]
+  trainingRequests      TrainingRequest[]
+  contactRequests       ContactRequest[]
+  consents              StudentConsent[]
+  vacancies             Vacancy[]
+  signedContractHelp    ContractHelpRequest[]
+
+  @@unique([tenantId, stir])
+  @@index([tenantId, status])
+  @@index([tenantId, regionId])
+  @@index([tenantId, searchKey])
+}
+
+model CompanyIndustry {
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  industryId String
+  industry   Industry @relation(fields: [industryId], references: [id])
+
+  @@id([companyId, industryId])
+  @@index([industryId])
+}
+
+model CompanyDirection {
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  directionId String
+  direction   Direction @relation(fields: [directionId], references: [id])
+
+  @@id([companyId, directionId])
+  @@index([directionId])
+}
+
+/// The student's questionnaire («уже учусь» / «хочу поступить»). Name, phone and e-mail live on User; consents are in
+/// StudentConsent. The institution confirms that the student studies there (studyConfirmation).
+model StudentProfile {
+  id                  String            @id @default(cuid())
+  tenantId            String
+  tenant              Tenant            @relation(fields: [tenantId], references: [id])
+  userId              String            @unique
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode                StudentMode
+  institutionType     InstitutionType?
+  /** Null while applying with «ещё не решил». */
+  institutionId       String?
+  institution         Institution?      @relation(fields: [institutionId], references: [id])
+  /** Year of study 1–6; for a school, the class 1–11. */
+  course              Int?
+  enrollYear          Int?
+  graduationYear      Int?
+  directionId         String?
+  direction           Direction?        @relation(fields: [directionId], references: [id])
+  studyForm           StudyForm?
+  /** Yearly contract amount the student entered, in tiyin. Informational: no contract money moves through ILMORA. */
+  contractAmountMinor BigInt?
+  birthDate           DateTime?         @db.Date
+  regionId            String?
+  region              Region?           @relation(fields: [regionId], references: [id])
+  districtId          String?
+  district            District?         @relation(fields: [districtId], references: [id])
+  about               String?
+  /** Parent or legal representative of a minor; their consent is a PARENT_CONSENT row in StudentConsent. */
+  parentName          String?
+  parentPhone         String?
+  studyConfirmation   StudyConfirmation @default(NONE)
+  studyConfirmedAt    DateTime?
+  studyConfirmedById  String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@index([tenantId, institutionId, studyConfirmation])
+  @@index([tenantId, directionId, graduationYear])
+  @@index([tenantId, mode])
+  @@index([tenantId, regionId])
+}
+
+/// Consent journal: a row is never rewritten. Revoking sets `revokedAt`; giving the consent again adds a new row, so the
+/// history of consents and revocations can always be shown. The current consent is the latest row without `revokedAt`.
+model StudentConsent {
+  id          String      @id @default(cuid())
+  tenantId    String
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        ConsentKind
+  /** COMPANY_CONTACTS only: the company the contacts were opened to. */
+  companyId   String?
+  company     Company?    @relation(fields: [companyId], references: [id])
+  /** Edition of the consent text the student agreed to. */
+  textVersion String
+  givenAt     DateTime    @default(now())
+  revokedAt   DateTime?
+  ip          String?
+
+  @@index([tenantId, userId, kind])
+  @@index([tenantId, kind, revokedAt])
+}
+
+/// A certificate the student uploaded; the file is in the private bucket (ilmora-docs). Authenticity is not checked.
+model StudentCertificate {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  issuer      String?
+  issuedAt    DateTime? @db.Date
+  fileKey     String
+  contentType String
+  sizeBytes   Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, userId])
+}
+
+/// «Выпуск»: an institution announces how many graduate in a year, per direction. Student cards are not stored here:
+/// they are the institution's confirmed students on the line's direction with graduationYear = year and a current
+/// GRADUATE_CARD consent, minus AnnouncementExclusion. A revoked consent therefore hides the card at once.
+model GraduationAnnouncement {
+  id            String             @id @default(cuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
+  institutionId String
+  institution   Institution        @relation(fields: [institutionId], references: [id])
+  year          Int
+  status        AnnouncementStatus @default(DRAFT)
+  publishedAt   DateTime?
+  closedAt      DateTime?
+  createdById   String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  lines           AnnouncementLine[]
+  exclusions      AnnouncementExclusion[]
+  responses       AnnouncementResponse[]
+  contactRequests ContactRequest[]
+
+  @@index([tenantId, status, year])
+  @@index([tenantId, institutionId])
+}
+
+model AnnouncementLine {
+  id             String                 @id @default(cuid())
+  announcementId String
+  announcement   GraduationAnnouncement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  directionId    String
+  direction      Direction              @relation(fields: [directionId], references: [id])
+  count          Int
+
+  responseLines AnnouncementResponseLine[]
+
+  @@unique([announcementId, directionId])
+  @@index([directionId])
+}
+
+/// A student the institution removed from an announcement.
+model AnnouncementExclusion {
+  announcementId String
+  announcement   GraduationAnnouncement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime               @default(now())
+
+  @@id([announcementId, userId])
+}
+
+/// A company's answer to an announcement: which lines and how many people. One per company and announcement.
+model AnnouncementResponse {
+  id             String                 @id @default(cuid())
+  tenantId       String
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id])
+  announcementId String
+  announcement   GraduationAnnouncement @relation(fields: [announcementId], references: [id])
+  companyId      String
+  company        Company                @relation(fields: [companyId], references: [id])
+  comment        String?
+  status         MatchStatus            @default(PENDING)
+  decidedAt      DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  lines AnnouncementResponseLine[]
+
+  @@unique([announcementId, companyId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, status])
+}
+
+model AnnouncementResponseLine {
+  responseId  String
+  response    AnnouncementResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  lineId      String
+  line        AnnouncementLine     @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  wantedCount Int
+
+  @@id([responseId, lineId])
+}
+
+/// «Под обучение»: a company asks for N people trained in a direction by a year, in a region or anywhere.
+model TrainingRequest {
+  id           String                @id @default(cuid())
+  tenantId     String
+  tenant       Tenant                @relation(fields: [tenantId], references: [id])
+  companyId    String
+  company      Company               @relation(fields: [companyId], references: [id])
+  directionId  String
+  direction    Direction             @relation(fields: [directionId], references: [id])
+  count        Int
+  byYear       Int
+  /** Null = any region. */
+  regionId     String?
+  region       Region?               @relation(fields: [regionId], references: [id])
+  requirements String?
+  status       TrainingRequestStatus @default(OPEN)
+  closedAt     DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  offers TrainingOffer[]
+
+  @@index([tenantId, status, directionId])
+  @@index([tenantId, companyId])
+}
+
+/// An institution's answer to a training request: «подготовим N человек к году Y». One per institution and request.
+model TrainingOffer {
+  id            String          @id @default(cuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  requestId     String
+  request       TrainingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  institutionId String
+  institution   Institution     @relation(fields: [institutionId], references: [id])
+  count         Int
+  byYear        Int
+  comment       String?
+  status        MatchStatus     @default(PENDING)
+  decidedAt     DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([requestId, institutionId])
+  @@index([tenantId, institutionId])
+}
+
+/// A student asks companies for help with the contract fee; companies see an anonymised card. One open request per
+/// student: `openKey` equals userId while the request is ACTIVE or INTERESTED and is null afterwards, and it is unique.
+/// The agreement itself is made outside ILMORA; the student marks it here (signedWithCompanyId) for the numbers.
+model ContractHelpRequest {
+  id                  String             @id @default(cuid())
+  tenantId            String
+  tenant              Tenant             @relation(fields: [tenantId], references: [id])
+  userId              String
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  motivation          String
+  yearsToWork         Int
+  /** Null = ready to work in any region. */
+  workRegionId        String?
+  workRegion          Region?            @relation(fields: [workRegionId], references: [id])
+  status              ContractHelpStatus @default(ACTIVE)
+  openKey             String?            @unique
+  signedWithCompanyId String?
+  signedWithCompany   Company?           @relation(fields: [signedWithCompanyId], references: [id])
+  signedAt            DateTime?
+  withdrawnAt         DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  contactRequests ContactRequest[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, userId])
+}
+
+/// A company asks a student to open their contacts. One request per company and student, whatever the source. When
+/// the student accepts, the company sees the full card (name, phone, e-mail, certificate files) and a COMPANY_CONTACTS
+/// consent row is written.
+model ContactRequest {
+  id             String                  @id @default(cuid())
+  tenantId       String
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id])
+  companyId      String
+  company        Company                 @relation(fields: [companyId], references: [id])
+  userId         String
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source         ContactSource
+  contractHelpId String?
+  contractHelp   ContractHelpRequest?    @relation(fields: [contractHelpId], references: [id])
+  announcementId String?
+  announcement   GraduationAnnouncement? @relation(fields: [announcementId], references: [id])
+  status         MatchStatus             @default(PENDING)
+  decidedAt      DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  @@unique([companyId, userId])
+  @@index([tenantId, userId, status])
+  @@index([tenantId, companyId, status])
+}
+
+/// Practice or internship offered by an approved company (published without a separate review).
+model Vacancy {
+  id           String        @id @default(cuid())
+  tenantId     String
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  companyId    String
+  company      Company       @relation(fields: [companyId], references: [id])
+  kind         VacancyKind
+  title        String
+  regionId     String
+  region       Region        @relation(fields: [regionId], references: [id])
+  districtId   String?
+  district     District?     @relation(fields: [districtId], references: [id])
+  address      String?
+  format       WorkFormat
+  paid         Boolean       @default(false)
+  /** Monthly stipend in tiyin, when paid and stated. */
+  stipendMinor BigInt?
+  /** Free text, e.g. «2 месяца». */
+  duration     String?
+  seats        Int
+  requirements String?
+  deadline     DateTime?     @db.Date
+  status       VacancyStatus @default(OPEN)
+  closedAt     DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  directions   VacancyDirection[]
+  applications VacancyApplication[]
+
+  @@index([tenantId, status, regionId])
+  @@index([tenantId, companyId])
+}
+
+model VacancyDirection {
+  vacancyId   String
+  vacancy     Vacancy   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  directionId String
+  direction   Direction @relation(fields: [directionId], references: [id])
+
+  @@id([vacancyId, directionId])
+  @@index([directionId])
+}
+
+/// A student's application to a vacancy: the company gets the full card (the button says so). One per vacancy.
+model VacancyApplication {
+  id              String            @id @default(cuid())
+  tenantId        String
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  vacancyId       String
+  vacancy         Vacancy           @relation(fields: [vacancyId], references: [id])
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  note            String?
+  status          ApplicationStatus @default(NEW)
+  statusChangedAt DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([vacancyId, userId])
+  @@index([tenantId, userId])
+  @@index([tenantId, vacancyId, status])
 }
