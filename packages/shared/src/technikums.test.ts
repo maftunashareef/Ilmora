@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isUzRegion } from './organization.js'
-import { searchTechnikums, TECHNIKUMS, type Technikum } from './technikums.js'
+import { matchesFormerNameOnly, searchTechnikums, TECHNIKUMS, type Technikum } from './technikums.js'
 
 const SAMPLE: Technikum[] = [
   { id: 'a', name: 'Toshkent qurilish texnikumi', region: 'tashkent-city', ownership: 'STATE', district: 'Chilonzor' },
@@ -9,11 +9,20 @@ const SAMPLE: Technikum[] = [
 ]
 
 describe('technikum list', () => {
-  it('holds the official list: 739 institutions, 687 state and 52 private, in all 14 regions', () => {
-    expect(TECHNIKUMS).toHaveLength(739)
-    expect(TECHNIKUMS.filter((t) => t.ownership === 'STATE')).toHaveLength(687)
+  it('holds the official list: 738 institutions, 686 state and 52 private, in all 14 regions', () => {
+    expect(TECHNIKUMS).toHaveLength(738)
+    expect(TECHNIKUMS.filter((t) => t.ownership === 'STATE')).toHaveLength(686)
     expect(TECHNIKUMS.filter((t) => t.ownership === 'PRIVATE')).toHaveLength(52)
     expect(new Set(TECHNIKUMS.map((t) => t.region)).size).toBe(14)
+    expect(TECHNIKUMS.filter((t) => t.inn)).toHaveLength(634)
+  })
+
+  it('finds a renamed technikum by its former name', () => {
+    const t = TECHNIKUMS.find((x) => x.id === 'pe-4')!
+    expect(t.name).toBe('Andijon shahar 1-son texnikumi')
+    expect(searchTechnikums(TECHNIKUMS, 'andijon shahar 1-son politexnikumi', { region: 'andijan' }).map((x) => x.id)).toContain('pe-4')
+    expect(matchesFormerNameOnly(t, 'politexnikumi')).toBe(true)
+    expect(matchesFormerNameOnly(t, 'andijon shahar')).toBe(false)
   })
 
   it('has unique ids, known regions, an ownership and a name for every entry', () => {

@@ -1365,6 +1365,8 @@ export const dict = {
   'auth.org.technikumManual': d('Röyxatda yöq: nom qölda kiritildi', 'Нет в списке: название введено вручную', 'Not in the list: name typed by hand'),
   'auth.org.technikumNoMatch': d('Röyxatda topilmadi. Texnikumning töliq nomini yozing.', 'В списке не найдено. Введите полное название техникума.', 'Not found in the list. Type the college’s full name.'),
   'auth.org.technikumMore': d('Birinçi {n} tasi körsatilgan. Nomini yozing yoki hududni tanlang.', 'Показаны первые {n}. Начните вводить название или выберите регион.', 'Showing the first {n}. Type the name or choose a region.'),
+  'auth.org.formerName': d('Avvalgi nomi: {name}', 'Прежнее название: {name}', 'Former name: {name}'),
+  'auth.org.innFromList': d('STIR reyestrdan qöyildi. Iltimos, tekşirib qöying.', 'ИНН подставлен из реестра. Пожалуйста, проверьте его.', 'TIN filled in from the register. Please check it.'),
   'auth.org.technikumNotListed': d('Mening texnikumim röyxatda yöq', 'Моего техникума нет в списке', 'My college is not in the list'),
 
   // ── Center workspace ────────────────────────────────────────────────────────

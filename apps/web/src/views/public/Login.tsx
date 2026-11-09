@@ -430,6 +430,12 @@ export function LoginPage() {
                       className="tabular-nums tracking-wider"
                     />
                     {fieldErrors.inn && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.inn}</p>}
+                    {!fieldErrors.inn && innFromPick(pickedTechnikum) && (
+                      <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-charcoal/55">
+                        <Icon name="info" className="mt-px h-3.5 w-3.5 shrink-0 text-champagne" />
+                        {t('auth.org.innFromList')}
+                      </p>
+                    )}
                   </Field>
                   <Field label={t('auth.org.phone')} required>
                     <Input

@@ -1,6 +1,6 @@
 'use client'
 import { useId, useState, type KeyboardEvent } from 'react'
-import { searchTechnikums, UZ_REGIONS, type OrgOwnership, type Technikum } from '@ilmora/shared'
+import { matchesFormerNameOnly, searchTechnikums, UZ_REGIONS, type OrgOwnership, type Technikum } from '@ilmora/shared'
 import { useT } from '@/i18n/useT'
 import { cx, Icon, Input } from './ui'
 
@@ -89,6 +89,7 @@ export function TechnikumPicker({ id, list, value, onChange, region, ownership, 
                 <span className="min-w-0 flex-1">
                   {m.name}
                   {lang === 'ru' && m.nameRu && <span className="block text-xs text-charcoal/60">{m.nameRu}</span>}
+                  {!value.id && matchesFormerNameOnly(m, value.name) && <span className="block text-xs text-champagne">{t('auth.org.formerName', { name: m.formerName! })}</span>}
                 </span>
                 {value.id === m.id && <Icon name="check" className="mt-0.5 h-4 w-4 shrink-0 text-forest" />}
               </div>
