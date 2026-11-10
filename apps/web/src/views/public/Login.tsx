@@ -291,7 +291,7 @@ export function LoginPage() {
         <Eyebrow className="mb-2">ILMORA</Eyebrow>
         <Card className="px-5 py-7 sm:px-7 sm:py-8 shadow-card border-charcoal/10 bg-white">
           <h1 className="font-display text-3xl text-charcoal">{t('auth.title')}</h1>
-          <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t('auth.subtitle')}</p>
+          <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t(mfa ? 'mfa.passwordAccepted' : 'auth.subtitle')}</p>
 
           {mfa ? (
             <div className="mt-6 border-t border-charcoal/10 pt-6">

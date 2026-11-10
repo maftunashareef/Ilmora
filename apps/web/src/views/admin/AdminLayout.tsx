@@ -31,6 +31,7 @@ export function AdminLayout() {
       { id: 'content', to: '/admin/content', label: t('admin.content'), icon: 'video' },
       { id: 'people', to: '/admin/people', label: t('admin.people'), icon: 'users' },
       ...(platform ? [{ id: 'accounts', to: '/admin/accounts', label: t('admin.accounts'), icon: 'shield' }] : []),
+      ...(platform ? [{ id: 'ministry', to: '/admin/ministry', label: t('admin.ministry.menu'), icon: 'globe' }] : []),
       { id: 'centers', to: '/admin/centers', label: t('admin.centers'), icon: 'building' },
       ...(platform ? [{ id: 'inquiries', to: '/admin/inquiries', label: t('admin.inquiries'), icon: 'archive' }] : []),
       { id: 'packages', to: '/admin/packages', label: t('admin.packages'), icon: 'package' },
