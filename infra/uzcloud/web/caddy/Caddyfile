@@ -1,5 +1,6 @@
 # ILMORA edge (machine ilmora-web). Certificates are issued and renewed by Caddy automatically.
 # {$VAR} values come from infra/uzcloud/web/.env through docker-compose.yml.
+# The release checks this file with `caddy validate` before Caddy sees it (deploy.sh web).
 
 {
 	email {$ACME_EMAIL}
