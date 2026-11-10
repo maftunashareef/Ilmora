@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 const noMarkup = (max: number) => z.string().max(max).refine((s) => !hasMarkup(s), { message: 'Must not contain < or >' })
 const year = z.number().int().min(1990).max(2100)
-const institutionType = z.enum(['TECHNIKUM', 'COLLEGE', 'LYCEUM', 'SCHOOL', 'UNIVERSITY', 'CENTER'])
+const institutionType = z.enum(['TECHNIKUM', 'COLLEGE', 'LYCEUM', 'SCHOOL', 'UNIVERSITY', 'TRAINING_CENTER'])
 
 /**
  * The shape of `StudentQuestionnaire` (@ilmora/shared) — types and lengths only; the rules of every step are checked by

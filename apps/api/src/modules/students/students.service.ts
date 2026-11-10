@@ -20,8 +20,6 @@ export interface QuestionnaireState {
   studyConfirmed: 'CONFIRMED' | 'PENDING' | 'REJECTED' | null
 }
 
-const toDbType = (t: string): InstitutionType => (t === 'CENTER' ? 'TRAINING_CENTER' : (t as InstitutionType))
-const toWebType = (t: InstitutionType): StudentQuestionnaire['institutionType'] => (t === 'TRAINING_CENTER' ? 'CENTER' : t)
 
 /**
  * Fields the server cannot store yet and therefore does not hold against completeness: the student's contact phone
@@ -60,7 +58,7 @@ export class StudentsService {
     const consents = await this.activeConsents(actor.id)
     const q: StudentQuestionnaire = {
       status: row.mode,
-      institutionType: row.institutionType ? toWebType(row.institutionType) : null,
+      institutionType: row.institutionType,
       institution: row.institution ? { id: row.institution.id, name: row.institution.name, region: row.institution.region?.slug ?? '' } : null,
       institutionUndecided: row.mode === 'APPLYING' && !row.institutionId,
       course: row.course,
@@ -92,7 +90,7 @@ export class StudentsService {
     const now = new Date()
     const studying = q.status === 'STUDYING'
     const school = q.institutionType === 'SCHOOL'
-    const type = toDbType(q.institutionType!)
+    const type: InstitutionType = q.institutionType!
 
     const regionId = await regionIdByRef(this.prisma, q.region)
     if (!regionId) throw AppError.invalid('invalid_region', 'Choose a region from the list')
