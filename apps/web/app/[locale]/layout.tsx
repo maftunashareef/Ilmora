@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { isLang, pick } from '@ilmora/shared'
 import { AppProviders } from '@/components/AppProviders'
 import { getCatalog, getSite } from '@/lib/server-api'
-import { organizationJsonLd, pageMetadata } from '@/lib/seo'
+import { organizationJsonLd, pageMetadata, searchVerification } from '@/lib/seo'
 import '../globals.css'
 // Fonts are self-hosted via @fontsource (woff2 shipped in node_modules), not fetched from Google at build time.
 // next/font/google downloaded these during `next build`, which made the Docker image build flaky (network to Google
@@ -35,6 +35,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
     icons: { icon: [{ url: '/brand/icon-32.png', sizes: '32x32' }, { url: '/brand/icon-192.png', sizes: '192x192' }], apple: '/brand/icon-180.png', shortcut: '/brand/favicon.ico' },
     manifest: '/manifest.webmanifest',
+    verification: searchVerification(),
     ...pageMetadata({ locale: lang, path: '/', title: `${name} — ${pick(lang, site?.brand.heroHeadline)}`, description: pick(lang, site?.brand.heroTagline) || 'ILMORA' }),
     // Last so the spread above cannot replace it: child pages become "Kurslar — ILMORA".
     title: { default: `${name} — ${pick(lang, site?.brand.heroHeadline) || 'Bitta abonement'}`, template: `%s — ${name}` },

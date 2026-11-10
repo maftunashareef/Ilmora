@@ -14,6 +14,19 @@ export function alternatesFor(path: string, locale: Lang): NonNullable<Metadata[
   }
 }
 
+/**
+ * Ownership tokens for the search engine consoles, read when the server starts (set them in the hosting environment).
+ * Google covers Chrome, Safari and Firefox (their default search), Yandex covers Yandex Browser, Bing covers Edge and
+ * the engines built on its index (DuckDuckGo, Yahoo). An unset token renders no tag.
+ */
+export function searchVerification(env: Record<string, string | undefined> = process.env): Metadata['verification'] {
+  const google = env.GOOGLE_SITE_VERIFICATION?.trim()
+  const yandex = env.YANDEX_VERIFICATION?.trim()
+  const bing = env.BING_SITE_VERIFICATION?.trim()
+  if (!google && !yandex && !bing) return undefined
+  return { ...(google ? { google } : {}), ...(yandex ? { yandex } : {}), ...(bing ? { other: { 'msvalidate.01': bing } } : {}) }
+}
+
 export function pageMetadata(opts: { locale: Lang; path: string; title: string; description: string; image?: string; noindex?: boolean; type?: 'website' | 'article' }): Metadata {
   const image = opts.image ?? `${SITE_URL}/brand/og-default.png`
   return {
