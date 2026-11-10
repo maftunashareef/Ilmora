@@ -1351,6 +1351,7 @@ export const dict = {
   'apiError.noPassword': d('Bu hisob parolsiz kiradi.', 'Этот аккаунт входит без пароля.', 'This account signs in without a password.'),
   'apiError.wrongPassword': d('Joriy parol notöğri.', 'Текущий пароль неверный.', 'The current password is wrong.'),
   'apiError.samePassword': d('Yangi parol joriysidan farq qilişi kerak.', 'Новый пароль должен отличаться от текущего.', 'The new password must differ from the current one.'),
+  'apiError.passwordChangeRequired': d('Avval vaqtinçalik parolni almaştiring.', 'Сначала смените временный пароль.', 'Change the temporary password first.'),
   'apiError.passwordIsLogin': d('Parol login bilan bir xil bölmasligi kerak.', 'Пароль не должен совпадать с логином.', 'The password must not be the login.'),
   'apiError.stirLocked': d('Vazirlik röyxatidagi yozuvning STIRini özgartirib bölmaydi.', 'СТИР записи из списка министерства изменить нельзя.', 'The STIR of a record from the ministry list cannot be changed.'),
   'apiError.notClaimed': d('Bu yozuvning vakili yöq.', 'У этой записи нет представителя.', 'Nobody represents this record.'),

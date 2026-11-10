@@ -1,8 +1,8 @@
-import { type CanActivate, type ExecutionContext, Injectable } from '@nestjs/common'
+import { type CanActivate, type ExecutionContext, HttpStatus, Injectable } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { ThrottlerGuard } from '@nestjs/throttler'
 import type { Role } from '../generated/prisma/enums'
-import { type AuthenticatedRequest, IS_PUBLIC_KEY, ROLES_KEY } from './decorators'
+import { type AuthenticatedRequest, IS_PUBLIC_KEY, ROLES_KEY, WITH_ISSUED_PASSWORD_KEY } from './decorators'
 import { AppError } from './errors'
 
 /** Requires an authenticated actor unless the handler/class is marked @Public(). */
@@ -15,6 +15,24 @@ export class AuthGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest<AuthenticatedRequest>()
     if (!req.actor) throw AppError.unauthorized('Authentication required')
     return true
+  }
+}
+
+/**
+ * A password the Super Admin issued (ministry accounts) must be changed before anything else (security review 10.11
+ * №4): with the token claim set, every route but the change of password, «who am I» and the public ones (sign-in,
+ * refresh, logout, the authenticator steps) answers 403 `password_change_required`. The new token after the change
+ * carries no claim.
+ */
+@Injectable()
+export class PasswordChangeGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+  canActivate(ctx: ExecutionContext): boolean {
+    const actor = ctx.switchToHttp().getRequest<AuthenticatedRequest>().actor
+    if (!actor?.passwordChangeRequired) return true
+    const open = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [ctx.getHandler(), ctx.getClass()]) || this.reflector.getAllAndOverride<boolean>(WITH_ISSUED_PASSWORD_KEY, [ctx.getHandler(), ctx.getClass()])
+    if (open) return true
+    throw new AppError('password_change_required', 'Change the temporary password first', HttpStatus.FORBIDDEN)
   }
 }
 

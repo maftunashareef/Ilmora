@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Inject, Patch, Post, Req, Res } from '@nestjs/common'
 import type { Request, Response } from 'express'
-import { AuthThrottle, ClientInfo, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
+import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -119,6 +119,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @AllowWithIssuedPassword()
   me(@CurrentActor() actor: RequestActor) {
     return this.auth.me(actor.id)
   }
@@ -135,6 +136,7 @@ export class AuthController {
    * `passwordChangeRequired`). Ends every session of the account and answers like a sign-in: a fresh session here.
    */
   @Post('password')
+  @AllowWithIssuedPassword()
   @AuthThrottle(5)
   async changePassword(@CurrentActor() actor: RequestActor, @CurrentTenantId() tenantId: string, @ClientInfo() ci: ClientInfoValue, @Body() dto: ChangePasswordDto, @Res({ passthrough: true }) res: Response) {
     return this.respond(res, await this.accounts.changePassword({ id: actor.id, tenantId }, dto, { ip: ci.ip, userAgent: ci.userAgent }))
