@@ -90,6 +90,10 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   // help with the contract fee
   contract_help_exists: 'apiError.contractHelpExists',
   contract_help_profile: 'apiError.contractHelpProfile',
+  // practice and internships
+  vacancy_closed: 'apiError.vacancyClosed',
+  application_exists: 'apiError.applicationExists',
+  application_decided: 'apiError.applicationDecided',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
