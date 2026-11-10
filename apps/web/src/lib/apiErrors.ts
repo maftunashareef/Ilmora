@@ -75,6 +75,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   request_closed: 'apiError.requestClosed',
   offer_decided: 'apiError.offerDecided',
   offer_exists: 'apiError.offerExists',
+  questionnaire_incomplete: 'apiError.questionnaireIncomplete',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

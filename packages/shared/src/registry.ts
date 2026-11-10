@@ -537,3 +537,27 @@ export interface PageDto<T> {
   page: number
   pageSize: number
 }
+
+// ───────────── Student questionnaire: consents and the institution's view (ТЗ 4.1, 8) ─────────────
+
+/**
+ * Keys of `StudentQuestionnaire.consents` the API stores (ТЗ 8): show my card in my institution's graduation
+ * announcements; send my anonymous card to companies (help with the contract). Contacts for one company are a
+ * per-request decision, not a questionnaire mark.
+ */
+export const STUDENT_CONSENT_KEYS = ['GRADUATE_CARD', 'CONTRACT_HELP_CARD'] as const
+export type StudentConsentKey = (typeof STUDENT_CONSENT_KEYS)[number]
+/** Edition of the consent texts the marks refer to; a new edition (after the lawyer's review) gets a new version. */
+export const STUDENT_CONSENT_TEXT_VERSION = '2026-11-10'
+
+export type StudyConfirmationStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED'
+
+/** A student as their institution sees them (ТЗ 9.4): name, course, direction, year — no contacts, no birth date. */
+export interface InstitutionStudentDto {
+  id: string
+  name: string
+  course: number | null
+  direction: DirectionDto | null
+  graduationYear: number | null
+  confirmation: StudyConfirmationStatus
+}
