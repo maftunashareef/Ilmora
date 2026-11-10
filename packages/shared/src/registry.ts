@@ -295,3 +295,24 @@ export interface MfaSetupDto {
   secret: string
   otpauthUrl: string
 }
+
+// ───────────── Ministry accounts (created by the Super Admin) ─────────────
+
+export interface MinistryAccountDto {
+  id: string
+  login: string
+  name: string
+  jobTitle: string | null
+  email: string | null
+  active: boolean
+  /** The authenticator app is linked (the first sign-in links it). */
+  appLinked: boolean
+  lastLoginAt: string | null
+  createdAt: string
+}
+
+/** Answer to creating an account or resetting its password: the temporary password is shown this once. */
+export interface MinistryAccountCreatedDto {
+  account: MinistryAccountDto
+  temporaryPassword: string
+}

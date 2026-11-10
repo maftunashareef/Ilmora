@@ -15,6 +15,7 @@ import { ManageModule } from './modules/manage/manage.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { PaymentsModule } from './modules/payments/payments.module'
 import { InstitutionsModule } from './modules/institutions/institutions.module'
+import { MinistryModule } from './modules/ministry/ministry.module'
 import { RegistryModule } from './modules/registry/registry.module'
 import { REDIS_OFF } from './infra/queue/queue.module'
 import { WorkerModule } from './worker.module'
@@ -33,6 +34,7 @@ import { WorkerModule } from './worker.module'
     CenterModule,
     RegistryModule,
     InstitutionsModule,
+    MinistryModule,
     ...(process.env.APP_ROLE === 'api' || REDIS_OFF ? [] : [WorkerModule]),
   ],
   controllers: [HealthController],
