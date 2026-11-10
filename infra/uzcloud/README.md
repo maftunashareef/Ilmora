@@ -228,6 +228,32 @@ sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate
   `https://ilmoraa.uz/payments/click/prepare` и `https://ilmoraa.uz/payments/click/complete`.
 - **Закрыть админку по IP:** `ADMIN_ALLOW_IPS` в `web/.env`, затем `… compose.sh web up -d caddy`.
 
+## Индексация в поисковиках
+
+Chrome, Safari и Firefox ищут через Google, Яндекс Браузер — через Яндекс, Edge — через Bing (на его базе работают
+DuckDuckGo и Yahoo). Отдельной «индексации в браузере» нет: сайт добавляют в три кабинета поисковиков.
+
+Сайт уже отдаёт `https://ilmoraa.uz/robots.txt` и `https://ilmoraa.uz/sitemap.xml` (все открытые страницы на трёх
+языках). Остаётся подтвердить права и отправить карту сайта — один раз:
+
+1. В каждом кабинете добавить сайт `https://ilmoraa.uz` и выбрать подтверждение **HTML-тегом (мета-тег)**:
+   - Google Search Console — <https://search.google.com/search-console> (тип ресурса «Префикс URL»)
+   - Яндекс Вебмастер — <https://webmaster.yandex.ru>
+   - Bing Webmaster Tools — <https://www.bing.com/webmasters> (можно «Import from Google Search Console» — тогда тег не нужен)
+2. Из предложенного тега взять только значение `content="…"` и записать в `infra/uzcloud/web/.env` на ilmora-web:
+   ```
+   GOOGLE_SITE_VERIFICATION=…
+   YANDEX_VERIFICATION=…
+   BING_SITE_VERIFICATION=…
+   ```
+3. Применить: `sh /opt/ilmora/infra/uzcloud/deploy.sh web`. Проверка: `curl -s https://ilmoraa.uz/uz | grep -o '<meta name="[a-z-]*verification[^>]*>'`.
+4. В кабинетах нажать «Подтвердить», затем в разделе Sitemap / «Файлы Sitemap» добавить `https://ilmoraa.uz/sitemap.xml`.
+5. Главную и важные страницы можно отправить вручную («Проверка URL → Запросить индексирование» в Google,
+   «Переобход страниц» в Яндексе). Первые страницы появляются в поиске от нескольких дней до пары недель.
+
+Кабинеты учеников, учителей, центров, вход и админка закрыты от поисковиков (`robots.txt` и `noindex`); домен
+админки закрыт целиком.
+
 ## Удаление демо-данных перед запуском
 
 Сид оставляет в базе образцы: центры, учителей и учеников с пометкой «(demo)» и всё, что к ним привязано (курсы, группы,
