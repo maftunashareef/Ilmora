@@ -1,5 +1,6 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { presignPut, s3ClientConfig } from './s3-client'
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { randomBytes } from 'node:crypto'
 import { AppError } from '../../common/errors'
@@ -39,7 +40,7 @@ export class PrivateDocsService {
 
   /** A presigned PUT (10 minutes) with the content type and size fixed: the storage refuses anything else. */
   async uploadUrl(key: string, contentType: DocContentType, size: number): Promise<string> {
-    return getSignedUrl(this.s3(), new PutObjectCommand({ Bucket: this.bucket(), Key: key, ContentType: contentType, ContentLength: size }), { expiresIn: 600 })
+    return presignPut(this.s3(), new PutObjectCommand({ Bucket: this.bucket(), Key: key, ContentType: contentType, ContentLength: size }), 600)
   }
 
   /** A presigned GET that lives DOC_LINK_SECONDS. */
@@ -95,11 +96,6 @@ export class PrivateDocsService {
 
   private s3(): S3Client {
     this.bucket()
-    return new S3Client({
-      endpoint: this.env.S3_ENDPOINT,
-      region: this.env.S3_REGION,
-      credentials: { accessKeyId: this.env.S3_ACCESS_KEY_ID!, secretAccessKey: this.env.S3_SECRET_ACCESS_KEY! },
-      forcePathStyle: this.env.S3_FORCE_PATH_STYLE,
-    })
+    return new S3Client(s3ClientConfig(this.env))
   }
 }

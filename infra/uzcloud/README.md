@@ -5,7 +5,7 @@
 
 | Машина | Ресурсы | Частный IP | Внешний IP | Что работает |
 |---|---|---|---|---|
-| ilmora-web | 2 vCPU / 4 ГБ / 20 ГБ | 10.0.0.57 | 198.163.197.43 | Caddy (HTTPS), сайт, API (оплаты, QR) |
+| ilmora-web | 4 vCPU / 8 ГБ / 40 ГБ | 10.0.0.57 | 198.163.197.43 | Caddy (HTTPS), сайт, API (оплаты, QR) |
 | ilmora-admin | 1 vCPU / 4 ГБ / 30 ГБ | 10.0.0.171 | — (вход через web) | админка, worker, PostgreSQL, Redis, копии в S3 |
 
 ```
@@ -348,9 +348,34 @@ echo 'ssh-ed25519 AAAA… maftuna' >> /root/.ssh/authorized_keys
 
 Убрать доступ — удалить эту строку (`nano /root/.ssh/authorized_keys`) на обеих машинах.
 
+## Хранилище файлов (S3)
+
+Два бакета класса Standard (Hot) в UzCloud Object Storage, `https://s3.uzcstorage.uz`, адреса path-style:
+
+| Бакет | Что лежит | Чтение без ключа |
+|---|---|---|
+| `ilmora-media` | картинки курсов, баннеры, аватары, файлы уроков | **да** — только файлы по точному адресу, список закрыт |
+| `ilmora-docs` | свидетельства компаний, документы студентов | **нет** — только по ссылке API на 5 минут |
+
+Браузер загружает файлы сам, по ссылке, которую подписал API (10–15 минут; тип и размер файла закреплены подписью).
+Настройки бакетов — в `s3/`: `cors.json` (загрузка с доменов сайта) на оба бакета, `media-policy.json` (чтение файлов)
+только на `ilmora-media`. Применить с компьютера (AWS CLI, профиль с ключом UzCloud):
+
+```powershell
+aws s3api put-bucket-cors --bucket ilmora-media --cors-configuration file://cors.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
+aws s3api put-bucket-cors --bucket ilmora-docs --cors-configuration file://cors.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
+aws s3api put-bucket-policy --bucket ilmora-media --policy file://media-policy.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
+```
+
+Проверка: файл в `ilmora-media` открывается без ключа (200), в `ilmora-docs` — нет (403), список `ilmora-media/` — 403.
+
+Ключи — в `api.env` на обеих машинах (`S3_ENDPOINT`, `S3_BUCKET=ilmora-media`, `S3_DOCS_BUCKET=ilmora-docs`,
+`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`), затем `… compose.sh admin up -d worker` и `… compose.sh web up -d api`.
+Адрес медиа для сайта (`NEXT_PUBLIC_MEDIA_BASE_URL`) задаёт релиз: переменная репозитория `MEDIA_BASE_URL`, по
+умолчанию `https://s3.uzcstorage.uz/ilmora-media`; по нему CSP пускает браузер к хранилищу.
+
 ## Позже
 
-- Загрузка видео и файлов в S3 (отдельный бакет класса Standard) — код ещё не написан.
 - Мониторинг: UptimeRobot для `https://ilmoraa.uz/health/ready`; Healthchecks.io для ночных копий (`BACKUP_PING_URL`).
 - Тестовая машина (staging).
 - Удалить устаревший столбец `Tenant.ownerUserId` отдельной миграцией (через релиз после перехода на `User.isOwner`).

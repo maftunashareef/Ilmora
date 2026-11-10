@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import { randomBytes } from 'node:crypto'
 import type { z } from 'zod'
 import { AppError } from '../../common/errors'
@@ -79,16 +79,11 @@ export class UploadsService {
     if (!s3Configured(this.env)) {
       throw new AppError('storage_unavailable', 'File storage is not configured in this environment', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    const s3 = new S3Client({
-      endpoint: this.env.S3_ENDPOINT,
-      region: this.env.S3_REGION,
-      credentials: { accessKeyId: this.env.S3_ACCESS_KEY_ID!, secretAccessKey: this.env.S3_SECRET_ACCESS_KEY! },
-      forcePathStyle: this.env.S3_FORCE_PATH_STYLE,
-    })
+    const s3 = new S3Client(s3ClientConfig(this.env))
     const ext = EXTENSIONS[input.contentType] ?? 'bin'
     const key = `${prefix}-${Date.now()}-${randomBytes(4).toString('hex')}.${ext}`
     const command = new PutObjectCommand({ Bucket: this.env.S3_BUCKET, Key: key, ContentType: input.contentType, ContentLength: input.fileSize })
-    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 })
+    const uploadUrl = await presignPut(s3, command, 900)
     const baseUrl = this.env.S3_PUBLIC_BASE_URL ?? (this.env.S3_ENDPOINT ? `${this.env.S3_ENDPOINT}/${this.env.S3_BUCKET}` : '')
     const publicUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/${key}` : `/${key}`
     return { uploadUrl, publicUrl, key }
