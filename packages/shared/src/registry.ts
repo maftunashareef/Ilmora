@@ -694,4 +694,63 @@ export interface StudentContactRequestDto {
   status: MatchStatus
   createdAt: string
   company: CompanyCardDto & { website: string | null }
+  /** The company's contacts — once the student accepted (ТЗ 5.3 «студент видит контакты компании»). */
+  contacts: PartyContactsDto | null
+}
+
+// ───────────── help with the contract fee (ТЗ 5.3) ─────────────
+
+export type ContractHelpStatus = 'ACTIVE' | 'INTERESTED' | 'SIGNED' | 'WITHDRAWN'
+/** «Где готов работать»: the student's own region or any. */
+export type ContractHelpWorkRegion = 'OWN' | 'ANY'
+export const CONTRACT_HELP_MOTIVATION_MAX = 1000
+export const CONTRACT_HELP_YEARS_MAX = 10
+
+/** The student's request as they see it, with the companies that showed interest. */
+export interface ContractHelpDto {
+  id: string
+  status: ContractHelpStatus
+  motivation: string
+  yearsToWork: number
+  /** Null — any region. */
+  workRegion: PlaceRefDto | null
+  createdAt: string
+  signedAt: string | null
+  signedWith: { id: string; name: string } | null
+  withdrawnAt: string | null
+  /** Contact requests that came through this request. */
+  interests: { requestId: string; company: { id: string; name: string }; status: MatchStatus; createdAt: string }[]
+  /** Companies the «договор заключён» mark can name: those the student opened contacts to. */
+  signableCompanies: { id: string; name: string }[]
+}
+
+/**
+ * The anonymised card a company sees (ТЗ 5.3): no name, birth date, phone, e-mail, files, parent or user id — only the
+ * request id and a card number. Age instead of the birth date.
+ */
+export interface ContractHelpCardDto {
+  id: string
+  /** Short card number for people to refer to («№ 4F2A9C»). */
+  number: string
+  status: 'ACTIVE' | 'INTERESTED'
+  age: number | null
+  region: PlaceRefDto | null
+  institution: InstitutionCardDto | null
+  direction: DirectionDto | null
+  mode: 'STUDYING' | 'APPLYING'
+  /** Year of study (studying) or the year of admission (applying). */
+  course: number | null
+  enrollYear: number | null
+  studyForm: 'GRANT' | 'CONTRACT' | 'UNDECIDED' | null
+  /** Yearly contract, so'm. */
+  contractAmount: number | null
+  motivation: string
+  yearsToWork: number
+  workRegion: PlaceRefDto | null
+  certificates: string[]
+  ilmoraCourses: L[]
+  studyConfirmed: boolean
+  createdAt: string
+  /** This company's contact request to the student, if any (from any source). */
+  contactRequest: MatchStatus | null
 }

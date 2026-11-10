@@ -87,6 +87,9 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   invalid_line: 'apiError.invalidLine',
   response_exists: 'apiError.responseExists',
   response_decided: 'apiError.responseDecided',
+  // help with the contract fee
+  contract_help_exists: 'apiError.contractHelpExists',
+  contract_help_profile: 'apiError.contractHelpProfile',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

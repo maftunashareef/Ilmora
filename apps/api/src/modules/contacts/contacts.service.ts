@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import type { CompanyContactDto, ContactSource, DocumentLinkDto, L, StudentContactRequestDto, StudentFullCardDto } from '@ilmora/shared'
+import type { CompanyContactDto, ContactSource, DocumentLinkDto, L, PartyContactsDto, StudentContactRequestDto, StudentFullCardDto } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
@@ -10,9 +10,16 @@ import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, toIndu
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
 const COMPANY_CARD = {
-  id: true, name: true, about: true, website: true, region: { select: { id: true, name: true } },
+  id: true, name: true, about: true, website: true, address: true, region: { select: { id: true, name: true } },
+  representative: { select: { displayName: true, jobTitle: true, email: true } },
   industries: { select: { industry: { select: { ...INDUSTRY_SELECT, sortOrder: true } } } },
 } as const
+
+/** What the student sees of a company they opened contacts to: its site, address and representative. */
+const companyContacts = (c: { website: string | null; address: string | null; representative: { displayName: string; jobTitle: string | null; email: string | null } | null }): PartyContactsDto => ({
+  phone: null, email: c.representative?.email ?? null, website: c.website, address: c.address,
+  representative: c.representative ? { name: c.representative.displayName, jobTitle: c.representative.jobTitle, email: c.representative.email } : null,
+})
 
 /**
  * Contact requests (ТЗ 5.1 «Пригласить», 5.3 «Заинтересованы», 8): a company asks a student to open their contacts;
@@ -81,6 +88,7 @@ export class ContactsService {
         region: r.company.region ? { id: r.company.region.id, name: r.company.region.name as L } : null,
         industries: r.company.industries.map((i) => i.industry).sort((a, b) => a.sortOrder - b.sortOrder).map(toIndustry),
       },
+      contacts: r.status === 'ACCEPTED' ? companyContacts(r.company) : null,
     }))
   }
 
