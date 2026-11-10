@@ -46,7 +46,7 @@ export class MinistryAccountsService {
     let row: Row
     try {
       row = await this.prisma.client.user.create({
-        data: { tenantId, login, passwordHash: await argon2.hash(password, PASSWORD_HASH), displayName: input.name, jobTitle: input.jobTitle ?? null, email: input.email ?? null, roles: ['MINISTRY'] },
+        data: { tenantId, login, passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date(), displayName: input.name, jobTitle: input.jobTitle ?? null, email: input.email ?? null, roles: ['MINISTRY'] },
         select: SELECT,
       })
     } catch (err) {
@@ -82,7 +82,7 @@ export class MinistryAccountsService {
   async resetPassword(tenantId: string, id: string): Promise<MinistryAccountCreatedDto> {
     await this.ministryAccount(id)
     const password = temporaryPassword()
-    const row = await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH) }, select: SELECT })
+    const row = await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date() }, select: SELECT })
     await this.tokens.revokeAllForUser(tenantId, id, 'password-reset-by-admin')
     await this.audit.record({ action: 'ministry.account.reset_password', entityType: 'User', entityId: id })
     return { account: toDto(row), temporaryPassword: password }

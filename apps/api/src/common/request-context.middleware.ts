@@ -25,7 +25,7 @@ export class RequestContextMiddleware implements NestMiddleware {
       const header = req.headers.authorization
       if (typeof header === 'string' && header.startsWith('Bearer ')) {
         const claims = await this.tokens.verifyAccess(header.slice(7).trim())
-        actor = { id: claims.sub, roles: claims.roles, centerId: claims.cid ?? null, teacherProfileId: claims.tpid ?? null, institutionId: claims.iid ?? null, companyId: claims.coid ?? null }
+        actor = { id: claims.sub, roles: claims.roles, centerId: claims.cid ?? null, teacherProfileId: claims.tpid ?? null, institutionId: claims.iid ?? null, companyId: claims.coid ?? null, passwordChangeRequired: claims.pwc === true }
         tenantId = claims.tid
       }
       if (!tenantId) {

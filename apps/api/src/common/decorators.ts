@@ -9,6 +9,10 @@ export const IS_PUBLIC_KEY = 'ilmora:public'
 /** Marks a route as reachable without an access token (tenant still resolved from header/default). */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true)
 
+export const WITH_ISSUED_PASSWORD_KEY = 'ilmora:with-issued-password'
+/** Open while the password issued by the Super Admin is not changed yet: the change itself and «who am I». */
+export const AllowWithIssuedPassword = () => SetMetadata(WITH_ISSUED_PASSWORD_KEY, true)
+
 export const ROLES_KEY = 'ilmora:roles'
 /** Any of the listed roles grants access (PLATFORM_ADMIN always passes). */
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles)
