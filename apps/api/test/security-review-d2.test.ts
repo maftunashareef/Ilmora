@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { AttendanceEvents } from '../src/modules/attendance/attendance.events'
 import { AttendanceService } from '../src/modules/attendance/attendance.service'
+import { RefundsService } from '../src/modules/enrollment/refunds.service'
 import { SubscriptionService } from '../src/modules/enrollment/subscription.service'
 import { ManageService } from '../src/modules/manage/manage.service'
 import { PaymentsController } from '../src/modules/payments/payments.controller'
@@ -90,17 +91,18 @@ describe.skipIf(!DB_AVAILABLE)('Small fixes of the security review 10.11: paymen
     }, { actor: teacher })
   })
 
-  it('№42: cancelling a paid subscription sends the finance admins a refund request', async () => {
+  it('№42: «Cancel» on a paid subscription files a refund request and tells the finance admins', async () => {
     const s = await paid('d2-refund')
     const sent: { type: string; userIds: string[]; params?: object }[] = []
-    const subs = new SubscriptionService(ctx.prisma, ctx.audit, { ...notificationsStub, notify: async (n: { type: string; userIds: string[] }) => { sent.push(n); return n.userIds.length } } as never, ctx.env)
+    const notify = { ...notificationsStub, notify: async (n: { type: string; userIds: string[] }) => { sent.push(n); return n.userIds.length } } as never
+    const refunds = new RefundsService(ctx.prisma, ctx.audit, notify, ctx.ledger, new SubscriptionService(ctx.prisma, ctx.audit, notify, ctx.env))
     const finance = await s.inT(() => db.user.create({ data: { tenantId: s.tenantId, login: `fin-${s.tenantId.slice(0, 8)}`, displayName: 'Finance', roles: ['FINANCE_ADMIN'] } }))
-    const out = await s.inT(() => subs.cancel(s.tenantId, s.student.id, 'moving away'))
-    expect(out).toEqual({ ok: true, refundRequested: true })
-    const request = sent.find((n) => n.type === 'refund.requested')
-    expect(request?.userIds).toEqual([finance.id])
-    expect(request?.params).toMatchObject({ amountMinor: s.payment.amountMinor.toString(), reason: 'moving away' })
-    expect(await s.inT(() => db.auditEvent.count({ where: { action: 'refund.requested', entityId: s.subscription.id } }))).toBe(1)
+    const out = await s.inT(() => refunds.cancelSubscription(s.tenantId, s.student.id, 'moving away'))
+    expect(out).toMatchObject({ ok: true, refundRequested: true })
+    expect(sent.find((n) => n.type === 'refund.requested')?.userIds).toEqual([finance.id])
+    const request = await s.inT(() => db.refundRequest.findFirstOrThrow({ where: { subscriptionId: s.subscription.id } }))
+    expect(request).toMatchObject({ status: 'PENDING', reason: 'REFUSAL', reasonText: 'moving away', paymentId: s.payment.id })
+    expect((await s.inT(() => db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } }))).status).toBe('CANCELLED')
   })
 
   it('Н12: without a connected payment provider the checkout holds no seats', async () => {

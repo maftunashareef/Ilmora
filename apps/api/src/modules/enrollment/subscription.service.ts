@@ -417,37 +417,15 @@ export class SubscriptionService {
     return expired.length
   }
 
+  /**
+   * Cancels the student's subscription without a refund: an unpaid checkout, or one with nothing paid left to return.
+   * A paid one is cancelled through RefundsService.cancelSubscription, which files the refund requests (offer 6.3–6.6).
+   */
   async cancel(tenantId: string, studentId: string, reason?: string) {
     const sub = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'] } } })
     if (!sub) throw AppError.notFound('Subscription')
-    const refund = await this.prisma.tx(async (tx) => {
-      if (!(await this.cancelIn(tx, sub.id, ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'], reason))) return null
-      return this.requestRefund(tx, sub, reason)
-    })
-    if (refund === null) throw AppError.notFound('Subscription')
-    return { ok: true, refundRequested: refund }
-  }
-
-  /**
-   * Cancelling a paid subscription is the student's refusal under the offer (6.3–6.4): the money of the period not yet
-   * used is owed back. The finance admins get a refund request in their notifications, and the audit log keeps it
-   * (security review 10.11 №42). Returns whether there was anything paid to look at.
-   */
-  private async requestRefund(tx: TransactionClient, sub: { id: string; tenantId: string; studentId: string; kind: string; lessonsTotal: number | null; lessonsUsed: number }, reason?: string): Promise<boolean> {
-    const now = new Date()
-    const paid = await tx.payment.findMany({ where: { subscriptionId: sub.id, state: 'PAID', periodEnd: { gt: now } }, select: { id: true, amountMinor: true } })
-    const lessonsLeft = sub.kind === 'LESSONS' && sub.lessonsTotal != null ? Math.max(0, sub.lessonsTotal - sub.lessonsUsed) : null
-    if (!paid.length || lessonsLeft === 0) return false
-    const amountMinor = paid.reduce((sum, p) => sum + p.amountMinor, 0n).toString()
-    const student = await tx.user.findFirst({ where: { id: sub.studentId }, select: { displayName: true } })
-    const finance = await tx.user.findMany({ where: { tenantId: sub.tenantId, isActive: true, OR: [{ roles: { has: 'FINANCE_ADMIN' } }, { isOwner: true }] }, select: { id: true } })
-    await this.audit.record({ tx, tenantId: sub.tenantId, action: 'refund.requested', entityType: 'Subscription', entityId: sub.id, after: { paymentIds: paid.map((p) => p.id), amountMinor, lessonsLeft }, reason })
-    await this.notifications.notify({
-      tenantId: sub.tenantId, userIds: finance.map((u) => u.id), type: 'refund.requested',
-      params: { studentName: student?.displayName ?? '', studentId: sub.studentId, subscriptionId: sub.id, amountMinor, lessonsLeft, reason: reason ?? null },
-      dedupeKey: `refund-requested:${sub.id}`,
-    }, tx)
-    return true
+    if (!(await this.prisma.tx((tx) => this.cancelIn(tx, sub.id, ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'], reason)))) throw AppError.notFound('Subscription')
+    return { ok: true }
   }
 
   /**
@@ -455,7 +433,7 @@ export class SubscriptionService {
    * (nothing written) when the row is no longer in one of `from`, e.g. a settlement activated it meanwhile. The payment
    * rows are locked first, in the order settle() takes them, so the two serialize instead of deadlocking.
    */
-  private async cancelIn(tx: TransactionClient, subscriptionId: string, from: SubscriptionStatus[], reason?: string, now = new Date()): Promise<boolean> {
+  async cancelIn(tx: TransactionClient, subscriptionId: string, from: SubscriptionStatus[], reason?: string, now = new Date()): Promise<boolean> {
     await tx.$queryRawUnsafe(`SELECT id FROM "Payment" WHERE "subscriptionId" = $1 FOR UPDATE`, subscriptionId)
     const cancelled = await tx.subscription.updateMany({ where: { id: subscriptionId, status: { in: from } }, data: { status: 'CANCELLED', cancelledAt: now } })
     if (cancelled.count !== 1) return false

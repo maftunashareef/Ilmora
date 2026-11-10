@@ -25,7 +25,7 @@ export class ReconciliationService {
       ...(f.from || f.to ? { createdAt: { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lte: f.to } : {}) } } : {}),
     }
     const [rows, total] = await Promise.all([
-      this.prisma.client.paymentTransaction.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { payment: { select: { id: true, state: true, amountMinor: true, currency: true, paidAt: true, studentId: true } } } }),
+      this.prisma.client.paymentTransaction.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { payment: { select: { id: true, state: true, amountMinor: true, refundedMinor: true, currency: true, paidAt: true, studentId: true } } } }),
       this.prisma.client.paymentTransaction.count({ where }),
     ])
     const paymentIds = rows.map((r) => r.paymentId)
@@ -33,12 +33,18 @@ export class ReconciliationService {
     // journal it reverses and filed under that payment; matching on referenceId alone made every refund look unposted.
     const journals = await this.prisma.client.ledgerJournal.findMany({
       where: { tenantId, referenceType: 'Payment', kind: { in: ['PAYMENT_SETTLED', 'PAYMENT_REFUNDED', 'REVERSAL'] }, OR: [{ referenceId: { in: paymentIds } }, { reversalOf: { referenceId: { in: paymentIds } } }] },
-      select: { id: true, referenceId: true, kind: true, createdAt: true, reversalOf: { select: { referenceId: true } } },
+      select: { id: true, referenceId: true, kind: true, createdAt: true, reversalOf: { select: { referenceId: true } }, entries: { select: { direction: true, amountMinor: true } } },
     })
-    const byPayment = new Map<string, typeof journals>()
-    for (const j of journals) {
-      const paymentId = j.reversalOf?.referenceId ?? j.referenceId
-      byPayment.set(paymentId, [...(byPayment.get(paymentId) ?? []), j])
+    const byPayment = new Map<string, { id: string; kind: string; refundMinor: bigint }[]>()
+    const file = (paymentId: string, j: { id: string; kind: string; refundMinor: bigint }) => byPayment.set(paymentId, [...(byPayment.get(paymentId) ?? []), j])
+    const debit = (entries: { direction: string; amountMinor: bigint }[]) => entries.filter((e) => e.direction === 'DEBIT').reduce((s, e) => s + e.amountMinor, 0n)
+    for (const j of journals) file(j.reversalOf?.referenceId ?? j.referenceId, { id: j.id, kind: j.kind, refundMinor: j.kind === 'PAYMENT_SETTLED' ? 0n : debit(j.entries) })
+    // Partial refunds are posted under their refund request (security review 10.11 №42): filed under its payment.
+    const requests = await this.prisma.client.refundRequest.findMany({ where: { tenantId, paymentId: { in: paymentIds }, status: 'PAID' }, select: { id: true, paymentId: true } })
+    if (requests.length) {
+      const paymentOf = new Map(requests.map((r) => [r.id, r.paymentId]))
+      const refundJournals = await this.prisma.client.ledgerJournal.findMany({ where: { tenantId, referenceType: 'RefundRequest', kind: 'PAYMENT_REFUNDED', referenceId: { in: [...paymentOf.keys()] } }, select: { id: true, kind: true, referenceId: true, entries: { select: { direction: true, amountMinor: true } } } })
+      for (const j of refundJournals) file(paymentOf.get(j.referenceId)!, { id: j.id, kind: j.kind, refundMinor: debit(j.entries) })
     }
 
     return {
@@ -49,6 +55,7 @@ export class ReconciliationService {
         const js = byPayment.get(r.paymentId) ?? []
         const settled = js.some((j) => j.kind === 'PAYMENT_SETTLED')
         const refunded = js.some((j) => j.kind === 'PAYMENT_REFUNDED')
+        const refundedLedgerMinor = js.reduce((sum, j) => sum + j.refundMinor, 0n)
         return {
           transactionId: r.id,
           seq: r.seq,
@@ -60,12 +67,13 @@ export class ReconciliationService {
           paymentState: r.payment.state,
           amountMinor: r.amountMinor.toString(),
           paymentAmountMinor: r.payment.amountMinor.toString(),
+          paymentRefundedMinor: r.payment.refundedMinor.toString(),
           currency: r.currency,
           createdAt: r.createdAt,
           performedAt: r.performedAt,
           cancelledAt: r.cancelledAt,
           ledger: { settled, refunded, journalIds: js.map((j) => j.id) },
-          discrepancy: this.discrepancy(r, r.payment, settled, refunded),
+          discrepancy: this.discrepancy(r, r.payment, settled, refunded) ?? (!r.sandbox && r.payment.refundedMinor !== refundedLedgerMinor ? 'refund_amount_mismatch' : null),
           sandbox: r.sandbox,
         }
       }),

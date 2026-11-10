@@ -13,10 +13,11 @@ describe('reconciliation files reversal journals under the payment they reverse'
   function setup(journals: { id: string; referenceId: string; kind: string; reversalOf: { referenceId: string } | null }[]) {
     const row = {
       id: 'ptx-1', seq: 7, provider: 'PAYME', providerTransactionId: 'pm-1', providerState: -2, state: 'CANCELLED', paymentId: 'pay-1', amountMinor: 100n, currency: 'UZS',
-      createdAt: new Date(), performedAt: new Date(), cancelledAt: new Date(), sandbox: false, payment: { id: 'pay-1', state: 'REFUNDED', amountMinor: 100n, currency: 'UZS', paidAt: new Date(), studentId: 's1' },
+      createdAt: new Date(), performedAt: new Date(), cancelledAt: new Date(), sandbox: false, payment: { id: 'pay-1', state: 'REFUNDED', amountMinor: 100n, refundedMinor: 100n, currency: 'UZS', paidAt: new Date(), studentId: 's1' },
     }
-    const ledgerJournal = { findMany: vi.fn(async (_args: unknown) => journals.map((j) => ({ ...j, createdAt: new Date() }))) }
-    const prisma = { client: { paymentTransaction: { findMany: vi.fn(async () => [row]), count: vi.fn(async () => 1) }, ledgerJournal } }
+    // A refund journal debits the revenue it gives back; the settlement's entries do not count as refunded.
+    const ledgerJournal = { findMany: vi.fn(async (_args: unknown) => journals.map((j) => ({ ...j, createdAt: new Date(), entries: [{ direction: 'DEBIT', amountMinor: 100n }, { direction: 'CREDIT', amountMinor: 100n }] }))) }
+    const prisma = { client: { paymentTransaction: { findMany: vi.fn(async () => [row]), count: vi.fn(async () => 1) }, ledgerJournal, refundRequest: { findMany: vi.fn(async () => []) } } }
     return { service: new ReconciliationService(prisma as unknown as PrismaService), ledgerJournal }
   }
 
@@ -45,12 +46,13 @@ describe('a provider refund takes the subscription down only for the period it p
     const tx = {
       $queryRawUnsafe: vi.fn(async () => []),
       payment: {
-        findFirst: vi.fn(async () => ({ id: 'pay-x', tenantId: 't', subscriptionId: 'sub-1', state: 'PAID', amountMinor: 100n, periodStart: new Date(refunded.periodEnd.getTime() - 30 * 86_400_000), periodEnd: refunded.periodEnd })),
+        findFirst: vi.fn(async () => ({ id: 'pay-x', tenantId: 't', subscriptionId: 'sub-1', state: 'PAID', amountMinor: 100n, refundedMinor: 0n, periodStart: new Date(refunded.periodEnd.getTime() - 30 * 86_400_000), periodEnd: refunded.periodEnd })),
         update: vi.fn(async () => ({})),
       },
       ledgerJournal: { findUnique: vi.fn(async () => null) },
       subscription: { findFirst: vi.fn(async () => ({ id: 'sub-1', ...sub })), update: vi.fn(async () => ({})) },
       enrollment: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      refundRequest: { updateMany: vi.fn(async () => ({ count: 0 })) },
     }
     const payments = new PaymentsService({} as PrismaService, new LedgerService(), { enqueue: async () => undefined } as unknown as OutboxService, {} as SubscriptionService, audit, env)
     return { payments, tx }

@@ -1,11 +1,13 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq'
-import { Logger, type OnModuleInit } from '@nestjs/common'
+import { Inject, Logger, type OnModuleInit } from '@nestjs/common'
 import type { Job, Queue } from 'bullmq'
 import { pick } from '@ilmora/shared'
+import { ENV, type Env } from '../../config/env'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { PrivateDocsService } from '../../infra/storage/private-docs.service'
 import { JOBS, QUEUES } from '../../infra/queue/queues'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
+import { RefundsService } from '../enrollment/refunds.service'
 import { SubscriptionService } from '../enrollment/subscription.service'
 import { SmsService } from '../sms/sms.service'
 import { OutboxService } from './outbox.service'
@@ -26,8 +28,10 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     private readonly sms: SmsService,
     private readonly payments: PaymentsService,
     private readonly subscriptions: SubscriptionService,
+    private readonly refunds: RefundsService,
     private readonly docs: PrivateDocsService,
     @InjectQueue(QUEUES.outbox) private readonly queue: Queue,
+    @Inject(ENV) private readonly env: Env,
   ) {
     super()
   }
@@ -40,12 +44,15 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     await this.queue.upsertJobScheduler('docs-incoming-purge', { every: 6 * 3_600_000 }, { name: JOBS.maintenance.purgeIncomingDocs, data: {} })
     // Provider callback logs do not grow without end (security review №11).
     await this.queue.upsertJobScheduler('callback-logs-purge', { every: 24 * 3_600_000 }, { name: JOBS.maintenance.purgeCallbackLogs, data: {} })
+    // Refund requests near their 10-day due date remind the finance admins (offer 6.6, security review №42).
+    await this.queue.upsertJobScheduler('refund-reminders', { pattern: '0 10 * * *', tz: this.env.SCHEDULE_TIMEZONE }, { name: JOBS.maintenance.refundReminders, data: {} })
   }
 
   async process(job: Job): Promise<unknown> {
     if (job.name === JOBS.maintenance.expirePayments) return { expired: await this.payments.expireAll() }
     if (job.name === JOBS.maintenance.subscriptionLifecycle) return this.subscriptions.runLifecycleAll()
     if (job.name === JOBS.maintenance.purgeCallbackLogs) return { removed: await this.payments.purgeCallbackLogs() }
+    if (job.name === JOBS.maintenance.refundReminders) return this.refunds.remindDue()
     if (job.name === JOBS.maintenance.purgeIncomingDocs) return { removed: this.docs.configured ? await this.docs.purgeIncoming() : 0 }
     const events = await TenantContext.system(() => this.outbox.claim(50))
     let done = 0
