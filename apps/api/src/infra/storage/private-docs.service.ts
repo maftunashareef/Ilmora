@@ -1,6 +1,7 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
+import { randomBytes } from 'node:crypto'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 
@@ -59,6 +60,28 @@ export class PrivateDocsService {
       if (status === 404 || (err as { name?: string }).name === 'NotFound' || (err as { name?: string }).name === 'NoSuchKey') return null
       throw err
     }
+  }
+
+  /** An object key for an upload under `prefix`: time and randomness, never the browser's file name. */
+  newKey(prefix: string, contentType: DocContentType): string {
+    return `${prefix}${Date.now()}-${randomBytes(8).toString('hex')}.${DOC_TYPES[contentType].ext}`
+  }
+
+  /**
+   * Checks what the browser uploaded before anything refers to it: the key lies under the owner's `prefix`, the object
+   * exists, is at most 10 MB and its first bytes are the PDF/JPEG/PNG its extension says. Anything else is deleted.
+   */
+  async verifyUpload(key: string, prefix: string): Promise<{ type: DocContentType; size: number }> {
+    if (!key.startsWith(prefix) || !/^[\w./-]+$/.test(key) || key.includes('..')) throw AppError.invalid('invalid_file', 'Upload the file again')
+    const object = await this.inspect(key)
+    if (!object) throw AppError.invalid('file_not_uploaded', 'The file has not been uploaded yet')
+    const type = sniffDocType(object.head)
+    const expected = (Object.entries(DOC_TYPES) as [DocContentType, (typeof DOC_TYPES)[DocContentType]][]).find(([, spec]) => key.endsWith(`.${spec.ext}`))?.[0]
+    if (object.size > DOC_MAX_BYTES || !type || type !== expected) {
+      await this.remove(key).catch(() => undefined)
+      throw AppError.invalid('invalid_file', 'Upload a PDF, JPG or PNG file up to 10 MB')
+    }
+    return { type, size: object.size }
   }
 
   async remove(key: string): Promise<void> {

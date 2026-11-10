@@ -1,10 +1,9 @@
 import { Injectable } from '@nestjs/common'
 import { COMPANY_REVIEW_FIELDS, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, registrySearchKey } from '@ilmora/shared'
-import { randomBytes } from 'node:crypto'
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
-import { DOC_LINK_SECONDS, DOC_MAX_BYTES, DOC_TYPES, PrivateDocsService, sniffDocType } from '../../infra/storage/private-docs.service'
+import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -156,7 +155,7 @@ export class CompaniesService {
     const id = await this.ownId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { status: true, approvedAt: true } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
-    const key = `${certPrefix(tenantId, id)}${Date.now()}-${randomBytes(8).toString('hex')}.${DOC_TYPES[input.contentType].ext}`
+    const key = this.docs.newKey(certPrefix(tenantId, id), input.contentType)
     return { uploadUrl: await this.docs.uploadUrl(key, input.contentType, input.fileSize), key, expiresInSeconds: 600 }
   }
 
@@ -166,23 +165,14 @@ export class CompaniesService {
    */
   async confirmCertificate(tenantId: string, actor: RequestActor, input: CertificateConfirmInput): Promise<CompanyProfileDto> {
     const id = await this.ownId(actor)
-    const prefix = certPrefix(tenantId, id)
-    if (!input.key.startsWith(prefix) || !/^[\w./-]+$/.test(input.key) || input.key.includes('..')) throw AppError.invalid('invalid_file', 'Upload the certificate again')
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { name: true, status: true, approvedAt: true, certificateFileKey: true } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
-    const object = await this.docs.inspect(input.key)
-    if (!object) throw AppError.invalid('file_not_uploaded', 'The file has not been uploaded yet')
-    const type = sniffDocType(object.head)
-    const expected = Object.entries(DOC_TYPES).find(([, spec]) => input.key.endsWith(`.${spec.ext}`))?.[0]
-    if (object.size > DOC_MAX_BYTES || !type || type !== expected) {
-      await this.docs.remove(input.key).catch(() => undefined)
-      throw AppError.invalid('invalid_file', 'Upload a PDF, JPG or PNG file up to 10 MB')
-    }
+    const { type, size } = await this.docs.verifyUpload(input.key, certPrefix(tenantId, id))
     const backToReview = current.approvedAt !== null && current.status !== 'PENDING'
     const now = new Date()
     await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: input.key, ...(backToReview ? { status: 'PENDING', submittedAt: now, rejectReason: null } : {}) } })
     if (current.certificateFileKey && current.certificateFileKey !== input.key) await this.docs.remove(current.certificateFileKey).catch(() => undefined)
-    await this.audit.record({ action: backToReview ? 'company.certificate.review' : 'company.certificate', entityType: 'Company', entityId: id, after: { type, size: object.size } })
+    await this.audit.record({ action: backToReview ? 'company.certificate.review' : 'company.certificate', entityType: 'Company', entityId: id, after: { type, size } })
     if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)
     return this.profileOf(id)
   }

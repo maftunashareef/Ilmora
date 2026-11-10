@@ -1326,6 +1326,8 @@ export const dict = {
   'apiError.offerDecided': d('Bu taklif böyiça qaror allaqaçon qabul qilingan.', 'По этому отклику уже принято решение.', 'This offer has already been decided.'),
   'apiError.offerExists': d('Muassasangiz bu arizaga allaqaçon javob bergan.', 'Ваше учреждение уже ответило на эту заявку.', 'Your institution has already answered this request.'),
   'apiError.questionnaireIncomplete': d('Anketani oxirigaça töldiring.', 'Заполните анкету до конца.', 'Fill in the questionnaire to the end.'),
+  'apiError.certificatesLimit': d('Ködan köp 20 ta sertifikat yuklaş mumkin.', 'Можно загрузить не больше 20 сертификатов.', 'You can upload at most 20 certificates.'),
+  'apiError.certificateExists': d('Bu fayl allaqaçon qöşilgan.', 'Этот файл уже добавлен.', 'This file is already added.'),
   'apiError.invalidJobTitle': d('Lavozimingizni kiriting (2–80 ta belgi).', 'Укажите вашу должность (2–80 символов).', 'Enter your position (2–80 characters).'),
   'apiError.incomplete': d('Davom etiş uçun paket va kurslarni tanlang.', 'Чтобы продолжить, выберите пакет и курсы.', 'Choose a package and courses to continue.'),
   'apiError.limit': d('Tanlangan kurslar soni ruxsat etilgan çegaradan oşib ketdi.', 'Выбрано больше курсов, чем разрешено.', 'More courses are selected than allowed.'),
