@@ -21,16 +21,9 @@ export interface QuestionnaireState {
 }
 
 
-/**
- * Fields the server cannot store yet and therefore does not hold against completeness: the student's contact phone
- * waits for `StudentProfile.contactPhone` (asked of the data engineer: User.phoneE164 serves SMS sign-in and must not
- * take a number nobody confirmed).
- */
-const NOT_STORED_YET = new Set(['phone'])
-
 const PROFILE_SELECT = {
   mode: true, institutionType: true, institutionId: true, course: true, enrollYear: true, graduationYear: true, studyForm: true, contractAmountMinor: true,
-  birthDate: true, about: true, parentName: true, parentPhone: true, studyConfirmation: true,
+  birthDate: true, about: true, contactPhone: true, parentName: true, parentPhone: true, studyConfirmation: true,
   institution: { select: { id: true, name: true, region: { select: { slug: true } } } },
   direction: { select: DIRECTION_WITH_MAIN },
   region: { select: { slug: true } },
@@ -71,7 +64,7 @@ export class StudentsService {
       birthDate: row.birthDate ? row.birthDate.toISOString().slice(0, 10) : '',
       region: row.region?.slug ?? '',
       district: row.user.district ?? '',
-      phone: row.user.phoneVerifiedAt && row.user.phoneE164 ? row.user.phoneE164 : '',
+      phone: row.contactPhone ?? this.signInPhone(row.user),
       email: row.user.email ?? '',
       about: row.about ?? '',
       guardianName: row.parentName ?? '',
@@ -85,7 +78,7 @@ export class StudentsService {
   async save(tenantId: string, actor: RequestActor, input: QuestionnaireInput, ip?: string): Promise<QuestionnaireState> {
     if (!actor.roles.includes('STUDENT')) throw AppError.forbidden('Only a student fills in the questionnaire')
     const q = input as StudentQuestionnaire
-    const errors = this.missing(q, true)
+    const errors = this.missing(q)
     if (errors.length) throw AppError.invalid('questionnaire_incomplete', 'Fill in the questionnaire', { step: errors[0].step, errors: Object.fromEntries(errors.map((e) => [e.field, e.key])) })
     const now = new Date()
     const studying = q.status === 'STUDYING'
@@ -98,6 +91,8 @@ export class StudentsService {
     const directionId = q.direction?.name.trim() ? await this.directionOf(tenantId, actor, q.direction) : null
     const minor = isMinor(q, now)
     const guardianPhone = minor ? normalizeUzPhone(q.guardianPhone) : null
+    // The contact phone (checked by the step rules above): its own field — the sign-in number User.phoneE164 is never touched.
+    const contactPhone = normalizeUzPhone(q.phone)
 
     const before = await this.prisma.client.studentProfile.findFirst({ where: { userId: actor.id }, select: { institutionId: true, studyConfirmation: true, mode: true } })
     const confirmation = await this.confirmationFor(studying, institutionId, before)
@@ -115,6 +110,7 @@ export class StudentsService {
       regionId,
       about: q.about.trim() || null,
       parentName: minor ? q.guardianName.trim() : null,
+      contactPhone: contactPhone.ok ? contactPhone.e164 : null,
       parentPhone: guardianPhone?.ok ? guardianPhone.e164 : null,
       ...confirmation,
     }
@@ -158,13 +154,20 @@ export class StudentsService {
 
   // ───────────── helpers ─────────────
 
-  /** Step errors of the questionnaire; `forSave` also holds fields the server does not store yet. */
-  private missing(q: StudentQuestionnaire, forSave = false) {
+  /**
+   * The phone the questionnaire offers when it has no contact phone of its own: the number the student signed in
+   * with by SMS (User.phoneE164, confirmed); never one typed elsewhere.
+   */
+  private signInPhone(user: { phoneE164: string | null; phoneVerifiedAt: Date | null }): string {
+    return user.phoneVerifiedAt && user.phoneE164 ? user.phoneE164 : ''
+  }
+
+  /** Step errors of the questionnaire (steps 1–3, the rules of the web wizard). */
+  private missing(q: StudentQuestionnaire) {
     const today = new Date()
     const out: { step: number; field: string; key: string }[] = []
     for (let s = 1; s < QUESTIONNAIRE_STEPS; s++) {
       for (const [field, key] of Object.entries(validateQuestionnaireStep(s, q, today))) {
-        if (!forSave && NOT_STORED_YET.has(field)) continue
         out.push({ step: s, field, key: key as string })
       }
     }
