@@ -7,7 +7,7 @@ import type { PrismaService } from '../src/infra/prisma/prisma.service'
 import type { TokenService } from '../src/modules/auth/token.service'
 import type { AuditService } from '../src/modules/audit/audit.service'
 import type { RedisService } from '../src/infra/redis/redis.service'
-import { notificationsStub } from './stubs'
+import { mfaStub, notificationsStub } from './stubs'
 
 describe('Auth extended unit tests (Google OAuth & Registration Security)', () => {
   const env = testEnv({
@@ -34,7 +34,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
     },
   } as unknown as AccountService
 
-  const authService = new AuthService(dummyPrisma, dummyOtp, dummyTokens, dummyAudit, dummyAccounts, env)
+  const authService = new AuthService(dummyPrisma, dummyOtp, dummyTokens, dummyAudit, dummyAccounts, env, mfaStub)
 
   describe('Phone normalization & format parity', () => {
     it('normalizes local 9-digit format to E.164 with +998', () => {
@@ -89,7 +89,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         GOOGLE_CLIENT_ID: undefined,
         GOOGLE_CLIENT_SECRET: undefined,
       })
-      const unconfiguredAuth = new AuthService(dummyPrisma, dummyOtp, dummyTokens, dummyAudit, dummyAccounts, unconfiguredEnv)
+      const unconfiguredAuth = new AuthService(dummyPrisma, dummyOtp, dummyTokens, dummyAudit, dummyAccounts, unconfiguredEnv, mfaStub)
 
       await expect(
         unconfiguredAuth.authenticateGoogle('ilmora', { code: 'auth-code-123' }, { ip: '127.0.0.1', userAgent: 'vitest' })
@@ -104,6 +104,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as RedisService,
         notificationsStub,
         env,
+        mfaStub,
       )
 
       await expect(
@@ -184,6 +185,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as RedisService,
         notificationsStub,
         env,
+        mfaStub,
       )
 
       const result = await accountService.loginWithGoogle(
@@ -220,7 +222,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
       }
       const tokens = { signAccess: vi.fn().mockResolvedValue('jwt'), issueRefresh: vi.fn().mockResolvedValue({ raw: 'r', expiresAt: new Date() }) } as unknown as TokenService
       const audit = { record: vi.fn().mockResolvedValue(undefined) } as unknown as AuditService
-      const service = new AccountService({ client } as unknown as PrismaService, tokens, audit, {} as unknown as RedisService, notificationsStub, env)
+      const service = new AccountService({ client } as unknown as PrismaService, tokens, audit, {} as unknown as RedisService, notificationsStub, env, mfaStub)
       return { service, client, created }
     }
 
@@ -250,6 +252,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as RedisService,
         notificationsStub,
         env,
+        mfaStub,
       )
 
       expect(accountService.normalizeLogin('  Ali_Vali  ')).toBe('ali_vali')
@@ -277,6 +280,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as RedisService,
         notificationsStub,
         env,
+        mfaStub,
       )
 
       // Even if database row had PLATFORM_ADMIN in roles column:
@@ -301,6 +305,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as RedisService,
         notificationsStub,
         env,
+        mfaStub,
       )
 
       const ownerRoles = await accountService.effectiveRoles({
@@ -328,6 +333,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as RedisService,
         notificationsStub,
         env,
+        mfaStub,
       )
 
       await expect(
@@ -363,6 +369,7 @@ describe('Auth extended unit tests (Google OAuth & Registration Security)', () =
         {} as unknown as RedisService,
         notificationsStub,
         env,
+        mfaStub,
       )
 
       const result = await accountService.register(

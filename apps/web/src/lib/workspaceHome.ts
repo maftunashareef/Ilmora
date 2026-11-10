@@ -13,6 +13,9 @@ export const canOpen = (roles: readonly string[], path: string): boolean => {
   return w === 'teacher' ? roles.includes('TEACHER') : w === 'center' ? roles.includes('CENTER_ADMIN') : roles.includes('STUDENT')
 }
 
-/** Landing page after sign-in, in the same precedence as the store's `roleOf`; shared by the password and Google sign-in flows. */
+/** Landing page after sign-in, in the same precedence as the store's `roleOf`; used after every sign-in. */
 export const homeFor = (roles: readonly string[]): string =>
-  roles.includes('PLATFORM_ADMIN') ? '/admin' : roles.includes('TEACHER') ? '/teacher' : roles.includes('CENTER_ADMIN') ? '/center' : roles.includes('FINANCE_ADMIN') ? '/admin/finance' : '/student'
+  roles.includes('PLATFORM_ADMIN') ? '/admin' : roles.includes('TEACHER') ? '/teacher' : roles.includes('CENTER_ADMIN') ? '/center' : roles.includes('FINANCE_ADMIN') ? '/admin/finance'
+    // An institution's representative has no workspace yet (ТЗ 4.2, /institution comes next): the home page, not /student.
+    : roles.includes('INSTITUTION_ADMIN') ? '/'
+    : '/student'

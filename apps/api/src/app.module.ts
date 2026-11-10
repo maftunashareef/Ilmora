@@ -3,6 +3,7 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import { CoreModule } from './core.module'
 import { AppExceptionFilter } from './common/filters/app-exception.filter'
 import { AppThrottlerGuard, AuthGuard, RolesGuard } from './common/guards'
+import { ApprovedGuard } from './common/registry-access'
 import { RequestContextMiddleware } from './common/request-context.middleware'
 import { AttendanceModule } from './modules/attendance/attendance.module'
 import { AuthModule } from './modules/auth/auth.module'
@@ -13,6 +14,9 @@ import { CenterModule } from './modules/center/center.module'
 import { ManageModule } from './modules/manage/manage.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { PaymentsModule } from './modules/payments/payments.module'
+import { InstitutionsModule } from './modules/institutions/institutions.module'
+import { MinistryModule } from './modules/ministry/ministry.module'
+import { RegistryModule } from './modules/registry/registry.module'
 import { REDIS_OFF } from './infra/queue/queue.module'
 import { WorkerModule } from './worker.module'
 
@@ -28,6 +32,9 @@ import { WorkerModule } from './worker.module'
     AttendanceModule,
     ManageModule,
     CenterModule,
+    RegistryModule,
+    InstitutionsModule,
+    MinistryModule,
     ...(process.env.APP_ROLE === 'api' || REDIS_OFF ? [] : [WorkerModule]),
   ],
   controllers: [HealthController],
@@ -36,6 +43,8 @@ import { WorkerModule } from './worker.module'
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Registry: approved-only routes (ТЗ 4.2, 4.3).
+    { provide: APP_GUARD, useClass: ApprovedGuard },
   ],
 })
 export class AppModule implements NestModule {

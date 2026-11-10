@@ -19,6 +19,8 @@ export interface CenterProfile {
   id: string
   slug: string
   name: string
+  /** A new name waiting for the Super Admin's approval (the public name stays until then). */
+  pendingName?: string | null
   district: L
   description: L
   tone: string

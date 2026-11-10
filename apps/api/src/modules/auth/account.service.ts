@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
-import { type Lang, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
+import { type Lang, type MfaChallengeDto, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { randomToken } from '../../common/crypto'
 import { AppError } from '../../common/errors'
@@ -9,6 +9,7 @@ import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma
 import { RedisService } from '../../infra/redis/redis.service'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { MfaService } from './mfa.service'
 import { type SessionMeta, TokenService } from './token.service'
 
 export interface PublicUser {
@@ -49,6 +50,10 @@ export type UserRow = {
   roles: Role[]
   isOwner: boolean
   centerId: string | null
+  /** Registry: the institution / company this account represents (INSTITUTION_ADMIN / COMPANY_ADMIN). */
+  institutionId: string | null
+  companyId: string | null
+  totpEnabledAt: Date | null
   isActive: boolean
   offerAcceptedAt: Date | null
   offerVersion: string | null
@@ -60,9 +65,12 @@ export type UserRow = {
 /** OWASP's minimum argon2id configuration; the same parameters hash one-time codes. */
 export const PASSWORD_HASH = { type: argon2.argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 } as const
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
-/** Roles a person can choose at registration. CENTER = an Educational Center account (its first administrator). */
-export type SelfServiceRole = 'STUDENT' | 'TEACHER' | 'CENTER'
-const SELF_SERVICE_ROLES: Record<SelfServiceRole, Role[]> = { STUDENT: ['STUDENT'], TEACHER: ['TEACHER'], CENTER: ['CENTER_ADMIN'] }
+/**
+ * Roles a person can choose at registration. CENTER = an Educational Center account (its first administrator);
+ * INSTITUTION = the representative of a registry institution, who then claims it by STIR (ТЗ 4.2). MINISTRY is never here.
+ */
+export type SelfServiceRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION'
+const SELF_SERVICE_ROLES: Record<SelfServiceRole, Role[]> = { STUDENT: ['STUDENT'], TEACHER: ['TEACHER'], CENTER: ['CENTER_ADMIN'], INSTITUTION: ['INSTITUTION_ADMIN'] }
 const USER_INCLUDE = { teacherProfile: { select: { id: true } } } as const
 const EMPTY_L = { uz: '', ru: '', en: '' }
 /** URL slug for a center name written in any of the three alphabets. */
@@ -86,6 +94,7 @@ export class AccountService {
     private readonly redis: RedisService,
     private readonly notifications: NotificationsService,
     @Inject(ENV) private readonly env: Env,
+    private readonly mfa: MfaService,
   ) {}
 
   /** Trim + lower-case + Unicode-normalize; the same form is stored and looked up. */
@@ -102,11 +111,18 @@ export class AccountService {
    */
   async register(
     tenantId: string,
-    input: { role: SelfServiceRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; lang?: 'uz' | 'ru' | 'en' },
+    input: { role: SelfServiceRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; jobTitle?: string; lang?: 'uz' | 'ru' | 'en' },
     meta: SessionMeta,
   ): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
-    if (!roles) throw AppError.invalid('invalid_role', 'Choose Student, Teacher or Educational Center')
+    if (!roles) throw AppError.invalid('invalid_role', 'Choose Student, Teacher, Educational Center or Institution')
+    // An institution representative: full name and position (ТЗ 4.2 step 1); the phone of the institution goes into its profile.
+    const jobTitle = input.role === 'INSTITUTION' ? input.jobTitle?.normalize('NFC').trim().replace(/\s+/g, ' ') ?? '' : ''
+    if (input.role === 'INSTITUTION') {
+      const name = input.displayName?.trim() ?? ''
+      if (name.length < 2 || /[<>]/.test(name)) throw AppError.invalid('invalid_contact_name', 'Enter your full name')
+      if (jobTitle.length < 2 || jobTitle.length > 80 || /[<>]/.test(jobTitle)) throw AppError.invalid('invalid_job_title', 'Enter your position (2–80 characters)')
+    }
     const centerName = input.role === 'CENTER' ? input.centerName?.trim() ?? '' : ''
     if (input.role === 'CENTER' && (centerName.length < 2 || centerName.length > 120)) throw AppError.invalid('invalid_center_name', 'Enter the name of the center (2–120 characters)')
     const login = this.normalizeLogin(input.login)
@@ -140,6 +156,7 @@ export class AccountService {
             displayName,
             preferredLang: input.lang ?? 'uz',
             roles,
+            jobTitle: jobTitle || null,
             lastLoginAt: now,
             offerAcceptedAt: now,
             offerVersion: OFFER_VERSION,
@@ -183,7 +200,7 @@ export class AccountService {
     return `${base}-${Date.now().toString(36)}`
   }
 
-  async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult> {
+  async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult | MfaChallengeDto> {
     const raw = input.login.trim()
     const login = raw.normalize('NFKC').toLowerCase()
     // The failure counter follows the account, not the spelling: every way of writing a phone shares one lock.
@@ -208,8 +225,12 @@ export class AccountService {
       await this.recordFailure(key)
       throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     }
-    if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+    // Do not reveal that the password was correct for a disabled account: answer exactly as for a wrong password (Ж15).
+    if (!user.isActive) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     await this.clearFailures(key)
+    // The ministry and the Super Admins: the password only opens the next step — the authenticator code (MfaService).
+    const challenge = await this.mfa.gate(user)
+    if (challenge) return challenge
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'password' } })
     return this.openSession(updated, meta)
@@ -261,6 +282,7 @@ export class AccountService {
 
   private async finishGoogleLogin(user: UserRow, googleId: string, email: string, meta: SessionMeta): Promise<LoginResult> {
     if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+    this.mfa.refuseOtherSignIn(user)
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'google', googleId, email } })
     return this.openSession(updated, meta)
@@ -281,6 +303,9 @@ export class AccountService {
           preferredLang,
           roles,
           lastLoginAt: now,
+          // Google sign-in shows no offer/consent checkboxes, so consent must NOT be stamped here — recording it
+          // would be recording a consent the user never gave (Ж11). Left null, the client's ConsentGate
+          // (needsConsent) requires the two marks before the workspace opens, via /auth/consent.
         },
         include: USER_INCLUDE,
       })
@@ -320,7 +345,7 @@ export class AccountService {
 
   async openSession(user: UserRow, meta: SessionMeta): Promise<LoginResult> {
     const roles = await this.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null })
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
     const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta)
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: this.toPublic(user, roles) }
   }

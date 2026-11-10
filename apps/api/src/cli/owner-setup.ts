@@ -114,7 +114,10 @@ async function main() {
     // 2a. --remove: Super Admin is taken away; the account itself stays.
     if (args.remove) {
       if (!target?.isOwner) throw new Error(`"${login}" is not an owner`)
-      if (owners.length <= 1) throw new Error('Refusing to remove the last owner: add another one first (--add)')
+      // Count only ACTIVE owners: a disabled owner cannot sign in, so leaving only disabled owners is the same as
+      // leaving none. Refuse unless another active owner would remain (Ж14).
+      const otherActiveOwners = owners.filter((o) => o.id !== target.id && o.isActive)
+      if (otherActiveOwners.length === 0) throw new Error('Refusing to remove the last active owner: add another active owner first (--add)')
       await prisma.$transaction(async (tx) => {
         await tx.user.update({ where: { id: target.id }, data: { isOwner: false, roles: target.roles.filter((r) => !PRIVILEGED.includes(r)) } })
         await tx.refreshSession.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: now, revokedReason: 'owner_removed' } })

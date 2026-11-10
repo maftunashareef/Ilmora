@@ -50,6 +50,11 @@ export const EnvSchema = z.object({
   COOKIE_SECURE: bool(true),
   /** Key used to encrypt one-time codes while they wait in the SMS queue (base64, 32 bytes). */
   OTP_JOB_ENCRYPTION_KEY: z.string().min(32),
+  /**
+   * Key that encrypts the authenticator-app secrets of the ministry and the Super Admins (base64, 32 bytes:
+   * `openssl rand -base64 32`). Without it the ministry cannot sign in and the Super Admins sign in with a password only.
+   */
+  TOTP_ENCRYPTION_KEY: z.string().min(32).optional(),
 
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   OTP_LENGTH: z.coerce.number().int().min(4).max(8).default(6),
@@ -140,6 +145,7 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     if (!env.COOKIE_SECURE) throw new Error('COOKIE_SECURE must be true in production')
     if (env.SMS_PROVIDER === 'console' && !env.SMS_ALLOW_CONSOLE_IN_PRODUCTION) throw new Error('SMS_PROVIDER=console is not allowed in production unless SMS_ALLOW_CONSOLE_IN_PRODUCTION=true (demo/staging without an SMS contract)')
     if (env.REDIS_MODE !== 'redis') throw new Error('REDIS_MODE=off is a development convenience and is not allowed in production')
+    if (!env.TOTP_ENCRYPTION_KEY) console.warn('TOTP_ENCRYPTION_KEY is not set: the ministry cannot sign in, the Super Admins sign in without the authenticator code')
     // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
     if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
     if (clickConfigured(env) && env.CLICK_ALLOWED_IPS.length === 0) console.warn('CLICK_ALLOWED_IPS is empty: Click callbacks are accepted from any address (the signature is still checked)')

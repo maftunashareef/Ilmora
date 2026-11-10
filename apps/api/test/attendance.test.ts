@@ -34,6 +34,18 @@ describe.skipIf(!DB_AVAILABLE)('attendance: sessions, tokens, check-in rules', (
     return { t, student, other, teacher, stranger, session: session!, group: group! }
   }
 
+  it('a blocked center no longer opens attendance, moves or adds lessons (the Super Admin still can)', async () => {
+    const { t, teacher, session } = await setup()
+    await TenantContext.system(() => ctx.prisma.client.center.update({ where: { id: t.center.id }, data: { status: 'BLOCKED' } }), { tenantId: t.tenantId })
+    const blocked = { details: { code: 'center_blocked' } }
+    await expect(TenantContext.forTenant(t.tenantId, () => attendance.open(session.id, teacher))).rejects.toMatchObject(blocked)
+    await expect(TenantContext.forTenant(t.tenantId, () => attendance.setStatus(session.id, 'cancelled', teacher))).rejects.toMatchObject(blocked)
+    await expect(TenantContext.forTenant(t.tenantId, () => attendance.rescheduleSession(session.id, teacher, { start: '09:00', end: '10:00' }))).rejects.toMatchObject(blocked)
+    await expect(TenantContext.forTenant(t.tenantId, () => attendance.addExtraSession(t.group.id, teacher, { date: '2030-01-07', start: '09:00', end: '10:00' }))).rejects.toMatchObject(blocked)
+    const owner = { id: 'u-owner', roles: ['PLATFORM_ADMIN' as const], centerId: null }
+    await expect(TenantContext.forTenant(t.tenantId, () => attendance.open(session.id, owner))).resolves.toBeTruthy()
+  })
+
   it('session generation is idempotent and never creates attendance', async () => {
     const { t, group } = await setup()
     const before = await TenantContext.forTenant(t.tenantId, () => ctx.prisma.client.lessonSession.count({ where: { groupId: group.id } }))

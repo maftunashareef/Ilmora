@@ -41,5 +41,9 @@
     "@prisma/engines@7.10.1": true,
     "esbuild@0.27.7": true,
     "esbuild@0.28.2": true
+  },
+  "overrides": {
+    "body-parser": "2.4.0",
+    "multer": "2.5.0"
   }
 }

@@ -5,6 +5,7 @@ import { SmsModule } from '../sms/sms.module'
 import { AccountService } from './account.service'
 import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
+import { MfaService } from './mfa.service'
 import { OtpService } from './otp.service'
 import { TokenService } from './token.service'
 
@@ -22,7 +23,7 @@ import { TokenService } from './token.service'
     }),
   ],
   controllers: [AuthController],
-  providers: [AccountService, AuthService, OtpService, TokenService],
-  exports: [TokenService, AuthService, AccountService],
+  providers: [AccountService, AuthService, MfaService, OtpService, TokenService],
+  exports: [TokenService, AuthService, AccountService, MfaService],
 })
 export class AuthModule {}

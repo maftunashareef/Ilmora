@@ -54,6 +54,15 @@ export class ManageService {
     const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { status: true } })
     if (center && center.status !== 'ACTIVE') throw AppError.forbidden('The center is not approved yet, so its courses cannot be published', { code: 'center_not_approved', status: center.status })
   }
+  /**
+   * A blocked or rejected center stops selling: its administrator and teachers can no longer create or change courses,
+   * prices, discounts, groups or schedules (reads keep working). The Super Admin still can.
+   */
+  private async assertCenterWritable(tenantId: string, actor: RequestActor, centerId: string | null | undefined) {
+    if (this.isAdmin(actor) || !centerId) return
+    const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { status: true } })
+    if (center && (center.status === 'BLOCKED' || center.status === 'REJECTED')) throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
+  }
   /** Discounts: the Super Admin, or the center admin of the course's own center. Never a teacher. */
   private canSetDiscount(actor: RequestActor, centerId: string) {
     return this.isAdmin(actor) || (this.isCenterAdmin(actor) && !!actor.centerId && actor.centerId === centerId)
@@ -79,6 +88,19 @@ export class ManageService {
     if (this.isCenterAdmin(actor) && item.centerId && item.centerId === actor.centerId) return
     if (actor.teacherProfileId && actor.teacherProfileId === item.teacherId) return
     throw AppError.forbidden('You can only manage your own content')
+  }
+
+  /**
+   * A teacher may link a video or resource only to a course they teach; a center admin only to a course of their
+   * own center. Without this a teacher could attach their content to any course in the tenant (Ж10).
+   */
+  private async assertCourseLinkable(tenantId: string, actor: RequestActor, teacherId: string, courseId: string | null | undefined) {
+    if (!courseId || this.isAdmin(actor)) return
+    const course = await this.prisma.client.course.findFirst({ where: { tenantId, id: courseId }, select: { teacherId: true, centerId: true } })
+    if (!course) throw AppError.invalid('invalid_course', 'Unknown course')
+    const ownsCourse = course.teacherId === teacherId
+    const centerCourse = this.isCenterAdmin(actor) && !!actor.centerId && course.centerId === actor.centerId
+    if (!ownsCourse && !centerCourse) throw AppError.forbidden('You can only attach content to your own courses', { code: 'wrong_course' })
   }
 
   private async teacherPermissions(tenantId: string) {
@@ -216,6 +238,7 @@ export class ManageService {
           if (teacher.centerId !== centerId) throw AppError.forbidden('You can only create courses for your own center', { code: 'wrong_center' })
         }
       }
+      await this.assertCenterWritable(tenantId, actor, centerId)
     }
     const perms = await this.permsFor(tenantId, actor, centerId)
     if (!this.isAdmin(actor) && !perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
@@ -257,6 +280,7 @@ export class ManageService {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id, deletedAt: null }, include: { groups: { where: { deletedAt: null } } } })
     if (!course) throw AppError.notFound('Course')
     if (!this.canSetDiscount(actor, course.centerId)) throw AppError.forbidden('Only the Super Admin or the center of this course can change its discount')
+    await this.assertCenterWritable(tenantId, actor, course.centerId)
     if (course.learningFormat === 'ONLINE') this.assertOnlineIsFree(undefined, discount)
     if (this.sameDiscount(discount, course)) return toCourse(course)
     const updated = await this.prisma.client.course.update({ where: { id }, data: { ...this.discountColumns(discount), updatedById: actor.id }, include: { groups: { where: { deletedAt: null } } } })
@@ -268,6 +292,7 @@ export class ManageService {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id } })
     if (!course) throw AppError.notFound('Course')
     this.assertTeacherScope(actor, course)
+    await this.assertCenterWritable(tenantId, actor, course.centerId)
     const perms = await this.permsFor(tenantId, actor, course.centerId)
     if (!this.isAdmin(actor)) {
       if (!perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
@@ -337,6 +362,10 @@ export class ManageService {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id }, include: { groups: { where: { deletedAt: null }, select: { id: true } } } })
     if (!course) throw AppError.notFound('Course')
     this.assertTeacherScope(actor, course)
+    await this.assertCenterWritable(tenantId, actor, course.centerId)
+    // Deleting is an edit: respect the same permission switch as create/update, which a bare delete bypassed (Ж19).
+    const perms = await this.permsFor(tenantId, actor, course.centerId)
+    if (!this.isAdmin(actor) && !perms.editCourses) throw AppError.forbidden('Teachers cannot edit courses in this workspace')
     const enrolled = await this.prisma.client.enrollment.count({ where: { tenantId, groupId: { in: course.groups.map((g) => g.id) }, status: { in: ['PENDING', 'ACTIVE'] } } })
     if (enrolled > 0) throw AppError.conflict('has_enrollments', 'Archive the course instead: students are enrolled in its groups')
     const groupIds = course.groups.map((g) => g.id)
@@ -355,6 +384,7 @@ export class ManageService {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id: courseId } })
     if (!course) throw AppError.notFound('Course')
     this.assertTeacherScope(actor, course)
+    await this.assertCenterWritable(tenantId, actor, course.centerId)
     if (course.learningFormat === 'ONLINE') throw AppError.invalid('online_course_has_no_groups', 'Online courses are taken on the provider’s site and have no groups')
     const perms = await this.permsFor(tenantId, actor, course.centerId)
     if (!this.isAdmin(actor) && !perms.manageGroups) throw AppError.forbidden('Group management is disabled for teachers')
@@ -368,6 +398,7 @@ export class ManageService {
     const group = await this.prisma.client.group.findFirst({ where: { tenantId, id }, include: { course: true } })
     if (!group) throw AppError.notFound('Group')
     this.assertTeacherScope(actor, group.course)
+    await this.assertCenterWritable(tenantId, actor, group.course.centerId)
     const perms = await this.permsFor(tenantId, actor, group.course.centerId)
     const sameDays = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((d) => b.includes(d))
     // Only a real change counts: a form that resends the same schedule must not regenerate the lessons or notify anyone.
@@ -413,6 +444,10 @@ export class ManageService {
     const group = await this.prisma.client.group.findFirst({ where: { tenantId, id }, include: { course: true } })
     if (!group) throw AppError.notFound('Group')
     this.assertTeacherScope(actor, group.course)
+    await this.assertCenterWritable(tenantId, actor, group.course.centerId)
+    // Same as createGroup/updateGroup: deleting a group needs the manageGroups switch, which a bare delete bypassed (Ж19).
+    const perms = await this.permsFor(tenantId, actor, group.course.centerId)
+    if (!this.isAdmin(actor) && !perms.manageGroups) throw AppError.forbidden('Group management is disabled for teachers')
     const enrolled = await this.prisma.client.enrollment.count({ where: { tenantId, groupId: id, status: { in: ['PENDING', 'ACTIVE'] } } })
     if (enrolled > 0) throw AppError.conflict('has_enrollments', 'A group with enrolled students cannot be deleted')
     await this.prisma.client.group.update({ where: { id }, data: { deletedAt: new Date() } })
@@ -449,6 +484,7 @@ export class ManageService {
     const group = await this.prisma.client.group.findFirst({ where: { tenantId, id }, include: { course: true } })
     if (!group) throw AppError.notFound('Group')
     this.assertTeacherScope(actor, group.course)
+    await this.assertCenterWritable(tenantId, actor, group.course.centerId)
     const created = await this.sessions.generateForGroup(group, this.sessions.todayLocal(), Math.min(Math.max(days, 1), 90), `user:${actor.id}`)
     return { created }
   }
@@ -456,6 +492,7 @@ export class ManageService {
   // ───────── videos / playlists / resources / subjects ─────────
   async createVideo(tenantId: string, actor: RequestActor, input: z.infer<typeof VideoInput>) {
     const teacherId = await this.resolveTeacherId(tenantId, actor, input.teacherId)
+    await this.assertCourseLinkable(tenantId, actor, teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     const v = await this.prisma.client.video.create({
       data: {
@@ -470,6 +507,7 @@ export class ManageService {
     const v = await this.prisma.client.video.findFirst({ where: { tenantId, id } })
     if (!v) throw AppError.notFound('Video')
     this.assertTeacherScope(actor, v)
+    if (input.courseId !== undefined) await this.assertCourseLinkable(tenantId, actor, v.teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     const data: Record<string, unknown> = this.publishableData(input, actor, !!perms.publishDirectly)
     if (input.title) data.title = input.title as Json
@@ -526,6 +564,7 @@ export class ManageService {
 
   async createResource(tenantId: string, actor: RequestActor, input: z.infer<typeof ResourceInput>) {
     const teacherId = await this.resolveTeacherId(tenantId, actor, input.teacherId)
+    await this.assertCourseLinkable(tenantId, actor, teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     if (!this.isAdmin(actor) && !perms.uploadResources) throw AppError.forbidden('Resource uploads are disabled for teachers')
     const r = await this.prisma.client.resource.create({
@@ -541,6 +580,7 @@ export class ManageService {
     const r = await this.prisma.client.resource.findFirst({ where: { tenantId, id } })
     if (!r) throw AppError.notFound('Resource')
     this.assertTeacherScope(actor, r)
+    if (input.courseId !== undefined) await this.assertCourseLinkable(tenantId, actor, r.teacherId, input.courseId)
     const perms = await this.teacherPermissions(tenantId)
     const data: Record<string, unknown> = this.publishableData(input, actor, !!perms.publishDirectly)
     if (input.title) data.title = input.title as Json
@@ -614,12 +654,28 @@ export class ManageService {
     return rows.map((c) => {
       const owner = c.ownerUserId ? ownerOf.get(c.ownerUserId) : undefined
       return {
-        id: c.id, slug: c.slug, name: c.name, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
+        id: c.id, slug: c.slug, name: c.name, pendingName: c.pendingName, pendingNameAt: c.pendingNameAt, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
         status: c.status, approvedAt: c.approvedAt, blockedAt: c.blockedAt, blockReason: c.blockReason, createdAt: c.createdAt,
         counts: { courses: c._count.courses, teachers: c._count.teachers, admins: c._count.staff },
         owner: owner ? { id: owner.id, login: owner.login, displayName: owner.displayName, phoneMasked: owner.phoneE164 ? owner.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null } : null,
       }
     })
+  }
+
+  /** Super Admin: apply or discard the new name an approved center asked for (the center's administrators are told). */
+  async reviewCenterName(tenantId: string, actor: RequestActor, id: string, approve: boolean) {
+    const center = await this.prisma.client.center.findFirst({ where: { tenantId, id } })
+    if (!center) throw AppError.notFound('Center')
+    if (!center.pendingName) throw AppError.conflict('no_pending_name', 'The center has not asked for a new name')
+    const updated = await this.prisma.client.center.update({ where: { id }, data: { ...(approve ? { name: center.pendingName } : {}), pendingName: null, pendingNameAt: null } })
+    await this.audit.record({ action: approve ? 'center.rename_approve' : 'center.rename_reject', entityType: 'Center', entityId: id, before: { name: center.name, pendingName: center.pendingName }, after: { name: updated.name } })
+    await this.notifications.safely('center.rename', async () => {
+      const admins = await this.notifications.centerAdminIds(tenantId, id)
+      const type = approve ? 'center.renameApproved' : 'center.renameRejected'
+      await this.notifications.notify({ tenantId, userIds: admins, type, params: { centerName: updated.name, newName: center.pendingName, centerId: id }, dedupeKey: `center-${type}:${id}:${Date.now()}` })
+    })
+    void actor
+    return { id: updated.id, name: updated.name, pendingName: null }
   }
 
   /** Super Admin: approve, block or reopen a center. The center's administrators are told; blocked centers vanish from the catalog. */

@@ -12,7 +12,7 @@ import { CenterStatusNotice } from './CenterOverview'
 
 type Draft = { name: string; district: CenterProfile['district']; description: CenterProfile['description']; address: string; phone: string; lat: string; lng: string; geoRadiusM: string; checkInBeforeMin: string; absenceAfterMin: string }
 const toDraft = (c: CenterProfile): Draft => ({
-  name: c.name, district: c.district, description: c.description, address: c.address ?? '', phone: c.phone ?? '',
+  name: c.pendingName ?? c.name, district: c.district, description: c.description, address: c.address ?? '', phone: c.phone ?? '',
   lat: c.checkIn.lat == null ? '' : String(c.checkIn.lat), lng: c.checkIn.lng == null ? '' : String(c.checkIn.lng), geoRadiusM: c.checkIn.geoRadiusM == null ? '' : String(c.checkIn.geoRadiusM),
   checkInBeforeMin: String(c.checkIn.checkInBeforeMin), absenceAfterMin: String(c.checkIn.absenceAfterMin),
 })
@@ -68,7 +68,7 @@ export function CenterSettings() {
         <div className="space-y-6">
           <Card className="space-y-4 p-6">
             <Eyebrow>{t('center.profile')}</Eyebrow>
-            <Field label={t('common.name')} required><Input disabled={locked} maxLength={120} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+            <Field label={t('common.name')} required hint={center.pendingName ? t('center.renamePending', { name: center.name }) : undefined}><Input disabled={locked} maxLength={120} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
             <LField label={t('admin.centers.district')} value={draft.district} onChange={(v) => setDraft({ ...draft, district: v })} />
             <LField label={t('common.description')} multiline value={draft.description} onChange={(v) => setDraft({ ...draft, description: v })} />
             <div className="grid gap-4 sm:grid-cols-2">

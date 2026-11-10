@@ -5,7 +5,7 @@ import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AccountService } from './account.service'
-import { ConsentDto, GoogleAuthDto, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
+import { ConsentDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
 import { AuthService, type LoginResult } from './auth.service'
 import { REFRESH_COOKIE, SESSION_FLAG, TokenService } from './token.service'
 
@@ -17,7 +17,8 @@ export class AuthController {
   @Public()
   @AuthThrottle(10)
   @Post('register')
-  async register(@CurrentTenantId() tenantId: string, @Body() dto: RegisterDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async register(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: RegisterDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.accounts.register(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }
@@ -26,16 +27,48 @@ export class AuthController {
   @Public()
   @AuthThrottle(10)
   @Post('login')
-  async login(@CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async login(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.accounts.loginWithPassword(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
+    // The ministry and the Super Admins: no session yet — the pass for the authenticator step (no cookies).
+    if ('mfaRequired' in result) return result
     return this.respond(res, result)
+  }
+
+  /** Second factor, first sign-in: the secret of the authenticator app (QR code). */
+  @Public()
+  @AuthThrottle(10)
+  @Post('mfa/setup')
+  mfaSetup(@Req() req: Request, @Body() dto: MfaChallengeBody, @Headers('x-requested-with') requestedWith: string | undefined) {
+    this.assertSameSite(req, requestedWith)
+    return this.auth.mfaSetup(dto.challenge)
+  }
+
+  /** Second factor, first sign-in: the first code links the app and opens the session; answers the recovery codes once. */
+  @Public()
+  @AuthThrottle(10)
+  @Post('mfa/confirm')
+  async mfaConfirm(@Req() req: Request, @Body() dto: MfaCodeBody, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
+    const result = await this.auth.mfaConfirm(dto.challenge, dto.code, { ip: ci.ip, userAgent: ci.userAgent })
+    return { ...this.respond(res, result), recoveryCodes: result.recoveryCodes }
+  }
+
+  /** Second factor: a code from the app or a recovery code opens the session. */
+  @Public()
+  @AuthThrottle(10)
+  @Post('mfa/verify')
+  async mfaVerify(@Req() req: Request, @Body() dto: MfaCodeBody, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
+    return this.respond(res, await this.auth.mfaVerify(dto.challenge, dto.code, { ip: ci.ip, userAgent: ci.userAgent }))
   }
 
   /** Google Sign-In with ID token or authorization code; opens a session on success. */
   @Public()
   @AuthThrottle(10)
   @Post('google')
-  async google(@CurrentTenantId() tenantId: string, @Body() dto: GoogleAuthDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async google(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: GoogleAuthDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.auth.authenticateGoogle(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }
@@ -43,14 +76,16 @@ export class AuthController {
   @Public()
   @AuthThrottle(6)
   @Post('otp/request')
-  requestOtp(@CurrentTenantId() tenantId: string, @Body() dto: RequestOtpDto, @ClientInfo() ci: ClientInfoValue) {
+  requestOtp(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: RequestOtpDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined) {
+    this.assertSameSite(req, requestedWith)
     return this.auth.requestOtp(tenantId, dto.phone, dto.lang ?? 'uz', { ip: ci.ip })
   }
 
   @Public()
   @AuthThrottle(10)
   @Post('otp/verify')
-  async verifyOtp(@CurrentTenantId() tenantId: string, @Body() dto: VerifyOtpDto, @ClientInfo() ci: ClientInfoValue, @Res({ passthrough: true }) res: Response) {
+  async verifyOtp(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: VerifyOtpDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
     const result = await this.auth.verifyOtp(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
   }
