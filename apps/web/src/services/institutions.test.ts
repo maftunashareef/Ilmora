@@ -13,7 +13,7 @@ vi.mock('../lib/api', () => ({
   }),
 }))
 
-const { claimInstitution, toRegistryType } = await import('./institutions')
+const { claimInstitution } = await import('./institutions')
 
 const choice = { stir: '200237474', type: 'TECHNIKUM' as const, name: ' Andijon pedagogika texnikumi ', ownership: 'STATE' as const, region: 'andijan' }
 
@@ -28,7 +28,7 @@ describe('claiming an institution after sign-up', () => {
 
   it('saves ownership and region to the passport of a new institution', async () => {
     claimAnswer = { created: true }
-    expect(await claimInstitution({ ...choice, type: 'CENTER', ownership: 'PRIVATE' })).toEqual({ created: true, detailsSaved: true })
+    expect(await claimInstitution({ ...choice, type: 'TRAINING_CENTER', ownership: 'PRIVATE' })).toEqual({ created: true, detailsSaved: true })
     expect(calls[0].body).toMatchObject({ type: 'TRAINING_CENTER' })
     expect(calls[1]).toEqual({ path: '/institutions/me', method: 'PATCH', body: { ownership: 'PRIVATE', regionId: 'andijan' } })
   })
@@ -37,10 +37,5 @@ describe('claiming an institution after sign-up', () => {
     claimAnswer = { created: true }
     patchFails = true
     expect(await claimInstitution(choice)).toEqual({ created: true, detailsSaved: false })
-  })
-
-  it('maps the web app’s CENTER to the registry’s TRAINING_CENTER and leaves the rest as they are', () => {
-    expect(toRegistryType('CENTER')).toBe('TRAINING_CENTER')
-    expect(toRegistryType('UNIVERSITY')).toBe('UNIVERSITY')
   })
 })

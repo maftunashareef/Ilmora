@@ -67,10 +67,11 @@ export const PASSWORD_HASH = { type: argon2.argon2id, memoryCost: 19_456, timeCo
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
 /**
  * Roles a person can choose at registration. CENTER = an Educational Center account (its first administrator);
- * INSTITUTION = the representative of a registry institution, who then claims it by STIR (ТЗ 4.2). MINISTRY is never here.
+ * INSTITUTION = the representative of a registry institution, who then claims it by STIR (ТЗ 4.2); COMPANY = the contact
+ * person of a company, who then starts its profile by STIR (ТЗ 4.3). MINISTRY is never here.
  */
-export type SelfServiceRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION'
-const SELF_SERVICE_ROLES: Record<SelfServiceRole, Role[]> = { STUDENT: ['STUDENT'], TEACHER: ['TEACHER'], CENTER: ['CENTER_ADMIN'], INSTITUTION: ['INSTITUTION_ADMIN'] }
+export type SelfServiceRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'COMPANY'
+const SELF_SERVICE_ROLES: Record<SelfServiceRole, Role[]> = { STUDENT: ['STUDENT'], TEACHER: ['TEACHER'], CENTER: ['CENTER_ADMIN'], INSTITUTION: ['INSTITUTION_ADMIN'], COMPANY: ['COMPANY_ADMIN'] }
 const USER_INCLUDE = { teacherProfile: { select: { id: true } } } as const
 const EMPTY_L = { uz: '', ru: '', en: '' }
 /** URL slug for a center name written in any of the three alphabets. */
@@ -115,10 +116,11 @@ export class AccountService {
     meta: SessionMeta,
   ): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
-    if (!roles) throw AppError.invalid('invalid_role', 'Choose Student, Teacher, Educational Center or Institution')
-    // An institution representative: full name and position (ТЗ 4.2 step 1); the phone of the institution goes into its profile.
-    const jobTitle = input.role === 'INSTITUTION' ? input.jobTitle?.normalize('NFC').trim().replace(/\s+/g, ' ') ?? '' : ''
-    if (input.role === 'INSTITUTION') {
+    if (!roles) throw AppError.invalid('invalid_role', 'Choose Student, Teacher, Educational Center, Institution or Company')
+    // A representative of an institution or a company: full name and position (ТЗ 4.2 step 1, 4.3).
+    const representative = input.role === 'INSTITUTION' || input.role === 'COMPANY'
+    const jobTitle = representative ? input.jobTitle?.normalize('NFC').trim().replace(/\s+/g, ' ') ?? '' : ''
+    if (representative) {
       const name = input.displayName?.trim() ?? ''
       if (name.length < 2 || /[<>]/.test(name)) throw AppError.invalid('invalid_contact_name', 'Enter your full name')
       if (jobTitle.length < 2 || jobTitle.length > 80 || /[<>]/.test(jobTitle)) throw AppError.invalid('invalid_job_title', 'Enter your position (2–80 characters)')

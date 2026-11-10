@@ -16,6 +16,7 @@ export const canOpen = (roles: readonly string[], path: string): boolean => {
 /** Landing page after sign-in, in the same precedence as the store's `roleOf`; used after every sign-in. */
 export const homeFor = (roles: readonly string[]): string =>
   roles.includes('PLATFORM_ADMIN') ? '/admin' : roles.includes('TEACHER') ? '/teacher' : roles.includes('CENTER_ADMIN') ? '/center' : roles.includes('FINANCE_ADMIN') ? '/admin/finance'
-    // An institution's representative has no workspace yet (ТЗ 4.2, /institution comes next): the home page, not /student.
-    : roles.includes('INSTITUTION_ADMIN') ? '/'
+    // The ministry and the institution's or company's representative have no workspace yet (/ministry, /institution,
+    // /company come next): the home page, not /student.
+    : roles.includes('MINISTRY') || roles.includes('INSTITUTION_ADMIN') || roles.includes('COMPANY_ADMIN') ? '/'
     : '/student'

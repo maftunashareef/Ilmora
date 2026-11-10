@@ -14,6 +14,9 @@ import { CenterModule } from './modules/center/center.module'
 import { ManageModule } from './modules/manage/manage.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { PaymentsModule } from './modules/payments/payments.module'
+import { StorageModule } from './infra/storage/storage.module'
+import { CompaniesModule } from './modules/companies/companies.module'
+import { TrainingModule } from './modules/training/training.module'
 import { InstitutionsModule } from './modules/institutions/institutions.module'
 import { MinistryModule } from './modules/ministry/ministry.module'
 import { RegistryModule } from './modules/registry/registry.module'
@@ -24,6 +27,7 @@ import { WorkerModule } from './worker.module'
 @Module({
   imports: [
     CoreModule,
+    StorageModule,
     NotificationsModule,
     AuthModule,
     CatalogModule,
@@ -34,6 +38,8 @@ import { WorkerModule } from './worker.module'
     CenterModule,
     RegistryModule,
     InstitutionsModule,
+    CompaniesModule,
+    TrainingModule,
     MinistryModule,
     ...(process.env.APP_ROLE === 'api' || REDIS_OFF ? [] : [WorkerModule]),
   ],

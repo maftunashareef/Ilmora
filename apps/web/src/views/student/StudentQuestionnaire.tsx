@@ -1,7 +1,7 @@
 'use client'
 import { useState, type ReactNode } from 'react'
 import {
-  ABOUT_MAX, APPLYING_TYPES, EMPTY_QUESTIONNAIRE, firstIncompleteStep, INSTITUTION_REGISTRY, isMinor, maxCourse, QUESTIONNAIRE_STEPS,
+  ABOUT_MAX, APPLYING_TYPES, EMPTY_QUESTIONNAIRE, firstIncompleteStep, isMinor, maxCourse, QUESTIONNAIRE_STEPS,
   STUDYING_TYPES, UZ_REGIONS, validateQuestionnaireStep, type InstitutionType, type PlannedStudyForm, type QuestionnaireErrors,
   type StudentQuestionnaire as Questionnaire, type StudyStatus,
 } from '@ilmora/shared'
@@ -147,7 +147,7 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
                   )}
                 </div>
                 {!q.institutionUndecided && (
-                  <InstitutionSearch id="q-institution" list={INSTITUTION_REGISTRY} type={q.institutionType} value={q.institution} invalid={!!errors.institution} onChange={(v) => set('institution', v)} />
+                  <InstitutionSearch id="q-institution" type={q.institutionType} value={q.institution} invalid={!!errors.institution} onChange={(v) => set('institution', v)} />
                 )}
                 {err('institution')}
               </div>

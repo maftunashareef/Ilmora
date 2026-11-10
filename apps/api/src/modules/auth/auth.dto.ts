@@ -54,8 +54,8 @@ export class UpdateProfileDto {
  * representative); anything else — MINISTRY above all — is rejected by validation.
  */
 export class RegisterDto {
-  @IsIn(['STUDENT', 'TEACHER', 'CENTER', 'INSTITUTION'])
-  role!: 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION'
+  @IsIn(['STUDENT', 'TEACHER', 'CENTER', 'INSTITUTION', 'COMPANY'])
+  role!: 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'COMPANY'
 
   /** Educational Center only: the center's name (it starts as PENDING until the Super Admin approves it). */
   @ValidateIf((o: RegisterDto) => o.role === 'CENTER')
@@ -63,8 +63,8 @@ export class RegisterDto {
   @Length(2, 120)
   centerName?: string
 
-  /** Institution representative only: their position (ТЗ 4.2 step 1). */
-  @ValidateIf((o: RegisterDto) => o.role === 'INSTITUTION')
+  /** Institution or company representative only: their position (ТЗ 4.2 step 1, 4.3). */
+  @ValidateIf((o: RegisterDto) => o.role === 'INSTITUTION' || o.role === 'COMPANY')
   @IsString()
   @Length(2, 80)
   jobTitle?: string
