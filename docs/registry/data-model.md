@@ -2,7 +2,8 @@
 
 Модель для ТЗ «ILMORA — реестр учреждений, компании, студенты» (9 ноября 2026). Схема —
 `apps/api/prisma/schema.prisma`, раздел «Registry», миграции `20261113000000_registry_institutions_companies_students`
-и `20261114000000_institution_names_region_slug` (названия техникумов на русском и прежние, район текстом, slug региона).
+`20261114000000_institution_names_region_slug` (названия техникумов на русском и прежние, район текстом, slug региона)
+и `20261115000000_student_contact_phone` (контактный телефон студента).
 Старая часть ILMORA (центры, курсы, подписки, оплата) не менялась.
 
 > **Схему и миграции меняет только чат БД (дата-инженер).** Нужно поле или таблица — через него. Остальные чаты
@@ -90,10 +91,14 @@ APPROVED → правка названия / СТИР / типа / собств�
 направления — `CompanyDirection`. Представитель — `User.companyId`, роль `COMPANY_ADMIN`.
 
 **Студент**
-- ФИО, телефон, email — в `User` (`displayName`, `phoneE164`, `email`).
+- ФИО и email — в `User` (`displayName`, `email`). `User.phoneE164` — **номер для входа по SMS**, уникальный; анкета
+  его не меняет: непроверенный номер там позволил бы занять чужой номер.
+- **Телефон из анкеты** — `StudentProfile.contactPhone` (E.164, по SMS не проверяется, ко входу отношения не имеет).
+  Его видят только компании, которым студент дал согласие на контакты. Если студент вошёл по SMS, анкета подставляет
+  его `User.phoneE164` по умолчанию.
 - `StudentProfile` — анкета: `mode` (`STUDYING` / `APPLYING`), `institutionType`, `institutionId` (пусто = «ещё не
   решил»), `course`, `enrollYear`, `graduationYear`, `directionId`, `studyForm` (`GRANT` / `CONTRACT` / `UNDECIDED`),
-  `contractAmountMinor`, `birthDate`, `regionId`, `districtId`, `about`, `parentName`, `parentPhone`,
+  `contractAmountMinor`, `birthDate`, `regionId`, `districtId`, `about`, `contactPhone`, `parentName`, `parentPhone`,
   `studyConfirmation` (`NONE` / `PENDING` / `CONFIRMED` / `REJECTED`), `studyConfirmedAt`, `studyConfirmedById`.
 - `StudentConsent` — **журнал согласий**, строки не перезаписываются. `kind`: `GRADUATE_CARD` (показ в объявлениях),
   `CONTRACT_HELP_CARD` (обезличенная карточка), `COMPANY_CONTACTS` (контакты конкретной компании, `companyId`),
