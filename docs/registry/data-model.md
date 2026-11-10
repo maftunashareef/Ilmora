@@ -63,15 +63,16 @@
 **Справочники**
 - `Industry` — отрасль: `slug`, `name {uz,ru,en}`, `sortOrder`, `isActive`.
 - `Region` — 14 регионов, `code` = СОАТО, `slug` — id региона на сайте (`UZ_REGIONS`: `andijan`, `tashkent-city`…).
-  Сайт присылает slug — регион в базе ищите по `slug`. `District` — районы, **только официальные коды** (из
-  справочника министерства или stat.uz), руками не вводятся.
+  Сайт присылает slug — регион в базе ищите по `slug`. `District` — 206 районов и городов районного значения,
+  `code` = СОАТО (7 цифр), `name {uz,ru,en}`; **только из официального списка** (открытые данные Агентства
+  статистики), руками не вводятся. Районы региона: `GET /registry/districts?regionId=<id или slug>`.
 - `Direction` — `name`, `searchKey`, `industryId`, `origin` (`OFFICIAL` / `USER` / `ADMIN`), `code` (классификатор),
   `mergedIntoId`, `createdById`.
 
 **Учреждение** — `Institution`: `type` (`TECHNIKUM` `COLLEGE` `LYCEUM` `SCHOOL` `UNIVERSITY` `TRAINING_CENTER`),
 `ownership` (`STATE` / `PRIVATE`), `name`, `nameRu`, `formerName` (название до переименования 2025 года),
 `searchKey`, `searchText`, `stir`, `parentId` (головная организация филиала), `regionId`, `districtId`,
-`districtName` (район текстом из официального списка, пока нет кодов СОАТО районов), `address`, `phone`, `email`, `website`, `directorName`, `status`, `source`
+`districtName` (район текстом, как он записан в официальном списке техникумов; рядом с `districtId`), `address`, `phone`, `email`, `website`, `directorName`, `status`, `source`
 (`IMPORT` / `SELF` / `STUDENT`), `submittedAt`, `approvedAt`, `reviewedAt`, `reviewedById`, `rejectReason`,
 `centerId` (связь с учебным центром ILMORA), `mergedIntoId`. Представитель — `User` с `institutionId` и ролью
 `INSTITUTION_ADMIN`; должность — `User.jobTitle`.
@@ -158,15 +159,21 @@ APPROVED → правка названия / СТИР / типа / собств�
 
 ## Справочники и тестовые данные
 
-- **Отрасли и регионы** — `REGISTRY_INDUSTRIES`, `REGISTRY_REGIONS` в `packages/shared/src/registry.ts`. В базу их
-  кладёт `prisma/seed.ts` (в любом режиме) и отдельная команда, безопасная для боевого сервера:
+- **Отрасли, регионы и районы** — `REGISTRY_INDUSTRIES`, `REGISTRY_REGIONS`, `REGISTRY_DISTRICTS` в
+  `packages/shared/src/registry.ts`. В базу их кладёт `prisma/seed.ts` (в любом режиме) и отдельная команда,
+  безопасная для боевого сервера:
   ```bash
   npm run prisma:seed:registry -w apps/api
   # на сервере, один раз после релиза с этой миграцией:
   sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate npx tsx prisma/seed-registry.ts
   ```
-  Существующие строки не перезаписываются (правки Super Admin сохраняются). Коды СОАТО регионов сверить со
-  справочником министерства.
+  Существующие строки не перезаписываются (правки Super Admin сохраняются).
+- **Районы — коды СОАТО**: открытые данные Агентства статистики (SIAT, `api.siat.stat.uz`, набор 1252, обновлён
+  30.06.2026; те же 206 кодов и названий — в наборах 1346, 2853, 2161, 3197, 2152), файл
+  `packages/shared/src/districts.data.ts`, создан из файла агентства, а не набран руками. Коды 14 регионов
+  сверены с теми же данными. Узбекские названия — в алфавите ILMORA (Ö Ğ Ş Ç ’), русские и английские — как
+  опубликованы. Когда у региона есть районы, анкета учреждения требует район (`districtId`; у записи из списка
+  техникумов хватает `districtName`) — сайту нужен выбор района из `GET /registry/districts`.
 - **Техникумы — официальный список** (738: 686 государственных, 52 частных; stat.edu.uz, выгрузка 9 ноября 2026) —
   `TECHNIKUMS` в `packages/shared/src/technikums.data.ts`. В базу их кладёт импорт с **теми же id, что на сайте**
   (`pe-<id в prof.edu.uz>`), так что выбор техникума на сайте = запись в базе:
@@ -178,7 +185,12 @@ APPROVED → правка названия / СТИР / типа / собств�
   ```
   Новые — `UNCLAIMED`, `source = IMPORT`, тип `TECHNIKUM`, СТИР = ИНН из списка (есть у 634). Повторный запуск
   безопасен: незанятые записи догоняют список (пустое в списке не стирает заполненное), у занятых (представитель уже
-  заполняет) меняются только пустые `nameRu`, `formerName`, `districtName`. СТИР, который уже есть у другой записи
+  заполняет) меняются только пустые `nameRu`, `formerName`, `districtName`, `districtId`. С `--apply` импорт сначала
+  кладёт справочники, в том числе районы. Район из списка (текст) связывается с районом СОАТО того же региона
+  (`matchDistrict`: то же название на любом языке; x/h, q/k; инициал — «Sh.Rashidov», «M.Ulugbek», «Q-bozor»;
+  другая гласная — «Toyloq» = «Tayloq»); город и район с одним именем не путаются, неуверенное совпадение не
+  связывается, а выводится в отчёте. Из 634 записей с районом связаны 632; «Uchquduq shahri» (2) — город внутри
+  Uchquduq tumani, не отдельный район СОАТО, остаётся текстом. СТИР, который уже есть у другой записи
   (учреждение зарегистрировалось само), не пишется — импорт выводит такие пары, их сливают руками. Запись с тем же
   названием в том же регионе (добавил студент) импорт тоже выводит — её Super Admin сливает в официальную.
 - **Тестовые данные** — 600 учреждений, 10 000 студентов, 80 компаний, объявления, заявки, вакансии. Только

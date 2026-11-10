@@ -1,4 +1,4 @@
-import { REGISTRY_REGIONS, registrySearchKey, registrySearchText, TECHNIKUMS, type Technikum } from '@ilmora/shared'
+import { type L, matchDistrict, REGISTRY_REGIONS, registrySearchKey, registrySearchText, TECHNIKUMS, type Technikum } from '@ilmora/shared'
 import type { Prisma, PrismaClient } from '../src/generated/prisma/client'
 
 type Holder = { id: string; name: string; source: string; status: string }
@@ -18,6 +18,12 @@ export interface TechnikumImportReport {
   sameName: { id: string; name: string; holder: Holder }[]
   /** Regions of the list that are not in the database (run prisma/seed-registry.ts). */
   missingRegion: string[]
+  /**
+   * The list's districts (text) linked to a SOATO district of the record's region (matchDistrict). `unlinked`: the
+   * names not found, as "region: name"; those records keep only the text. `available`: districts in the database
+   * (0 until prisma/seed-registry.ts or the import with --apply loads them).
+   */
+  districts: { linked: number; unlinked: string[]; available: number }
   /** Imported records ("pe-…") no longer in the list: kept as they are. */
   notInList: { id: string; name: string }[]
   applied: boolean
@@ -30,8 +36,10 @@ export interface TechnikumImportReport {
  * - New: created UNCLAIMED, source IMPORT, type TECHNIKUM (the list is the ministry's list of professional education
  *   institutions; the Super Admin changes the type where needed).
  * - Unclaimed imported records follow the list; a value the list lacks (STIR, district) is never cleared.
+ * - The list's district (text, kept in `districtName`) is linked to the SOATO district of the region by matchDistrict;
+ *   a name it is not sure of stays text only and is reported.
  * - Claimed records (DRAFT and later: the representative owns name, STIR, region) get only the empty Russian name, former
- *   name and district, and their search text.
+ *   name and district (text and link), and their search text.
  * - Every listed record carries the list's name in `officialName` (the reviewer sees it next to the representative's);
  *   it follows the list whether the record is claimed or not.
  * - A STIR already held by another record is reported, not written: one institution per STIR (unique index), and the
@@ -45,16 +53,24 @@ export async function importTechnikums(
 ): Promise<TechnikumImportReport> {
   const report: TechnikumImportReport = {
     total: list.length, created: [], updated: [], enriched: [], unchanged: 0, stirConflicts: [], sameName: [], missingRegion: [], notInList: [], applied: false,
+    districts: { linked: 0, unlinked: [], available: 0 },
   }
 
   // Regions by the web app's slug, through the SOATO code (works before Region.slug is filled in).
   const regions = await prisma.region.findMany({ where: { tenantId }, select: { id: true, code: true } })
   const regionIdByCode = new Map(regions.map((r) => [r.code, r.id]))
   const regionIdBySlug = new Map(REGISTRY_REGIONS.map((r) => [r.slug, regionIdByCode.get(r.code)]))
+  const districts = await prisma.district.findMany({ where: { tenantId }, select: { id: true, regionId: true, name: true } })
+  report.districts.available = districts.length
+  const districtsByRegion = new Map<string, { id: string; name: L }[]>()
+  for (const d of districts) districtsByRegion.set(d.regionId, [...(districtsByRegion.get(d.regionId) ?? []), { id: d.id, name: d.name as L }])
+  const districtIdOf = (regionId: string | null, name: string | null | undefined) =>
+    (regionId && name && matchDistrict(name, districtsByRegion.get(regionId) ?? [])?.id) || null
+  const unlinked = new Set<string>()
 
   const rows = await prisma.institution.findMany({
     where: { tenantId },
-    select: { id: true, name: true, officialName: true, nameRu: true, formerName: true, searchKey: true, searchText: true, stir: true, ownership: true, regionId: true, districtName: true, source: true, status: true, mergedIntoId: true },
+    select: { id: true, name: true, officialName: true, nameRu: true, formerName: true, searchKey: true, searchText: true, stir: true, ownership: true, regionId: true, districtId: true, districtName: true, source: true, status: true, mergedIntoId: true },
   })
   const byId = new Map(rows.map((r) => [r.id, r]))
   const holder = (r: (typeof rows)[number]): Holder => ({ id: r.id, name: r.name, source: r.source, status: r.status })
@@ -78,13 +94,16 @@ export async function importTechnikums(
     }
     const row = byId.get(t.id)
     const searchKey = registrySearchKey(t.name)
+    const districtId = districtIdOf(regionId, t.district)
+    if (t.district && districtId) report.districts.linked++
+    else if (t.district) unlinked.add(`${t.region}: ${t.district}`)
 
     if (!row) {
       const twin = rows.find((r) => r.searchKey === searchKey && r.regionId === regionId && !r.mergedIntoId)
       if (twin) report.sameName.push({ id: t.id, name: t.name, holder: holder(twin) })
       creates.push({
         id: t.id, tenantId, type: 'TECHNIKUM', ownership: t.ownership, name: t.name, officialName: t.name, nameRu: t.nameRu ?? null, formerName: t.formerName ?? null,
-        searchKey, searchText: registrySearchText(t.name, t.nameRu, t.formerName), stir, regionId, districtName: t.district ?? null,
+        searchKey, searchText: registrySearchText(t.name, t.nameRu, t.formerName), stir, regionId, districtId, districtName: t.district ?? null,
         source: 'IMPORT', status: 'UNCLAIMED',
       })
       report.created.push(t.id)
@@ -98,8 +117,14 @@ export async function importTechnikums(
           name: t.name, officialName: t.name, searchKey, ownership: t.ownership, regionId,
           nameRu: t.nameRu ?? row.nameRu, formerName: t.formerName ?? row.formerName,
           stir: stir ?? row.stir, districtName: t.district ?? row.districtName,
+          // A district is never cleared, but one of another region goes when the list moves the record.
+          districtId: districtIdOf(regionId, t.district ?? row.districtName) ?? (row.regionId === regionId ? row.districtId : null),
         }
-      : { officialName: t.name, nameRu: row.nameRu ?? t.nameRu ?? null, formerName: row.formerName ?? t.formerName ?? null, districtName: row.districtName ?? t.district ?? null }
+      : {
+          officialName: t.name, nameRu: row.nameRu ?? t.nameRu ?? null, formerName: row.formerName ?? t.formerName ?? null, districtName: row.districtName ?? t.district ?? null,
+          // In the region the representative chose, only if they have not chosen a district.
+          districtId: row.districtId ?? districtIdOf(row.regionId, row.districtName ?? t.district),
+        }
     const name = (wanted.name as string | undefined) ?? row.name
     wanted.searchText = registrySearchText(name, wanted.nameRu as string | null, wanted.formerName as string | null)
 
@@ -113,6 +138,7 @@ export async function importTechnikums(
     ;(unclaimed ? report.updated : report.enriched).push(row.id)
   }
 
+  report.districts.unlinked = [...unlinked]
   const listed = new Set(list.map((t) => t.id))
   report.notInList = rows.filter((r) => r.source === 'IMPORT' && r.id.startsWith('pe-') && !listed.has(r.id)).map((r) => ({ id: r.id, name: r.name }))
 

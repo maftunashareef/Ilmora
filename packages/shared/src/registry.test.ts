@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasMarkup, isStir, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey, registrySearchText, STUDENT_ADDABLE_TYPES } from './registry.js'
+import { hasMarkup, isStir, matchDistrict, REGISTRY_DISTRICTS, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey, registrySearchText, STUDENT_ADDABLE_TYPES } from './registry.js'
 import { UZ_REGIONS } from './organization.js'
 
 describe('registrySearchText', () => {
@@ -58,11 +58,67 @@ describe('registry reference data', () => {
     expect(REGISTRY_REGIONS.map((r) => r.slug).sort()).toEqual(UZ_REGIONS.map((r) => r.id).sort())
   })
 
+  it('has the 206 SOATO districts, each in one of the 14 regions, every region with its own', () => {
+    expect(REGISTRY_DISTRICTS).toHaveLength(206)
+    expect(new Set(REGISTRY_DISTRICTS.map((d) => d.code)).size).toBe(206)
+    const regions = new Set(REGISTRY_REGIONS.map((r) => r.code))
+    for (const d of REGISTRY_DISTRICTS) {
+      expect(d.code).toMatch(/^17\d{5}$/)
+      expect(d.code.startsWith(d.region), d.code).toBe(true)
+      expect(regions.has(d.region), d.code).toBe(true)
+      expect([d.name.uz, d.name.ru, d.name.en].every((n) => n.trim() === n && n.length > 2 && !/\s{2}/.test(n)), d.code).toBe(true)
+      // A district or a city, said the same way in the three languages.
+      const city = / (şahri|şahar)$/.test(d.name.uz)
+      expect(d.name.uz, d.code).toMatch(city ? / (şahri|şahar)$/ : / tumani$/)
+      expect(d.name.ru, d.code).toMatch(city ? /^Город / : / район$/)
+      expect(d.name.en, d.code).toMatch(city ? / city$/ : / district$/)
+    }
+    expect(new Set(REGISTRY_DISTRICTS.map((d) => d.region))).toEqual(regions)
+  })
+
   it('validates a STIR as exactly 9 digits', () => {
     expect(isStir('123456789')).toBe(true)
     expect(isStir('12345678')).toBe(false)
     expect(isStir('1234567890')).toBe(false)
     expect(isStir('12345678a')).toBe(false)
+  })
+})
+
+describe('matchDistrict', () => {
+  const of = (region: string) => REGISTRY_DISTRICTS.filter((d) => d.region === region)
+  const code = (region: string, name: string) => matchDistrict(name, of(region))?.code ?? null
+
+  it('finds a district by its name in any alphabet or language, with or without the kind word', () => {
+    expect(code('1703', 'Asaka tumani')).toBe('1703224')
+    expect(code('1703', 'Асака тумани')).toBe('1703224')
+    expect(code('1703', 'Асакинский район')).toBe('1703224')
+    expect(code('1703', 'Asaka')).toBe('1703224')
+    expect(code('1735', 'Bozatauskiy r-n')).toBe('1735209')
+  })
+
+  it('tells a city from the district of the same name', () => {
+    expect(code('1703', 'Andijon shahri')).toBe('1703401')
+    expect(code('1703', 'Andijonshahri')).toBe('1703401')
+    expect(code('1703', 'Andijon tumani')).toBe('1703203')
+    expect(code('1703', 'Andijon')).toBeNull()
+    expect(code('1710', 'Shaxrisabz shahri')).toBe('1710405')
+    expect(code('1710', 'Shaxrisabz tumani')).toBe('1710245')
+  })
+
+  it('reads the spellings the lists use: x/h, q/k, initials, a different vowel', () => {
+    expect(code('1703', 'Marhamat tumani')).toBe('1703227')
+    expect(code('1718', 'Kattaqoʻrgʻon shahri')).toBe('1718406')
+    expect(code('1708', 'Sh.Rashidov tumani')).toBe('1708212')
+    expect(code('1706', 'Q-bozor tumani')).toBe('1706232')
+    expect(code('1726', 'M.Ulugbek tumani')).toBe('1726269')
+    expect(code('1718', 'Toyloq tumani')).toBe('1718238')
+  })
+
+  it('gives null when not sure: another region, a city that is not a district, a name of nothing', () => {
+    expect(code('1706', 'Asaka tumani')).toBeNull()
+    expect(code('1712', 'Uchquduq shahri')).toBeNull()
+    expect(code('1703', 'Yangi tuman')).toBeNull()
+    expect(code('1703', ' ')).toBeNull()
   })
 })
 

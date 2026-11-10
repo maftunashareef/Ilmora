@@ -17,7 +17,7 @@ import argon2 from 'argon2'
 import type { Prisma } from '../src/generated/prisma/client'
 import { PrismaClient } from '../src/generated/prisma/client'
 import { addDays, isoToDateColumn, localDate, zonedTimeToUtc } from '../src/common/time'
-import { seedRegistryReference } from './registry-reference'
+import { seedRegistryDistricts, seedRegistryReference } from './registry-reference'
 
 try {
   process.loadEnvFile?.('.env')
@@ -68,8 +68,9 @@ async function main() {
     await prisma.category.upsert({ where: { id: c.id }, update: { name: json(c.name), glyph: c.glyph, sortOrder: i }, create: { id: c.id, tenantId: TENANT_ID, slug: slugOf(c.id), name: json(c.name), glyph: c.glyph, sortOrder: i } })
   }
   if (SEED_CATALOG) await seedCatalog()
-  // Registry reference data (industries, regions) is not demo data: every mode gets it; existing rows are kept.
+  // Registry reference data (industries, regions, districts) is not demo data: every mode gets it; existing rows are kept.
   await seedRegistryReference(prisma, TENANT_ID)
+  await seedRegistryDistricts(prisma, TENANT_ID)
 
   if (SEED_DEMO) await seedDemo()
   console.log(`Seed complete (${SEED_DEMO ? 'demo' : 'production'} mode${SEED_CATALOG ? '' : ', no sample catalog'})`)
