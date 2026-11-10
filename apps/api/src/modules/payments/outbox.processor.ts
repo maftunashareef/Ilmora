@@ -38,11 +38,14 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     await this.queue.upsertJobScheduler('subscriptions-lifecycle', { every: 10 * 60_000 }, { name: JOBS.maintenance.subscriptionLifecycle, data: {} })
     // Private documents never confirmed (security review №51); the bucket's lifecycle rule does the same where supported.
     await this.queue.upsertJobScheduler('docs-incoming-purge', { every: 6 * 3_600_000 }, { name: JOBS.maintenance.purgeIncomingDocs, data: {} })
+    // Provider callback logs do not grow without end (security review №11).
+    await this.queue.upsertJobScheduler('callback-logs-purge', { every: 24 * 3_600_000 }, { name: JOBS.maintenance.purgeCallbackLogs, data: {} })
   }
 
   async process(job: Job): Promise<unknown> {
     if (job.name === JOBS.maintenance.expirePayments) return { expired: await this.payments.expireAll() }
     if (job.name === JOBS.maintenance.subscriptionLifecycle) return this.subscriptions.runLifecycleAll()
+    if (job.name === JOBS.maintenance.purgeCallbackLogs) return { removed: await this.payments.purgeCallbackLogs() }
     if (job.name === JOBS.maintenance.purgeIncomingDocs) return { removed: this.docs.configured ? await this.docs.purgeIncoming() : 0 }
     const events = await TenantContext.system(() => this.outbox.claim(50))
     let done = 0

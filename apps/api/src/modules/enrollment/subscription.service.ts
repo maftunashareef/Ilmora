@@ -17,6 +17,8 @@ type Db = TransactionClient | PrismaService['client']
 type PackageAccess = { accessKind: 'PERIOD' | 'LESSONS'; periodDays: number | null; lessonCount: number | null } | null
 
 const DAY_MS = 86_400_000
+/** An active period is renewed in its last days only (security review №8): at most one period paid ahead. */
+export const RENEW_WINDOW_DAYS = 7
 
 /** A cancelled or expired subscription never comes back: a late settlement is refused (and refunded) rather than applied. */
 export const isClosed = (status: SubscriptionStatus): boolean => status === 'CANCELLED' || status === 'EXPIRED'
@@ -174,6 +176,9 @@ export class SubscriptionService {
         where: { id: draft.id },
         data: { status: 'PENDING_PAYMENT', amountMinor, currency: 'UZS', currentPeriodStart: now, currentPeriodEnd: periodEnd, ...this.accessColumns(pkg) },
       })
+      // Holds of an earlier attempt that failed or expired (CANCELLED, never active) make way for the new ones — they
+      // would otherwise collide on (subscription, group) and answer 409 for the same groups (security review Н2).
+      await tx.enrollment.deleteMany({ where: { subscriptionId: sub.id, status: 'CANCELLED' } })
       await tx.enrollment.createMany({
         data: groups.map((g) => ({ tenantId, subscriptionId: sub.id, studentId, groupId: g.id, courseId: g.courseId, status: 'PENDING' as const })),
       })
@@ -195,18 +200,35 @@ export class SubscriptionService {
     return payment
   }
 
-  /** Renewal payment for the next period of an active or blocked subscription (no new seat holds). */
+  /**
+   * Renewal payment for the next period of an active or blocked subscription (no new seat holds). Security review
+   * 10.11: the price is today's — what a new student pays now; the first payment's discount does not carry over
+   * (decision 10.11) — №8; an active period is renewed only in its last RENEW_WINDOW_DAYS days, so at most one period
+   * ahead — №8; and only while every course is still open: published, its center active, the group not deleted — №9.
+   */
   async renew(tenantId: string, studentId: string, provider: PaymentProvider) {
     const sub = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE'] } }, include: { package: true } })
     if (!sub) throw AppError.notFound('Active subscription')
     const pending = await this.prisma.client.payment.findFirst({ where: { tenantId, subscriptionId: sub.id, state: 'PENDING' } })
     if (pending) return { subscription: sub, payment: pending }
     const now = new Date()
+    if (sub.status === 'ACTIVE' && sub.kind === 'PERIOD' && sub.currentPeriodEnd && sub.currentPeriodEnd.getTime() - now.getTime() > RENEW_WINDOW_DAYS * DAY_MS) {
+      throw AppError.conflict('renewal_too_early', `A subscription is renewed in the last ${RENEW_WINDOW_DAYS} days of its period`, { from: new Date(sub.currentPeriodEnd.getTime() - RENEW_WINDOW_DAYS * DAY_MS).toISOString() })
+    }
+    const seats = await this.prisma.client.enrollment.findMany({
+      where: { subscriptionId: sub.id, status: 'ACTIVE' },
+      select: { group: { select: { deletedAt: true, course: { select: { priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, status: true, center: { select: { status: true } } } } } } },
+    })
+    if (!seats.length || seats.some((e) => e.group.deletedAt || e.group.course.status !== 'PUBLISHED' || e.group.course.center.status !== 'ACTIVE')) {
+      throw AppError.conflict('renewal_unavailable', 'One of the courses is no longer open: choose the courses again')
+    }
+    const amountMinor = seats.reduce((sum, e) => sum + finalPriceMinor(e.group.course.priceMinor, discountWindow(e.group.course), now), 0n)
     // An early renewal continues after the current period; a renewal of a blocked subscription starts a fresh period now.
     const periodStart = sub.status === 'ACTIVE' && sub.kind === 'PERIOD' && sub.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now
     const payment = await this.prisma.tx((tx) =>
-      this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor: sub.amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId }),
+      this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId }),
     )
+    await this.audit.record({ action: 'subscription.renew', entityType: 'Subscription', entityId: sub.id, after: { paymentId: payment.id, amountMinor: amountMinor.toString(), previousAmountMinor: sub.amountMinor.toString() } })
     return { subscription: sub, payment }
   }
 
@@ -225,6 +247,7 @@ export class SubscriptionService {
     const joining = await tx.enrollment.findMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, include: { group: { select: { id: true, name: true, course: { select: { id: true, title: true, teacherId: true, centerId: true } } } } } })
     await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, data: { status: 'ACTIVE', enrolledAt: now } })
     const access = this.accessColumns(sub.package)
+    const carryLessons = sub.status === 'ACTIVE' && sub.kind === 'LESSONS' && sub.lessonsTotal !== null ? Math.max(0, sub.lessonsTotal - sub.lessonsUsed) : 0
     const periodEnd = sub.kind === 'LESSONS' || payment.periodEnd > (sub.currentPeriodEnd ?? new Date(0)) ? payment.periodEnd : sub.currentPeriodEnd
     await tx.subscription.update({
       where: { id: sub.id },
@@ -237,9 +260,10 @@ export class SubscriptionService {
         blockReason: null,
         graceEndsAt: null,
         expiryReminderAt: null,
-        // A payment buys a fresh lesson balance (LESSONS) or a period (PERIOD); the kind follows the package.
+        // A payment buys a lesson balance (LESSONS) or a period (PERIOD); the kind follows the package. A renewal of an
+        // active lesson package adds to what is left — paid lessons are never burnt (security review №7).
         kind: access.kind,
-        lessonsTotal: access.lessonsTotal,
+        lessonsTotal: access.kind === 'LESSONS' ? (access.lessonsTotal ?? 0) + carryLessons : access.lessonsTotal,
         lessonsUsed: 0,
       },
     })
@@ -353,7 +377,9 @@ export class SubscriptionService {
 
   /** Expire pending payments past their deadline and release the seat holds. */
   async expirePending(tenantId: string, now = new Date()): Promise<number> {
-    const expired = await this.prisma.client.payment.findMany({ where: { tenantId, state: 'PENDING', expiresAt: { lt: now } }, select: { id: true, subscriptionId: true } })
+    // A payment the provider is processing right now (a Payme transaction created, not yet performed) keeps its hold
+    // until Payme performs or cancels it — the hold is short (security review №12), the bank's confirmation is not.
+    const expired = await this.prisma.client.payment.findMany({ where: { tenantId, state: 'PENDING', expiresAt: { lt: now }, transactions: { none: { state: 'CREATED' } } }, select: { id: true, subscriptionId: true } })
     for (const p of expired) {
       await this.prisma.tx(async (tx) => {
         const locked = await tx.payment.updateMany({ where: { id: p.id, state: 'PENDING' }, data: { state: 'EXPIRED' } })

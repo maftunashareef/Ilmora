@@ -5,6 +5,7 @@ import { Public } from '../../../common/decorators'
 import { ENV, type Env } from '../../../config/env'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { TenantContext } from '../../../infra/tenancy/tenant-context'
+import { CallbackLogBudget } from '../callback-log-budget'
 import { CLICK, type ClickForm, type ClickResponse, ClickService } from './click.service'
 
 /** Click SHOP API callbacks (form-urlencoded in, JSON out). Outside the API prefix and the rate limiter. */
@@ -13,6 +14,7 @@ import { CLICK, type ClickForm, type ClickResponse, ClickService } from './click
 @SkipThrottle()
 export class ClickController {
   private readonly logger = new Logger(ClickController.name)
+  private readonly budget = new CallbackLogBudget()
 
   constructor(private readonly click: ClickService, private readonly prisma: PrismaService, @Inject(ENV) private readonly env: Env) {}
 
@@ -41,7 +43,10 @@ export class ClickController {
       this.logger.error({ err }, 'Click handler failed')
       response = this.click.reply(form, CLICK.UPDATE_FAILED)
     }
-    await this.log(tenantId, action, form, response, req.ip, started)
+    // Not proven to come from Click (bad signature, unknown order): no body in the log, and only within the budget.
+    const proven = tenantId !== null && response.error !== CLICK.SIGN_FAILED
+    if (proven) await this.log(tenantId, action, form, response, req.ip, started)
+    else if (this.budget.allow(req.ip)) await this.log(null, action, {} as ClickForm, response, req.ip, started)
     return response
   }
 

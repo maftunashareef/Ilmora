@@ -107,7 +107,8 @@ export const EnvSchema = z.object({
   CLICK_API_URL: z.string().url().default('https://api.click.uz/v2/merchant'),
   CLICK_PAY_URL: z.string().url().default('https://my.click.uz/services/pay'),
   CLICK_ALLOWED_IPS: csv,
-  PAYMENT_EXPIRES_HOURS: z.coerce.number().int().positive().default(24),
+  /** Seats are held this long for an unpaid checkout (security review 10.11 №12: an hour, not a day). */
+  PAYMENT_EXPIRES_HOURS: z.coerce.number().int().positive().default(1),
 
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),

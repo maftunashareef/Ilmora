@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Put } from '@nestjs/common'
 import { MAX_CART_COURSES } from '@ilmora/shared'
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Length, ValidateIf } from 'class-validator'
-import { CurrentActor, CurrentTenantId } from '../../common/decorators'
+import { AuthThrottle, CurrentActor, CurrentTenantId } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { PaymentsService } from '../payments/payments.service'
 import { SubscriptionService } from './subscription.service'
@@ -38,7 +38,9 @@ export class EnrollmentController {
   }
 
   /** Creates the pending payment (with seat holds) and returns the provider checkout URL. */
+  /** Seats are held for an hour; at most 20 checkouts an hour from one address (security review №12). */
   @Post('checkout')
+  @AuthThrottle(20, 3_600_000)
   async checkout(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Body() dto: CheckoutDto) {
     const { payment } = await this.subscriptions.checkout(tenantId, actor.id, dto.provider)
     return this.payments.checkoutLink(payment, dto.provider, dto.lang ?? 'uz')

@@ -5,6 +5,7 @@ import { Public } from '../../../common/decorators'
 import { ENV, type Env } from '../../../config/env'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { TenantContext } from '../../../infra/tenancy/tenant-context'
+import { CallbackLogBudget } from '../callback-log-budget'
 import { PAYME, PaymeError, PaymeService } from './payme.service'
 
 /**
@@ -16,6 +17,7 @@ import { PAYME, PaymeError, PaymeService } from './payme.service'
 @SkipThrottle()
 export class PaymeController {
   private readonly logger = new Logger(PaymeController.name)
+  private readonly budget = new CallbackLogBudget()
 
   constructor(private readonly payme: PaymeService, private readonly prisma: PrismaService, @Inject(ENV) private readonly env: Env) {}
 
@@ -28,6 +30,7 @@ export class PaymeController {
     let outcome = 'ok'
     let code: number | undefined
     let payload: unknown
+    let proven = false
 
     try {
       if (req.method !== 'POST') throw new PaymeError(PAYME.NOT_POST, { ru: 'Метод запроса должен быть POST', uz: 'So‘rov POST bo‘lishi kerak', en: 'Request method must be POST' })
@@ -35,6 +38,7 @@ export class PaymeController {
         throw new PaymeError(PAYME.UNAUTHORIZED, { ru: 'Недостаточно привилегий', uz: 'Huquq yetarli emas', en: 'Insufficient privileges' })
       }
       const { sandbox } = this.payme.authenticate(authorization)
+      proven = true
       if (typeof body.method !== 'string' || (body.params !== undefined && (typeof body.params !== 'object' || body.params === null))) {
         throw new PaymeError(PAYME.INVALID_REQUEST, { ru: 'Неверный запрос', uz: 'Noto‘g‘ri so‘rov', en: 'Invalid request' })
       }
@@ -50,7 +54,9 @@ export class PaymeController {
       code = e.code
       outcome = `error:${e.code}`
       payload = { error: { code: e.code, message: e.messages, data: e.data }, id }
-      await this.log(await this.tenantFor((body.params ?? {}) as Record<string, unknown>).catch(() => null), String(body.method ?? ''), (body.params ?? {}) as Record<string, unknown>, outcome, code, req.ip, started)
+      // Not from Payme (no valid password): the method, the address and the code only, and not more than the budget allows.
+      if (proven) await this.log(await this.tenantFor((body.params ?? {}) as Record<string, unknown>).catch(() => null), String(body.method ?? ''), (body.params ?? {}) as Record<string, unknown>, outcome, code, req.ip, started)
+      else if (this.budget.allow(req.ip)) await this.log(null, typeof body.method === 'string' ? body.method : '', {}, outcome, code, req.ip, started)
     }
     res.status(200).type('application/json').send(JSON.stringify(payload))
   }

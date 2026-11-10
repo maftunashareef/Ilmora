@@ -24,7 +24,7 @@ function setup(opts: { priceMinor?: bigint; open?: { id: string; status: string 
   const tx = {
     $queryRawUnsafe: spy('tx.$queryRawUnsafe', []),
     group: { findMany: vi.fn(async () => [group(opts.priceMinor ?? 50_000_00n)]) },
-    enrollment: { groupBy: vi.fn(async () => []), createMany: spy('enrollment.createMany', { count: 1 }), updateMany: spy('enrollment.updateMany', { count: 1 }), findMany: vi.fn(async () => []) },
+    enrollment: { groupBy: vi.fn(async () => []), deleteMany: spy('enrollment.deleteMany', { count: 0 }), createMany: spy('enrollment.createMany', { count: 1 }), updateMany: spy('enrollment.updateMany', { count: 1 }), findMany: vi.fn(async () => []) },
     subscription: {
       updateMany: spy('subscription.updateMany', { count: opts.raceLost ? 0 : 1 }),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { (calls['subscription.update'] ??= []).push(data); return { ...draft, kind: 'PERIOD', lessonsTotal: null, ...data } }),
