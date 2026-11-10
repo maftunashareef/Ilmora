@@ -94,6 +94,10 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   vacancy_closed: 'apiError.vacancyClosed',
   application_exists: 'apiError.applicationExists',
   application_decided: 'apiError.applicationDecided',
+  // Super Admin: reference data
+  industry_exists: 'apiError.industryExists',
+  direction_exists: 'apiError.directionExists',
+  invalid_merge: 'apiError.invalidMerge',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

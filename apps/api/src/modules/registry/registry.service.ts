@@ -152,6 +152,9 @@ export class RegistryService {
     if (key.length < SUGGEST_MIN_CHARS) throw AppError.invalid('invalid_name', 'Enter the name of the institution')
     const existing = await this.prisma.client.institution.findFirst({ where: { searchKey: key, regionId: region.id, mergedIntoId: null }, select: INSTITUTION_PUBLIC })
     if (existing) return { institution: toInstitution(existing), created: false }
+    // A record the Super Admin merged answers its target: the duplicate does not come back under the same name.
+    const merged = await this.prisma.client.institution.findFirst({ where: { searchKey: key, regionId: region.id, mergedIntoId: { not: null } }, select: { mergedInto: { select: INSTITUTION_PUBLIC } } })
+    if (merged?.mergedInto) return { institution: toInstitution(merged.mergedInto), created: false }
     const row = await this.prisma.client.institution.create({
       data: {
         tenantId, type: input.type, name: input.name, searchKey: key, searchText: registrySearchText(input.name), regionId: region.id, districtId: input.districtId ?? null,

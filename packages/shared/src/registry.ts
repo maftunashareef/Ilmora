@@ -834,3 +834,45 @@ export interface StudentApplicationDto {
   statusChangedAt: string | null
   vacancy: Omit<VacancyDto, 'myApplication'>
 }
+
+// ───────────── Super Admin: the reference data (ТЗ 9.2 «Super Admin») ─────────────
+
+export interface AdminIndustryDto extends IndustryDto {
+  sortOrder: number
+  isActive: boolean
+  /** Main directions of the industry (aliases not counted) and companies that chose it. */
+  directions: number
+  companies: number
+}
+
+/** A direction as the Super Admin manages it: where it is used, and what it was merged into. */
+export interface AdminDirectionDto {
+  id: string
+  name: string
+  industry: IndustryDto
+  origin: 'OFFICIAL' | 'USER' | 'ADMIN'
+  code: string | null
+  createdAt: string
+  mergedInto: { id: string; name: string } | null
+  /** Aliases merged into this one. */
+  aliases: number
+  usage: { students: number; institutions: number; companies: number; announcements: number; trainingRequests: number; vacancies: number }
+}
+
+/** A record a student added (ТЗ 3.5): to be merged into the real registry record, with likely candidates. */
+export interface StudentInstitutionDto {
+  id: string
+  name: string
+  type: RegistryInstitutionType
+  region: PlaceRefDto | null
+  createdAt: string
+  students: number
+  candidates: InstitutionCardDto[]
+}
+
+/** What a merge moved. */
+export interface MergeResultDto {
+  fromId: string
+  intoId: string
+  moved: Record<string, number>
+}
