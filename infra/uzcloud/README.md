@@ -372,6 +372,14 @@ aws s3api put-bucket-policy --bucket ilmora-media --policy file://media-policy.j
 
 Проверка: файл в `ilmora-media` открывается без ключа (200), в `ilmora-docs` — нет (403), список `ilmora-media/` — 403.
 
+Загрузки в `ilmora-docs` сначала попадают в `incoming/`; API после проверки переносит файл и удаляет загрузку.
+Неподтверждённое в `incoming/` удаляется через сутки — правило `docs-lifecycle.json` (и, на случай если UzCloud
+правила не поддерживает, задача воркера раз в 6 часов):
+
+```powershell
+aws s3api put-bucket-lifecycle-configuration --bucket ilmora-docs --lifecycle-configuration file://docs-lifecycle.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
+```
+
 Ключи — в `api.env` на обеих машинах (`S3_ENDPOINT`, `S3_BUCKET=ilmora-media`, `S3_DOCS_BUCKET=ilmora-docs`,
 `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`), затем `… compose.sh admin up -d worker` и `… compose.sh web up -d api`.
 Адрес медиа для сайта (`NEXT_PUBLIC_MEDIA_BASE_URL`) задаёт релиз: переменная репозитория `MEDIA_BASE_URL`, по

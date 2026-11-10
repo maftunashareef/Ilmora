@@ -7,7 +7,7 @@ import { ROLES_KEY } from '../src/common/decorators'
 import { ApprovedGuard, APPROVED_KEY } from '../src/common/registry-access'
 import { ZodValidationPipe } from '../src/common/zod.pipe'
 import type { RedisService } from '../src/infra/redis/redis.service'
-import { PrivateDocsService, sniffDocType } from '../src/infra/storage/private-docs.service'
+import { finalKeyOf, PrivateDocsService, sniffDocType } from '../src/infra/storage/private-docs.service'
 import { TenantContext, type RequestActor } from '../src/infra/tenancy/tenant-context'
 import { AccountService } from '../src/modules/auth/account.service'
 import { CompaniesAdminController } from '../src/modules/companies/companies-admin.controller'
@@ -40,6 +40,29 @@ describe('Private documents', () => {
     const docs = new PrivateDocsService(testEnv({ S3_ENDPOINT: 'https://s3.test', S3_DOCS_BUCKET: 'ilmora-docs', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' }))
     expect(await docs.uploadUrl('company-certs/t/c/1.pdf', 'application/pdf', 1000)).toMatch(/^https:\/\/s3\.test\/ilmora-docs\/company-certs\/t\/c\/1\.pdf\?.*X-Amz-Signature=/)
     expect(await docs.downloadUrl('company-certs/t/c/1.pdf')).toMatch(/X-Amz-Expires=300.*response-content-disposition=attachment/)
+  })
+
+  it('purges uploads never confirmed after a day, page by page, and leaves the rest (security review №51)', async () => {
+    const now = Date.now()
+    const pages = [
+      { Contents: [{ Key: 'incoming/a/1.pdf', LastModified: new Date(now - 2 * 86_400_000) }, { Key: 'incoming/a/2.pdf', LastModified: new Date(now - 60_000) }], IsTruncated: true, NextContinuationToken: 't2' },
+      { Contents: [{ Key: 'incoming/b/3.png', LastModified: new Date(now - 3 * 86_400_000) }], IsTruncated: false },
+    ]
+    const deleted: string[] = []
+    const prefixes: string[] = []
+    class FakeS3Docs extends PrivateDocsService {
+      constructor() { super(testEnv({ S3_ENDPOINT: 'https://s3.test', S3_DOCS_BUCKET: 'ilmora-docs', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' })) }
+      protected override s3() {
+        return { send: async (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => {
+          if (cmd.constructor.name === 'ListObjectsV2Command') { prefixes.push(String(cmd.input.Prefix)); return cmd.input.ContinuationToken ? pages[1] : pages[0] }
+          deleted.push(...((cmd.input.Delete as { Objects: { Key: string }[] }).Objects.map((o) => o.Key)))
+          return {}
+        } } as never
+      }
+    }
+    expect(await new FakeS3Docs().purgeIncoming()).toBe(2)
+    expect(deleted).toEqual(['incoming/a/1.pdf', 'incoming/b/3.png'])
+    expect(prefixes).toEqual(['incoming/', 'incoming/'])
   })
 
   it('certificate input: PDF, JPG, PNG up to 10 MB; the company profile takes no status or certificate key', () => {
@@ -75,6 +98,7 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
     override async downloadUrl(key: string) { return `https://s3.test/ilmora-docs/${key}?X-Amz-Expires=300` }
     override async inspect(key: string) { return objects.has(key) ? { size: objects.get(key)!.length, head: objects.get(key)!.subarray(0, 16) } : null }
     override async remove(key: string) { removed.push(key); objects.delete(key) }
+    override async copy(from: string, to: string) { objects.set(to, objects.get(from)!) }
   }
   const docs = new MemoryDocs()
   const service = new CompaniesService(ctx.prisma, ctx.audit, notifications, docs)
@@ -183,7 +207,7 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       const rep = await s.representative()
       const { id } = await service.create(s.tenantId, rep, { stir: '304444444', name: 'Doc Test' })
       const { uploadUrl, key } = await service.certificateUploadUrl(s.tenantId, rep, { contentType: 'application/pdf', fileSize: 5000 })
-      expect(key).toMatch(new RegExp(`^company-certs/${s.tenantId}/${id}/\\d+-[0-9a-f]{16}\\.pdf$`))
+      expect(key).toMatch(new RegExp(`^incoming/company-certs/${s.tenantId}/${id}/\\d+-[0-9a-f]{16}\\.pdf$`))
       expect(uploadUrl).toContain(key)
       await expect(service.confirmCertificate(s.tenantId, rep, { key })).rejects.toMatchObject({ code: 'file_not_uploaded' })
       await expect(service.confirmCertificate(s.tenantId, rep, { key: `company-certs/${s.tenantId}/someone-else/1.pdf` })).rejects.toMatchObject({ code: 'invalid_file' })
@@ -195,9 +219,15 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       const first = await s.upload(rep, PDF)
       expect(first.profile.certificateUploaded).toBe(true)
       const second = await s.upload(rep, PNG, 'image/png')
-      expect(removed).toContain(first.key)
-      expect((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id } })).certificateFileKey).toBe(second.key)
-      expect((await service.certificateLink(rep)).url).toContain(second.key)
+      // The checked file moves out of the upload area; the upload is deleted, the replaced certificate too.
+      const kept = finalKeyOf(second.key)
+      expect(kept).toMatch(new RegExp(`^company-certs/${s.tenantId}/${id}/`))
+      expect(removed).toEqual(expect.arrayContaining([first.key, finalKeyOf(first.key), second.key]))
+      expect((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id } })).certificateFileKey).toBe(kept)
+      expect((await service.certificateLink(rep)).url).toContain(kept)
+      // The 10-minute upload link used again after the check cannot replace the kept file (security review №51).
+      objects.set(second.key, Buffer.from('<html><script>x</script>'))
+      expect(objects.get(kept)).toEqual(PNG)
     })
   })
 
