@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { presignPut, s3ClientConfig } from './s3-client'
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
@@ -16,6 +16,16 @@ export type DocContentType = keyof typeof DOC_TYPES
 export const DOC_MAX_BYTES = 10 * 1024 * 1024
 /** Download links live 5 minutes (ТЗ 9.2). */
 export const DOC_LINK_SECONDS = 300
+/**
+ * Uploads land here first (the presigned PUT points into this area); a checked file is copied out of it and the upload
+ * deleted, so the PUT link — valid 10 minutes — can no longer replace a file anybody refers to (security review №51).
+ * What is never confirmed is deleted after a day: the bucket's lifecycle rule (infra/uzcloud/s3) and `purgeIncoming`.
+ */
+export const INCOMING = 'incoming/'
+export const INCOMING_TTL_MS = 24 * 3_600_000
+
+/** Where a checked upload is kept: the same name outside the upload area. */
+export const finalKeyOf = (uploadKey: string) => (uploadKey.startsWith(INCOMING) ? uploadKey.slice(INCOMING.length) : uploadKey)
 
 /** The type the first bytes show, or null — whatever the browser claimed. */
 export function sniffDocType(head: Buffer): DocContentType | null {
@@ -66,15 +76,15 @@ export class PrivateDocsService {
 
   /** An object key for an upload under `prefix`: time and randomness, never the browser's file name. */
   newKey(prefix: string, contentType: DocContentType): string {
-    return `${prefix}${Date.now()}-${randomBytes(8).toString('hex')}.${DOC_TYPES[contentType].ext}`
+    return `${INCOMING}${prefix}${Date.now()}-${randomBytes(8).toString('hex')}.${DOC_TYPES[contentType].ext}`
   }
 
   /**
    * Checks what the browser uploaded before anything refers to it: the key lies under the owner's `prefix`, the object
    * exists, is at most 10 MB and its first bytes are the PDF/JPEG/PNG its extension says. Anything else is deleted.
    */
-  async verifyUpload(key: string, prefix: string): Promise<{ type: DocContentType; size: number }> {
-    if (!key.startsWith(prefix) || !/^[\w./-]+$/.test(key) || key.includes('..')) throw AppError.invalid('invalid_file', 'Upload the file again')
+  async verifyUpload(key: string, prefix: string): Promise<{ type: DocContentType; size: number; key: string }> {
+    if (!key.startsWith(`${INCOMING}${prefix}`) || !/^[\w./-]+$/.test(key) || key.includes('..')) throw AppError.invalid('invalid_file', 'Upload the file again')
     const object = await this.inspect(key)
     if (!object) throw AppError.invalid('file_not_uploaded', 'The file has not been uploaded yet')
     const type = sniffDocType(object.head)
@@ -83,7 +93,35 @@ export class PrivateDocsService {
       await this.remove(key).catch(() => undefined)
       throw AppError.invalid('invalid_file', 'Upload a PDF, JPG or PNG file up to 10 MB')
     }
-    return { type, size: object.size }
+    // Out of the upload area: the checked bytes get their own key that no upload link points to.
+    const kept = finalKeyOf(key)
+    await this.copy(key, kept)
+    await this.remove(key).catch(() => undefined)
+    return { type, size: object.size, key: kept }
+  }
+
+  async copy(from: string, to: string): Promise<void> {
+    const bucket = this.bucket()
+    await this.s3().send(new CopyObjectCommand({ Bucket: bucket, Key: to, CopySource: `${bucket}/${from}` }))
+  }
+
+  /** Deletes uploads never confirmed (older than `olderThanMs`): rejected, abandoned or re-sent through an old link. */
+  async purgeIncoming(olderThanMs = INCOMING_TTL_MS): Promise<number> {
+    const s3 = this.s3()
+    const bucket = this.bucket()
+    const cutoff = Date.now() - olderThanMs
+    let token: string | undefined
+    let removed = 0
+    do {
+      const page = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: INCOMING, ContinuationToken: token, MaxKeys: 1000 }))
+      const old = (page.Contents ?? []).filter((o) => o.Key && o.LastModified && o.LastModified.getTime() < cutoff).map((o) => ({ Key: o.Key! }))
+      if (old.length) {
+        await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: old, Quiet: true } }))
+        removed += old.length
+      }
+      token = page.IsTruncated ? page.NextContinuationToken : undefined
+    } while (token)
+    return removed
   }
 
   async remove(key: string): Promise<void> {
@@ -95,7 +133,7 @@ export class PrivateDocsService {
     return this.env.S3_DOCS_BUCKET!
   }
 
-  private s3(): S3Client {
+  protected s3(): S3Client {
     this.bucket()
     return new S3Client(s3ClientConfig(this.env))
   }

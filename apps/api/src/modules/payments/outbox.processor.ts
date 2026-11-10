@@ -3,6 +3,7 @@ import { Logger, type OnModuleInit } from '@nestjs/common'
 import type { Job, Queue } from 'bullmq'
 import { pick } from '@ilmora/shared'
 import { PrismaService } from '../../infra/prisma/prisma.service'
+import { PrivateDocsService } from '../../infra/storage/private-docs.service'
 import { JOBS, QUEUES } from '../../infra/queue/queues'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { SubscriptionService } from '../enrollment/subscription.service'
@@ -12,7 +13,7 @@ import { PaymentsService } from './payments.service'
 
 /**
  * Worker: drains the transactional outbox (receipts, refund notices) every 20 s, expires stale payments and runs the
- * subscription lifecycle (blocking, expiry, reminders) every 10 minutes. All are repeatable BullMQ jobs; multiple
+ * subscription lifecycle (blocking, expiry, reminders) every 10 minutes, deletes unconfirmed private uploads every 6 h. All are repeatable BullMQ jobs; multiple
  * workers are safe (SKIP LOCKED / unique keys / idempotent updates).
  */
 @Processor(QUEUES.outbox, { concurrency: 1 })
@@ -25,6 +26,7 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     private readonly sms: SmsService,
     private readonly payments: PaymentsService,
     private readonly subscriptions: SubscriptionService,
+    private readonly docs: PrivateDocsService,
     @InjectQueue(QUEUES.outbox) private readonly queue: Queue,
   ) {
     super()
@@ -34,11 +36,14 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     await this.queue.upsertJobScheduler('outbox-dispatch', { every: 20_000 }, { name: JOBS.outbox.dispatch, data: {} })
     await this.queue.upsertJobScheduler('payments-expire', { every: 10 * 60_000 }, { name: JOBS.maintenance.expirePayments, data: {} })
     await this.queue.upsertJobScheduler('subscriptions-lifecycle', { every: 10 * 60_000 }, { name: JOBS.maintenance.subscriptionLifecycle, data: {} })
+    // Private documents never confirmed (security review №51); the bucket's lifecycle rule does the same where supported.
+    await this.queue.upsertJobScheduler('docs-incoming-purge', { every: 6 * 3_600_000 }, { name: JOBS.maintenance.purgeIncomingDocs, data: {} })
   }
 
   async process(job: Job): Promise<unknown> {
     if (job.name === JOBS.maintenance.expirePayments) return { expired: await this.payments.expireAll() }
     if (job.name === JOBS.maintenance.subscriptionLifecycle) return this.subscriptions.runLifecycleAll()
+    if (job.name === JOBS.maintenance.purgeIncomingDocs) return { removed: this.docs.configured ? await this.docs.purgeIncoming() : 0 }
     const events = await TenantContext.system(() => this.outbox.claim(50))
     let done = 0
     for (const ev of events) {

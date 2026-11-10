@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ZodValidationPipe } from '../src/common/zod.pipe'
-import { PrivateDocsService } from '../src/infra/storage/private-docs.service'
+import { finalKeyOf, PrivateDocsService } from '../src/infra/storage/private-docs.service'
 import { TenantContext, type RequestActor } from '../src/infra/tenancy/tenant-context'
 import { CertificateInput, CertificatePatch } from '../src/modules/students/certificates.schemas'
 import { CertificatesService } from '../src/modules/students/certificates.service'
@@ -31,6 +31,7 @@ describe.skipIf(!DB_AVAILABLE)('Student certificates and «Курсы в ILMORA�
     override async downloadUrl(key: string) { return `https://s3.test/ilmora-docs/${key}?X-Amz-Expires=300` }
     override async inspect(key: string) { return objects.has(key) ? { size: objects.get(key)!.length, head: objects.get(key)!.subarray(0, 16) } : null }
     override async remove(key: string) { removed.push(key); objects.delete(key) }
+    override async copy(from: string, to: string) { objects.set(to, objects.get(from)!) }
   }
   const service = new CertificatesService(ctx.prisma, ctx.audit, new MemoryDocs())
   beforeAll(() => ctx.connect())
@@ -53,7 +54,7 @@ describe.skipIf(!DB_AVAILABLE)('Student certificates and «Курсы в ILMORA�
     await s.inT(async () => {
       const me = await s.student()
       const { key, uploadUrl } = await service.uploadUrl(s.tenantId, me, { contentType: 'application/pdf', fileSize: PDF.length })
-      expect(key).toMatch(new RegExp(`^student-certs/${s.tenantId}/${me.id}/\\d+-[0-9a-f]{16}\\.pdf$`))
+      expect(key).toMatch(new RegExp(`^incoming/student-certs/${s.tenantId}/${me.id}/\\d+-[0-9a-f]{16}\\.pdf$`))
       expect(uploadUrl).toContain(key)
       await expect(service.add(s.tenantId, me, { key, title: 'IELTS' })).rejects.toMatchObject({ code: 'file_not_uploaded' })
       objects.set(key, PDF)
@@ -61,9 +62,12 @@ describe.skipIf(!DB_AVAILABLE)('Student certificates and «Курсы в ILMORA�
       expect(cert).toMatchObject({ title: 'IELTS 7.0', issuer: 'British Council', issuedAt: '2026-01-15', contentType: 'application/pdf', sizeBytes: PDF.length })
       await expect(service.add(s.tenantId, me, { key, title: 'Again' })).rejects.toMatchObject({ code: 'certificate_exists' })
       expect((await service.update(me, cert.id, { title: 'IELTS Academic', issuer: null })).issuer).toBeNull()
-      expect((await service.link(me, cert.id)).url).toContain(key)
+      // Kept outside the upload area (security review №51): the upload link no longer reaches it.
+      expect(objects.has(key)).toBe(false)
+      expect(objects.get(finalKeyOf(key))).toEqual(PDF)
+      expect((await service.link(me, cert.id)).url).toContain(finalKeyOf(key))
       await service.remove(me, cert.id)
-      expect(removed).toContain(key)
+      expect(removed).toContain(finalKeyOf(key))
       expect(await service.list(me)).toEqual([])
     })
   })

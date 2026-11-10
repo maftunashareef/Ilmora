@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { type DocumentLinkDto, type DocumentUploadDto, type IlmoraCourseDto, type L, STUDENT_CERTIFICATES_MAX, type StudentCertificateDto } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { PrismaService } from '../../infra/prisma/prisma.service'
-import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
+import { DOC_LINK_SECONDS, finalKeyOf, PrivateDocsService } from '../../infra/storage/private-docs.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import type { CertificateInput, CertificatePatch, CertificateUploadInput } from './certificates.schemas'
@@ -40,10 +40,10 @@ export class CertificatesService {
   /** Step 2: the server checks the upload (prefix, size, real type) and only then records the certificate. */
   async add(tenantId: string, actor: RequestActor, input: CertificateInput): Promise<StudentCertificateDto> {
     await this.assertRoom(actor)
-    if (await this.prisma.client.studentCertificate.findFirst({ where: { userId: actor.id, fileKey: input.key }, select: { id: true } })) throw AppError.conflict('certificate_exists', 'This file is already added')
-    const { type, size } = await this.docs.verifyUpload(input.key, prefixOf(tenantId, actor.id))
+    if (await this.prisma.client.studentCertificate.findFirst({ where: { userId: actor.id, fileKey: finalKeyOf(input.key) }, select: { id: true } })) throw AppError.conflict('certificate_exists', 'This file is already added')
+    const { type, size, key } = await this.docs.verifyUpload(input.key, prefixOf(tenantId, actor.id))
     const row = await this.prisma.client.studentCertificate.create({
-      data: { tenantId, userId: actor.id, title: input.title, issuer: input.issuer ?? null, issuedAt: dateOf(input.issuedAt), fileKey: input.key, contentType: type, sizeBytes: size },
+      data: { tenantId, userId: actor.id, title: input.title, issuer: input.issuer ?? null, issuedAt: dateOf(input.issuedAt), fileKey: key, contentType: type, sizeBytes: size },
       select: SELECT,
     })
     await this.audit.record({ action: 'student.certificate.add', entityType: 'StudentCertificate', entityId: row.id, after: { title: row.title, type, size } })
