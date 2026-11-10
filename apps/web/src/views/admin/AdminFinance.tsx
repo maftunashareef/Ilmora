@@ -27,7 +27,6 @@ export function AdminFinance() {
   const [rows, setRows] = useState<ReconRow[]>([])
   const [total, setTotal] = useState(0)
   const [balances, setBalances] = useState<Balance[]>([])
-  const [verify, setVerify] = useState<Record<string, unknown>>({})
   // The failed request is kept, not its text, so the message follows a language switch.
   const [error, setError] = useState<unknown>(null)
   const canSee = roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN')
@@ -44,12 +43,6 @@ export function AdminFinance() {
 
   useEffect(() => { if (canSee) void load() }, [canSee, load])
 
-  const check = async (row: ReconRow) => {
-    try {
-      const r = await api<Record<string, unknown>>(`/admin/finance/transactions/${row.transactionId}/verify`, { method: 'POST', body: {} })
-      setVerify((v) => ({ ...v, [row.transactionId]: r }))
-    } catch (err) { notify(apiErrorText(err, lang), 'warn') }
-  }
   const settle = async (row: ReconRow) => {
     const reference = prompt(t('finance.manualReference'))
     if (!reference || reference.length < 3) return
@@ -73,7 +66,7 @@ export function AdminFinance() {
       <div className="mt-8 flex flex-wrap items-center gap-2">
         <Eyebrow>{t('finance.transactions')} · {total}</Eyebrow>
         <div className="ml-auto flex gap-2">
-          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="CLICK">Click</option><option value="MANUAL">{t('finance.manual')}</option></Select>
+          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="MANUAL">{t('finance.manual')}</option></Select>
           <Select aria-label={t('finance.status')} className="py-2" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">{t('common.all')}</option><option value="CREATED">CREATED</option><option value="PERFORMED">PERFORMED</option><option value="CANCELLED">CANCELLED</option><option value="FAILED">FAILED</option></Select>
         </div>
       </div>
@@ -98,10 +91,8 @@ export function AdminFinance() {
                   <td className="px-3 py-2.5">{r.discrepancy ? <Badge tone="danger">{r.discrepancy}</Badge> : <Badge tone="sage">{t('finance.match')}</Badge>}</td>
                   <td className="px-3 py-2.5">
                     <div className="flex flex-col gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => void check(r)}>{t('finance.verify')}</Button>
                       {r.paymentState === 'PENDING' && <Button size="sm" variant="ghost" onClick={() => void settle(r)}>{t('finance.manualSettle')}</Button>}
                     </div>
-                    {verify[r.transactionId] !== undefined && <pre className="mt-1 max-w-[16rem] overflow-x-auto rounded bg-ivory p-2 text-[10px] text-charcoal/70">{JSON.stringify(verify[r.transactionId], null, 1)}</pre>}
                   </td>
                 </tr>
               ))}

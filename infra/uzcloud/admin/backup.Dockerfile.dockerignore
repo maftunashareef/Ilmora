@@ -1,0 +1,3 @@
+# Only backup.sh goes into the build context of backup.Dockerfile: admin/ also holds .env with passwords and keys.
+*
+!backup.sh

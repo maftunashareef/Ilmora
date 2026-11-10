@@ -142,8 +142,7 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-90}
       BACKUP_AT_UTC: ${BACKUP_AT_UTC:-22:40}
       BACKUP_PING_URL: ${BACKUP_PING_URL:-}
-    volumes:
-      - ./backup.sh:/usr/local/bin/backup.sh:ro
+    # backup.sh is copied into the image (backup.Dockerfile), not mounted (security review 10.11, №24).
     entrypoint: ["/usr/local/bin/backup.sh", "--schedule"]
     depends_on:
       postgres:

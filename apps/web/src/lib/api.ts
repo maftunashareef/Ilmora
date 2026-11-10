@@ -47,7 +47,18 @@ export interface RequestOptions {
   retryOn401?: boolean
 }
 
-let refreshing: Promise<boolean> | null = null
+/**
+ * How a refresh ended: 'ok'; 'denied' — the API rejected the cookie (the session is over); 'limited' — 429, too many
+ * refreshes for now (security review 10.11 №19: the cookie is still valid, so the session is kept and the person is
+ * asked to try again shortly, never sent to the sign-in page); 'failed' — no answer (network).
+ */
+export type RefreshOutcome = 'ok' | 'denied' | 'limited' | 'failed'
+let refreshing: Promise<RefreshOutcome> | null = null
+/** Seconds the API asked to wait after its last 429 on /auth/refresh (`Retry-After`; 30 when it did not say). */
+let refreshRetryAfter = 30
+export const refreshRetryAfterSeconds = () => refreshRetryAfter
+/** The error a request gets while refreshes are limited: «повторите позже», the session stays. */
+export const REFRESH_LIMITED = 'session_refresh_limited'
 
 /** Cross-tab lock name and the timestamp the last successful refresh wrote (both tabs share the cookie jar). */
 const REFRESH_LOCK = 'ilmora-refresh'
@@ -67,10 +78,15 @@ const writeRefreshedAt = () => {
   }
 }
 
-/** One POST /auth/refresh. Resolves 'ok', 'denied' (the API rejected the cookie) or 'failed' (network). */
-async function postRefresh(): Promise<'ok' | 'denied' | 'failed'> {
+/** One POST /auth/refresh (see RefreshOutcome). */
+async function postRefresh(): Promise<RefreshOutcome> {
   try {
     const res = await fetch(`${apiBase()}${PREFIX}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'X-Requested-With': 'ilmora' } })
+    if (res.status === 429) {
+      const wait = Number(res.headers.get('Retry-After'))
+      refreshRetryAfter = Number.isFinite(wait) && wait > 0 ? Math.min(wait, 300) : 30
+      return 'limited'
+    }
     if (!res.ok) return 'denied'
     const data = (await res.json()) as { accessToken: string }
     session.set(data.accessToken)
@@ -87,29 +103,35 @@ async function postRefresh(): Promise<'ok' | 'denied' | 'failed'> {
  * sends the cookie the winner just received. Without Web Locks, a refresh rejected while another tab refreshed is
  * retried once with the new cookie.
  */
-async function refreshExclusive(): Promise<boolean> {
+async function refreshExclusive(): Promise<RefreshOutcome> {
   const startedAt = Date.now()
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
   if (locks) {
     const outcome = await locks.request(REFRESH_LOCK, postRefresh)
     if (outcome === 'denied') session.set(null)
-    return outcome === 'ok'
+    return outcome
   }
   let outcome = await postRefresh()
   if (outcome === 'denied' && readRefreshedAt() >= startedAt) outcome = await postRefresh()
+  // Only a rejected cookie ends the session; «limited» and «failed» keep it for the next try.
   if (outcome === 'denied') session.set(null)
-  return outcome === 'ok'
+  return outcome
 }
 
-/** Exchange the refresh cookie for a new access token. Resolves false when there is no valid session. */
-export async function refreshSession(): Promise<boolean> {
-  if (typeof window === 'undefined') return false
+/** Exchange the refresh cookie for a new access token, and say how it went (see RefreshOutcome). */
+export async function refreshSessionOutcome(): Promise<RefreshOutcome> {
+  if (typeof window === 'undefined') return 'denied'
   if (!refreshing) {
     refreshing = refreshExclusive().finally(() => {
       setTimeout(() => (refreshing = null), 0)
     })
   }
   return refreshing
+}
+
+/** Exchange the refresh cookie for a new access token. Resolves false when there is no new token (any reason). */
+export async function refreshSession(): Promise<boolean> {
+  return (await refreshSessionOutcome()) === 'ok'
 }
 
 /**
@@ -141,8 +163,10 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     throw new ApiError(0, 'network_error', 'Server bilan aloqa örnatib bölmadi', { cause })
   }
   if (res.status === 401 && useAuth && accessToken && opts.retryOn401 !== false) {
-    const ok = await refreshSession()
-    if (ok) return api<T>(path, { ...opts, retryOn401: false })
+    const outcome = await refreshSessionOutcome()
+    if (outcome === 'ok') return api<T>(path, { ...opts, retryOn401: false })
+    // №19: refreshes are limited for now — «повторите позже», not «the session is over».
+    if (outcome === 'limited') throw new ApiError(429, REFRESH_LIMITED, 'Too many sign-in refreshes; try again shortly', { retryAfter: refreshRetryAfter })
   }
   if (res.status === 204) return undefined as T
   const text = await res.text()
