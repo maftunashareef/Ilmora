@@ -80,3 +80,24 @@ describe('the temporary password of a ministry account', () => {
     expect(store.getState().auth.user?.passwordChangeRequired).toBe(true)
   })
 })
+
+describe('403 password_change_required from any request', () => {
+  it('marks the signed-in account, so the change screen shows', async () => {
+    const real = await vi.importActual<typeof import('../lib/api')>('../lib/api')
+    // The store registers its handler in the browser only.
+    vi.stubGlobal('window', globalThis)
+    try {
+      apiMock.mockResolvedValueOnce({ accessToken: 'token', user: ministry })
+      const store = createIlmoraStore(initialMock)
+      await store.getState().mfaVerify('v'.repeat(40), '123456')
+      expect(store.getState().auth.user?.passwordChangeRequired).toBeFalsy()
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'password_change_required', message: 'x' } }), { status: 403 })))
+      await expect(real.api('/ministry/stats')).rejects.toMatchObject({ code: 'password_change_required' })
+      expect(store.getState().auth.status).toBe('authenticated')
+      expect(store.getState().auth.user?.passwordChangeRequired).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+      real.setPasswordChangeRequiredHandler(null)
+    }
+  })
+})

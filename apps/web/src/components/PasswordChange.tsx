@@ -1,9 +1,11 @@
 'use client'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useT } from '@/i18n/useT'
 import { apiErrorText } from '@/lib/apiErrors'
 import { PASSWORD_MAX, passwordChangeProblem, type PasswordChangeFields } from '@/lib/passwordChange'
+import { useLocation, useNavigate } from '@/lib/router'
+import { workspaceOf } from '@/lib/workspaceHome'
 import { useStore, type AuthUser } from '@/store/useStore'
 import { Button, Card, Field, Icon, Input, Modal } from './ui'
 
@@ -131,4 +133,21 @@ export function PasswordCard({ className = '' }: { className?: string }) {
       {open && <PasswordChangeDialog onClose={close} />}
     </Card>
   )
+}
+
+/**
+ * Takes an account that must change its temporary password to the change screen from any page — on the flag
+ * (`passwordChangeRequired`) and on the API's 403 `password_change_required`, which the store turns into the flag.
+ * Workspaces show the form in place (RequireRole), the sign-in page in its card; any other page goes to /login and
+ * comes back after the change.
+ */
+export function PasswordChangeRedirect() {
+  const mustChange = useStore((s) => s.auth.status === 'authenticated' && s.auth.user?.passwordChangeRequired === true)
+  const { pathname, search } = useLocation()
+  const nav = useNavigate()
+  useEffect(() => {
+    if (!mustChange || pathname === '/login' || workspaceOf(pathname)) return
+    nav(`/login?next=${encodeURIComponent(pathname + search)}`, { replace: true })
+  }, [mustChange, pathname, search, nav])
+  return null
 }
