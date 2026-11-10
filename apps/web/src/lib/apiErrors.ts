@@ -60,6 +60,12 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   already_approved: 'apiError.alreadyApproved',
   incomplete_profile: 'apiError.incompleteProfile',
   not_pending: 'apiError.notPending',
+  // second factor (ministry and Super Admins)
+  mfa_unavailable: 'apiError.mfaUnavailable',
+  mfa_password_login: 'apiError.mfaPasswordLogin',
+  invalid_challenge: 'apiError.invalidChallenge',
+  mfa_already_enabled: 'apiError.mfaAlreadyEnabled',
+  mfa_setup_first: 'apiError.mfaSetupFirst',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

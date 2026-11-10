@@ -277,3 +277,21 @@ export interface InstitutionReviewDto {
   representative: { name: string; jobTitle: string | null; login: string | null } | null
   history: { action: string; reason: string | null; at: string; by: string | null }[]
 }
+
+// ───────────── Second factor: authenticator app (ministry and Super Admins) ─────────────
+
+/** `/auth/login` answers this instead of a session when the account needs the authenticator code. */
+export interface MfaChallengeDto {
+  mfaRequired: true
+  /** `setup`: first sign-in — link the app (`/auth/mfa/setup`, then `/auth/mfa/confirm`); `verify`: enter its code (`/auth/mfa/verify`). */
+  stage: 'setup' | 'verify'
+  /** Pass for the next step; valid for `expiresInSeconds`. */
+  challenge: string
+  expiresInSeconds: number
+}
+
+/** The secret to link the app: show `otpauthUrl` as a QR code and `secret` for typing in by hand. */
+export interface MfaSetupDto {
+  secret: string
+  otpauthUrl: string
+}

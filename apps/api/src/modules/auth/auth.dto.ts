@@ -139,3 +139,17 @@ export class GoogleAuthDto {
   @IsIn(['uz', 'ru', 'en'])
   lang?: 'uz' | 'ru' | 'en'
 }
+
+/** Second factor: the pass `/auth/login` answered (ministry and Super Admins). */
+export class MfaChallengeBody {
+  @IsString()
+  @Length(20, 2000)
+  challenge!: string
+}
+
+/** Second factor: the pass and a 6-digit code from the app — or, in `/auth/mfa/verify`, a recovery code «xxxx-xxxx». */
+export class MfaCodeBody extends MfaChallengeBody {
+  @IsString()
+  @Length(6, 20)
+  code!: string
+}

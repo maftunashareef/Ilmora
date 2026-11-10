@@ -6,6 +6,7 @@ import { PrismaService } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { AccountService, type LoginResult, type PublicUser } from './account.service'
+import { MfaService } from './mfa.service'
 import { OtpService } from './otp.service'
 import { type SessionMeta, TokenService } from './token.service'
 
@@ -23,6 +24,7 @@ export class AuthService {
     private readonly audit: AuditService,
     private readonly accounts: AccountService,
     @Inject(ENV) private readonly env: Env,
+    private readonly mfa: MfaService,
   ) {}
 
   requestOtp(tenantId: string, phone: string, lang: 'uz' | 'ru' | 'en', meta: { ip?: string }) {
@@ -42,6 +44,8 @@ export class AuthService {
       await this.audit.record({ action: 'auth.register', entityType: 'User', entityId: user.id, after: { roles: user.roles, method: 'otp' } })
     } else {
       if (!user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
+      // The ministry and the Super Admins: a one-time SMS code is not the second factor — login, password and the app code.
+      this.mfa.refuseOtherSignIn(user)
       user = await this.prisma.client.user.update({
         where: { id: user.id },
         data: { phoneVerifiedAt: user.phoneVerifiedAt ?? now, lastLoginAt: now, ...(input.lang ? { preferredLang: input.lang } : {}) },
@@ -56,9 +60,37 @@ export class AuthService {
     const rotated = await this.tokens.rotate(raw, meta)
     const user = await TenantContext.forTenant(rotated.tenantId, () => this.prisma.client.user.findUnique({ where: { id: rotated.userId }, include: USER_INCLUDE }))
     if (!user || !user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
+    // A session of the ministry or a Super Admin lives on only if it was opened with the authenticator code.
+    if (!(await TenantContext.forTenant(rotated.tenantId, () => this.mfa.allowsRefresh(user, rotated.familyId)))) {
+      await TenantContext.forTenant(rotated.tenantId, () => this.tokens.revokeFamily(rotated.tenantId, rotated.familyId, 'mfa-required'))
+      throw AppError.unauthorized('Sign in again with the authenticator code', 'invalid_refresh')
+    }
     const roles = await this.accounts.effectiveRoles(user)
     const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: this.accounts.toPublic(user, roles) }
+  }
+
+  /** Second factor, first sign-in: the secret for the app (QR code). */
+  mfaSetup(challenge: string) {
+    return this.mfa.setup(challenge)
+  }
+
+  /** Second factor, first sign-in: the first code links the app and opens the session; the recovery codes are shown once. */
+  async mfaConfirm(challenge: string, code: string, meta: SessionMeta): Promise<LoginResult & { recoveryCodes: string[] }> {
+    const { userId, recoveryCodes } = await this.mfa.confirm(challenge, code)
+    return { ...(await this.openMfaSession(userId, 'password+totp', meta)), recoveryCodes }
+  }
+
+  /** Second factor: a code from the app or a recovery code opens the session. */
+  async mfaVerify(challenge: string, code: string, meta: SessionMeta): Promise<LoginResult> {
+    const { userId, method } = await this.mfa.verify(challenge, code)
+    return this.openMfaSession(userId, method === 'totp' ? 'password+totp' : 'password+recovery_code', meta)
+  }
+
+  private async openMfaSession(userId: string, method: string, meta: SessionMeta): Promise<LoginResult> {
+    const user = await this.prisma.client.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
+    await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method } })
+    return this.accounts.openSession(user, meta)
   }
 
   async logout(raw: string | undefined): Promise<void> {

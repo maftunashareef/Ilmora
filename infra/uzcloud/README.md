@@ -135,12 +135,14 @@ UzCloud → Object Storage: бакет `ilmora-backups`, класс **Cold**, и
 ```bash
 cd /opt/ilmora/infra/uzcloud
 cp api.env.example api.env && cp admin/.env.example admin/.env && chmod 600 api.env admin/.env
-for i in 1 2 3 4 5; do openssl rand -hex 32; done
+for i in 1 2 3 4 5 6; do openssl rand -hex 32; done
 nano api.env
 ```
 
-Пять сгенерированных строк — пять разных секретов. В `api.env` вставить четыре:
-`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `JWT_ACCESS_SECRET`, `OTP_JOB_ENCRYPTION_KEY`. Остальное уже заполнено для
+Шесть сгенерированных строк — шесть разных секретов. В `api.env` вставить пять:
+`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `JWT_ACCESS_SECRET`, `OTP_JOB_ENCRYPTION_KEY` и `TOTP_ENCRYPTION_KEY`
+(ключ для кодов из приложения у министерства и Super Admin; без него министерство не войдёт, а Super Admin входят
+только по паролю; после установки не менять — подключённые приложения перестанут подходить). Остальное уже заполнено для
 запуска: домен `ilmoraa.uz`, пустой каталог (`SEED_CATALOG=false`), SMS без Eskiz (только в журнал), Payme/Click пусто.
 Сохранить: `Ctrl+O`, Enter, `Ctrl+X`.
 
@@ -148,7 +150,7 @@ nano api.env
 nano admin/.env
 ```
 
-Вписать `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` (из шага 6) и `BACKUP_PASSPHRASE` (пятая строка).
+Вписать `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` (из шага 6) и `BACKUP_PASSPHRASE` (шестая строка).
 **`BACKUP_PASSPHRASE` сохранить ещё и в менеджере паролей**: без него копии не расшифровать. Строки `API_IMAGE…`
 оставить пустыми — их заполняет релиз.
 
@@ -217,6 +219,9 @@ sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate
   sh /opt/ilmora/infra/uzcloud/compose.sh web logs --tail=100 api
   sh /opt/ilmora/infra/uzcloud/compose.sh admin logs --tail=100 worker
   ```
+- **Ключ кодов из приложения** (`TOTP_ENCRYPTION_KEY`, нужен с релиза, где министерство и Super Admin входят с кодом):
+  на ilmora-admin `openssl rand -hex 32`, строку — в `api.env` как `TOTP_ENCRYPTION_KEY=…`, дальше как в пункте ниже.
+  Ключ — только на серверах (и в менеджере паролей), не в чатах и не в GitHub; поставленный ключ не менять.
 - **Поменять `api.env`** (ключи Payme, Click, Eskiz): правка на ilmora-admin, копия на ilmora-web (`scp -3`, как в
   шаге 7), затем на admin `… compose.sh admin up -d worker`, на web `… compose.sh web up -d api`.
   Адреса для кабинетов Payme / Click: `https://ilmoraa.uz/payments/payme`,

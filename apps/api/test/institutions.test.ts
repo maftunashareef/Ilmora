@@ -12,6 +12,7 @@ import { InstitutionReviewService } from '../src/modules/institutions/institutio
 import { InstitutionsService } from '../src/modules/institutions/institutions.service'
 import type { NotifyInput, NotificationsService } from '../src/modules/notifications/notifications.service'
 import { DB_AVAILABLE, TestContext } from './helpers'
+import { mfaStub } from './stubs'
 
 describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions, submit (ТЗ 4.2)', () => {
   const ctx = new TestContext()
@@ -22,7 +23,7 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
     ownerIds: async (tenantId: string) => (await TenantContext.system(() => ctx.prisma.client.user.findMany({ where: { tenantId, isOwner: true, isActive: true }, select: { id: true } }))).map((u) => u.id),
   } as unknown as NotificationsService
   const service = new InstitutionsService(ctx.prisma, ctx.audit, notifications)
-  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, {} as RedisService, notifications, ctx.env)
+  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, {} as RedisService, notifications, ctx.env, mfaStub)
   beforeAll(() => ctx.connect())
   afterAll(() => ctx.close())
 
