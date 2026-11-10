@@ -41,9 +41,12 @@ export class MfaService {
     return !!this.env.TOTP_ENCRYPTION_KEY
   }
 
-  /** The account must pass the second factor: always for the ministry, for the Super Admins once the key is set. */
+  /**
+   * The account must pass the second factor: always for the ministry; for the Super Admins and the finance admins
+   * (they settle payments by hand — security review 10.11 №1) once the key is set.
+   */
   enforced(user: { roles: Role[]; isOwner: boolean }): boolean {
-    return user.roles.includes('MINISTRY') || (user.isOwner && this.configured)
+    return user.roles.includes('MINISTRY') || ((user.isOwner || user.roles.includes('FINANCE_ADMIN')) && this.configured)
   }
 
   /**

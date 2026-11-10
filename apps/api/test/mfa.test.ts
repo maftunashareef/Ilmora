@@ -141,6 +141,10 @@ describe.skipIf(!DB_AVAILABLE)('Second factor for the ministry and the Super Adm
     expect(() => withKey.mfa.refuseOtherSignIn(ministry)).toThrow(expect.objectContaining({ code: 'mfa_password_login' }))
     const student = await s.inT(() => ctx.prisma.client.user.findFirstOrThrow({ where: { login: 'a.student' } }))
     expect(() => withKey.mfa.refuseOtherSignIn(student)).not.toThrow()
+    // The finance admin settles payments by hand: the app code too, once the key is set (security review №1).
+    expect(withKey.mfa.enforced({ roles: ['FINANCE_ADMIN'], isOwner: false })).toBe(true)
+    expect(withoutKey.mfa.enforced({ roles: ['FINANCE_ADMIN'], isOwner: false })).toBe(false)
+    expect(withKey.mfa.enforced({ roles: ['CENTER_ADMIN', 'TEACHER'], isOwner: false })).toBe(false)
 
     // A session opened before the app was linked does not survive a refresh.
     const old = await s.inT(() => ctx.tokens.issueRefresh(ministry.id, s.tenantId, meta))

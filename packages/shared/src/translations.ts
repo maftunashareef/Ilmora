@@ -1351,6 +1351,7 @@ export const dict = {
   'apiError.noPassword': d('Bu hisob parolsiz kiradi.', 'Этот аккаунт входит без пароля.', 'This account signs in without a password.'),
   'apiError.wrongPassword': d('Joriy parol notöğri.', 'Текущий пароль неверный.', 'The current password is wrong.'),
   'apiError.samePassword': d('Yangi parol joriysidan farq qilişi kerak.', 'Новый пароль должен отличаться от текущего.', 'The new password must differ from the current one.'),
+  'apiError.noLogin': d('Bu hisob faqat SMS orqali kiradi: unda login yöq.', 'Этот аккаунт входит только по SMS: у него нет логина.', 'This account signs in by SMS only: it has no login.'),
   'apiError.passwordChangeRequired': d('Avval vaqtinçalik parolni almaştiring.', 'Сначала смените временный пароль.', 'Change the temporary password first.'),
   'apiError.passwordIsLogin': d('Parol login bilan bir xil bölmasligi kerak.', 'Пароль не должен совпадать с логином.', 'The password must not be the login.'),
   'apiError.alreadyBlocked': d('Yozuv allaqaçon bloklangan.', 'Запись уже заблокирована.', 'The record is already blocked.'),
