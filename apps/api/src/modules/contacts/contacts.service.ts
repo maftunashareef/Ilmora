@@ -76,7 +76,8 @@ export class ContactsService {
     const companyId = await this.ownCompany(actor)
     const r = await this.prisma.client.contactRequest.findFirst({ where: { id, companyId }, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, userId: true, user: { select: { displayName: true } } } })
     if (!r) throw AppError.notFound('Contact request')
-    const full = r.status === 'ACCEPTED' ? await this.fullCard(r.userId) : null
+    const consent = r.status === 'ACCEPTED' ? await this.activeConsent(r.userId, companyId) : null
+    const full = consent ? await this.fullCard(r.userId, consent.givenAt) : null
     if (full) await this.audit.record({ action: 'contact.view', entityType: 'User', entityId: r.userId, after: { companyId, requestId: id } })
     return { id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.userId, name: r.user.displayName, full } }
   }
@@ -85,7 +86,9 @@ export class ContactsService {
   async certificateLink(actor: RequestActor, requestId: string, certificateId: string): Promise<DocumentLinkDto> {
     const companyId = await this.ownCompany(actor)
     const r = await this.prisma.client.contactRequest.findFirst({ where: { id: requestId, companyId, status: 'ACCEPTED' }, select: { userId: true } })
-    const cert = r ? await this.prisma.client.studentCertificate.findFirst({ where: { id: certificateId, userId: r.userId }, select: { fileKey: true } }) : null
+    const consent = r ? await this.activeConsent(r.userId, companyId) : null
+    // Only a file the student had when they opened their contacts (ТЗ 8): what they add later is not shared.
+    const cert = r && consent ? await this.prisma.client.studentCertificate.findFirst({ where: { id: certificateId, userId: r.userId, createdAt: { lte: consent.givenAt } }, select: { fileKey: true } }) : null
     if (!r || !cert) throw AppError.notFound('Certificate')
     await this.audit.record({ action: 'contact.certificate.download', entityType: 'StudentCertificate', entityId: certificateId, after: { companyId, userId: r.userId } })
     return { url: await this.docs.downloadUrl(cert.fileKey), expiresInSeconds: DOC_LINK_SECONDS }
@@ -124,16 +127,58 @@ export class ContactsService {
     return this.studentList(actor)
   }
 
-  /** The full card: name, phone (contact phone, else the SMS sign-in number), e-mail, study, certificates. */
-  async fullCard(userId: string): Promise<StudentFullCardDto> {
-    const u = await this.prisma.client.user.findFirstOrThrow({
-      where: { id: userId },
+  /**
+   * «Отозвать доступ» (ТЗ 8): the student takes back the contacts opened to one company. The consent row gets its
+   * revocation date, the request becomes WITHDRAWN (the company does not ask again); what the company already saw stays
+   * with it — the student is warned about that on the screen.
+   */
+  async revoke(actor: RequestActor, id: string): Promise<StudentContactRequestDto[]> {
+    const r = await this.prisma.client.contactRequest.findFirst({ where: { id, userId: actor.id }, select: { companyId: true } })
+    if (!r) throw AppError.notFound('Contact request')
+    const now = new Date()
+    await this.prisma.client.$transaction(async (tx) => {
+      const moved = await tx.contactRequest.updateMany({ where: { id, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now } })
+      if (moved.count !== 1) throw AppError.conflict('contact_not_open', 'Only opened contacts can be taken back')
+      await tx.studentConsent.updateMany({ where: { userId: actor.id, kind: 'COMPANY_CONTACTS', companyId: r.companyId, revokedAt: null }, data: { revokedAt: now } })
+    })
+    await this.audit.record({ action: 'contact.revoke', entityType: 'ContactRequest', entityId: id, after: { companyId: r.companyId } })
+    return this.studentList(actor)
+  }
+
+  /** The student's consent to this company in force (checked at every read — a revocation works at once). */
+  private activeConsent(userId: string, companyId: string) {
+    return this.prisma.client.studentConsent.findFirst({ where: { userId, kind: 'COMPANY_CONTACTS', companyId, revokedAt: null }, orderBy: { givenAt: 'desc' }, select: { givenAt: true } })
+  }
+
+  /**
+   * The full card: name, phone (contact phone, else the SMS sign-in number), e-mail, study, certificates — those the
+   * student had by `certificatesUntil` (when they agreed), not the ones added later.
+   */
+  async fullCard(userId: string, certificatesUntil?: Date): Promise<StudentFullCardDto> {
+    const card = (await this.fullCards([userId], certificatesUntil ? new Map([[userId, certificatesUntil]]) : undefined)).get(userId)
+    if (!card) throw AppError.notFound('Student')
+    return card
+  }
+
+  /** Full cards of many students in two queries (a company opening its applications). */
+  async fullCards(userIds: string[], certificatesUntil?: Map<string, Date>): Promise<Map<string, StudentFullCardDto>> {
+    if (!userIds.length) return new Map()
+    const users = await this.prisma.client.user.findMany({
+      where: { id: { in: userIds } },
       select: {
-        displayName: true, email: true, phoneE164: true, phoneVerifiedAt: true,
+        id: true, displayName: true, email: true, phoneE164: true, phoneVerifiedAt: true,
         studentProfile: { select: { contactPhone: true, graduationYear: true, about: true, institution: { select: { name: true } }, direction: { select: DIRECTION_WITH_MAIN } } },
       },
     })
-    const certs = await this.prisma.client.studentCertificate.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, select: { id: true, title: true, issuer: true, issuedAt: true, contentType: true, sizeBytes: true, createdAt: true } })
+    const certs = await this.prisma.client.studentCertificate.findMany({ where: { userId: { in: userIds } }, orderBy: { createdAt: 'desc' }, select: { userId: true, id: true, title: true, issuer: true, issuedAt: true, contentType: true, sizeBytes: true, createdAt: true } })
+    const until = (userId: string) => certificatesUntil?.get(userId)?.getTime() ?? Infinity
+    return new Map(users.map((u) => [u.id, this.toFullCard(u, certs.filter((c) => c.userId === u.id && c.createdAt.getTime() <= until(u.id)))]))
+  }
+
+  private toFullCard(
+    u: { displayName: string; email: string | null; phoneE164: string | null; phoneVerifiedAt: Date | null; studentProfile: { contactPhone: string | null; graduationYear: number | null; about: string | null; institution: { name: string } | null; direction: Parameters<typeof mainOf>[0] | null } | null },
+    certs: { id: string; title: string; issuer: string | null; issuedAt: Date | null; contentType: string; sizeBytes: number; createdAt: Date }[],
+  ): StudentFullCardDto {
     const p = u.studentProfile
     return {
       name: u.displayName,

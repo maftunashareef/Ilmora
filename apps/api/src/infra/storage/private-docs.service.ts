@@ -43,9 +43,10 @@ export class PrivateDocsService {
     return presignPut(this.s3(), new PutObjectCommand({ Bucket: this.bucket(), Key: key, ContentType: contentType, ContentLength: size }), 600)
   }
 
-  /** A presigned GET that lives DOC_LINK_SECONDS. */
+  /** A presigned GET that lives DOC_LINK_SECONDS; the browser saves the file instead of opening it on the storage's address. */
   async downloadUrl(key: string): Promise<string> {
-    return getSignedUrl(this.s3(), new GetObjectCommand({ Bucket: this.bucket(), Key: key }), { expiresIn: DOC_LINK_SECONDS })
+    const name = key.slice(key.lastIndexOf('/') + 1)
+    return getSignedUrl(this.s3(), new GetObjectCommand({ Bucket: this.bucket(), Key: key, ResponseContentDisposition: `attachment; filename="${name}"` }), { expiresIn: DOC_LINK_SECONDS })
   }
 
   /** Size and first 16 bytes of an uploaded object, or null when there is none. */

@@ -135,12 +135,13 @@ export class VacanciesService {
       for (const a of fresh) await this.tellStudent(tenantId, a, 'VIEWED', company.name, v.title)
     }
     const rows = await this.prisma.client.vacancyApplication.findMany({ where: { vacancyId: id }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true } })
-    const out: VacancyApplicationDto[] = []
-    for (const r of rows) {
-      out.push({ id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId)) } })
-      await this.audit.record({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, vacancyId: id, applicationId: r.id } })
-    }
-    return out
+    // The cards in two queries and the audit rows in one insert, however many applied.
+    // Certificates the student had when applying — the application is the consent (ТЗ 5.4, 8).
+    const cards = await this.contacts.fullCards(rows.map((r) => r.userId), new Map(rows.map((r) => [r.userId, r.createdAt])))
+    await this.audit.recordMany(rows.map((r) => ({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, vacancyId: id, applicationId: r.id } })))
+    return rows.filter((r) => cards.has(r.userId)).map((r) => ({
+      id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...cards.get(r.userId)! },
+    }))
   }
 
   /** One application with the full card («Мои контакты» opens it from there); the view is audited, a new one becomes «просмотрен». */
@@ -152,7 +153,7 @@ export class VacanciesService {
     if (moved.count === 1) await this.tellStudent(tenantId, a, 'VIEWED', company.name, a.vacancy.title)
     const r = await this.prisma.client.vacancyApplication.findUniqueOrThrow({ where: { id: applicationId }, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true } })
     await this.audit.record({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, applicationId } })
-    return { id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId)) } }
+    return { id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId, r.createdAt)) } }
   }
 
   /** «Пригласить» / «Отказать»: from new or viewed only; the student is told. */
@@ -170,8 +171,8 @@ export class VacanciesService {
   /** A certificate file of an applicant — a 5-minute link, audited (ТЗ 8 «скачал файл»). */
   async certificateLink(actor: RequestActor, applicationId: string, certificateId: string): Promise<DocumentLinkDto> {
     const company = await this.ownCompany(actor)
-    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, vacancy: { companyId: company.id } }, select: { userId: true } })
-    const cert = a ? await this.prisma.client.studentCertificate.findFirst({ where: { id: certificateId, userId: a.userId }, select: { fileKey: true } }) : null
+    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, vacancy: { companyId: company.id } }, select: { userId: true, createdAt: true } })
+    const cert = a ? await this.prisma.client.studentCertificate.findFirst({ where: { id: certificateId, userId: a.userId, createdAt: { lte: a.createdAt } }, select: { fileKey: true } }) : null
     if (!a || !cert) throw AppError.notFound('Certificate')
     await this.audit.record({ action: 'vacancy.certificate.download', entityType: 'StudentCertificate', entityId: certificateId, after: { companyId: company.id, userId: a.userId, applicationId } })
     return { url: await this.docs.downloadUrl(cert.fileKey), expiresInSeconds: DOC_LINK_SECONDS }
@@ -223,6 +224,15 @@ export class VacanciesService {
       await this.notifications.notify({ tenantId, userIds: reps.map((u) => u.id), type: 'vacancy.application', params: { vacancyTitle: v.title, vacancyId: id }, dedupeKey: `vacancy-application:${applicationId}` })
     })
     return this.get(actor, id)
+  }
+
+  /** «Отозвать отклик» (ТЗ 8): the application goes, and with it the company's access to the card; the journal keeps the trace. */
+  async withdraw(actor: RequestActor, applicationId: string): Promise<StudentApplicationDto[]> {
+    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, userId: actor.id }, select: { id: true, vacancyId: true, status: true } })
+    if (!a) throw AppError.notFound('Application')
+    await this.prisma.client.vacancyApplication.delete({ where: { id: a.id } })
+    await this.audit.record({ action: 'vacancy.application.withdraw', entityType: 'VacancyApplication', entityId: a.id, before: { vacancyId: a.vacancyId, status: a.status } })
+    return this.myApplications(actor)
   }
 
   async myApplications(actor: RequestActor): Promise<StudentApplicationDto[]> {

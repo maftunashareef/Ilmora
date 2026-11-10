@@ -1343,6 +1343,7 @@ export const dict = {
   'apiError.industryExists': d('Bunday slug bilan soha allaqaçon bor.', 'Отрасль с таким slug уже есть.', 'An industry with this slug already exists.'),
   'apiError.directionExists': d('Bunday nomli yönaliş allaqaçon bor: ularni birlaştiring.', 'Направление с таким названием уже есть: слейте их.', 'A direction with this name already exists: merge them.'),
   'apiError.invalidMerge': d('Bu yozuvlarni birlaştirib bölmaydi.', 'Эти записи нельзя слить.', 'These records cannot be merged.'),
+  'apiError.contactNotOpen': d('Faqat oçilgan kontaktlarni qaytarib olişingiz mumkin.', 'Отозвать можно только открытые контакты.', 'Only opened contacts can be taken back.'),
   'apiError.responseDecided': d('Bu javob böyiça qaror allaqaçon qabul qilingan.', 'По этому отклику уже принято решение.', 'This response is already decided.'),
   'apiError.invalidJobTitle': d('Lavozimingizni kiriting (2–80 ta belgi).', 'Укажите вашу должность (2–80 символов).', 'Enter your position (2–80 characters).'),
   'apiError.incomplete': d('Davom etiş uçun paket va kurslarni tanlang.', 'Чтобы продолжить, выберите пакет и курсы.', 'Choose a package and courses to continue.'),

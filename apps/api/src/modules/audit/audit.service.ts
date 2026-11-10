@@ -24,12 +24,20 @@ export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
   async record(input: AuditInput): Promise<void> {
+    const client = input.tx ?? this.prisma.client
+    await client.auditEvent.create({ data: this.row(input) })
+  }
+
+  /** Many rows of one request in one insert (e.g. every student card a company opened in a list). */
+  async recordMany(inputs: Omit<AuditInput, 'tx'>[]): Promise<void> {
+    if (inputs.length) await this.prisma.client.auditEvent.createMany({ data: inputs.map((i) => this.row(i)) })
+  }
+
+  private row(input: AuditInput): Prisma.AuditEventUncheckedCreateInput {
     const ctx = TenantContext.current()
     const tenantId = input.tenantId ?? ctx?.tenantId
     if (!tenantId) throw new Error('Audit record requires a tenant')
-    const client = input.tx ?? this.prisma.client
-    await client.auditEvent.create({
-      data: {
+    return {
         tenantId,
         actorId: ctx?.actor?.id ?? null,
         actorRoles: ctx?.actor?.roles ?? [],
@@ -42,7 +50,6 @@ export class AuditService {
         ip: ctx?.ip,
         userAgent: ctx?.userAgent,
         requestId: ctx?.requestId,
-      },
-    })
+    }
   }
 }

@@ -279,6 +279,24 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       })
     })
 
+    it('students who named it before the approval are asked about at the approval (security review №16)', async () => {
+      const { tenantId, inT, id, admin } = await submitted('rev-students')
+      await inT(async () => {
+        const db = ctx.prisma.client
+        const profile = async (mode: 'STUDYING' | 'APPLYING') => {
+          const u = await ctx.makeStudent(tenantId)
+          await db.studentProfile.create({ data: { tenantId, userId: u.id, mode, institutionId: id, studyConfirmation: 'NONE' } })
+          return u.id
+        }
+        const studying = await profile('STUDYING')
+        const applying = await profile('APPLYING')
+        await review.approve(tenantId, admin, id)
+        const state = async (userId: string) => (await db.studentProfile.findUniqueOrThrow({ where: { userId } })).studyConfirmation
+        expect(await state(studying)).toBe('PENDING')
+        expect(await state(applying)).toBe('NONE')
+      })
+    })
+
     it('a rejected re-review keeps the workspace of an institution approved once', async () => {
       const { tenantId, inT, id, rep, admin } = await submitted('rev-again')
       await inT(async () => {

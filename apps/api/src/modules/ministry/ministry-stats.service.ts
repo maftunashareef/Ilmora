@@ -3,6 +3,7 @@ import type { L, MinistryStatsDto, MinistryStatsFilters, MinistryTableKey, Stats
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
+import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { regionIdByRef } from '../registry/registry.mappers'
 
 const T = (uz: string, ru: string, en: string): L => ({ uz, ru, en })
@@ -345,12 +346,17 @@ export class MinistryStatsService {
     return by
   }
 
+  /** Reached from AnnouncementLine (no tenantId): the tenant is stated here, as in companyWhere. */
   private announcementWhere(ctx: Ctx): Prisma.GraduationAnnouncementWhereInput {
-    return { status: { in: ['PUBLISHED', 'CLOSED'] }, institution: ctx.inst, ...(ctx.f.year ? { year: ctx.f.year } : {}) }
+    return { tenantId: TenantContext.requireTenantId(), status: { in: ['PUBLISHED', 'CLOSED'] }, institution: ctx.inst, ...(ctx.f.year ? { year: ctx.f.year } : {}) }
   }
 
+  /**
+   * Also used as a relation filter from rows without tenantId (CompanyIndustry): the tenant is stated here, the
+   * automatic scope covers only top-level queries of tenant models.
+   */
   private companyWhere(ctx: Ctx): Prisma.CompanyWhereInput {
-    return { approvedAt: { not: null }, ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}) }
+    return { tenantId: TenantContext.requireTenantId(), approvedAt: { not: null }, ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}) }
   }
 
   private requestWhere(ctx: Ctx): Prisma.TrainingRequestWhereInput {

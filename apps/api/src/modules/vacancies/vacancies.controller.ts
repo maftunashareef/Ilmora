@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { Approved } from '../../common/registry-access'
@@ -51,4 +51,5 @@ export class StudentVacanciesController {
   apply(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(ApplyInput)) dto: ApplyInput) { return this.vacancies.apply(t, a, id, dto) }
 
   @Get('students/me/applications') mine(@CurrentActor() a: RequestActor) { return this.vacancies.myApplications(a) }
+  @Delete('students/me/applications/:id') withdraw(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.withdraw(a, id) }
 }

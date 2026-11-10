@@ -24,5 +24,7 @@ export class StudentContactsController {
 
   @Get() list(@CurrentActor() a: RequestActor) { return this.contacts.studentList(a) }
   @Post(':id/accept') accept(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @ClientInfo() ci: ClientInfoValue, @Param('id') id: string) { return this.contacts.decide(t, a, id, true, ci.ip) }
+  /** «Отозвать доступ»: the contacts opened to this company are closed again. */
+  @Post(':id/revoke') revoke(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.contacts.revoke(a, id) }
   @Post(':id/decline') decline(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.contacts.decide(t, a, id, false) }
 }
