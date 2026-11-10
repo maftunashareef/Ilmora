@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import type { z } from 'zod'
 import { isSafeExternalUrl, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
@@ -782,15 +782,7 @@ export class ManageService {
     if (!s3Configured(this.env)) {
       throw AppError.invalid('storage_not_configured', 'Object storage (S3) is not configured in this environment.')
     }
-    const s3 = new S3Client({
-      endpoint: this.env.S3_ENDPOINT,
-      region: this.env.S3_REGION,
-      credentials: {
-        accessKeyId: this.env.S3_ACCESS_KEY_ID!,
-        secretAccessKey: this.env.S3_SECRET_ACCESS_KEY!,
-      },
-      forcePathStyle: this.env.S3_FORCE_PATH_STYLE,
-    })
+    const s3 = new S3Client(s3ClientConfig(this.env))
     const ext = input.contentType === 'image/webp' ? 'webp' : input.contentType === 'image/png' ? 'png' : 'jpg'
     const key = `${prefix}-${Date.now()}.${ext}`
     const command = new PutObjectCommand({
@@ -799,7 +791,7 @@ export class ManageService {
       ContentType: input.contentType,
       ContentLength: input.fileSize,
     })
-    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 })
+    const uploadUrl = await presignPut(s3, command, 900)
     const baseUrl = this.env.S3_PUBLIC_BASE_URL ?? (this.env.S3_ENDPOINT ? `${this.env.S3_ENDPOINT}/${this.env.S3_BUCKET}` : '')
     const publicUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/${key}` : `/${key}`
     return { uploadUrl, publicUrl, key }

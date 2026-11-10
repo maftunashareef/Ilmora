@@ -23,6 +23,12 @@ export const remotePatterns = (() => {
   }
 })()
 
+/**
+ * Origin of the object storage (from NEXT_PUBLIC_MEDIA_BASE_URL): images load from it, and the browser uploads there with
+ * presigned PUTs, including private documents, whose bucket sits on the same storage host (path-style addresses).
+ */
+const storageOrigins = remotePatterns.map((p) => `${p.protocol}://${p.hostname}${p.port ? `:${p.port}` : ''}`).join(' ')
+
 export const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
@@ -37,13 +43,13 @@ export const securityHeaders = [
       // React dev tooling needs eval; production bundles never do.
       `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'production' ? '' : " 'unsafe-eval'"}`,
       "style-src 'self' 'unsafe-inline'",
-      `img-src 'self' data: blob: ${remotePatterns.map((p) => `${p.protocol}://${p.hostname}${p.port ? `:${p.port}` : ''}`).join(' ')}`.trim(),
+      `img-src 'self' data: blob: ${storageOrigins}`.trim(),
       "font-src 'self' data:",
       "media-src 'self' blob:",
       // Lesson videos are embedded from YouTube (privacy-enhanced no-cookie host) and Vimeo; without frame-src these
       // iframes fall back to default-src 'self' and never load. Kept to the exact player origins used in embedFor().
       "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com",
-      `connect-src 'self' ${apiOrigin}`.trim(),
+      `connect-src 'self' ${apiOrigin} ${storageOrigins}`.replace(/\s+/g, ' ').trim(),
       "worker-src 'self' blob:",
       "frame-ancestors 'none'",
       "base-uri 'self'",
