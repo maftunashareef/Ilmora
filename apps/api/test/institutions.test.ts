@@ -6,7 +6,7 @@ import { ZodValidationPipe } from '../src/common/zod.pipe'
 import type { RedisService } from '../src/infra/redis/redis.service'
 import { TenantContext, type RequestActor } from '../src/infra/tenancy/tenant-context'
 import { AccountService } from '../src/modules/auth/account.service'
-import { InstitutionsAdminController, RejectInput } from '../src/modules/institutions/institutions-admin.controller'
+import { AdminInstitutionsQuery, InstitutionsAdminController, RejectInput } from '../src/modules/institutions/institutions-admin.controller'
 import { ClaimInput, DirectionsInput, InstitutionPatch } from '../src/modules/institutions/institutions.schemas'
 import { InstitutionReviewService, officialName } from '../src/modules/institutions/institution-review.service'
 import { InstitutionsService } from '../src/modules/institutions/institutions.service'
@@ -82,6 +82,12 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       expect(sent).toEqual([expect.objectContaining({ type: 'registry.released', userIds: [squatter.id] })])
       expect(await db.auditEvent.count({ where: { entityId: imported.id, action: 'institution.release', reason: 'abandoned-draft' } })).toBe(1)
     })
+  })
+
+  it('the Super Admin search takes a 9-digit STIR, known statuses and types only', () => {
+    const pipe = new ZodValidationPipe(AdminInstitutionsQuery)
+    expect(pipe.transform({ stir: '011111111', q: ' axborot ', status: 'APPROVED', page: '2' })).toMatchObject({ stir: '011111111', q: 'axborot', status: 'APPROVED', page: 2 })
+    for (const bad of [{ stir: '0111' }, { stir: 'abcdefghi' }, { status: 'MERGED' }, { type: 'SHOP' }, { page: '0' }]) expect(() => pipe.transform(bad)).toThrow()
   })
 
   it('the review queue shows the official name of a record from the ministry list (security review №18)', () => {
@@ -371,6 +377,28 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
         expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
         expect(await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id } })).toMatchObject({ name: 'Toşkent IT texnikumi', searchKey: registrySearchKey('Toşkent IT texnikumi'), status: 'APPROVED', pendingChanges: null, rejectReason: null })
         expect((await review.detail(id)).history.map((h) => h.action)).toEqual(expect.arrayContaining(['institution.change.reject', 'institution.change.approve']))
+      })
+    })
+
+    it('the Super Admin finds any record — by STIR, name (official too), status, type, region — not only the queue (issue #50)', async () => {
+      const { tenantId, inT, id, admin, tashkent } = await submitted('rev-search')
+      await inT(async () => {
+        await review.approve(tenantId, admin, id)
+        await ctx.prisma.client.institution.update({ where: { id }, data: { name: 'Boşqa nom', searchKey: registrySearchKey('Boşqa nom'), searchText: registrySearchText('Boşqa nom'), officialName: 'Toşkent axborot texnikumi' } })
+        const unclaimed = await ctx.prisma.client.institution.create({ data: { tenantId, type: 'COLLEGE', name: 'Bo‘sh kollej', searchKey: registrySearchKey('Bo‘sh kollej'), stir: '066666666', source: 'IMPORT', regionId: tashkent.id } })
+        const merged = await ctx.prisma.client.institution.create({ data: { tenantId, type: 'TECHNIKUM', name: 'Dubl', searchKey: 'dubl', source: 'STUDENT', status: 'UNCLAIMED', mergedIntoId: id } })
+
+        // Without a status: the records somebody represents — whatever their status.
+        const all = await review.search({ page: 1 })
+        expect(all).toMatchObject({ total: 1, page: 1, pageSize: 50, items: [{ id, stir: '011111111', status: 'APPROVED', approvedAt: expect.any(String), blocked: false, inRegistry: true, representative: { name: 'Aziz Karimov' } }] })
+        expect((await review.search({ stir: '011111111', page: 1 })).items.map((i) => i.id)).toEqual([id])
+        expect((await review.search({ q: 'axborot texnikumi', page: 1 })).items.map((i) => i.id)).toEqual([id])
+        expect((await review.search({ q: 'boşqa', page: 1 })).items.map((i) => i.id)).toEqual([id])
+        expect((await review.search({ status: 'UNCLAIMED', page: 1 })).items.map((i) => i.id)).toEqual([unclaimed.id])
+        expect((await review.search({ status: 'UNCLAIMED', type: 'TECHNIKUM', page: 1 })).items).toEqual([])
+        expect((await review.search({ status: 'UNCLAIMED', regionId: tashkent.id, page: 1 })).total).toBe(1)
+        expect((await review.search({ regionId: 'mars', page: 1 })).total).toBe(0)
+        expect(JSON.stringify(await review.search({ q: 'dubl', status: 'UNCLAIMED', page: 1 }))).not.toContain(merged.id)
       })
     })
 

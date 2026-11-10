@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { type CompanyPendingChanges, type CompanyProfileDto, type CompanyReviewDto, type CompanyReviewItemDto, type L, registrySearchKey } from '@ilmora/shared'
+import { type AdminCompanyItemDto, type AdminPage, type CompanyPendingChanges, type CompanyProfileDto, type CompanyReviewDto, type CompanyReviewItemDto, type L, registrySearchKey } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
@@ -7,6 +7,7 @@ import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { INDUSTRY_SELECT, isUniqueViolation, toIndustry } from '../registry/registry.mappers'
+import type { AdminCompaniesQuery } from '../institutions/institutions-admin.controller'
 import { CompaniesService } from './companies.service'
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
@@ -16,6 +17,21 @@ const WAITING: Prisma.CompanyWhereInput = { OR: [{ status: 'PENDING' }, { pendin
 const REP_SELECT = { displayName: true, jobTitle: true, login: true, email: true } as const
 const toRep = (r: { displayName: string; jobTitle: string | null; login: string | null; email: string | null } | null) =>
   r ? { name: r.displayName, jobTitle: r.jobTitle, login: r.login, email: r.email } : null
+const ADMIN_PAGE = 50
+const ITEM_SELECT = {
+  id: true, name: true, stir: true, submittedAt: true, approvedAt: true, certificateFileKey: true, pendingChanges: true,
+  region: { select: { id: true, slug: true, name: true } },
+  industries: { select: { industry: { select: { ...INDUSTRY_SELECT, sortOrder: true } } } },
+  representative: { select: REP_SELECT },
+} as const satisfies Prisma.CompanySelect
+const toItem = (r: Prisma.CompanyGetPayload<{ select: typeof ITEM_SELECT }>): CompanyReviewItemDto => ({
+  id: r.id, name: r.name, stir: r.stir,
+  region: r.region ? { id: r.region.id, slug: r.region.slug, name: r.region.name as L } : null,
+  industries: r.industries.map((i) => i.industry).sort((a, b) => a.sortOrder - b.sortOrder).map(toIndustry),
+  submittedAt: iso(r.submittedAt), reReview: r.approvedAt !== null, certificateUploaded: r.certificateFileKey !== null,
+  pendingChanges: (r.pendingChanges as CompanyPendingChanges | null) ?? null,
+  representative: toRep(r.representative),
+})
 const notPending = () => AppError.conflict('not_pending', 'The profile is not waiting for a decision')
 
 /**
@@ -32,25 +48,23 @@ export class CompanyReviewService {
   ) {}
 
   async queue(): Promise<CompanyReviewItemDto[]> {
-    const rows = await this.prisma.client.company.findMany({
-      where: WAITING,
-      orderBy: { submittedAt: 'asc' },
-      take: 500,
-      select: {
-        id: true, name: true, stir: true, submittedAt: true, approvedAt: true, certificateFileKey: true, pendingChanges: true,
-        region: { select: { id: true, slug: true, name: true } },
-        industries: { select: { industry: { select: { ...INDUSTRY_SELECT, sortOrder: true } } } },
-        representative: { select: REP_SELECT },
-      },
-    })
-    return rows.map((r) => ({
-      id: r.id, name: r.name, stir: r.stir,
-      region: r.region ? { id: r.region.id, slug: r.region.slug, name: r.region.name as L } : null,
-      industries: r.industries.map((i) => i.industry).sort((a, b) => a.sortOrder - b.sortOrder).map(toIndustry),
-      submittedAt: iso(r.submittedAt), reReview: r.approvedAt !== null, certificateUploaded: r.certificateFileKey !== null,
-      pendingChanges: (r.pendingChanges as CompanyPendingChanges | null) ?? null,
-      representative: toRep(r.representative),
-    }))
+    const rows = await this.prisma.client.company.findMany({ where: WAITING, orderBy: { submittedAt: 'asc' }, take: 500, select: ITEM_SELECT })
+    return rows.map(toItem)
+  }
+
+  /** Every company — by STIR (exact), name, status; without a status, the ones somebody represents (issue #50). */
+  async search(q: AdminCompaniesQuery): Promise<AdminPage<AdminCompanyItemDto>> {
+    const key = q.q ? registrySearchKey(q.q) : ''
+    const where: Prisma.CompanyWhereInput = {
+      ...(q.status ? { status: q.status } : { representative: { isNot: null } }),
+      ...(q.stir ? { stir: q.stir } : {}),
+      ...(key ? { searchKey: { contains: key } } : {}),
+    }
+    const [rows, total] = await Promise.all([
+      this.prisma.client.company.findMany({ where, orderBy: [{ name: 'asc' }, { id: 'asc' }], skip: (q.page - 1) * ADMIN_PAGE, take: ADMIN_PAGE, select: { ...ITEM_SELECT, status: true, blockedAt: true } }),
+      this.prisma.client.company.count({ where }),
+    ])
+    return { items: rows.map((r) => ({ ...toItem(r), status: r.status, approvedAt: iso(r.approvedAt), blocked: r.blockedAt !== null })), total, page: q.page, pageSize: ADMIN_PAGE }
   }
 
   async detail(id: string): Promise<CompanyReviewDto> {
