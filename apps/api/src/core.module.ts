@@ -49,7 +49,9 @@ const REDACT_PATHS = [
           },
           autoLogging: { ignore: (req) => (req.url ?? '').startsWith('/health') },
           serializers: {
-            req: (req: { id: string; method: string; url: string; remoteAddress?: string }) => ({ id: req.id, method: req.method, url: (req.url ?? '').split('?')[0], ip: req.remoteAddress }),
+            // `ip` is the client's address as Express resolves it through the trusted proxy (TRUST_PROXY: Caddy's
+            // X-Forwarded-For), not the proxy's own address — the log now shows who called (security review 10.11 №71).
+            req: (req: { id: string; method: string; url: string; remoteAddress?: string; raw?: { ip?: string } }) => ({ id: req.id, method: req.method, url: (req.url ?? '').split('?')[0], ip: req.raw?.ip ?? req.remoteAddress, peer: req.remoteAddress }),
             res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
           },
           customProps: (req) => {

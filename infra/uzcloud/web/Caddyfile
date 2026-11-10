@@ -6,6 +6,22 @@
 }
 
 (common) {
+	# Request log (security review 10.11 №71): client address, method, path, status — to stdout, read with
+	# `docker compose logs caddy`. Cookies and Authorization are not logged by Caddy; the attendance QR token (?t=) is
+	# removed from the logged address. Check with `caddy validate` after changing.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete t
+				}
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+			}
+		}
+	}
 	encode zstd gzip
 	header {
 		Strict-Transport-Security "max-age=15552000; includeSubDomains"
