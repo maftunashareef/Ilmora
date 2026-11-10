@@ -468,3 +468,72 @@ export interface IncomingTrainingRequestDto {
   company: CompanyCardDto
   myOffer: { id: string; count: number; byYear: number; comment: string | null; status: MatchStatus; contacts: PartyContactsDto | null } | null
 }
+
+// ───────────── Ministry: registry view and figures (ТЗ 7) ─────────────
+
+/** Filters of the figures: region (id or slug), institution type, ownership, year (graduation, request, enrolment). */
+export interface MinistryStatsFilters {
+  regionId?: string
+  type?: RegistryInstitutionType
+  ownership?: RegistryOwnership
+  year?: number
+}
+
+/** Keys of the ministry's tables; each can be downloaded as Excel (`/v1/ministry/export?table=<key>`). */
+export const MINISTRY_TABLES = [
+  'demand_supply', 'coverage', 'institutions_by_region', 'institutions_by_type', 'students_by_industry', 'graduates_by_year',
+  'companies_by_region', 'ilmora_students', 'applicants', 'contract_help', 'vacancies', 'student_added',
+] as const
+export type MinistryTableKey = (typeof MINISTRY_TABLES)[number]
+
+/**
+ * One table of figures: columns with their titles in three languages, rows of values — counts, and names (industry,
+ * region, type) as `{ uz, ru, en }`. No personal data ever.
+ */
+export interface StatsTableDto {
+  key: MinistryTableKey
+  title: L
+  columns: { key: string; label: L; numeric: boolean }[]
+  rows: Record<string, string | number | null | L>[]
+}
+
+export interface MinistryStatsDto {
+  filters: MinistryStatsFilters
+  generatedAt: string
+  tables: StatsTableDto[]
+}
+
+/** An institution in the ministry's registry list (read-only). */
+export interface MinistryInstitutionItemDto {
+  id: string
+  name: string
+  nameRu: string | null
+  type: RegistryInstitutionType
+  ownership: RegistryOwnership | null
+  stir: string | null
+  region: PlaceRefDto | null
+  districtName: string | null
+  status: RegistryInstitutionStatus
+  /** Where the record came from: the official list, the institution itself, a student. */
+  source: 'IMPORT' | 'SELF' | 'STUDENT'
+  /** Counted in the official figures: approved and not a student-added record. */
+  official: boolean
+  students: number
+  directions: number
+}
+
+export interface MinistryCompanyItemDto {
+  id: string
+  name: string
+  stir: string
+  region: PlaceRefDto | null
+  industries: IndustryDto[]
+  status: RegistryCompanyStatus
+}
+
+export interface PageDto<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+}
