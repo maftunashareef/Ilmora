@@ -75,6 +75,29 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   request_closed: 'apiError.requestClosed',
   offer_decided: 'apiError.offerDecided',
   offer_exists: 'apiError.offerExists',
+  questionnaire_incomplete: 'apiError.questionnaireIncomplete',
+  certificates_limit: 'apiError.certificatesLimit',
+  certificate_exists: 'apiError.certificateExists',
+  // graduation announcements and contact requests
+  contact_request_exists: 'apiError.contactRequestExists',
+  contact_request_decided: 'apiError.contactRequestDecided',
+  announcement_closed: 'apiError.announcementClosed',
+  announcement_not_draft: 'apiError.announcementNotDraft',
+  announcement_not_published: 'apiError.announcementNotPublished',
+  invalid_line: 'apiError.invalidLine',
+  response_exists: 'apiError.responseExists',
+  response_decided: 'apiError.responseDecided',
+  // help with the contract fee
+  contract_help_exists: 'apiError.contractHelpExists',
+  contract_help_profile: 'apiError.contractHelpProfile',
+  // practice and internships
+  vacancy_closed: 'apiError.vacancyClosed',
+  application_exists: 'apiError.applicationExists',
+  application_decided: 'apiError.applicationDecided',
+  // Super Admin: reference data
+  industry_exists: 'apiError.industryExists',
+  direction_exists: 'apiError.directionExists',
+  invalid_merge: 'apiError.invalidMerge',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

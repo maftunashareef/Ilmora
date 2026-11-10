@@ -468,3 +468,411 @@ export interface IncomingTrainingRequestDto {
   company: CompanyCardDto
   myOffer: { id: string; count: number; byYear: number; comment: string | null; status: MatchStatus; contacts: PartyContactsDto | null } | null
 }
+
+// ───────────── Ministry: registry view and figures (ТЗ 7) ─────────────
+
+/** Filters of the figures: region (id or slug), institution type, ownership, year (graduation, request, enrolment). */
+export interface MinistryStatsFilters {
+  regionId?: string
+  type?: RegistryInstitutionType
+  ownership?: RegistryOwnership
+  year?: number
+}
+
+/** Keys of the ministry's tables; each can be downloaded as Excel (`/v1/ministry/export?table=<key>`). */
+export const MINISTRY_TABLES = [
+  'demand_supply', 'coverage', 'institutions_by_region', 'institutions_by_type', 'students_by_industry', 'graduates_by_year',
+  'companies_by_region', 'ilmora_students', 'applicants', 'contract_help', 'vacancies', 'student_added',
+] as const
+export type MinistryTableKey = (typeof MINISTRY_TABLES)[number]
+
+/**
+ * One table of figures: columns with their titles in three languages, rows of values — counts, and names (industry,
+ * region, type) as `{ uz, ru, en }`. No personal data ever.
+ */
+export interface StatsTableDto {
+  key: MinistryTableKey
+  title: L
+  columns: { key: string; label: L; numeric: boolean }[]
+  rows: Record<string, string | number | null | L>[]
+}
+
+export interface MinistryStatsDto {
+  filters: MinistryStatsFilters
+  generatedAt: string
+  tables: StatsTableDto[]
+}
+
+/** An institution in the ministry's registry list (read-only). */
+export interface MinistryInstitutionItemDto {
+  id: string
+  name: string
+  nameRu: string | null
+  type: RegistryInstitutionType
+  ownership: RegistryOwnership | null
+  stir: string | null
+  region: PlaceRefDto | null
+  districtName: string | null
+  status: RegistryInstitutionStatus
+  /** Where the record came from: the official list, the institution itself, a student. */
+  source: 'IMPORT' | 'SELF' | 'STUDENT'
+  /** Counted in the official figures: approved and not a student-added record. */
+  official: boolean
+  students: number
+  directions: number
+}
+
+export interface MinistryCompanyItemDto {
+  id: string
+  name: string
+  stir: string
+  region: PlaceRefDto | null
+  industries: IndustryDto[]
+  status: RegistryCompanyStatus
+}
+
+export interface PageDto<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+// ───────────── Student questionnaire: consents and the institution's view (ТЗ 4.1, 8) ─────────────
+
+/**
+ * Keys of `StudentQuestionnaire.consents` the API stores (ТЗ 8): show my card in my institution's graduation
+ * announcements; send my anonymous card to companies (help with the contract). Contacts for one company are a
+ * per-request decision, not a questionnaire mark.
+ */
+export const STUDENT_CONSENT_KEYS = ['GRADUATE_CARD', 'CONTRACT_HELP_CARD'] as const
+export type StudentConsentKey = (typeof STUDENT_CONSENT_KEYS)[number]
+/** Edition of the consent texts the marks refer to; a new edition (after the lawyer's review) gets a new version. */
+export const STUDENT_CONSENT_TEXT_VERSION = '2026-11-10'
+
+export type StudyConfirmationStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED'
+
+/** A student as their institution sees them (ТЗ 9.4): name, course, direction, year — no contacts, no birth date. */
+export interface InstitutionStudentDto {
+  id: string
+  name: string
+  course: number | null
+  direction: DirectionDto | null
+  graduationYear: number | null
+  confirmation: StudyConfirmationStatus
+}
+
+// ───────────── Student certificates and «Курсы в ILMORA» (ТЗ 5.5) ─────────────
+
+/** At most 20 certificate files per student, each PDF / JPG / PNG up to 10 MB. */
+export const STUDENT_CERTIFICATES_MAX = 20
+
+/** A certificate the student uploaded. Its authenticity is not checked; the file is private (5-minute links). */
+export interface StudentCertificateDto {
+  id: string
+  title: string
+  issuer: string | null
+  /** YYYY-MM-DD */
+  issuedAt: string | null
+  contentType: string
+  sizeBytes: number
+  createdAt: string
+}
+
+/** A course of a learning center the student had a subscription to — a record, not a certificate (ILMORA issues none). */
+export interface IlmoraCourseDto {
+  courseId: string
+  title: L
+  center: string
+  group: string
+  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED'
+  enrolledAt: string
+  /** Lessons held while enrolled, attended (present) and the share in percent; null before the first lesson. */
+  lessonsHeld: number
+  lessonsAttended: number
+  attendancePercent: number | null
+}
+
+// ───────────── Graduation announcements and contact requests (ТЗ 5.1, 5.3 «запрос контакта», 8) ─────────────
+
+export type AnnouncementStatus = 'DRAFT' | 'PUBLISHED' | 'CLOSED'
+export type ContactSource = 'GRADUATE' | 'CONTRACT_HELP'
+
+/** A graduate as a company sees them in an announcement (ТЗ 5.1): no phone, e-mail or files until they accept a request. */
+export interface GraduateCardDto {
+  studentId: string
+  name: string
+  institution: string
+  direction: DirectionDto
+  graduationYear: number
+  region: PlaceRefDto | null
+  about: string | null
+  /** Titles only; the files open after an accepted contact request. */
+  certificates: string[]
+  /** «Курсы в ILMORA»: titles of the learning-center courses the student took. */
+  ilmoraCourses: L[]
+  /** Only students the institution confirmed are shown. */
+  studyConfirmed: true
+  /** This company's contact request to the student, if any. */
+  contactRequest: MatchStatus | null
+}
+
+/** One line of an announcement: a direction (its industry decides which companies see it) and how many graduate. */
+export interface AnnouncementLineDto {
+  id: string
+  direction: DirectionDto
+  count: number
+}
+
+/** The institution's own announcement. */
+export interface AnnouncementDto {
+  id: string
+  year: number
+  status: AnnouncementStatus
+  publishedAt: string | null
+  closedAt: string | null
+  lines: (AnnouncementLineDto & {
+    /** Students with consent whose cards companies of this industry see; excluded ones are marked, not shown to companies. */
+    students: { studentId: string; name: string; course: number | null; excluded: boolean }[]
+  })[]
+  total: number
+  responses: { pending: number; accepted: number }
+}
+
+/** A company's answer to an announcement, as the institution sees it. */
+export interface AnnouncementResponseDto {
+  id: string
+  company: CompanyCardDto
+  lines: { lineId: string; direction: DirectionDto; wantedCount: number }[]
+  comment: string | null
+  status: MatchStatus
+  createdAt: string
+  /** Only once the institution accepted. */
+  contacts: PartyContactsDto | null
+}
+
+/** A published announcement as a company sees it: only the lines of its industries. */
+export interface CompanyAnnouncementDto {
+  id: string
+  year: number
+  publishedAt: string | null
+  institution: InstitutionCardDto
+  lines: AnnouncementLineDto[]
+  /** Sum of the visible lines. */
+  total: number
+  /** Graduates with consent on the visible lines (the detail view only). */
+  graduates?: GraduateCardDto[]
+  myResponse: { id: string; status: MatchStatus; lines: { lineId: string; wantedCount: number }[]; comment: string | null; contacts: PartyContactsDto | null } | null
+}
+
+/**
+ * «Мои контакты» of a company (ТЗ 4.3): accepted contact requests and applications to its vacancies — the students
+ * whose contacts it has. `source` tells where the item came from: a contact request (GRADUATE, CONTRACT_HELP — `id` is
+ * the request, the card opens at `…/contacts/:id`) or VACANCY (`id` is the application, the card opens at
+ * `…/vacancy-applications/:id`). The list carries names only; the full card is opened one by one, each time audited.
+ */
+export interface CompanyContactDto {
+  id: string
+  source: ContactSource | 'VACANCY'
+  status: MatchStatus | ApplicationStatus
+  createdAt: string
+  decidedAt: string | null
+  /** The vacancy of an application. */
+  vacancy: { id: string; title: string } | null
+  student: { id: string; name: string; full: StudentFullCardDto | null }
+}
+
+/** One row of the student's consent journal (ТЗ 8): given, and when taken back; nothing is overwritten. */
+export interface StudentConsentDto {
+  id: string
+  kind: 'GRADUATE_CARD' | 'CONTRACT_HELP_CARD' | 'COMPANY_CONTACTS' | 'PARENT_CONSENT'
+  /** COMPANY_CONTACTS: the company the contacts were opened to. */
+  company: { id: string; name: string } | null
+  textVersion: string
+  givenAt: string
+  revokedAt: string | null
+  active: boolean
+}
+
+/** The full card (ТЗ 5.3, 9.4) — only for a company the student accepted: name, phone, e-mail, certificate files. */
+export interface StudentFullCardDto {
+  name: string
+  phone: string | null
+  email: string | null
+  institution: string | null
+  direction: DirectionDto | null
+  graduationYear: number | null
+  about: string | null
+  certificates: StudentCertificateDto[]
+}
+
+/** A contact request as the student sees it: who asks and why. */
+export interface StudentContactRequestDto {
+  id: string
+  source: ContactSource
+  status: MatchStatus
+  createdAt: string
+  company: CompanyCardDto & { website: string | null }
+  /** The company's contacts — once the student accepted (ТЗ 5.3 «студент видит контакты компании»). */
+  contacts: PartyContactsDto | null
+}
+
+// ───────────── help with the contract fee (ТЗ 5.3) ─────────────
+
+export type ContractHelpStatus = 'ACTIVE' | 'INTERESTED' | 'SIGNED' | 'WITHDRAWN'
+/** «Где готов работать»: the student's own region or any. */
+export type ContractHelpWorkRegion = 'OWN' | 'ANY'
+export const CONTRACT_HELP_MOTIVATION_MAX = 1000
+export const CONTRACT_HELP_YEARS_MAX = 10
+
+/** The student's request as they see it, with the companies that showed interest. */
+export interface ContractHelpDto {
+  id: string
+  status: ContractHelpStatus
+  motivation: string
+  yearsToWork: number
+  /** Null — any region. */
+  workRegion: PlaceRefDto | null
+  createdAt: string
+  signedAt: string | null
+  signedWith: { id: string; name: string } | null
+  withdrawnAt: string | null
+  /** Contact requests that came through this request. */
+  interests: { requestId: string; company: { id: string; name: string }; status: MatchStatus; createdAt: string }[]
+  /** Companies the «договор заключён» mark can name: those the student opened contacts to. */
+  signableCompanies: { id: string; name: string }[]
+}
+
+/**
+ * The anonymised card a company sees (ТЗ 5.3): no name, birth date, phone, e-mail, files, parent or user id — only the
+ * request id and a card number. Age instead of the birth date.
+ */
+export interface ContractHelpCardDto {
+  id: string
+  /** Short card number for people to refer to («№ 4F2A9C»). */
+  number: string
+  status: 'ACTIVE' | 'INTERESTED'
+  age: number | null
+  region: PlaceRefDto | null
+  institution: InstitutionCardDto | null
+  direction: DirectionDto | null
+  mode: 'STUDYING' | 'APPLYING'
+  /** Year of study (studying) or the year of admission (applying). */
+  course: number | null
+  enrollYear: number | null
+  studyForm: 'GRANT' | 'CONTRACT' | 'UNDECIDED' | null
+  /** Yearly contract, so'm. */
+  contractAmount: number | null
+  motivation: string
+  yearsToWork: number
+  workRegion: PlaceRefDto | null
+  certificates: string[]
+  ilmoraCourses: L[]
+  studyConfirmed: boolean
+  createdAt: string
+  /** This company's contact request to the student, if any (from any source). */
+  contactRequest: MatchStatus | null
+}
+
+// ───────────── practice and internships (ТЗ 5.4) ─────────────
+
+export type VacancyKind = 'PRACTICE' | 'INTERNSHIP'
+export type WorkFormat = 'ONSITE' | 'REMOTE' | 'HYBRID'
+export type VacancyStatus = 'OPEN' | 'CLOSED'
+/** новый → просмотрен → приглашён / отказ. */
+export type ApplicationStatus = 'NEW' | 'VIEWED' | 'INVITED' | 'REJECTED'
+export const VACANCY_SEATS_MAX = 1000
+export const VACANCY_DIRECTIONS_MAX = 10
+
+/** A vacancy as a student sees it (approved companies, open, deadline not passed). */
+export interface VacancyDto {
+  id: string
+  kind: VacancyKind
+  title: string
+  company: { id: string; name: string; industries: IndustryDto[] }
+  directions: DirectionDto[]
+  region: PlaceRefDto
+  district: PlaceRefDto | null
+  address: string | null
+  format: WorkFormat
+  paid: boolean
+  /** Monthly stipend, so'm, when stated. */
+  stipend: number | null
+  duration: string | null
+  seats: number
+  requirements: string | null
+  /** YYYY-MM-DD, the last day to apply; null — until closed. */
+  deadline: string | null
+  status: VacancyStatus
+  createdAt: string
+  /** The student's own application, if any. */
+  myApplication: { id: string; status: ApplicationStatus } | null
+}
+
+/** The company's own vacancy with the applications by status. */
+export interface CompanyVacancyDto extends Omit<VacancyDto, 'myApplication'> {
+  closedAt: string | null
+  applications: Record<ApplicationStatus, number>
+}
+
+/** An application as the company sees it: the student agreed by applying to show the full card (ТЗ 5.4, 9.4). */
+export interface VacancyApplicationDto {
+  id: string
+  status: ApplicationStatus
+  note: string | null
+  createdAt: string
+  statusChangedAt: string | null
+  student: StudentFullCardDto & { id: string }
+}
+
+/** The student's application with the vacancy. */
+export interface StudentApplicationDto {
+  id: string
+  status: ApplicationStatus
+  note: string | null
+  createdAt: string
+  statusChangedAt: string | null
+  vacancy: Omit<VacancyDto, 'myApplication'>
+}
+
+// ───────────── Super Admin: the reference data (ТЗ 9.2 «Super Admin») ─────────────
+
+export interface AdminIndustryDto extends IndustryDto {
+  sortOrder: number
+  isActive: boolean
+  /** Main directions of the industry (aliases not counted) and companies that chose it. */
+  directions: number
+  companies: number
+}
+
+/** A direction as the Super Admin manages it: where it is used, and what it was merged into. */
+export interface AdminDirectionDto {
+  id: string
+  name: string
+  industry: IndustryDto
+  origin: 'OFFICIAL' | 'USER' | 'ADMIN'
+  code: string | null
+  createdAt: string
+  mergedInto: { id: string; name: string } | null
+  /** Aliases merged into this one. */
+  aliases: number
+  usage: { students: number; institutions: number; companies: number; announcements: number; trainingRequests: number; vacancies: number }
+}
+
+/** A record a student added (ТЗ 3.5): to be merged into the real registry record, with likely candidates. */
+export interface StudentInstitutionDto {
+  id: string
+  name: string
+  type: RegistryInstitutionType
+  region: PlaceRefDto | null
+  createdAt: string
+  students: number
+  candidates: InstitutionCardDto[]
+}
+
+/** What a merge moved. */
+export interface MergeResultDto {
+  fromId: string
+  intoId: string
+  moved: Record<string, number>
+}

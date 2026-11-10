@@ -13,8 +13,12 @@ FROM deps AS build
 # Public build-time configuration (baked into the client bundle). Server-only values come from the environment at runtime.
 ARG NEXT_PUBLIC_API_URL=https://api.ilmora.uz
 ARG NEXT_PUBLIC_SITE_URL=https://ilmora.uz
+# Public address of the media bucket: images may load from its host and the browser may upload there (security-headers.ts).
+# Empty = no object storage allowed by the CSP.
+ARG NEXT_PUBLIC_MEDIA_BASE_URL=
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL} \
+    NEXT_PUBLIC_MEDIA_BASE_URL=${NEXT_PUBLIC_MEDIA_BASE_URL} \
     NEXT_TELEMETRY_DISABLED=1
 COPY packages/shared packages/shared
 COPY apps/web apps/web

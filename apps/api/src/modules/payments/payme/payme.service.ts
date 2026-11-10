@@ -52,7 +52,10 @@ type Account = { payment_id?: unknown }
 export class PaymeService {
   constructor(private readonly prisma: PrismaService, private readonly payments: PaymentsService, @Inject(ENV) private readonly env: Env) {}
 
-  /** Returns { sandbox } when the Basic header matches the live key (or the test key outside production). */
+  /**
+   * Returns { sandbox } when the Basic header matches the live key, or the test key. The test key is accepted outside
+   * production, and in production only while PAYME_SANDBOX_PAYMENT_IDS lists the test orders (see `fenced`).
+   */
   authenticate(authorization: string | undefined): { sandbox: boolean } {
     if (!authorization?.startsWith('Basic ')) throw new PaymeError(PAYME.UNAUTHORIZED, M.unauthorized)
     const decoded = Buffer.from(authorization.slice(6).trim(), 'base64').toString('utf8')
@@ -62,27 +65,43 @@ export class PaymeService {
     const key = decoded.slice(sep + 1)
     if (!safeEqual(login, this.env.PAYME_LOGIN)) throw new PaymeError(PAYME.UNAUTHORIZED, M.unauthorized)
     if (this.env.PAYME_KEY && safeEqual(key, this.env.PAYME_KEY)) return { sandbox: false }
-    if (this.env.PAYME_TEST_KEY && this.env.NODE_ENV !== 'production' && safeEqual(key, this.env.PAYME_TEST_KEY)) return { sandbox: true }
+    if (this.env.PAYME_TEST_KEY && (this.env.NODE_ENV !== 'production' || this.env.PAYME_SANDBOX_PAYMENT_IDS.length > 0) && safeEqual(key, this.env.PAYME_TEST_KEY)) return { sandbox: true }
     throw new PaymeError(PAYME.UNAUTHORIZED, M.unauthorized)
   }
 
   async handle(method: string, params: Record<string, unknown>, sandbox: boolean): Promise<unknown> {
     switch (method) {
-      case 'CheckPerformTransaction': return this.checkPerform(params)
+      case 'CheckPerformTransaction': return this.checkPerform(params, sandbox)
       case 'CreateTransaction': return this.create(params, sandbox)
-      case 'PerformTransaction': return this.perform(params)
-      case 'CancelTransaction': return this.cancel(params)
-      case 'CheckTransaction': return this.check(params)
-      case 'GetStatement': return this.statement(params)
+      case 'PerformTransaction': return this.perform(params, sandbox)
+      case 'CancelTransaction': return this.cancel(params, sandbox)
+      case 'CheckTransaction': return this.check(params, sandbox)
+      case 'GetStatement': return this.statement(params, sandbox)
       default: throw new PaymeError(PAYME.METHOD_NOT_FOUND, M.methodNotFound, method)
     }
   }
 
-  private paymentIdFrom(params: Record<string, unknown>): string {
+  /**
+   * A test-key call in production: a sandbox payment settles like a real one, so it may only reach the test orders
+   * listed in PAYME_SANDBOX_PAYMENT_IDS and the sandbox transactions on them. Everything else looks absent to it.
+   */
+  private fenced(sandbox: boolean): boolean {
+    return sandbox && this.env.NODE_ENV === 'production'
+  }
+
+  private paymentIdFrom(params: Record<string, unknown>, sandbox: boolean): string {
     const account = params.account as Account | undefined
     const id = account?.payment_id
     if (typeof id !== 'string' || !id) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
+    if (this.fenced(sandbox) && !this.env.PAYME_SANDBOX_PAYMENT_IDS.includes(id)) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
     return id
+  }
+
+  /** The Payme transaction by its id, as the caller may see it: a fenced test-key call sees only sandbox rows. */
+  private async findTx(db: TransactionClient | PrismaService['client'], params: Record<string, unknown>, sandbox: boolean) {
+    const row = await db.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: String(params.id ?? '') } } })
+    if (!row || (this.fenced(sandbox) && !row.sandbox)) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
+    return row
   }
 
   private amountFrom(params: Record<string, unknown>): bigint {
@@ -91,14 +110,28 @@ export class PaymeService {
     return BigInt(a)
   }
 
-  private async checkPerform(params: Record<string, unknown>) {
-    const paymentId = this.paymentIdFrom(params)
+  private async checkPerform(params: Record<string, unknown>, sandbox: boolean) {
+    const paymentId = this.paymentIdFrom(params, sandbox)
     const amount = this.amountFrom(params)
     const payment = await this.prisma.client.payment.findFirst({ where: { id: paymentId } })
     if (!payment) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
     if (!(await this.payable(this.prisma.client, payment))) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
     if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
-    return { allow: true }
+    return {
+      allow: true,
+      // Fiscal receipt: one line for the whole amount (tiyins); codes and VAT come from env.
+      detail: {
+        receipt_type: 0,
+        items: [{
+          title: 'ILMORA — подписка на занятия',
+          price: Number(payment.amountMinor),
+          count: 1,
+          code: this.env.PAYME_FISCAL_IKPU,
+          package_code: this.env.PAYME_FISCAL_PACKAGE_CODE,
+          vat_percent: this.env.PAYME_FISCAL_VAT_PERCENT,
+        }],
+      },
+    }
   }
 
   /** The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. */
@@ -121,7 +154,7 @@ export class PaymeService {
     const providerTxId = String(params.id ?? '')
     const time = typeof params.time === 'number' ? params.time : NaN
     if (!providerTxId || !Number.isFinite(time)) throw new PaymeError(PAYME.INVALID_REQUEST, M.invalidRequest)
-    const paymentId = this.paymentIdFrom(params)
+    const paymentId = this.paymentIdFrom(params, sandbox)
     const amount = this.amountFrom(params)
 
     return this.txRefusing(async (tx) => {
@@ -151,11 +184,10 @@ export class PaymeService {
     })
   }
 
-  private async perform(params: Record<string, unknown>) {
+  private async perform(params: Record<string, unknown>, sandbox: boolean) {
     const providerTxId = String(params.id ?? '')
     return this.txRefusing(async (tx) => {
-      const found = await tx.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: providerTxId } } })
-      if (!found) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
+      const found = await this.findTx(tx, params, sandbox)
       const payment = await this.payments.lockPayment(tx, found.paymentId)
       const row = await tx.paymentTransaction.findFirst({ where: { id: found.id } })
       if (!row) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
@@ -179,12 +211,10 @@ export class PaymeService {
     })
   }
 
-  private async cancel(params: Record<string, unknown>) {
-    const providerTxId = String(params.id ?? '')
+  private async cancel(params: Record<string, unknown>, sandbox: boolean) {
     const reason = typeof params.reason === 'number' ? params.reason : 10
     return this.prisma.tx(async (tx) => {
-      const found = await tx.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: providerTxId } } })
-      if (!found) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
+      const found = await this.findTx(tx, params, sandbox)
       await this.payments.lockPayment(tx, found.paymentId)
       const row = await tx.paymentTransaction.findFirst({ where: { id: found.id } })
       if (!row) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
@@ -202,9 +232,8 @@ export class PaymeService {
     })
   }
 
-  private async check(params: Record<string, unknown>) {
-    const row = await this.prisma.client.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: String(params.id ?? '') } } })
-    if (!row) throw new PaymeError(PAYME.TX_NOT_FOUND, M.txNotFound)
+  private async check(params: Record<string, unknown>, sandbox: boolean) {
+    const row = await this.findTx(this.prisma.client, params, sandbox)
     return {
       create_time: row.createdAt.getTime(),
       perform_time: row.performedAt?.getTime() ?? 0,
@@ -215,10 +244,10 @@ export class PaymeService {
     }
   }
 
-  private async statement(params: Record<string, unknown>) {
+  private async statement(params: Record<string, unknown>, sandbox: boolean) {
     const from = typeof params.from === 'number' ? BigInt(Math.trunc(params.from)) : 0n
     const to = typeof params.to === 'number' ? BigInt(Math.trunc(params.to)) : BigInt(Date.now())
-    const rows = await this.prisma.client.paymentTransaction.findMany({ where: { provider: 'PAYME', providerTime: { gte: from, lte: to } }, orderBy: { providerTime: 'asc' } })
+    const rows = await this.prisma.client.paymentTransaction.findMany({ where: { provider: 'PAYME', providerTime: { gte: from, lte: to }, ...(this.fenced(sandbox) ? { sandbox: true } : {}) }, orderBy: { providerTime: 'asc' } })
     return {
       transactions: rows.map((r) => ({
         id: r.providerTransactionId,

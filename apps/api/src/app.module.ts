@@ -16,6 +16,11 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PaymentsModule } from './modules/payments/payments.module'
 import { StorageModule } from './infra/storage/storage.module'
 import { CompaniesModule } from './modules/companies/companies.module'
+import { ContactsModule } from './modules/contacts/contacts.module'
+import { GraduatesModule } from './modules/graduates/graduates.module'
+import { ContractHelpModule } from './modules/contract-help/contract-help.module'
+import { VacanciesModule } from './modules/vacancies/vacancies.module'
+import { StudentsModule } from './modules/students/students.module'
 import { TrainingModule } from './modules/training/training.module'
 import { InstitutionsModule } from './modules/institutions/institutions.module'
 import { MinistryModule } from './modules/ministry/ministry.module'
@@ -40,6 +45,11 @@ import { WorkerModule } from './worker.module'
     InstitutionsModule,
     CompaniesModule,
     TrainingModule,
+    StudentsModule,
+    ContactsModule,
+    GraduatesModule,
+    ContractHelpModule,
+    VacanciesModule,
     MinistryModule,
     ...(process.env.APP_ROLE === 'api' || REDIS_OFF ? [] : [WorkerModule]),
   ],

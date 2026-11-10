@@ -1596,6 +1596,12 @@ model StudentProfile {
   districtId          String?
   district            District?         @relation(fields: [districtId], references: [id])
   about               String?
+  /**
+   * Contact phone from the questionnaire (E.164), for companies the student agreed to share contacts with. Not checked
+   * by SMS and never used to sign in: the sign-in number is `User.phoneE164`, which the questionnaire does not change
+   * (an unchecked number there would let anyone take someone else's number).
+   */
+  contactPhone        String?
   /** Parent or legal representative of a minor; their consent is a PARENT_CONSENT row in StudentConsent. */
   parentName          String?
   parentPhone         String?

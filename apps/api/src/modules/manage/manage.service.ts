@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import type { z } from 'zod'
 import { isSafeExternalUrl, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
@@ -16,6 +16,9 @@ import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
 import { ONLINE_PROVIDER } from './online-provider'
 import type { AvatarUploadUrlInput, CenterStatusInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
+
+/** What a finance admin reads in the audit log: the money records only. */
+const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription']
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
@@ -782,15 +785,7 @@ export class ManageService {
     if (!s3Configured(this.env)) {
       throw AppError.invalid('storage_not_configured', 'Object storage (S3) is not configured in this environment.')
     }
-    const s3 = new S3Client({
-      endpoint: this.env.S3_ENDPOINT,
-      region: this.env.S3_REGION,
-      credentials: {
-        accessKeyId: this.env.S3_ACCESS_KEY_ID!,
-        secretAccessKey: this.env.S3_SECRET_ACCESS_KEY!,
-      },
-      forcePathStyle: this.env.S3_FORCE_PATH_STYLE,
-    })
+    const s3 = new S3Client(s3ClientConfig(this.env))
     const ext = input.contentType === 'image/webp' ? 'webp' : input.contentType === 'image/png' ? 'png' : 'jpg'
     const key = `${prefix}-${Date.now()}.${ext}`
     const command = new PutObjectCommand({
@@ -799,7 +794,7 @@ export class ManageService {
       ContentType: input.contentType,
       ContentLength: input.fileSize,
     })
-    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 })
+    const uploadUrl = await presignPut(s3, command, 900)
     const baseUrl = this.env.S3_PUBLIC_BASE_URL ?? (this.env.S3_ENDPOINT ? `${this.env.S3_ENDPOINT}/${this.env.S3_BUCKET}` : '')
     const publicUrl = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/${key}` : `/${key}`
     return { uploadUrl, publicUrl, key }
@@ -1017,9 +1012,16 @@ export class ManageService {
     return { courses: courses.map((c) => toCourse(c)), videos: videos.map(toVideo), playlists: playlists.map(toPlaylist), resources: resources.map(toResource) }
   }
 
-  async audits(tenantId: string, q: { entityType?: string; entityId?: string; page?: number; pageSize?: number }) {
+  /**
+   * The audit log. The Super Admin reads all of it; a finance admin only the money records (payments and
+   * subscriptions) — never who opened a student's contacts, the reviews or the accounts (ТЗ 8, 9.4).
+   */
+  async audits(tenantId: string, actor: RequestActor, q: { entityType?: string; entityId?: string; page?: number; pageSize?: number }) {
     const page = Math.max(1, q.page ?? 1), pageSize = Math.min(200, Math.max(10, q.pageSize ?? 50))
-    const where = { tenantId, ...(q.entityType ? { entityType: q.entityType } : {}), ...(q.entityId ? { entityId: q.entityId } : {}) }
+    const financeOnly = !actor.roles.includes('PLATFORM_ADMIN')
+    if (financeOnly && q.entityType && !FINANCE_AUDIT_ENTITIES.includes(q.entityType)) return { page, pageSize, total: 0, items: [] }
+    const entityType = q.entityType ? q.entityType : financeOnly ? { in: FINANCE_AUDIT_ENTITIES } : undefined
+    const where = { tenantId, ...(entityType ? { entityType } : {}), ...(q.entityId ? { entityId: q.entityId } : {}) }
     const [items, total] = await Promise.all([
       this.prisma.client.auditEvent.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { actor: { select: { id: true, displayName: true } } } }),
       this.prisma.client.auditEvent.count({ where }),

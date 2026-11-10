@@ -1,6 +1,8 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { presignPut, s3ClientConfig } from './s3-client'
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
+import { randomBytes } from 'node:crypto'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 
@@ -38,7 +40,7 @@ export class PrivateDocsService {
 
   /** A presigned PUT (10 minutes) with the content type and size fixed: the storage refuses anything else. */
   async uploadUrl(key: string, contentType: DocContentType, size: number): Promise<string> {
-    return getSignedUrl(this.s3(), new PutObjectCommand({ Bucket: this.bucket(), Key: key, ContentType: contentType, ContentLength: size }), { expiresIn: 600 })
+    return presignPut(this.s3(), new PutObjectCommand({ Bucket: this.bucket(), Key: key, ContentType: contentType, ContentLength: size }), 600)
   }
 
   /** A presigned GET that lives DOC_LINK_SECONDS. */
@@ -61,6 +63,28 @@ export class PrivateDocsService {
     }
   }
 
+  /** An object key for an upload under `prefix`: time and randomness, never the browser's file name. */
+  newKey(prefix: string, contentType: DocContentType): string {
+    return `${prefix}${Date.now()}-${randomBytes(8).toString('hex')}.${DOC_TYPES[contentType].ext}`
+  }
+
+  /**
+   * Checks what the browser uploaded before anything refers to it: the key lies under the owner's `prefix`, the object
+   * exists, is at most 10 MB and its first bytes are the PDF/JPEG/PNG its extension says. Anything else is deleted.
+   */
+  async verifyUpload(key: string, prefix: string): Promise<{ type: DocContentType; size: number }> {
+    if (!key.startsWith(prefix) || !/^[\w./-]+$/.test(key) || key.includes('..')) throw AppError.invalid('invalid_file', 'Upload the file again')
+    const object = await this.inspect(key)
+    if (!object) throw AppError.invalid('file_not_uploaded', 'The file has not been uploaded yet')
+    const type = sniffDocType(object.head)
+    const expected = (Object.entries(DOC_TYPES) as [DocContentType, (typeof DOC_TYPES)[DocContentType]][]).find(([, spec]) => key.endsWith(`.${spec.ext}`))?.[0]
+    if (object.size > DOC_MAX_BYTES || !type || type !== expected) {
+      await this.remove(key).catch(() => undefined)
+      throw AppError.invalid('invalid_file', 'Upload a PDF, JPG or PNG file up to 10 MB')
+    }
+    return { type, size: object.size }
+  }
+
   async remove(key: string): Promise<void> {
     await this.s3().send(new DeleteObjectCommand({ Bucket: this.bucket(), Key: key }))
   }
@@ -72,11 +96,6 @@ export class PrivateDocsService {
 
   private s3(): S3Client {
     this.bucket()
-    return new S3Client({
-      endpoint: this.env.S3_ENDPOINT,
-      region: this.env.S3_REGION,
-      credentials: { accessKeyId: this.env.S3_ACCESS_KEY_ID!, secretAccessKey: this.env.S3_SECRET_ACCESS_KEY! },
-      forcePathStyle: this.env.S3_FORCE_PATH_STYLE,
-    })
+    return new S3Client(s3ClientConfig(this.env))
   }
 }

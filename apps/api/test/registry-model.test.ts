@@ -46,6 +46,16 @@ describe.skipIf(!DB_AVAILABLE)('registry model: uniqueness and tenant isolation'
     await expect(inT(() => ctx.prisma.client.user.update({ where: { id: second.id }, data: { institutionId: institution.id } }))).rejects.toMatchObject({ code: 'P2002' })
   })
 
+  it('keeps the questionnaire phone apart from the sign-in number, so it takes no one\'s number', async () => {
+    const { tenantId, inT } = await setup('reg-phone')
+    const a = await ctx.makeStudent(tenantId, 44_444)
+    const b = await ctx.makeStudent(tenantId, 55_555)
+    const phone = '+998901234567'
+    for (const s of [a, b]) await inT(() => ctx.prisma.client.studentProfile.create({ data: { userId: s.id, mode: 'STUDYING', contactPhone: phone } as never }))
+    // The number stays free for its real owner to sign up with.
+    await expect(inT(() => ctx.prisma.client.user.create({ data: { phoneE164: phone, displayName: 'Owner', roles: ['STUDENT'] } as never }))).resolves.toBeTruthy()
+  })
+
   it('allows one open contract-help request per student', async () => {
     const { tenantId, inT } = await setup('reg-help')
     const student = await ctx.makeStudent(tenantId, 33_333)

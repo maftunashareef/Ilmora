@@ -68,13 +68,15 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
   /** The private bucket in memory: what the browser «uploaded», and what the API deleted. */
   const objects = new Map<string, Buffer>()
   const removed: string[] = []
-  const docs = {
-    configured: true,
-    uploadUrl: async (key: string) => `https://s3.test/ilmora-docs/${key}?X-Amz-Signature=x`,
-    downloadUrl: async (key: string) => `https://s3.test/ilmora-docs/${key}?X-Amz-Expires=300`,
-    inspect: async (key: string) => (objects.has(key) ? { size: objects.get(key)!.length, head: objects.get(key)!.subarray(0, 16) } : null),
-    remove: async (key: string) => { removed.push(key); objects.delete(key) },
-  } as unknown as PrivateDocsService
+  /** The real document service with S3 replaced by the map above: the upload checks run as in production. */
+  class MemoryDocs extends PrivateDocsService {
+    constructor() { super(testEnv({ S3_ENDPOINT: 'https://s3.test', S3_DOCS_BUCKET: 'ilmora-docs', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' })) }
+    override async uploadUrl(key: string) { return `https://s3.test/ilmora-docs/${key}?X-Amz-Signature=x` }
+    override async downloadUrl(key: string) { return `https://s3.test/ilmora-docs/${key}?X-Amz-Expires=300` }
+    override async inspect(key: string) { return objects.has(key) ? { size: objects.get(key)!.length, head: objects.get(key)!.subarray(0, 16) } : null }
+    override async remove(key: string) { removed.push(key); objects.delete(key) }
+  }
+  const docs = new MemoryDocs()
   const service = new CompaniesService(ctx.prisma, ctx.audit, notifications, docs)
   const review = new CompanyReviewService(ctx.prisma, ctx.audit, notifications, service)
   const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, {} as RedisService, notifications, ctx.env, mfaStub)

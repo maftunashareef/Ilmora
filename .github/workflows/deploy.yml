@@ -11,7 +11,8 @@ name: Release (UzCloud)
 #
 # Repository secrets: DEPLOY_SSH_KEY (private key of the ilmora-deploy pair), DEPLOY_KNOWN_HOSTS (host keys of both
 # machines), WEB_HOST (public IP), ADMIN_HOST (private IP, reached through WEB_HOST).
-# Repository variables: RELEASE_ACTORS (comma-separated GitHub logins), PUBLIC_WEB_URL, DEPLOY_PATH (default /opt/ilmora).
+# Repository variables: RELEASE_ACTORS (comma-separated GitHub logins), PUBLIC_WEB_URL, DEPLOY_PATH (default /opt/ilmora),
+# MEDIA_BASE_URL (default https://s3.uzcstorage.uz/ilmora-media).
 
 on:
   workflow_dispatch:
@@ -40,6 +41,9 @@ env:
   IMAGE_WEB: ghcr.io/${{ github.repository_owner }}/ilmora-web
   DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/ilmora' }}
   PUBLIC_WEB_URL: ${{ vars.PUBLIC_WEB_URL || 'https://ilmoraa.uz' }}
+  # Public address of the media bucket (UzCloud Object Storage, path style); the API builds the same address from
+  # S3_ENDPOINT and S3_BUCKET in api.env. Built into the site: images load from its host, the browser uploads there.
+  MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL || 'https://s3.uzcstorage.uz/ilmora-media' }}
 
 jobs:
   authorize:
@@ -142,6 +146,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=/
             NEXT_PUBLIC_SITE_URL=${{ env.PUBLIC_WEB_URL }}
+            NEXT_PUBLIC_MEDIA_BASE_URL=${{ env.MEDIA_BASE_URL }}
           cache-from: type=registry,ref=${{ env.IMAGE_WEB }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_WEB }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
 
@@ -190,6 +195,13 @@ jobs:
             IdentitiesOnly yes
             StrictHostKeyChecking yes
             ProxyJump web
+          # A machine that reboots or drops off the network mid-release fails the step within 2 minutes instead of
+          # hanging until the job timeout (10 Nov 2026: ilmora-admin was rebooted during release 47, which waited 30
+          # minutes on a dead connection). Short network blips under 2 minutes do not break the session.
+          Host *
+            ServerAliveInterval 20
+            ServerAliveCountMax 6
+            ConnectTimeout 20
           EOF
           ssh web true && ssh admin true && echo "both machines reachable"
 

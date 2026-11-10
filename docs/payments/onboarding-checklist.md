@@ -50,10 +50,16 @@ Optional source-IP allow-lists: `PAYME_ALLOWED_IPS`, `CLICK_ALLOWED_IPS` (comma-
 1. Register as a merchant at merchant.payme.uz with the legal entity and bank account.
 2. Create a cash register (касса) for ILMORA. Give Payme the Merchant API endpoint from the table above.
 3. Receive the Кассa ID, the production key and the test key.
-4. Sandbox: the production machines ignore `PAYME_TEST_KEY` on purpose. The API accepts the test key only when
-   `NODE_ENV` is not `production` (`payme.service.ts`), because a sandbox payment settles like a real one and would
-   activate a real subscription. Pass Payme's sandbox tests against a non-production instance that Payme can reach
-   (a staging machine), not against `ilmoraa.uz`.
+4. Sandbox: production ignores `PAYME_TEST_KEY` by default, because a sandbox payment settles like a real one and
+   activates a real subscription. Without a staging machine, pass Payme's tests on `ilmoraa.uz` this way:
+   1. Create two test students, put a package in the cart, choose Payme and leave the payment unfinished. Note both
+      payment ids.
+   2. In `api.env`: `PAYME_MERCHANT_ID`, `PAYME_TEST_KEY`, `PAYME_SANDBOX_PAYMENT_IDS=<id1>,<id2>`, and a long enough
+      `PAYMENT_EXPIRES_HOURS` for the orders to outlive the test window. Restart the API.
+   3. The test key now reaches only those two orders and the sandbox transactions on them; any other order looks
+      absent (-31050) and live transactions look absent (-31003). The API logs a warning at start while the list is set.
+   4. After the tests: clear `PAYME_SANDBOX_PAYMENT_IDS` and `PAYME_TEST_KEY`, restart, and cancel the test students'
+      subscriptions.
 5. Live: put `PAYME_MERCHANT_ID` and `PAYME_KEY` on the production server (step 3).
 
 ### 2. Click (SHOP-API)
