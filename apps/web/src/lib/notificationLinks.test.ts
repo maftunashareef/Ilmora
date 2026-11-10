@@ -9,6 +9,13 @@ describe('notification links', () => {
     expect(notificationHref({ type: 'center.teacherLinked', params: { centerId: 'ce-1' } }, 'teacher')).toBe('/teacher')
   })
 
+  it('opens a refund request in the finance queue, and the student\'s subscription for the student (№42)', () => {
+    const n = { type: 'refund.requested', params: { requestId: 'rr-1', queuePath: '/admin/finance?tab=refunds&request=rr-1' } }
+    expect(notificationHref(n, 'admin')).toBe('/admin/finance?tab=refunds&request=rr-1')
+    expect(notificationHref({ type: 'refund.requested', params: { queuePath: 'https://evil.example/x' } }, 'admin')).toBe('/admin/finance')
+    expect(notificationHref({ type: 'refund.paid', params: { requestId: 'rr-1' } }, 'student')).toBe('/student/subscription')
+  })
+
   it('opens the same lesson event in each role’s own place', () => {
     const n = { type: 'attendance.checkin', params: { groupId: 'g-1', date: '2026-11-03', start: '09:00' } }
     expect(notificationHref(n, 'teacher')).toBe('/teacher/groups/g-1')

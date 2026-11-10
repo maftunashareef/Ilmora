@@ -22,6 +22,16 @@ const ENDS_COURSE = new Set<RefundReason>(['REFUSAL', 'OTHER', 'SCHEDULE_CHANGED
 const NO_DEDUCTION = new Set<RefundReason>(['SCHEDULE_CHANGED', 'GROUP_CLOSED', 'NOT_AS_DESCRIBED'])
 const OPEN: RefundRequestStatus[] = ['PENDING', 'APPROVED']
 
+/** The finance admin's queue, opened on one request (the site's «Finance» → «Refunds»). */
+export const refundQueuePath = (requestId: string) => `/admin/finance?tab=refunds&request=${encodeURIComponent(requestId)}`
+
+/** So'm with spaces between thousands, tiyin after a comma when there are any: «72 000», «45 312,50». */
+export const formatSom = (minor: bigint): string => {
+  const whole = (minor / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+  const tiyin = minor % 100n
+  return tiyin ? `${whole},${tiyin.toString().padStart(2, '0')}` : whole
+}
+
 export interface RefundInput {
   /** The courses (enrollments) refused; all the subscription's courses when absent. */
   enrollmentIds?: string[]
@@ -92,7 +102,18 @@ export class RefundsService {
         await this.audit.record({ tx, tenantId, action: 'refund.requested', entityType: 'RefundRequest', entityId: row.id, after: { paymentId: r.paymentId, requestedMinor: r.requestedMinor.toString(), reason: input.reason, source: by.source, enrollmentIds: plan.enrollmentIds }, reason: input.reasonText })
       }
       if (plan.endsCourses) await this.endCourses(tx, plan, input, now)
-      if (out.length) await this.notifyFinance(tx, tenantId, studentId, out.map((r) => r.id))
+      // One notification per request, with its own amount by 6.4 and a link to it in the queue (a cancellation with the
+      // next month paid ahead makes two requests — two notifications, each with its amount).
+      if (out.length) {
+        const [finance, student] = await Promise.all([this.financeIds(tx, tenantId), tx.user.findFirst({ where: { id: studentId }, select: { displayName: true } })])
+        for (const r of out) {
+          await this.notifications.notify({
+            tenantId, userIds: finance, type: 'refund.requested',
+            params: { studentName: student?.displayName ?? '', studentId, requestId: r.id, paymentId: r.paymentId, amountMinor: r.requestedMinor.toString(), amount: formatSom(r.requestedMinor), days: REFUND_DECISION_DAYS, queuePath: refundQueuePath(r.id) },
+            dedupeKey: `refund-requested:${r.id}`,
+          }, tx)
+        }
+      }
       return { requests: out, endsCourses: plan.endsCourses }
     })
     return { ok: true, endsCourses: created.endsCourses, requests: created.requests.map((r) => ({ id: r.id, paymentId: r.paymentId, requestedMinor: r.requestedMinor.toString() })) }
@@ -215,7 +236,7 @@ export class RefundsService {
         for (const r of due) {
           reminded += await this.notifications.notify({
             tenantId: t.id, userIds: finance, type: 'refund.due',
-            params: { studentName: r.student.displayName, requestId: r.id, dueAt: r.decisionDueAt.toISOString(), overdue: r.decisionDueAt < now },
+            params: { studentName: r.student.displayName, requestId: r.id, amount: formatSom(r.approvedMinor ?? r.requestedMinor), dueAt: r.decisionDueAt.toISOString(), overdue: r.decisionDueAt < now, queuePath: refundQueuePath(r.id) },
             dedupeKey: `refund-due:${r.id}:${now.toISOString().slice(0, 10)}`,
           }) > 0 ? 1 : 0
         }
@@ -328,10 +349,6 @@ export class RefundsService {
     return db.user.findMany({ where: { tenantId, isActive: true, OR: [{ roles: { has: 'FINANCE_ADMIN' } }, { isOwner: true }] }, select: { id: true } }).then((u) => u.map((x) => x.id))
   }
 
-  private async notifyFinance(tx: TransactionClient, tenantId: string, studentId: string, requestIds: string[]) {
-    const [finance, student] = await Promise.all([this.financeIds(tx, tenantId), tx.user.findFirst({ where: { id: studentId }, select: { displayName: true } })])
-    await this.notifications.notify({ tenantId, userIds: finance, type: 'refund.requested', params: { studentName: student?.displayName ?? '', studentId, requestIds, days: REFUND_DECISION_DAYS }, dedupeKey: `refund-requested:${requestIds.join(',')}` }, tx)
-  }
 }
 
 

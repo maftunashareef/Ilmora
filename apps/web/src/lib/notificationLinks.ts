@@ -43,6 +43,10 @@ export function notificationHref(n: Pick<AppNotification, 'type' | 'params'>, ro
       if (role === 'center') return '/center/students'
       if (role === 'student') return '/student/courses'
       return '/admin/people'
+    case 'refund':
+      // A finance admin opens the request in the refunds queue (security review 10.11 №42); the student their subscription.
+      if (role === 'admin') return str(p.queuePath)?.startsWith('/admin/finance') ? str(p.queuePath)! : '/admin/finance'
+      return role === 'student' ? '/student/subscription' : notificationsPath(role)
     case 'subscription':
     case 'payment':
       return role === 'student' ? '/student/subscription' : role === 'admin' ? '/admin/finance' : notificationsPath(role)

@@ -109,7 +109,12 @@ Everything here is enforced on the server; the web app only reflects it.
   refuses Payme's whole cancellation, so its money is not returned twice.
 - Reconciliation counts refunds posted under requests: `refund_amount_mismatch` when `refundedMinor` differs from the
   refund journals.
-- The finance admins are reminded daily (10:00 Tashkent) of requests due within 2 days or overdue.
+- Every new request notifies the finance admins on its own (`refund.requested`). The notification carries the
+  request's amount by 6.4 and a link to it in the queue (`/admin/finance?tab=refunds&request=<id>`). A cancellation
+  with two payments sends two notifications, each with its amount; there is no notice with the payments' total.
+- The finance admins are reminded daily (10:00 Tashkent) of requests due within 2 days or overdue (`refund.due`). Every
+  step of a request is in the audit log (`refund.requested`, `refund.approved`, `refund.rejected`, `refund.paid`,
+  `refund.withdrawn`), which the finance admins can read.
 
 
 ## 5. Notifications

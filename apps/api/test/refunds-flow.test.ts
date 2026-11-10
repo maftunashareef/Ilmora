@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { addDays } from '../src/common/time'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { countLessons, refundShare, splitByPrice } from '../src/modules/enrollment/refund-count'
-import { RefundsService } from '../src/modules/enrollment/refunds.service'
+import { formatSom, RefundsService } from '../src/modules/enrollment/refunds.service'
 import type { NotificationsService } from '../src/modules/notifications/notifications.service'
 import { ReconciliationService } from '../src/modules/payments/reconciliation.service'
 import { SessionsService } from '../src/modules/sessions/sessions.service'
@@ -34,6 +34,12 @@ describe('Refund count of the offer, 6.4 (security review 10.11 №42)', () => {
     expect(c.held).toBe(0)
     expect(refundShare(30_000_00n, c.total, c.held)).toBe(30_000_00n)
     expect(refundShare(30_000_00n, 0, 0)).toBe(30_000_00n)
+  })
+
+  it('writes so\'m for the notification text: spaces between thousands, tiyin after a comma', () => {
+    expect(formatSom(72_000_00n)).toBe('72 000')
+    expect(formatSom(4_531_250n)).toBe('45 312,50')
+    expect(formatSom(5n)).toBe('0,05')
   })
 
   it('splits an old payment by the courses\' prices, the parts adding up to it', () => {
@@ -114,8 +120,14 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
       await db.payment.update({ where: { id: s.payment.id }, data: { periodEnd: new Date(Date.now() + 5 * DAY) } })
       const { payment: ahead } = await ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')
       await ctx.payments.manualSettle(ahead.id, s.student.id, 'test')
+      sent.length = 0
       const out = await refunds.refuse(s.tenantId, s.student.id, { reason: 'REFUSAL' }, { source: 'CABINET', actorId: s.student.id })
       expect(out.requests).toHaveLength(2)
+      // One notification per request, each with its own amount by 6.4 and a link to it in the queue — none with the payments' total.
+      const told = sent.filter((n) => n.type === 'refund.requested')
+      expect(told.map((n) => [n.params?.requestId, n.params?.amountMinor]).sort()).toEqual(out.requests.map((r) => [r.id, r.requestedMinor]).sort())
+      for (const n of told) expect(n.params).toMatchObject({ queuePath: `/admin/finance?tab=refunds&request=${n.params?.requestId}`, days: 10 })
+      expect(told.find((n) => n.params?.paymentId === ahead.id)?.params?.amount).toBe(formatSom(ahead.amountMinor))
       const next = out.requests.find((r) => r.paymentId === ahead.id)!
       expect(next.requestedMinor).toBe(ahead.amountMinor.toString())
       expect(BigInt(out.requests.find((r) => r.paymentId === s.payment.id)!.requestedMinor)).toBeLessThan(s.payment.amountMinor)
