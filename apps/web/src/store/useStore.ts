@@ -44,6 +44,11 @@ export interface AuthUser {
   offerVersion: string | null
   consentAt: string | null
   marketing: boolean
+  /**
+   * The password was issued by the Super Admin (a new ministry account or a reset) and not changed since: the site asks
+   * for a new one right after sign-in, before anything else (POST /auth/password). Older API answers lack the field.
+   */
+  passwordChangeRequired?: boolean
 }
 
 /** `/auth/login` answered with the authenticator step instead of a session. */
@@ -110,6 +115,11 @@ interface Actions {
   mfaVerify: (challenge: string, code: string) => Promise<AuthUser>
   loginAsDemo: (role: 'STUDENT' | 'TEACHER', customUser?: Partial<AuthUser>) => Promise<AuthUser>
   giveConsent: (input: ConsentInput) => Promise<AuthUser>
+  /**
+   * «Сменить пароль»: every session of the account ends and this browser gets a fresh one (the answer is a sign-in).
+   * Errors: wrong_password, same_password, password_is_login, no_password; 5 tries.
+   */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<AuthUser>
   logout: () => Promise<void>
   ensureWorkspace: () => Promise<void>
   loadAdminPresets: () => Promise<void>
@@ -554,6 +564,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         return { user: await openSession(r), recoveryCodes: r.recoveryCodes }
       },
       mfaVerify: (challenge, code) => api<{ accessToken: string; user: AuthUser }>('/auth/mfa/verify', { method: 'POST', body: { challenge, code }, credentials: true, auth: false }).then(openSession),
+      changePassword: (currentPassword, newPassword) => api<{ accessToken: string; user: AuthUser }>('/auth/password', { method: 'POST', body: { currentPassword, newPassword }, credentials: true }).then(openSession),
       loginAsDemo: async (role, customUser) => {
         if (!DEMO_LOGIN_ENABLED) throw new Error('demo_login_disabled')
         const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'

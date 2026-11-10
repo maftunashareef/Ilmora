@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from '@/lib/router'
 import { useStore } from '@/store/useStore'
 import type { Role } from '@/types'
 import { ConsentGate, needsConsent } from './ConsentGate'
+import { PasswordChangeGate } from './PasswordChange'
 import { Card, Icon, LinkButton } from './ui'
 
 /**
@@ -49,6 +50,8 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
       </div>
     )
   }
+  // A temporary password from the Super Admin is changed first (the ministry), then the rest.
+  if (user?.passwordChangeRequired) return <PasswordChangeGate />
   // Every account confirms the current offer edition and personal-data consent before using a workspace.
   if (needsConsent(user)) return <ConsentGate />
   return <>{children}</>
