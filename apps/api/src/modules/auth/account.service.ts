@@ -214,10 +214,7 @@ export class AccountService {
   async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult | MfaChallengeDto> {
     const raw = input.login.trim()
     const login = raw.normalize('NFKC').toLowerCase()
-    // The failure counter follows the account, not the spelling: every way of writing a phone shares one lock.
     const phoneParsed = normalizeUzPhone(raw)
-    const key = `login:fail:${tenantId}:${phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
-    await this.assertNotLocked(key)
 
     // Lookup user by normalized phone number or by unique login username
     let user: UserRow | null = null
@@ -227,15 +224,16 @@ export class AccountService {
     if (!user && LOGIN_RE.test(login)) {
       user = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: USER_INCLUDE })
     }
+    // The failure counter follows the account — its login and its phone share one lock — and is counted before the
+    // password is checked: attempts sent at once cannot all slip under the limit (security review 10.11 №3).
+    const key = `login:fail:${tenantId}:${user ? `user:${user.id}` : phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
+    await this.countAttempt(key)
 
     // Verify against a dummy hash when the login is unknown so response time does not reveal which logins exist.
     let ok = false
     if (user?.passwordHash) ok = await argon2.verify(user.passwordHash, input.password)
     else await argon2.verify(await this.dummyHash, input.password)
-    if (!user || !ok) {
-      await this.recordFailure(key)
-      throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
-    }
+    if (!user || !ok) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     // Do not reveal that the password was correct for a disabled account: answer exactly as for a wrong password (Ж15).
     if (!user.isActive) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     await this.clearFailures(key)
@@ -354,8 +352,9 @@ export class AccountService {
    * `User.passwordIssuedAt`; for accounts from before that column, the audit log, which records both.
    */
   async passwordChangeRequired(user: { id: string; tenantId: string; passwordIssuedAt?: Date | null }, roles: Role[]): Promise<boolean> {
-    if (!roles.includes('MINISTRY')) return false
+    // Any account the Super Admin reset; ministry accounts from before the column — through the journal.
     if (user.passwordIssuedAt) return true
+    if (!roles.includes('MINISTRY')) return false
     // The account's own tenant: a refresh runs before any tenant is known.
     return TenantContext.forTenant(user.tenantId, async () => {
       const issued = await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'User', entityId: user.id, action: { in: [...ADMIN_ISSUED_PASSWORD] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
@@ -441,44 +440,35 @@ export class AccountService {
   }
 
   // ── failed-attempt lock per login (shared across replicas through Redis; per process when REDIS_MODE=off) ──
-  private async assertNotLocked(key: string) {
-    const { count, ttl } = await this.failures(key)
-    if (count >= this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many failed sign-in attempts; try again later', ttl)
-  }
-
-  private async recordFailure(key: string) {
+  /**
+   * One attempt, counted atomically before the password is checked; past LOGIN_MAX_FAILURES attempts in the window
+   * the account is locked (429) whatever the password. A successful sign-in clears the count.
+   */
+  private async countAttempt(key: string) {
+    let count: number
+    let ttl = this.env.LOGIN_LOCK_SECONDS
     if (this.redis.off) {
       const now = Date.now()
       const rec = this.memoryFailures.get(key)
       const cur = rec && rec.expires > now ? rec : { count: 0, expires: now + this.env.LOGIN_LOCK_SECONDS * 1000 }
       cur.count += 1
       this.memoryFailures.set(key, cur)
-      return
+      count = cur.count
+      ttl = Math.ceil((cur.expires - now) / 1000)
+    } else {
+      try {
+        count = await this.redis.cache.incr(key)
+        if (count === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
+        else ttl = Math.max(1, await this.redis.cache.ttl(key))
+      } catch {
+        throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
+      }
     }
-    try {
-      const count = await this.redis.cache.incr(key)
-      if (count === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
-    } catch {
-      /* counting failures must never turn a bad password into a 500; the IP throttle still applies */
-    }
+    if (count > this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many failed sign-in attempts; try again later', ttl)
   }
 
   private async clearFailures(key: string) {
     if (this.redis.off) { this.memoryFailures.delete(key); return }
     await this.redis.cache.del(key).catch(() => undefined)
-  }
-
-  private async failures(key: string): Promise<{ count: number; ttl: number }> {
-    if (this.redis.off) {
-      const rec = this.memoryFailures.get(key)
-      if (!rec || rec.expires <= Date.now()) return { count: 0, ttl: 0 }
-      return { count: rec.count, ttl: Math.ceil((rec.expires - Date.now()) / 1000) }
-    }
-    try {
-      const [count, ttl] = await Promise.all([this.redis.cache.get(key), this.redis.cache.ttl(key)])
-      return { count: Number(count ?? 0), ttl: ttl > 0 ? ttl : this.env.LOGIN_LOCK_SECONDS }
-    } catch {
-      throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
-    }
   }
 }

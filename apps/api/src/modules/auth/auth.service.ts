@@ -1,11 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { formatUzPhone } from '@ilmora/shared'
+import argon2 from 'argon2'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { AccountService, type LoginResult, type PublicUser } from './account.service'
+import { AccountService, type LoginResult, PASSWORD_HASH, type PublicUser } from './account.service'
 import { MfaService } from './mfa.service'
 import { OtpService } from './otp.service'
 import { type SessionMeta, TokenService } from './token.service'
@@ -54,6 +55,28 @@ export class AuthService {
     }
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'otp' } })
     return this.accounts.openSession(user, meta)
+  }
+
+  /**
+   * «Забыл пароль» (security review 10.11 №4): the code sent to the account's phone (POST /auth/otp/request) proves it
+   * is theirs; the new password replaces the old one, every session ends and this browser gets a new one. The
+   * ministry, the Super Admins and the finance admins never reset by SMS — their passwords are reset by the Super Admin.
+   */
+  async resetPasswordBySms(tenantId: string, input: { phone: string; code: string; newPassword: string }, meta: SessionMeta): Promise<LoginResult> {
+    const { phoneE164 } = await this.otp.verify(tenantId, input.phone, input.code)
+    const user = await this.prisma.client.user.findUnique({ where: { tenantId_phoneE164: { tenantId, phoneE164 } }, include: USER_INCLUDE })
+    if (!user) throw AppError.notFound('Account')
+    if (!user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
+    this.mfa.refuseOtherSignIn(user)
+    if (user.login && input.newPassword.toLowerCase() === user.login) throw AppError.invalid('password_is_login', 'The password must not be the login')
+    const updated = await this.prisma.client.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await argon2.hash(input.newPassword, PASSWORD_HASH), passwordIssuedAt: null, phoneVerifiedAt: user.phoneVerifiedAt ?? new Date(), lastLoginAt: new Date() },
+      include: USER_INCLUDE,
+    })
+    await this.tokens.revokeAllForUser(tenantId, user.id, 'password-reset-by-sms')
+    await this.audit.record({ tenantId, action: 'auth.password.reset', entityType: 'User', entityId: user.id, after: { method: 'sms' } })
+    return this.accounts.openSession(updated, meta)
   }
 
   async refresh(raw: string, meta: SessionMeta): Promise<LoginResult> {

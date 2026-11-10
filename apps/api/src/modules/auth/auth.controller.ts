@@ -5,7 +5,7 @@ import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AccountService } from './account.service'
-import { ChangePasswordDto, ConsentDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
+import { ChangePasswordDto, ConsentDto, ResetPasswordDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
 import { AuthService, type LoginResult } from './auth.service'
 import { REFRESH_COOKIE, SESSION_FLAG, TokenService } from './token.service'
 
@@ -88,6 +88,18 @@ export class AuthController {
     this.assertSameSite(req, requestedWith)
     const result = await this.auth.verifyOtp(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
     return this.respond(res, result)
+  }
+
+  /**
+   * «Забыл пароль»: first POST /auth/otp/request to the account's phone, then this with the code and the new
+   * password. Answers like a sign-in. Not for the ministry, the Super Admins and the finance admins (403).
+   */
+  @Public()
+  @AuthThrottle(5)
+  @Post('password/reset')
+  async resetPassword(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: ResetPasswordDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
+    return this.respond(res, await this.auth.resetPasswordBySms(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent }))
   }
 
   /** Cookie-based: requires the custom header (browsers only add it from same-origin JavaScript) and an allowed Origin. */

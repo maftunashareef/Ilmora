@@ -33,6 +33,15 @@ describe('Ж1: the strict sign-in limit counts sign-in routes only, per client, 
     expect(await tracker({ ip: '10.0.0.7', body: { phone: '+998902222222' } })).toBe('ip:10.0.0.7')
     expect(await tracker({ ip: '10.0.0.7', actor: { id: 'u-1' } })).toBe('u:u-1')
   })
+
+  it('on the sign-in routes counts by address even with a token attached (security review 10.11 №2)', async () => {
+    const guard = Object.create(AppThrottlerGuard.prototype) as AppThrottlerGuard
+    const tracker = (req: Record<string, unknown>, ctx: ExecutionContext) => (guard as unknown as { getTracker: (r: Record<string, unknown>, c: ExecutionContext) => Promise<string> }).getTracker(req, ctx)
+    for (const name of ['login', 'register', 'requestOtp', 'verifyOtp', 'resetPassword', 'changePassword']) {
+      expect(await tracker({ ip: '10.0.0.7', actor: { id: 'u-1' } }, route(AuthController, name))).toBe('ip:10.0.0.7')
+    }
+    expect(await tracker({ ip: '10.0.0.7', actor: { id: 'u-1' } }, route(ManageController, 'mine'))).toBe('u:u-1')
+  })
 })
 
 describe('Ж3: a Google token is accepted only when it was issued to our app', () => {
@@ -104,6 +113,22 @@ describe.skipIf(!DB_AVAILABLE)('Ж7, Ж15: password sign-in lock against Postgre
     const spellings = [`+998 93 ${n}`, `998-93-${n}`, `93${n}`, `(93) ${n.slice(0, 3)} ${n.slice(3)}`]
     for (const login of spellings.slice(0, 3)) await expect(inT(() => accounts.loginWithPassword(t.tenantId, { login, password: 'wrong wrong' }, meta))).rejects.toMatchObject({ code: 'invalid_credentials' })
     await expect(inT(() => accounts.loginWithPassword(t.tenantId, { login: spellings[3], password: 'wrong wrong' }, meta))).rejects.toSatisfy((e) => (e as AppError).getStatus() === 429)
+  })
+
+  it('attempts sent at once cannot slip under the limit, and the login and the phone of one account share it (security review №3)', async () => {
+    const t = await ctx.makeTenant('lock-race')
+    const inT = <T>(fn: () => Promise<T>) => TenantContext.forTenant(t.tenantId, fn)
+    const login = `race${Math.floor(Math.random() * 1e6)}`
+    const opened = await inT(() => accounts.register(t.tenantId, { role: 'STUDENT', login, password: 'the right password' }, meta))
+    const phone = `+99890${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
+    await TenantContext.system(() => ctx.prisma.client.user.update({ where: { id: opened.user.id }, data: { phoneE164: phone } }), { tenantId: t.tenantId })
+    // 20 wrong passwords at once: at most 3 are checked, the rest are refused unchecked.
+    const results = await Promise.allSettled(Array.from({ length: 20 }, () => inT(() => accounts.loginWithPassword(t.tenantId, { login, password: 'wrong wrong' }, meta))))
+    const codes = results.map((r) => ((r as PromiseRejectedResult).reason as AppError).getStatus())
+    expect(codes.filter((c) => c === 401).length).toBeLessThanOrEqual(3)
+    expect(codes.filter((c) => c === 429).length).toBeGreaterThanOrEqual(17)
+    // Locked by the login — the phone of the same account is locked too, even with the right password.
+    await expect(inT(() => accounts.loginWithPassword(t.tenantId, { login: phone, password: 'the right password' }, meta))).rejects.toSatisfy((e) => (e as AppError).getStatus() === 429)
   })
 
   it('a disabled account answers the right password exactly like a wrong one (Ж15)', async () => {
