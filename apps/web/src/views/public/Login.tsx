@@ -14,6 +14,7 @@ import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { startCompany } from '../../services/companies'
 import { claimInstitution } from '../../services/institutions'
 import { MfaSignIn } from '../../components/MfaSignIn'
+import { PasswordChangeForm } from '../../components/PasswordChange'
 import { isMfaChallenge, useStore, type AuthUser, type RegisterRole } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
@@ -105,17 +106,22 @@ export function LoginPage() {
     (roles: readonly string[]) => firstStop.current ?? (safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles)),
     [safeNext],
   )
+  // A temporary password from the Super Admin (ministry) is changed here first; the page moves on once the new session
+  // comes back without the flag.
+  const mustChangePassword = auth.status === 'authenticated' && auth.user?.passwordChangeRequired === true
   useEffect(() => {
-    if (auth.status !== 'authenticated' || holdRedirect.current) return
+    if (auth.status !== 'authenticated' || holdRedirect.current || auth.user?.passwordChangeRequired) return
     nav(destination(auth.user?.roles ?? []), { replace: true })
   }, [auth.status, auth.user, nav, destination])
 
   /** The authenticator step after the password (ministry, Super Admins); the page waits for it before moving on. */
   const [mfa, setMfa] = useState<MfaChallengeDto | null>(null)
   const finishMfa = (user: AuthUser) => {
-    notify(t('auth.welcome', { name: user.displayName }))
     holdRedirect.current = false
     setMfa(null)
+    // Still on the temporary password: the card shows «Смените временный пароль» next, the rest (and the welcome) after.
+    if (user.passwordChangeRequired) return
+    notify(t('auth.welcome', { name: user.displayName }))
     nav(destination(user.roles), { replace: true })
   }
   const restartMfa = () => {
@@ -291,11 +297,15 @@ export function LoginPage() {
         <Eyebrow className="mb-2">ILMORA</Eyebrow>
         <Card className="px-5 py-7 sm:px-7 sm:py-8 shadow-card border-charcoal/10 bg-white">
           <h1 className="font-display text-3xl text-charcoal">{t('auth.title')}</h1>
-          <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t(mfa ? 'mfa.passwordAccepted' : 'auth.subtitle')}</p>
+          <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t(mfa ? 'mfa.passwordAccepted' : mustChangePassword ? 'pwd.lastStep' : 'auth.subtitle')}</p>
 
           {mfa ? (
             <div className="mt-6 border-t border-charcoal/10 pt-6">
               <MfaSignIn challenge={mfa} onSignedIn={finishMfa} onRestart={restartMfa} />
+            </div>
+          ) : mustChangePassword ? (
+            <div className="mt-6 border-t border-charcoal/10 pt-6">
+              <PasswordChangeForm required />
             </div>
           ) : (<>
           <Tabs<Mode>

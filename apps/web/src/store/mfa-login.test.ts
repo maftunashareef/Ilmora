@@ -61,3 +61,22 @@ describe('sign-in with the authenticator code (ministry, Super Admins)', () => {
     expect(isMfaChallenge(null)).toBe(false)
   })
 })
+
+describe('the temporary password of a ministry account', () => {
+  it('changing the password sends the current and the new one and takes the new session', async () => {
+    apiMock.mockResolvedValueOnce({ accessToken: 'fresh', user: { ...ministry, passwordChangeRequired: false } })
+    const store = createIlmoraStore(initialMock)
+    const user = await store.getState().changePassword('UNvGHQemjpsuXYwX', 'Yangi-parol-2026')
+    expect(apiMock).toHaveBeenCalledWith('/auth/password', expect.objectContaining({ method: 'POST', body: { currentPassword: 'UNvGHQemjpsuXYwX', newPassword: 'Yangi-parol-2026' }, credentials: true }))
+    expect(user.passwordChangeRequired).toBe(false)
+    expect(store.getState().auth.status).toBe('authenticated')
+    expect(store.getState().auth.user?.passwordChangeRequired).toBe(false)
+  })
+
+  it('the flag from the sign-in stays on the account until the password is changed', async () => {
+    apiMock.mockResolvedValueOnce({ accessToken: 'token', user: { ...ministry, passwordChangeRequired: true } })
+    const store = createIlmoraStore(initialMock)
+    await store.getState().mfaVerify('v'.repeat(40), '123456')
+    expect(store.getState().auth.user?.passwordChangeRequired).toBe(true)
+  })
+})
