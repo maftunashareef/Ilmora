@@ -13,6 +13,7 @@ import { AnnouncementInput, ResponseInput } from '../src/modules/graduates/gradu
 import { GraduatesService } from '../src/modules/graduates/graduates.service'
 import type { NotifyInput, NotificationsService } from '../src/modules/notifications/notifications.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
+import { deepKeys, PRIVATE_KEYS } from './support/keys'
 
 const YEAR = new Date().getUTCFullYear()
 
@@ -163,6 +164,7 @@ describe.skipIf(!DB_AVAILABLE)('Graduation announcements and contact requests (Ð
       const seen = await service.companyGet(s.softCo.actor, ann.id)
       expect(seen.graduates!.map((g) => g.name)).toEqual(['Aziz', 'Bobur'])
       expect(seen.graduates![0]).toMatchObject({ institution: 'IT texnikumi', graduationYear: YEAR, about: 'Python, SQL', studyConfirmed: true, contactRequest: null })
+      expect([...deepKeys(seen)].filter((k) => PRIVATE_KEYS.includes(k))).toEqual([])
       const text = JSON.stringify(seen)
       for (const secret of ['+998935554433', '@mail.uz', '+998901112233', 'tex@tex.uz']) expect(text).not.toContain(secret)
 
