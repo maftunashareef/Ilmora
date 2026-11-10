@@ -1340,12 +1340,14 @@ model Industry {
   @@index([tenantId, sortOrder])
 }
 
-/// Region: 12 regions, the Republic of Karakalpakstan and Tashkent city. `code` is the official SOATO code.
+/// Region: 12 regions, the Republic of Karakalpakstan and Tashkent city. `code` is the official SOATO code; `slug` is the
+/// id the web app uses for the region (UZ_REGIONS in @ilmora/shared, e.g. "andijan").
 model Region {
   id        String   @id @default(cuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id])
   code      String
+  slug      String?
   /** { uz, ru, en } */
   name      Json
   sortOrder Int      @default(0)
@@ -1359,6 +1361,7 @@ model Region {
   contractHelpWork ContractHelpRequest[]
 
   @@unique([tenantId, code])
+  @@unique([tenantId, slug])
 }
 
 /// District (туман/шаҳар) of a region. Only official SOATO codes, never invented ones.
@@ -1427,8 +1430,13 @@ model Institution {
   type         InstitutionType
   ownership    Ownership?
   name         String
-  /** Normalized name for search (`registrySearchKey`). */
+  /** Russian name and the name before the 2025 renaming (PF-190), from the official list; people search by both. */
+  nameRu       String?
+  formerName   String?
+  /** Normalized name (`registrySearchKey`): exact matches, e.g. a student adding an institution that already exists. */
   searchKey    String
+  /** Normalized name + Russian name + former name, for «contains» search. */
+  searchText   String?
   /** Taxpayer number, 9 digits; unique when present (records added by students have none). */
   stir         String?
   /** Head organization of a branch, in case branches turn out to share the head's STIR (asked of the ministry). */
@@ -1439,6 +1447,8 @@ model Institution {
   region       Region?           @relation(fields: [regionId], references: [id])
   districtId   String?
   district     District?         @relation(fields: [districtId], references: [id])
+  /** District as written in the official list, until the districts' SOATO codes are loaded (then districtId). */
+  districtName String?
   address      String?
   phone        String?
   email        String?
