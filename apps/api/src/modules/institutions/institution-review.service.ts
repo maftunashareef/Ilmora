@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common'
-import type { InstitutionPassportDto, InstitutionReviewDto, InstitutionReviewItemDto } from '@ilmora/shared'
+import { type InstitutionPassportDto, type InstitutionReviewDto, type InstitutionReviewItemDto, TECHNIKUMS } from '@ilmora/shared'
+
+/**
+ * The official name of a record imported from the ministry's list (ids «pe-…»), for the reviewer to compare with what
+ * the representative entered (security review №18). Until Timur's `officialName` column, read from the list itself.
+ */
+const OFFICIAL_NAMES = new Map(TECHNIKUMS.map((t) => [t.id, t.name]))
+export const officialName = (id: string, source: string) => (source === 'IMPORT' ? (OFFICIAL_NAMES.get(id) ?? null) : null)
 import { AppError } from '../../common/errors'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -43,6 +50,7 @@ export class InstitutionReviewService {
       submittedAt: iso(r.submittedAt),
       reReview: r.approvedAt !== null,
       inRegistry: r.source === 'IMPORT',
+      officialName: officialName(r.id, r.source),
       representative: r.representative ? { name: r.representative.displayName, jobTitle: r.representative.jobTitle, login: r.representative.login } : null,
     }))
   }
@@ -65,6 +73,7 @@ export class InstitutionReviewService {
     return {
       passport,
       inRegistry: row.source === 'IMPORT',
+      officialName: officialName(id, row.source),
       representative: row.representative ? { name: row.representative.displayName, jobTitle: row.representative.jobTitle, login: row.representative.login } : null,
       history: history.map((h) => ({ action: h.action, reason: h.reason, at: h.createdAt.toISOString(), by: h.actor?.displayName ?? null })),
     }
@@ -96,6 +105,12 @@ export class InstitutionReviewService {
     if (moved.count !== 1) throw notPending()
     await this.audit.record({ action: 'institution.reject', entityType: 'Institution', entityId: id, before: { status: 'PENDING' }, after: { status: 'REJECTED' }, reason })
     await this.tell(tenantId, current.representativeId, 'institution.rejected', { institutionName: current.name, institutionId: id, reason }, `inst-decision:${id}:${now.getTime()}`)
+    return this.institutions.passportOf(id)
+  }
+
+  /** «Отвязать представителя» (security review №17): somebody holds a record that is not theirs. With a reason; audited. */
+  async release(tenantId: string, id: string, reason: string): Promise<InstitutionPassportDto> {
+    await this.institutions.release(tenantId, id, reason)
     return this.institutions.passportOf(id)
   }
 

@@ -87,6 +87,12 @@ export class CompanyReviewService {
     return this.companies.profileOf(id)
   }
 
+  /** «Отвязать представителя» (security review №17): with a reason; audited. */
+  async release(tenantId: string, id: string, reason: string): Promise<CompanyProfileDto> {
+    await this.companies.release(tenantId, id, reason)
+    return this.companies.profileOf(id)
+  }
+
   private async pending(id: string) {
     const row = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, representative: { select: { id: true } } } })
     if (!row) throw AppError.notFound('Company')

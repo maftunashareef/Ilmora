@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { registrySearchKey, registrySearchText } from '@ilmora/shared'
+import { registrySearchKey, registrySearchText, TECHNIKUMS } from '@ilmora/shared'
 import { seedRegistryReference } from '../prisma/registry-reference'
 import { ROLES_KEY } from '../src/common/decorators'
 import { ZodValidationPipe } from '../src/common/zod.pipe'
@@ -8,7 +8,7 @@ import { TenantContext, type RequestActor } from '../src/infra/tenancy/tenant-co
 import { AccountService } from '../src/modules/auth/account.service'
 import { InstitutionsAdminController, RejectInput } from '../src/modules/institutions/institutions-admin.controller'
 import { ClaimInput, DirectionsInput, InstitutionPatch } from '../src/modules/institutions/institutions.schemas'
-import { InstitutionReviewService } from '../src/modules/institutions/institution-review.service'
+import { InstitutionReviewService, officialName } from '../src/modules/institutions/institution-review.service'
 import { InstitutionsService } from '../src/modules/institutions/institutions.service'
 import type { NotifyInput, NotificationsService } from '../src/modules/notifications/notifications.service'
 import { DB_AVAILABLE, TestContext } from './helpers'
@@ -56,6 +56,36 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       return { ...t, inT, tashkent, andijan, chilonzor, dasturlash, tarmoq, imported, ministry, owner, representative }
     })
   }
+
+  it('a claim abandoned as a draft for 14 days goes to the next representative; a submitted or recent one does not (security review №17, №18)', async () => {
+    const { tenantId, inT, imported, representative } = await setup('inst-abandon')
+    await inT(async () => {
+      const db = ctx.prisma.client
+      const squatter = await representative()
+      await service.claim(tenantId, squatter, { stir: '011111111' })
+      // The ministry's list fixes the STIR: the claimant cannot swap it for another.
+      await expect(service.update(tenantId, squatter, { stir: '099999999' })).rejects.toMatchObject({ code: 'stir_locked' })
+      const real = await representative()
+      await expect(service.claim(tenantId, real, { stir: '011111111' })).rejects.toMatchObject({ code: 'already_claimed' })
+      const old = new Date(Date.now() - 15 * 86_400_000)
+      await db.auditEvent.updateMany({ where: { entityId: imported.id, action: 'institution.claim' }, data: { createdAt: old } })
+      await db.institution.update({ where: { id: imported.id }, data: { createdAt: old } })
+      sent.length = 0
+      const r = await service.claim(tenantId, real, { stir: '011111111' })
+      expect(r.institution).toMatchObject({ id: imported.id, status: 'DRAFT', representative: { name: 'Aziz Karimov' } })
+      expect((await db.user.findUniqueOrThrow({ where: { id: squatter.id } })).institutionId).toBeNull()
+      expect((await db.user.findUniqueOrThrow({ where: { id: real.id } })).institutionId).toBe(imported.id)
+      expect(sent).toEqual([expect.objectContaining({ type: 'registry.released', userIds: [squatter.id] })])
+      expect(await db.auditEvent.count({ where: { entityId: imported.id, action: 'institution.release', reason: 'abandoned-draft' } })).toBe(1)
+    })
+  })
+
+  it('the review queue shows the official name of a record from the ministry list (security review №18)', () => {
+    const t = TECHNIKUMS[0]
+    expect(officialName(t.id, 'IMPORT')).toBe(t.name)
+    expect(officialName(t.id, 'SELF')).toBeNull()
+    expect(officialName('not-in-the-list', 'IMPORT')).toBeNull()
+  })
 
   it('registers an institution representative with the role, the name and the position — never MINISTRY', async () => {
     const { tenantId, inT, representative } = await setup('inst-reg')
@@ -294,6 +324,22 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
         const state = async (userId: string) => (await db.studentProfile.findUniqueOrThrow({ where: { userId } })).studyConfirmation
         expect(await state(studying)).toBe('PENDING')
         expect(await state(applying)).toBe('NONE')
+      })
+    })
+
+    it('the Super Admin releases a record from its representative, with a reason; the next one claims it', async () => {
+      const { tenantId, inT, id, rep, admin, representative } = await submitted('rev-release')
+      await inT(async () => {
+        await review.approve(tenantId, admin, id)
+        sent.length = 0
+        expect(await review.release(tenantId, id, 'Not the institution representative')).toMatchObject({ status: 'UNCLAIMED', workspaceOpen: false })
+        const p = await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id } })
+        expect(p).toMatchObject({ status: 'UNCLAIMED', approvedAt: null })
+        expect((await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: rep.id } })).institutionId).toBeNull()
+        expect(sent).toEqual([expect.objectContaining({ type: 'registry.released', userIds: [rep.id] })])
+        await expect(review.release(tenantId, id, 'Again, no one')).rejects.toMatchObject({ code: 'not_claimed' })
+        const next = await representative()
+        expect((await service.claim(tenantId, next, { stir: '011111111' })).institution).toMatchObject({ id, status: 'DRAFT', workspaceOpen: false })
       })
     })
 

@@ -102,6 +102,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   application_decided: 'apiError.applicationDecided',
   // Super Admin: reference data
   industry_exists: 'apiError.industryExists',
+  stir_locked: 'apiError.stirLocked',
+  not_claimed: 'apiError.notClaimed',
   direction_exists: 'apiError.directionExists',
   invalid_merge: 'apiError.invalidMerge',
   // cart and subscription

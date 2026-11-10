@@ -267,6 +267,8 @@ export interface InstitutionReviewItemDto {
   reReview: boolean
   /** The STIR came from the official registry (import) — otherwise the institution started the record itself. */
   inRegistry: boolean
+  /** The name in the ministry's list, to set against the name the representative entered (null — not from the list). */
+  officialName: string | null
   representative: { name: string; jobTitle: string | null; login: string | null } | null
 }
 
@@ -274,6 +276,7 @@ export interface InstitutionReviewItemDto {
 export interface InstitutionReviewDto {
   passport: InstitutionPassportDto
   inRegistry: boolean
+  officialName: string | null
   representative: { name: string; jobTitle: string | null; login: string | null } | null
   history: { action: string; reason: string | null; at: string; by: string | null }[]
 }
@@ -323,6 +326,13 @@ export type RegistryCompanyStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED
 
 /** After approval, changing one of these (or the certificate) sends the profile back to review; the workspace keeps working. */
 export const COMPANY_REVIEW_FIELDS = ['name', 'stir'] as const
+
+/**
+ * A claimed institution or a registered company that its representative never sent for review (or that was rejected
+ * and never approved) is held this many days; after that another representative of the same STIR takes it over
+ * (security review 10.11 №17: STIRs are public).
+ */
+export const REGISTRY_DRAFT_HOLD_DAYS = 14
 
 /** What must be filled in before «Отправить на проверку»; the API answers the missing ones in `details.missing`. */
 export const COMPANY_REQUIRED_FIELDS = ['stir', 'name', 'regionId', 'address', 'industries', 'certificate', 'representativeName', 'representativeJobTitle'] as const
