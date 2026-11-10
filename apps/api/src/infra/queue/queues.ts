@@ -14,7 +14,7 @@ export const JOBS = {
   notifications: { receipt: 'receipt', reminder: 'reminder' },
   sessions: { generateDaily: 'generate-daily', generateGroup: 'generate-group', markAbsences: 'mark-absences' },
   outbox: { dispatch: 'dispatch' },
-  maintenance: { expirePayments: 'expire-payments', subscriptionLifecycle: 'subscription-lifecycle', purgeIncomingDocs: 'purge-incoming-docs' },
+  maintenance: { expirePayments: 'expire-payments', subscriptionLifecycle: 'subscription-lifecycle', purgeIncomingDocs: 'purge-incoming-docs', purgeCallbackLogs: 'purge-callback-logs' },
 } as const
 
 export interface SmsJobData {

@@ -1358,6 +1358,8 @@ export const dict = {
   'apiError.notBlocked': d('Yozuv bloklanmagan.', 'Запись не заблокирована.', 'The record is not blocked.'),
   'apiError.stirLocked': d('Vazirlik röyxatidagi yozuvning STIRini özgartirib bölmaydi.', 'СТИР записи из списка министерства изменить нельзя.', 'The STIR of a record from the ministry list cannot be changed.'),
   'apiError.notClaimed': d('Bu yozuvning vakili yöq.', 'У этой записи нет представителя.', 'Nobody represents this record.'),
+  'apiError.renewalTooEarly': d('Obunani muddati tugaşidan 7 kun oldin uzaytiriş mumkin.', 'Продлить абонемент можно за 7 дней до конца периода.', 'A subscription can be renewed in the last 7 days of its period.'),
+  'apiError.renewalUnavailable': d('Kurslardan biri endi oçiq emas: kurslarni qaytadan tanlang.', 'Один из курсов больше не открыт: выберите курсы заново.', 'One of the courses is no longer open: choose the courses again.'),
   'apiError.responseDecided': d('Bu javob böyiça qaror allaqaçon qabul qilingan.', 'По этому отклику уже принято решение.', 'This response is already decided.'),
   'apiError.invalidJobTitle': d('Lavozimingizni kiriting (2–80 ta belgi).', 'Укажите вашу должность (2–80 символов).', 'Enter your position (2–80 characters).'),
   'apiError.incomplete': d('Davom etiş uçun paket va kurslarni tanlang.', 'Чтобы продолжить, выберите пакет и курсы.', 'Choose a package and courses to continue.'),

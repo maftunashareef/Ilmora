@@ -111,6 +111,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   direction_exists: 'apiError.directionExists',
   invalid_merge: 'apiError.invalidMerge',
   // cart and subscription
+  renewal_too_early: 'apiError.renewalTooEarly',
+  renewal_unavailable: 'apiError.renewalUnavailable',
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
   'no-package': 'builder.pickPackageFirst',

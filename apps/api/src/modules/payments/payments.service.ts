@@ -4,6 +4,7 @@ import { AppError } from '../../common/errors'
 import { ENV, type Env, clickConfigured, paymeConfigured } from '../../config/env'
 import type { PaymentProvider, PaymentState } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
+import { CALLBACK_LOG_DAYS, UNPROVEN_CALLBACK_LOG_DAYS } from './callback-log-budget'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { isClosed, SubscriptionService } from '../enrollment/subscription.service'
@@ -74,7 +75,16 @@ export class PaymentsService {
   async settleBlocker(db: TransactionClient | PrismaService['client'], payment: { state: PaymentState; subscriptionId: string }): Promise<'payment_not_pending' | 'subscription_closed' | null> {
     if (payment.state !== 'PENDING') return 'payment_not_pending'
     const sub = await db.subscription.findFirst({ where: { id: payment.subscriptionId }, select: { status: true } })
-    return !sub || isClosed(sub.status) ? 'subscription_closed' : null
+    if (!sub || isClosed(sub.status)) return 'subscription_closed'
+    // A course archived, a center blocked or a group deleted since the order: no money for lessons that will not
+    // happen (security review №9) — the provider refuses, the student chooses again.
+    const closed = await db.enrollment.count({
+      where: {
+        subscriptionId: payment.subscriptionId, status: { in: ['PENDING', 'ACTIVE'] },
+        OR: [{ group: { deletedAt: { not: null } } }, { group: { course: { status: { not: 'PUBLISHED' } } } }, { group: { course: { center: { status: { not: 'ACTIVE' } } } } }],
+      },
+    })
+    return closed ? 'subscription_closed' : null
   }
 
   /**
@@ -127,12 +137,29 @@ export class PaymentsService {
     if (journal) await this.ledger.reverse(tx, journal.id, 'PAYMENT_REFUNDED', reason, actorId)
     await tx.payment.update({ where: { id: payment.id }, data: { state: 'REFUNDED', refundedAt: new Date() } })
     const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId } })
-    // Only the payment that bought the current period takes the subscription down; a refund of an older period leaves
-    // a subscription whose newer period is paid alone.
-    const coversCurrent = !sub?.currentPeriodEnd || payment.periodEnd >= sub.currentPeriodEnd
-    if (sub && coversCurrent && (sub.status === 'ACTIVE' || sub.status === 'PAST_DUE')) {
-      await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: new Date() } })
-      await tx.subscription.update({ where: { id: sub.id }, data: { status: 'CANCELLED', cancelledAt: new Date() } })
+    const now = new Date()
+    const cancelSub = async (subId: string) => {
+      await tx.enrollment.updateMany({ where: { subscriptionId: subId, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: now } })
+      await tx.subscription.update({ where: { id: subId }, data: { status: 'CANCELLED', cancelledAt: now } })
+    }
+    if (sub && (sub.status === 'ACTIVE' || sub.status === 'PAST_DUE')) {
+      if (sub.kind === 'PERIOD' && payment.periodStart > now) {
+        // A period paid ahead (security review №10): the subscription now ends where that period would have begun.
+        if (sub.currentPeriodEnd && sub.currentPeriodEnd > payment.periodStart) await tx.subscription.update({ where: { id: sub.id }, data: { currentPeriodEnd: payment.periodStart } })
+      } else if (sub.kind === 'PERIOD' && payment.periodEnd > now) {
+        // The current period: its access goes. A period paid ahead starts now instead; without one the subscription ends.
+        const next = await tx.payment.findFirst({ where: { subscriptionId: sub.id, state: 'PAID', id: { not: payment.id }, periodStart: { gte: payment.periodEnd } }, orderBy: { periodStart: 'asc' } })
+        if (next) {
+          // The paid period moves to now — in the payment too, so a later refund of it sees the period that runs.
+          const end = new Date(now.getTime() + (next.periodEnd.getTime() - next.periodStart.getTime()))
+          await tx.payment.update({ where: { id: next.id }, data: { periodStart: now, periodEnd: end } })
+          await tx.subscription.update({ where: { id: sub.id }, data: { currentPeriodStart: now, currentPeriodEnd: end } })
+        } else await cancelSub(sub.id)
+      } else if (sub.kind !== 'PERIOD' && (!sub.currentPeriodEnd || payment.periodEnd >= sub.currentPeriodEnd)) {
+        // A lesson package: only the payment that bought the current balance takes the subscription down.
+        await cancelSub(sub.id)
+      }
+      // A period already over: nothing to take back.
     }
     await this.outbox.enqueue(tx, { tenantId: payment.tenantId, type: 'payment.refunded', dedupeKey: `refund:${payment.id}`, payload: { paymentId: payment.id, reason } })
     await this.audit.record({ tx, tenantId: payment.tenantId, action: 'payment.refunded', entityType: 'Payment', entityId: payment.id, reason })
@@ -164,6 +191,15 @@ export class PaymentsService {
   }
 
   /** Called by the maintenance job for every tenant. */
+  /** Old callback logs go: the provider's own after CALLBACK_LOG_DAYS, unproven ones after a week (security review №11). */
+  async purgeCallbackLogs(now = new Date()): Promise<number> {
+    const day = 86_400_000
+    const res = await TenantContext.system(() => this.prisma.client.providerCallbackLog.deleteMany({
+      where: { OR: [{ receivedAt: { lt: new Date(now.getTime() - CALLBACK_LOG_DAYS * day) } }, { tenantId: null, receivedAt: { lt: new Date(now.getTime() - UNPROVEN_CALLBACK_LOG_DAYS * day) } }] },
+    }))
+    return res.count
+  }
+
   async expireAll(): Promise<number> {
     let total = 0
     const tenants = await TenantContext.system(() => this.prisma.client.tenant.findMany({ select: { id: true } }))
