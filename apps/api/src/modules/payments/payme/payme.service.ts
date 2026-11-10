@@ -247,7 +247,10 @@ export class PaymeService {
   private async statement(params: Record<string, unknown>, sandbox: boolean) {
     const from = typeof params.from === 'number' ? BigInt(Math.trunc(params.from)) : 0n
     const to = typeof params.to === 'number' ? BigInt(Math.trunc(params.to)) : BigInt(Date.now())
-    const rows = await this.prisma.client.paymentTransaction.findMany({ where: { provider: 'PAYME', providerTime: { gte: from, lte: to }, ...(this.fenced(sandbox) ? { sandbox: true } : {}) }, orderBy: { providerTime: 'asc' } })
+    // Each key gets the statement of its own cash register: the sandbox one with the test key, the live one with the
+    // live key. Test transactions made on production during Payme's acceptance tests must not reach the live
+    // reconciliation act, and live payments must not reach the sandbox one.
+    const rows = await this.prisma.client.paymentTransaction.findMany({ where: { provider: 'PAYME', providerTime: { gte: from, lte: to }, sandbox }, orderBy: { providerTime: 'asc' } })
     return {
       transactions: rows.map((r) => ({
         id: r.providerTransactionId,

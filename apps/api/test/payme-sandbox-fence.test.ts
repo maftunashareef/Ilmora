@@ -46,11 +46,11 @@ describe('Payme test key on production (PAYME_SANDBOX_PAYMENT_IDS)', () => {
     await expect(payme.handle(method, { id: 'pm-1', reason: 3 }, true)).rejects.toMatchObject({ code: PAYME.TX_NOT_FOUND })
   })
 
-  it('shows a test-key GetStatement only sandbox transactions', async () => {
+  it('shows a test-key GetStatement only sandbox transactions, and a live-key one only live transactions', async () => {
     const { payme, findMany } = setup(prodEnv(['pay-test']))
     await payme.handle('GetStatement', { from: 0, to: Date.now() }, true)
     expect(findMany.mock.calls[0]?.[0]).toMatchObject({ where: { sandbox: true } })
     await payme.handle('GetStatement', { from: 0, to: Date.now() }, false)
-    expect(findMany.mock.calls[1]?.[0]).not.toMatchObject({ where: { sandbox: true } })
+    expect(findMany.mock.calls[1]?.[0]).toMatchObject({ where: { sandbox: false } })
   })
 })

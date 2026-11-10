@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import { Logger } from 'nestjs-pino'
 import { AppModule } from './app.module'
+import { useBodyParsing } from './body-parsing'
 import { ENV, type Env } from './config/env'
 
 // BigInt (tiyin amounts, provider timestamps) serialises as a decimal string to stay exact in JSON.
@@ -32,11 +33,7 @@ async function bootstrap() {
     }),
   )
   app.use(cookieParser())
-  // The default JSON limit (100 kB) is too small for the site configuration once it holds the university packages (one PUT
-  // carries every package, in three languages). useBodyParser replaces Nest's default JSON parser and keeps rawBody for the
-  // payment webhooks; request validation and rate limits are unchanged.
-  // Payme sends its JSON-RPC calls as text/json; without it the body arrives empty.
-  app.useBodyParser('json', { limit: '1mb', type: ['application/json', 'text/json'] })
+  useBodyParsing(app)
   app.enableCors({
     origin: env.CORS_ORIGINS.length ? env.CORS_ORIGINS : env.NODE_ENV === 'production' ? false : true,
     credentials: true,

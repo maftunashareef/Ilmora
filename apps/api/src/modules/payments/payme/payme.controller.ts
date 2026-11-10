@@ -1,11 +1,22 @@
 import { All, Controller, Headers, HttpCode, Inject, Logger, Req, Res } from '@nestjs/common'
 import { SkipThrottle } from '@nestjs/throttler'
-import type { Request, Response } from 'express'
+import type { NextFunction, Request, Response } from 'express'
 import { Public } from '../../../common/decorators'
 import { ENV, type Env } from '../../../config/env'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { TenantContext } from '../../../infra/tenancy/tenant-context'
 import { PAYME, PaymeError, PaymeService } from './payme.service'
+
+/**
+ * Express error handler mounted on the Payme route right after the JSON parser (src/body-parsing.ts). A body that is
+ * not valid JSON never reaches the controller, and the parser's HTTP 400 is read by Payme as -32400 (system error).
+ * The protocol wants HTTP 200 with JSON-RPC error -32700; the request id cannot be read, so it is null.
+ */
+export function paymeBodyErrorHandler(err: unknown, _req: Request, res: Response, next: NextFunction) {
+  if ((err as { type?: unknown } | null)?.type !== 'entity.parse.failed') return next(err)
+  const message = { ru: 'Ошибка разбора JSON', uz: 'JSON tahlilida xatolik', en: 'JSON parse error' }
+  res.status(200).type('application/json').send(JSON.stringify({ error: { code: PAYME.PARSE, message }, id: null }))
+}
 
 /**
  * JSON-RPC endpoint called by Payme Business (POST /payments/payme, outside the API prefix).

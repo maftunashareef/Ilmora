@@ -43,24 +43,41 @@ Never commit the file, never paste the keys into a chat.
 | Click | Secret key | `CLICK_SECRET_KEY` |
 
 Optional source-IP allow-lists: `PAYME_ALLOWED_IPS`, `CLICK_ALLOWED_IPS` (comma-separated; leave empty to accept any).
+Payme publishes its callers as 185.234.113.1 – 185.234.113.15; the full comma-separated line is in
+`infra/uzcloud/api.env.example`.
+
+Fiscal receipt (Payme): `PAYME_FISCAL_IKPU`, `PAYME_FISCAL_PACKAGE_CODE`, `PAYME_FISCAL_VAT_PERCENT` — see Payme step 4.
 
 ## Steps
 
 ### 1. Payme (Paycom)
 1. Register as a merchant at merchant.payme.uz with the legal entity and bank account.
 2. Create a cash register (касса) for ILMORA. Give Payme the Merchant API endpoint from the table above.
-3. Receive the Кассa ID, the production key and the test key.
-4. Sandbox: production ignores `PAYME_TEST_KEY` by default, because a sandbox payment settles like a real one and
-   activates a real subscription. Without a staging machine, pass Payme's tests on `ilmoraa.uz` this way:
+3. In the cash register settings, the payment account ("реквизит" / account field) must be exactly:
+   - field name (key) **`payment_id`**, type text (string): ILMORA puts its payment id there (`ac.payment_id` in the
+     checkout link) and reads it back from every call. Any other name (`order_id`, `phone`, …) makes every Payme call
+     fail with -31050 "order not found";
+   - account type **one-time** ("одноразовый"): one order, one payment.
+4. Fiscal receipt: ILMORA sends one receipt line per payment in CheckPerformTransaction. Get the ИКПУ (MXIK) code of
+   the service and its package code from tasnif.soliq.uz, and the VAT rate of your tax regime, from your accountant;
+   put them into `PAYME_FISCAL_IKPU`, `PAYME_FISCAL_PACKAGE_CODE`, `PAYME_FISCAL_VAT_PERCENT`. The code ships defaults
+   for all three — do not rely on them for live receipts.
+5. Receive the Кассa ID, the production key and the test key.
+6. Sandbox (test.paycom.uz): production ignores `PAYME_TEST_KEY` by default, because a sandbox payment settles like a
+   real one and activates a real subscription. Without a staging machine, pass Payme's tests on `ilmoraa.uz` this way:
    1. Create two test students, put a package in the cart, choose Payme and leave the payment unfinished. Note both
-      payment ids.
+      payment ids and their amounts. Scenario 1 (create + cancel) uses the first order, scenario 2 (create + perform +
+      cancel) the second; once cancelled, an order cannot be reused, so a rerun needs new orders.
    2. In `api.env`: `PAYME_MERCHANT_ID`, `PAYME_TEST_KEY`, `PAYME_SANDBOX_PAYMENT_IDS=<id1>,<id2>`, and a long enough
       `PAYMENT_EXPIRES_HOURS` for the orders to outlive the test window. Restart the API.
-   3. The test key now reaches only those two orders and the sandbox transactions on them; any other order looks
+   3. In the sandbox form: the amount in **tiyin** (the order's sum in so'm × 100), `payment_id` = the order id for the
+      valid account, any other text for the invalid one.
+   4. The test key now reaches only those two orders and the sandbox transactions on them; any other order looks
       absent (-31050) and live transactions look absent (-31003). The API logs a warning at start while the list is set.
-   4. After the tests: clear `PAYME_SANDBOX_PAYMENT_IDS` and `PAYME_TEST_KEY`, restart, and cancel the test students'
-      subscriptions.
-5. Live: put `PAYME_MERCHANT_ID` and `PAYME_KEY` on the production server (step 3).
+      `apps/api/test/payme-sandbox-acceptance.test.ts` replays the whole sandbox checklist against this setup.
+   5. After the tests: clear `PAYME_SANDBOX_PAYMENT_IDS` and `PAYME_TEST_KEY`, restart, and cancel the test students'
+      subscriptions. The test transactions stay out of the live GetStatement (reconciliation act).
+7. Live: put `PAYME_MERCHANT_ID` and `PAYME_KEY` on the production server (section 3, "Apply the config").
 
 ### 2. Click (SHOP-API)
 1. Apply for a Click merchant / SHOP-API with the same legal entity and bank account.
@@ -79,8 +96,8 @@ Both machines must hold the same `api.env` (see the note at the top of that file
 ### 4. Verify
 - `curl -s https://ilmoraa.uz/v1/payments/providers` → the configured provider(s) report `true`.
 - The "Pay" button for that provider appears on the subscription checkout.
-- Make one payment end to end (pending → paid) and confirm the return page shows "paid": a sandbox payment on the
-  staging instance, then one small real payment on `ilmoraa.uz`.
+- Make one small real payment end to end on `ilmoraa.uz` (pending → paid) and confirm the return page shows "paid"
+  and the fiscal receipt arrives in the Payme app.
 - Open admin → Finance: the provider transaction, the internal payment and the ledger postings line up with no
   discrepancy. Use "manual settle" only for genuine off-channel payments.
 
