@@ -316,3 +316,77 @@ export interface MinistryAccountCreatedDto {
   account: MinistryAccountDto
   temporaryPassword: string
 }
+
+// ───────────── Company profile (ТЗ 4.3) ─────────────
+
+export type RegistryCompanyStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED'
+
+/** After approval, changing one of these (or the certificate) sends the profile back to review; the workspace keeps working. */
+export const COMPANY_REVIEW_FIELDS = ['name', 'stir'] as const
+
+/** What must be filled in before «Отправить на проверку»; the API answers the missing ones in `details.missing`. */
+export const COMPANY_REQUIRED_FIELDS = ['stir', 'name', 'regionId', 'address', 'industries', 'certificate', 'representativeName', 'representativeJobTitle'] as const
+export type CompanyRequiredField = (typeof COMPANY_REQUIRED_FIELDS)[number]
+
+export const COMPANY_DIRECTIONS_MAX = 50
+/** Certificate: PDF, JPEG or PNG up to 10 MB (ТЗ 4.3); the type is checked by the file's first bytes. */
+export const DOCUMENT_CONTENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const
+export const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024
+
+/** The company's own profile, as its representative sees it. */
+export interface CompanyProfileDto {
+  id: string
+  stir: string
+  name: string
+  region: (PlaceRefDto & { slug: string | null }) | null
+  district: PlaceRefDto | null
+  address: string | null
+  website: string | null
+  about: string | null
+  industries: IndustryDto[]
+  /** Optional: directions that refine the industries. */
+  directions: DirectionDto[]
+  /** The state-registration certificate is uploaded (the file itself only through a 5-minute link). */
+  certificateUploaded: boolean
+  status: RegistryCompanyStatus
+  rejectReason: string | null
+  submittedAt: string | null
+  approvedAt: string | null
+  /** Approved once: graduates, training requests, students and vacancies are open (ТЗ 4.3). */
+  workspaceOpen: boolean
+  /** False only while the first review is pending. */
+  editable: boolean
+  representative: { name: string; jobTitle: string | null; email: string | null }
+}
+
+/** Answer to «Загрузить свидетельство»: PUT the file to `uploadUrl` with this content type, then confirm `key`. */
+export interface DocumentUploadDto {
+  uploadUrl: string
+  key: string
+  expiresInSeconds: number
+}
+
+/** A 5-minute link to a private document. */
+export interface DocumentLinkDto {
+  url: string
+  expiresInSeconds: number
+}
+
+/** One company in the Super Admin's review queue. */
+export interface CompanyReviewItemDto {
+  id: string
+  name: string
+  stir: string
+  region: (PlaceRefDto & { slug: string | null }) | null
+  industries: IndustryDto[]
+  submittedAt: string | null
+  reReview: boolean
+  certificateUploaded: boolean
+  representative: { name: string; jobTitle: string | null; login: string | null; email: string | null } | null
+}
+
+export interface CompanyReviewDto {
+  profile: CompanyProfileDto
+  representative: { name: string; jobTitle: string | null; login: string | null; email: string | null } | null
+  history: { action: string; reason: string | null; at: string; by: string | null }[]
+}
