@@ -24,5 +24,6 @@ export class InstitutionsAdminController {
   @Get('reviews') queue() { return this.review.queue() }
   @Get(':id') detail(@Param('id') id: string) { return this.review.detail(id) }
   @Post(':id/approve') approve(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.review.approve(t, a, id) }
+  @Post(':id/release') release(@CurrentTenantId() t: string, @Param('id') id: string, @Body(new ZodValidationPipe(RejectInput)) dto: RejectInput) { return this.review.release(t, id, dto.reason) }
   @Post(':id/reject') reject(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(RejectInput)) dto: RejectInput) { return this.review.reject(t, a, id, dto.reason) }
 }

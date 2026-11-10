@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import {
   INSTITUTION_REVIEW_FIELDS, type InstitutionClaimResult, type InstitutionPassportDto, type InstitutionRequiredField,
-  normalizeUzPhone, registrySearchKey, registrySearchText,
+  normalizeUzPhone, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey, registrySearchText,
 } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
@@ -78,7 +78,12 @@ export class InstitutionsService {
     if (await this.representedId(actor)) throw AppError.conflict('already_has_institution', 'This account already represents an institution')
     const alreadyClaimed = () => AppError.conflict('already_claimed', 'This institution is already registered. Write to support if it is yours.')
 
-    const existing = await this.prisma.client.institution.findFirst({ where: { stir: input.stir }, select: { id: true, status: true, mergedIntoId: true, representative: { select: { id: true } } } })
+    let existing = await this.prisma.client.institution.findFirst({ where: { stir: input.stir }, select: { id: true, status: true, mergedIntoId: true, representative: { select: { id: true } } } })
+    // A draft its holder has abandoned is released to the next representative of the STIR (security review №17).
+    if (existing?.representative && (await this.isAbandoned(existing.id))) {
+      await this.release(tenantId, existing.id, 'abandoned-draft')
+      existing = await this.prisma.client.institution.findFirst({ where: { id: existing.id }, select: { id: true, status: true, mergedIntoId: true, representative: { select: { id: true } } } })
+    }
     if (existing) {
       if (existing.representative || existing.status !== 'UNCLAIMED' || existing.mergedIntoId) throw alreadyClaimed()
       try {
@@ -115,6 +120,36 @@ export class InstitutionsService {
     return { institution: await this.passportOf(createdId), created: true }
   }
 
+  /**
+   * Abandoned: never approved, still a draft (or rejected) and untouched for REGISTRY_DRAFT_HOLD_DAYS since it was
+   * claimed, created or reviewed.
+   */
+  private async isAbandoned(id: string): Promise<boolean> {
+    const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true } })
+    if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
+    const claimed = await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'Institution', entityId: id, action: { in: ['institution.claim', 'institution.create'] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
+    const last = Math.max(row.createdAt.getTime(), claimed?.createdAt.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
+    return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
+  }
+
+  /**
+   * Releases the record from its representative (the Super Admin, or an abandoned draft): the account no longer
+   * represents it, the record is UNCLAIMED and closed until the next representative's review. Its data stay.
+   */
+  async release(tenantId: string, id: string, reason: string): Promise<void> {
+    const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, representative: { select: { id: true } } } })
+    if (!row) throw AppError.notFound('Institution')
+    if (!row.representative) throw AppError.conflict('not_claimed', 'Nobody represents this record')
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: row.representative!.id }, data: { institutionId: null } })
+      await tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null } })
+    })
+    await this.audit.record({ action: 'institution.release', entityType: 'Institution', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, reason })
+    await this.notifications.safely('registry.released', () =>
+      this.notifications.notify({ tenantId, userIds: [row.representative!.id], type: 'registry.released', params: { name: row.name }, dedupeKey: `registry-released:${id}:${Date.now()}` }),
+    )
+  }
+
   async passport(actor: RequestActor): Promise<InstitutionPassportDto> {
     return this.passportOf(await this.ownId(actor))
   }
@@ -126,7 +161,7 @@ export class InstitutionsService {
    */
   async update(tenantId: string, actor: RequestActor, input: InstitutionPatch): Promise<InstitutionPassportDto> {
     const id = await this.ownId(actor)
-    const current = await this.prisma.client.institution.findFirstOrThrow({ where: { id }, select: { ...PASSPORT_SELECT, representative: { select: { id: true, displayName: true, jobTitle: true } } } })
+    const current = await this.prisma.client.institution.findFirstOrThrow({ where: { id }, select: { ...PASSPORT_SELECT, source: true, representative: { select: { id: true, displayName: true, jobTitle: true } } } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
 
     const data: Prisma.InstitutionUncheckedUpdateInput = {}
@@ -134,7 +169,11 @@ export class InstitutionsService {
     if (input.ownership !== undefined) data.ownership = input.ownership
     // Renamed: the official Russian and former names stay searchable (PR #22, docs/registry/data-model.md «Поиск учреждений»).
     if (input.name !== undefined) Object.assign(data, { name: input.name, searchKey: registrySearchKey(input.name), searchText: registrySearchText(input.name, current.nameRu, current.formerName) })
-    if (input.stir !== undefined) data.stir = input.stir
+    if (input.stir !== undefined) {
+      // The ministry's list fixes the STIR of its records: whoever claimed one cannot swap it for another (security review №18).
+      if (current.source === 'IMPORT' && current.stir && input.stir !== current.stir) throw AppError.conflict('stir_locked', 'The STIR of a record from the ministry list cannot be changed')
+      data.stir = input.stir
+    }
     if (input.address !== undefined) data.address = input.address || null
     if (input.email !== undefined) data.email = input.email || null
     if (input.website !== undefined) data.website = input.website || null
