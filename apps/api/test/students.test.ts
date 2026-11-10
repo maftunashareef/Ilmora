@@ -80,6 +80,7 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
     const s = await setup('st-save')
     await TenantContext.forTenant(s.tenantId, async () => {
       const me = await s.student()
+      const signInPhoneBefore = (await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: me.id } })).phoneE164
       expect(await service.questionnaire(me)).toEqual({ questionnaire: null, complete: false, studyConfirmed: null })
       sent.length = 0
       const state = await service.save(s.tenantId, me, s.studying() as never, '10.0.0.1')
@@ -90,13 +91,33 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
         fullName: 'Aziz Karimov', birthDate: adultBirth, region: 'tashkent-city', district: 'Çilonzor', email: 'aziz@mail.uz', about: 'Python',
         consents: { GRADUATE_CARD: true, CONTRACT_HELP_CARD: false }, guardianConsent: false,
       })
-      // The contact phone waits for its own field: never written to the sign-in phone.
-      expect(state.questionnaire?.phone).toBe('')
-      expect((await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: me.id } })).phoneE164).not.toBe('+998901234567')
+      // The contact phone goes to its own field, normalized; the sign-in number stays as it was.
+      expect(state.questionnaire?.phone).toBe('+998901234567')
+      expect((await ctx.prisma.client.studentProfile.findUniqueOrThrow({ where: { userId: me.id } })).contactPhone).toBe('+998901234567')
+      expect((await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: me.id } })).phoneE164).toBe(signInPhoneBefore)
       expect(sent).toEqual([expect.objectContaining({ type: 'student.studyPending', userIds: [s.approved.actor!.id] })])
       const consent = await ctx.prisma.client.studentConsent.findFirstOrThrow({ where: { userId: me.id } })
       expect(consent).toMatchObject({ kind: 'GRADUATE_CARD', textVersion: '2026-11-10', ip: '10.0.0.1', revokedAt: null })
       expect((await ctx.prisma.client.studentProfile.findUniqueOrThrow({ where: { userId: me.id } })).contractAmountMinor).toBe(500_000_000n)
+    })
+  })
+
+  it('a student who signed in by SMS gets that number as the default phone; a typed one goes to contactPhone only', async () => {
+    const s = await setup('st-phone')
+    await TenantContext.forTenant(s.tenantId, async () => {
+      const me = await s.student()
+      const user = await ctx.prisma.client.user.update({ where: { id: me.id }, data: { phoneVerifiedAt: new Date() } })
+      // A profile without its own contact phone (e.g. saved before the field existed) offers the SMS number.
+      await ctx.prisma.client.studentProfile.create({ data: { tenantId: s.tenantId, userId: me.id, mode: 'APPLYING' } })
+      expect((await service.questionnaire(me)).questionnaire?.phone).toBe(user.phoneE164)
+      // Saving another number keeps it as the contact phone and never moves the sign-in number.
+      const state = await service.save(s.tenantId, me, s.studying({ phone: '93 111 22 33' }) as never)
+      expect(state.questionnaire?.phone).toBe('+998931112233')
+      expect((await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: me.id } })).phoneE164).toBe(user.phoneE164)
+      // A number not confirmed by SMS is never offered as the default.
+      const other = await s.student()
+      await ctx.prisma.client.studentProfile.create({ data: { tenantId: s.tenantId, userId: other.id, mode: 'APPLYING' } })
+      expect((await service.questionnaire(other)).questionnaire?.phone).toBe('')
     })
   })
 
