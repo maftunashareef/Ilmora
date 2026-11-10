@@ -1,10 +1,11 @@
 'use client'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useT } from '@/i18n/useT'
 import { apiErrorText } from '@/lib/apiErrors'
 import { PASSWORD_MAX, passwordChangeProblem, type PasswordChangeFields } from '@/lib/passwordChange'
 import { useStore, type AuthUser } from '@/store/useStore'
-import { Button, Card, Field, Icon, Input } from './ui'
+import { Button, Card, Field, Icon, Input, Modal } from './ui'
 
 const EMPTY: PasswordChangeFields = { current: '', next: '', repeat: '' }
 
@@ -13,7 +14,7 @@ const EMPTY: PasswordChangeFields = { current: '', next: '', repeat: '' }
  * after the sign-in and the app code, before anything else. Success ends every other session of the account; this
  * browser gets a fresh one, so the store simply takes the new session.
  */
-export function PasswordChangeForm({ required = false, onDone }: { required?: boolean; onDone?: (user: AuthUser) => void }) {
+export function PasswordChangeForm({ required = false, heading = true, onDone }: { required?: boolean; heading?: boolean; onDone?: (user: AuthUser) => void }) {
   const { t, lang } = useT()
   const login = useStore((s) => s.auth.user?.login ?? null)
   const changePassword = useStore((s) => s.changePassword)
@@ -61,10 +62,12 @@ export function PasswordChangeForm({ required = false, onDone }: { required?: bo
 
   return (
     <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void submit() }} aria-busy={busy}>
-      <div>
-        <h2 className="font-body text-lg font-semibold text-charcoal">{t(required ? 'pwd.requiredTitle' : 'pwd.title')}</h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-charcoal/70">{t(required ? 'pwd.requiredIntro' : 'pwd.intro')}</p>
-      </div>
+      {heading && (
+        <div>
+          <h2 className="font-body text-lg font-semibold text-charcoal">{t(required ? 'pwd.requiredTitle' : 'pwd.title')}</h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-charcoal/70">{t(required ? 'pwd.requiredIntro' : 'pwd.intro')}</p>
+        </div>
+      )}
       {/* The login is in the form so a password manager saves the new password under the right account. */}
       {login && <input type="text" name="username" autoComplete="username" value={login} readOnly hidden />}
       {field('current', t(required ? 'pwd.currentTemp' : 'pwd.current'), 'current-password')}
@@ -94,5 +97,38 @@ export function PasswordChangeGate() {
         <PasswordChangeForm required />
       </Card>
     </div>
+  )
+}
+
+/**
+ * «Сменить пароль» for any signed-in account with a password (account menu, profile pages). Rendered into <body>: the
+ * headers blur their background, which would trap a fixed dialog inside them.
+ */
+export function PasswordChangeDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useT()
+  return createPortal(
+    <Modal open onClose={onClose} title={t('pwd.title')}>
+      <PasswordChangeForm heading={false} onDone={onClose} />
+    </Modal>,
+    document.body,
+  )
+}
+
+/** A «Password» card for profile and settings pages. Accounts that sign in without a password (SMS only) do not see it. */
+export function PasswordCard({ className = '' }: { className?: string }) {
+  const { t } = useT()
+  const hasLogin = useStore((s) => !!s.auth.user?.login)
+  const [open, setOpen] = useState(false)
+  const close = useCallback(() => setOpen(false), [])
+  if (!hasLogin) return null
+  return (
+    <Card className={`flex flex-wrap items-center justify-between gap-3 p-6 ${className}`}>
+      <div className="min-w-0">
+        <h2 className="font-body text-base font-semibold text-charcoal">{t('auth.password')}</h2>
+        <p className="mt-1 text-xs leading-relaxed text-charcoal/60">{t('pwd.cardHint')}</p>
+      </div>
+      <Button variant="secondary" onClick={() => setOpen(true)}><Icon name="lock" className="h-4 w-4" />{t('pwd.title')}</Button>
+      {open && <PasswordChangeDialog onClose={close} />}
+    </Card>
   )
 }

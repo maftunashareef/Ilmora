@@ -1469,6 +1469,7 @@ export const dict = {
   'pwd.sessionsNote': d('Almaştirilgandan keyin bu hisobga boşqa barça kirişlar tugaydi, bu brauzerda esa kiriş saqlanadi.', 'После смены все другие входы в аккаунт завершатся; в этом браузере вы останетесь.', 'After the change every other sign-in to the account ends; you stay signed in in this browser.'),
   'pwd.changed': d('Parol almaştirildi. Boşqa kirişlar tugatildi.', 'Пароль изменён. Другие входы в аккаунт завершены.', 'Password changed. Other sign-ins to the account have ended.'),
   'pwd.err.current': d('Joriy parolni kiriting.', 'Введите текущий пароль.', 'Enter the current password.'),
+  'pwd.cardHint': d('Parolni almaştirsangiz, boşqa qurilmalardagi kirişlar tugaydi.', 'При смене пароля входы на других устройствах завершатся.', 'Changing the password ends the sign-ins on other devices.'),
   'mfa.verifyIntro': d('Autentifikator ilovasidagi 6 xonali kodni kiriting.', 'Введите 6-значный код из приложения-аутентификатора.', 'Enter the 6-digit code from your authenticator app.'),
   'mfa.recoveryIntro': d('Telefoningiz yöq bölsa, saqlab qöyilgan zaxira kodlardan birini kiriting.', 'Если телефона нет, введите один из сохранённых резервных кодов.', 'Without your phone, enter one of the recovery codes you saved.'),
   'mfa.code': d('Kod', 'Код', 'Code'),

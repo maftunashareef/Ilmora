@@ -1,11 +1,12 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useT } from '../../i18n/useT'
 import { useLocation, useNavigate } from '../../lib/router'
 import { stripLocale, useLocale } from '../../lib/router'
 import { useStore } from '../../store/useStore'
 import type { Role } from '../../types'
+import { PasswordChangeDialog } from '../PasswordChange'
 import { Button, cx, Icon } from '../ui'
 
 export const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: string; short: 'UZ' | 'RU' | 'EN' }[] = [
@@ -67,6 +68,8 @@ export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align
   const nav = useNavigate()
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const closePassword = useCallback(() => setPasswordOpen(false), [])
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -116,6 +119,12 @@ export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align
               </button>
             ))}
           </div>
+          {/* Accounts with a login sign in with a password and can change it here, in every workspace. */}
+          {user.login && (
+            <button type="button" onClick={() => { setOpen(false); setPasswordOpen(true) }} className="mt-3 flex w-full items-center gap-2 rounded-control px-1 py-1.5 text-left text-sm text-charcoal/75 transition hover:text-forest">
+              <Icon name="lock" className="h-3.5 w-3.5" />{t('pwd.title')}
+            </button>
+          )}
           <div className="mt-4 flex items-center justify-between gap-2 border-t border-charcoal/10 pt-3">
             <span className="text-[11px] text-charcoal/45">{t('role.viewingAs')} {t(`role.${role}`)}</span>
             <Button size="sm" variant="ghost" className="text-charcoal/60" onClick={async () => { setOpen(false); await logout(); notify(t('auth.signedOut')); nav('/') }}>
@@ -124,6 +133,7 @@ export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align
           </div>
         </div>
       )}
+      {passwordOpen && <PasswordChangeDialog onClose={closePassword} />}
     </div>
   )
 }
