@@ -5,6 +5,7 @@ import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate } from '../../lib/format'
+import { ministryAccounts } from '../../services/ministryAccounts'
 import { useStore } from '../../store/useStore'
 
 type Account = { id: string; login: string | null; phoneMasked: string | null; displayName: string; roles: string[]; centerId: string | null; isActive: boolean; subscription: { status: string } | null; createdAt: string; lastLoginAt: string | null }
@@ -47,6 +48,11 @@ export function AdminAccounts() {
     if (!reason || reason.length < 3) return
     return act(a.id, () => api(`/admin/users/${a.id}`, { method: 'DELETE', body: { reason } }), t('admin.accounts.deleted'))
   }
+  /** Lost phone of another Super Admin: unlink the authenticator app (the API refuses one's own). */
+  const resetApp = (a: Account) => {
+    if (!confirm(t('admin.ministry.resetAppConfirm', { name: a.displayName }))) return
+    return act(a.id, () => ministryAccounts.resetApp(a.id), t('admin.ministry.appReset'))
+  }
   const roleLabel = (r: string) => (r === 'STUDENT' ? t('role.student') : r === 'TEACHER' ? t('role.teacher') : r === 'CENTER_ADMIN' ? t('role.center') : r === 'FINANCE_ADMIN' ? t('finance.title') : r === 'PLATFORM_ADMIN' ? t('role.admin') : r)
 
   return (
@@ -70,6 +76,7 @@ export function AdminAccounts() {
               {a.id !== me && (
                 <>
                   <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => setEditing(a)}><Icon name="user" className="h-3.5 w-3.5" />{t('admin.accounts.roles')}</Button>
+                  {a.roles.includes('PLATFORM_ADMIN') && <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void resetApp(a)}><Icon name="refresh" className="h-3.5 w-3.5" />{t('admin.ministry.resetApp')}</Button>}
                   {/* Block and delete stay off Super Admin accounts; change them through the Roles dialog instead. */}
                   {!a.roles.includes('PLATFORM_ADMIN') && (
                     <>
