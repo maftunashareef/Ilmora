@@ -11,36 +11,39 @@ import { apiErrorText } from '../../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../../lib/demoMode'
 import { Link, useNavigate, useSearchParams } from '../../lib/router'
 import { canOpen, homeFor } from '../../lib/workspaceHome'
+import { startCompany } from '../../services/companies'
 import { claimInstitution } from '../../services/institutions'
 import { useStore, type RegisterRole } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
-type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'position' | 'instType' | 'ownership' | 'institution' | 'inn'
+type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'position' | 'instType' | 'ownership' | 'institution' | 'inn' | 'companyName' | 'email'
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /** Self-service roles shown at registration: people first, then organizations. */
 const ROLE_GROUPS: { label: TKey; cols: string; roles: RegisterRole[] }[] = [
   { label: 'auth.group.person', cols: 'sm:grid-cols-2', roles: ['STUDENT', 'TEACHER'] },
-  // A company signs up once the API has the role (ТЗ 4.3).
-  { label: 'auth.group.org', cols: 'sm:grid-cols-2', roles: ['CENTER', 'INSTITUTION'] },
+  { label: 'auth.group.org', cols: 'sm:grid-cols-3', roles: ['CENTER', 'INSTITUTION', 'COMPANY'] },
 ]
 const ROLE_META: Record<RegisterRole, { icon: string; label: TKey; hint: TKey }> = {
   STUDENT: { icon: 'user', label: 'role.student', hint: 'auth.role.studentHint' },
   TEACHER: { icon: 'edit', label: 'role.teacher', hint: 'auth.role.teacherHint' },
   CENTER: { icon: 'building', label: 'auth.role.center', hint: 'auth.role.centerHint' },
   INSTITUTION: { icon: 'cap', label: 'auth.role.institution', hint: 'auth.role.institutionHint' },
+  COMPANY: { icon: 'briefcase', label: 'auth.role.company', hint: 'auth.role.companyHint' },
 }
 /**
- * An institution (ТЗ 4.2) signs up as its representative (name, job title, phone), says what it is (type, ownership),
- * picks itself from the registry or types its name, and gives its STIR. The account is created first; the institution is
- * then claimed by STIR (`claimInstitution`). The passport is completed in the workspace and sent for review there.
+ * An institution (ТЗ 4.2) or a company (ТЗ 4.3) signs up as its representative (name, job title, phone) with its STIR.
+ * An institution also says what it is (type, ownership) and picks itself from the registry or types its name; a company
+ * gives its name and the representative's email. The account is created first; then the institution is claimed by STIR
+ * (`claimInstitution`) or the company profile is started (`startCompany`). The rest is completed in the workspace.
  */
-const isOrgRole = (r: RegisterRole | null): r is 'INSTITUTION' => r === 'INSTITUTION'
+const isOrgRole = (r: RegisterRole | null): r is 'INSTITUTION' | 'COMPANY' => r === 'INSTITUTION' || r === 'COMPANY'
 /**
- * Where a new account goes first: a student starts the questionnaire (ТЗ 4.1); an institution's representative goes to
- * the home page until the institution workspace exists.
+ * Where a new account goes first: a student starts the questionnaire (ТЗ 4.1); an institution's or a company's
+ * representative goes to the home page until their workspace exists.
  */
-const FIRST_STOP: Partial<Record<RegisterRole, string>> = { STUDENT: '/student/questionnaire', INSTITUTION: '/' }
+const FIRST_STOP: Partial<Record<RegisterRole, string>> = { STUDENT: '/student/questionnaire', INSTITUTION: '/', COMPANY: '/' }
 
 export function LoginPage() {
   const { t } = useT()
@@ -61,6 +64,8 @@ export function LoginPage() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [position, setPosition] = useState('')
+  const [companyName, setCompanyName] = useState('')
+  const [email, setEmail] = useState('')
   const firstStop = useRef<string | null>(null)
   /** Holds the redirect after sign-up while the institution is being claimed. */
   const holdRedirect = useRef(false)
@@ -154,6 +159,8 @@ export function LoginPage() {
         if (!institution || institution.name.trim().length < 2 || !isUzRegion(institution.region)) next.institution = t('q.err.institution')
       }
       if (isOrgRole(role) && !normalizeUzInn(inn).ok) next.inn = t('auth.err.inn')
+      if (role === 'COMPANY' && companyName.trim().length < 2) next.companyName = t('auth.err.orgName')
+      if (role === 'COMPANY' && !EMAIL_RE.test(email.trim())) next.email = t('q.err.email')
       if (!name.trim() || name.trim().length < 2) next.name = t('auth.err.name')
       // An organization must leave a contact phone; for a person the phone is optional.
       if (phone.trim() || isOrgRole(role)) {
@@ -188,6 +195,19 @@ export function LoginPage() {
     }
   }
 
+  /** The account exists; now the STIR and the name start the company profile (a registered STIR → "write to support"). */
+  const startCompanyAfterSignUp = async () => {
+    try {
+      const { emailSaved } = await startCompany({ stir: inn.replace(/\D/g, ''), name: companyName, email })
+      notify(t(emailSaved ? 'auth.companyCreated' : 'auth.companyCreatedEmailLater', { name: companyName.trim() }))
+    } catch (err) {
+      notify(apiErrorText(err, lang), 'warn')
+    } finally {
+      holdRedirect.current = false
+      nav(firstStop.current ?? '/', { replace: true })
+    }
+  }
+
   const submit = async () => {
     setError(null)
     setNetworkOffline(false)
@@ -197,7 +217,7 @@ export function LoginPage() {
       const normalizedLogin = loginName.trim().toLowerCase()
       if (mode === 'register' && role) {
         firstStop.current = FIRST_STOP[role] ?? null
-        holdRedirect.current = role === 'INSTITUTION'
+        holdRedirect.current = isOrgRole(role)
         const user = await register({
           role,
           login: normalizedLogin,
@@ -214,6 +234,7 @@ export function LoginPage() {
           if (instType && ownership && institution) await claimAfterSignUp(instType, ownership, institution)
           else { holdRedirect.current = false; nav(firstStop.current ?? '/', { replace: true }) }
         }
+        if (role === 'COMPANY') await startCompanyAfterSignUp()
       } else {
         const user = await login(loginName.trim(), password)
         notify(t('auth.welcome', { name: user.displayName }))
@@ -338,6 +359,20 @@ export function LoginPage() {
               </section>
             )}
 
+            {mode === 'register' && role === 'COMPANY' && (
+              <section aria-labelledby="company-details-title" className="space-y-4 rounded-control border border-forest/15 bg-sage/20 p-4">
+                <h2 id="company-details-title" className="flex items-center gap-2 font-body text-sm font-semibold text-charcoal">
+                  <Icon name="briefcase" className="h-4 w-4 text-forest" />{t('auth.org.companyTitle')}
+                </h2>
+                <Field label={t('auth.org.companyName')} required>
+                  <Input maxLength={200} placeholder={t('auth.org.companyNamePlaceholder')} value={companyName}
+                    onChange={(e) => { setCompanyName(e.target.value); clearError('companyName') }} aria-invalid={!!fieldErrors.companyName} />
+                  {fieldErrors.companyName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.companyName}</p>}
+                </Field>
+                <InnField value={inn} error={fieldErrors.inn} onChange={(v) => { setInn(v); clearError('inn') }} />
+              </section>
+            )}
+
             {mode === 'register' && role === 'CENTER' && (
               <Field label={t('auth.centerName')} required>
                 <Input
@@ -354,7 +389,7 @@ export function LoginPage() {
             )}
 
             {mode === 'register' && (
-              <Field label={t(role === 'INSTITUTION' ? 'auth.org.repName' : 'auth.fullName')} hint={t('auth.fullNamePlaceholder')} required={isOrg}>
+              <Field label={t(role === 'INSTITUTION' ? 'auth.org.repName' : role === 'COMPANY' ? 'auth.org.contactName' : 'auth.fullName')} hint={t('auth.fullNamePlaceholder')} required={isOrg}>
                 <Input
                   autoComplete="name"
                   maxLength={60}
@@ -402,10 +437,18 @@ export function LoginPage() {
               </Field>
             )}
 
+            {role === 'COMPANY' && mode === 'register' && (
+              <Field label={t('q.email')} required>
+                <Input type="email" autoComplete="email" maxLength={120} placeholder="info@company.uz" value={email}
+                  onChange={(e) => { setEmail(e.target.value); clearError('email') }} aria-invalid={!!fieldErrors.email} />
+                {fieldErrors.email && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.email}</p>}
+              </Field>
+            )}
+
             {isOrg && (
               <p className="flex items-start gap-2 rounded-control bg-sage/30 px-3 py-2.5 text-xs leading-relaxed text-charcoal/70">
                 <Icon name="info" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-forest" />
-                {t('auth.institutionNext')}
+                {t(role === 'COMPANY' ? 'auth.companyNext' : 'auth.institutionNext')}
               </p>
             )}
 

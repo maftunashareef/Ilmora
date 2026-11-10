@@ -1,4 +1,5 @@
 import type { InstitutionType } from './institutions.js'
+import { STUDENT_INSTITUTION_TYPES } from './registry.js'
 import { isUzRegion } from './organization.js'
 import { normalizeUzPhone } from './phone.js'
 import type { TKey } from './i18n.js'
@@ -13,9 +14,9 @@ export type StudyForm = 'GRANT' | 'CONTRACT'
 /** Applicants may not know yet how they will pay. */
 export type PlannedStudyForm = StudyForm | 'UNKNOWN'
 
-/** Step 2a offers technikum, university and school; step 2b technikum, lyceum and university. */
-export const STUDYING_TYPES: readonly InstitutionType[] = ['TECHNIKUM', 'UNIVERSITY', 'SCHOOL']
-export const APPLYING_TYPES: readonly InstitutionType[] = ['TECHNIKUM', 'LYCEUM', 'UNIVERSITY']
+/** Step 2a offers technikum, university and school; step 2b technikum, lyceum and university (the API's own lists). */
+export const STUDYING_TYPES: readonly InstitutionType[] = STUDENT_INSTITUTION_TYPES.studying
+export const APPLYING_TYPES: readonly InstitutionType[] = STUDENT_INSTITUTION_TYPES.applying
 
 /** A registry institution (`id`) or one the student typed (`name` + `region`, saved to the registry, ТЗ 3.5). */
 export interface InstitutionChoice {
@@ -24,7 +25,7 @@ export interface InstitutionChoice {
   region: string
 }
 
-/** A direction from the directory (`id`) or a new one the student added with its industry (ТЗ 3.2). */
+/** A direction of the shared directory (ТЗ 3.2): picked from the suggestions or just added there with its industry. */
 export interface DirectionChoice {
   id?: string
   name: string

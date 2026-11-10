@@ -1,8 +1,5 @@
-import type { InstitutionType, OrgOwnership, RegistryInstitutionType } from '@ilmora/shared'
+import type { InstitutionType, OrgOwnership } from '@ilmora/shared'
 import { api } from '../lib/api'
-
-/** The registry calls an educational center TRAINING_CENTER; the web app's own type list says CENTER. */
-export const toRegistryType = (t: InstitutionType): RegistryInstitutionType => (t === 'CENTER' ? 'TRAINING_CENTER' : t)
 
 export interface ClaimChoice {
   stir: string
@@ -30,7 +27,7 @@ export interface ClaimOutcome {
 export async function claimInstitution(c: ClaimChoice): Promise<ClaimOutcome> {
   const { created } = await api<{ created: boolean }>('/institutions/claim', {
     method: 'POST',
-    body: { stir: c.stir, type: toRegistryType(c.type), name: c.name.trim() },
+    body: { stir: c.stir, type: c.type, name: c.name.trim() },
   })
   if (!created) return { created, detailsSaved: true }
   try {

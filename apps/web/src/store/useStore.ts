@@ -47,11 +47,12 @@ export interface AuthUser {
 }
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad?: boolean; marketing?: boolean }
-export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION'
+export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'COMPANY'
 /**
  * What `POST /auth/register` takes (the API refuses any other field). CENTER registers an Educational Center: the account
- * becomes its first administrator and `centerName` names the center. INSTITUTION (ТЗ 4.2) is the institution's
- * representative with their `jobTitle`; the institution itself is claimed by STIR right after (services/institutions).
+ * becomes its first administrator and `centerName` names the center. INSTITUTION (ТЗ 4.2) and COMPANY (ТЗ 4.3) are the
+ * representative with their `jobTitle`; right after, the institution is claimed by STIR (services/institutions) or the
+ * company profile is started (services/companies).
  */
 export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; jobTitle?: string }
 

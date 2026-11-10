@@ -1,13 +1,15 @@
 import type { OrgOwnership } from './organization.js'
+import type { RegistryInstitutionType } from './registry.js'
 import { TECHNIKUMS } from './technikums.js'
 import { UNIVERSITIES } from './university-packages.js'
 
 /**
- * Kinds of institutions in the registry (ТЗ 3.3): technikum, college (when the ministry's directory has them), lyceum,
- * school, university and educational center. A student chooses only from a subset (see STUDYING_TYPES, APPLYING_TYPES).
+ * Kinds of institutions in the registry (ТЗ 3.3), the same values the API uses: technikum, college (when the ministry's
+ * directory has them), lyceum, school, university and educational center (TRAINING_CENTER). A student chooses only from a
+ * subset (see STUDYING_TYPES, APPLYING_TYPES).
  */
-export type InstitutionType = 'TECHNIKUM' | 'COLLEGE' | 'LYCEUM' | 'SCHOOL' | 'UNIVERSITY' | 'CENTER'
-export const INSTITUTION_TYPES: readonly InstitutionType[] = ['TECHNIKUM', 'COLLEGE', 'LYCEUM', 'SCHOOL', 'UNIVERSITY', 'CENTER']
+export type InstitutionType = RegistryInstitutionType
+export const INSTITUTION_TYPES: readonly InstitutionType[] = ['TECHNIKUM', 'COLLEGE', 'LYCEUM', 'SCHOOL', 'UNIVERSITY', 'TRAINING_CENTER']
 
 /**
  * An institution of the registry (ТЗ 3.5). `id` is stable; `inn` (TIN) is set only where it is confirmed. `addedBy`
@@ -28,8 +30,9 @@ export interface Institution {
 }
 
 /**
- * The registry as the web app knows it until the API serves the imported one (admin "Импорт реестра"): the official
- * technikum list and the universities of the catalogue. Schools and lyceums are added by students ("not in the list").
+ * The registry as the web app ships it: the official technikum list (the API imported the same list with these ids)
+ * and the universities of the catalogue. Used where the API's registry cannot be read — on the sign-up page, before the
+ * visitor has an account — and for the confirmed TIN of a listed technikum. Signed-in pages search the API instead.
  */
 export const INSTITUTION_REGISTRY: readonly Institution[] = [
   ...TECHNIKUMS.map((t): Institution => ({ ...t, type: 'TECHNIKUM' })),
