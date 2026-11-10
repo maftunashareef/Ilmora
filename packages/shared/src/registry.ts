@@ -41,6 +41,14 @@ export function registrySearchKey(name: string): string {
     .trim()
 }
 
+/**
+ * Text for «contains» search over an institution: the normalized official name, Russian name and former name, each
+ * once. Searching it finds a technikum by any of the names people know it by (the old name is still in use).
+ */
+export function registrySearchText(...names: (string | null | undefined)[]): string {
+  return [...new Set(names.filter((n): n is string => !!n?.trim()).map(registrySearchKey).filter(Boolean))].join(' ')
+}
+
 /** Taxpayer number (СТИР / ИНН): exactly 9 digits. */
 export const isStir = (s: string) => /^\d{9}$/.test(s)
 
@@ -67,27 +75,28 @@ export const REGISTRY_INDUSTRIES: RegistryIndustry[] = [
   { slug: 'other', name: { uz: 'Boşqa', ru: 'Другое', en: 'Other' } },
 ]
 
-export type RegistryRegion = { code: string; name: L }
+/** `slug` is the region id the web app uses (UZ_REGIONS in organization.ts). */
+export type RegistryRegion = { code: string; slug: string; name: L }
 
 /**
  * The 14 regions with their SOATO codes. Check the codes against the ministry's registry file or stat.uz before the
  * launch; districts are loaded only from an official list, never typed in by hand.
  */
 export const REGISTRY_REGIONS: RegistryRegion[] = [
-  { code: '1735', name: { uz: 'Qoraqalpoğiston Respublikasi', ru: 'Республика Каракалпакстан', en: 'Republic of Karakalpakstan' } },
-  { code: '1703', name: { uz: 'Andijon viloyati', ru: 'Андижанская область', en: 'Andijan Region' } },
-  { code: '1706', name: { uz: 'Buxoro viloyati', ru: 'Бухарская область', en: 'Bukhara Region' } },
-  { code: '1708', name: { uz: 'Jizzax viloyati', ru: 'Джизакская область', en: 'Jizzakh Region' } },
-  { code: '1710', name: { uz: 'Qaşqadaryo viloyati', ru: 'Кашкадарьинская область', en: 'Kashkadarya Region' } },
-  { code: '1712', name: { uz: 'Navoiy viloyati', ru: 'Навоийская область', en: 'Navoi Region' } },
-  { code: '1714', name: { uz: 'Namangan viloyati', ru: 'Наманганская область', en: 'Namangan Region' } },
-  { code: '1718', name: { uz: 'Samarqand viloyati', ru: 'Самаркандская область', en: 'Samarkand Region' } },
-  { code: '1722', name: { uz: 'Surxondaryo viloyati', ru: 'Сурхандарьинская область', en: 'Surkhandarya Region' } },
-  { code: '1724', name: { uz: 'Sirdaryo viloyati', ru: 'Сырдарьинская область', en: 'Syrdarya Region' } },
-  { code: '1727', name: { uz: 'Toşkent viloyati', ru: 'Ташкентская область', en: 'Tashkent Region' } },
-  { code: '1730', name: { uz: 'Farğona viloyati', ru: 'Ферганская область', en: 'Fergana Region' } },
-  { code: '1733', name: { uz: 'Xorazm viloyati', ru: 'Хорезмская область', en: 'Khorezm Region' } },
-  { code: '1726', name: { uz: 'Toşkent şahri', ru: 'город Ташкент', en: 'Tashkent City' } },
+  { code: '1735', slug: 'karakalpakstan', name: { uz: 'Qoraqalpoğiston Respublikasi', ru: 'Республика Каракалпакстан', en: 'Republic of Karakalpakstan' } },
+  { code: '1703', slug: 'andijan', name: { uz: 'Andijon viloyati', ru: 'Андижанская область', en: 'Andijan Region' } },
+  { code: '1706', slug: 'bukhara', name: { uz: 'Buxoro viloyati', ru: 'Бухарская область', en: 'Bukhara Region' } },
+  { code: '1708', slug: 'jizzakh', name: { uz: 'Jizzax viloyati', ru: 'Джизакская область', en: 'Jizzakh Region' } },
+  { code: '1710', slug: 'kashkadarya', name: { uz: 'Qaşqadaryo viloyati', ru: 'Кашкадарьинская область', en: 'Kashkadarya Region' } },
+  { code: '1712', slug: 'navoi', name: { uz: 'Navoiy viloyati', ru: 'Навоийская область', en: 'Navoi Region' } },
+  { code: '1714', slug: 'namangan', name: { uz: 'Namangan viloyati', ru: 'Наманганская область', en: 'Namangan Region' } },
+  { code: '1718', slug: 'samarkand', name: { uz: 'Samarqand viloyati', ru: 'Самаркандская область', en: 'Samarkand Region' } },
+  { code: '1722', slug: 'surkhandarya', name: { uz: 'Surxondaryo viloyati', ru: 'Сурхандарьинская область', en: 'Surkhandarya Region' } },
+  { code: '1724', slug: 'syrdarya', name: { uz: 'Sirdaryo viloyati', ru: 'Сырдарьинская область', en: 'Syrdarya Region' } },
+  { code: '1727', slug: 'tashkent', name: { uz: 'Toşkent viloyati', ru: 'Ташкентская область', en: 'Tashkent Region' } },
+  { code: '1730', slug: 'fergana', name: { uz: 'Farğona viloyati', ru: 'Ферганская область', en: 'Fergana Region' } },
+  { code: '1733', slug: 'khorezm', name: { uz: 'Xorazm viloyati', ru: 'Хорезмская область', en: 'Khorezm Region' } },
+  { code: '1726', slug: 'tashkent-city', name: { uz: 'Toşkent şahri', ru: 'город Ташкент', en: 'Tashkent City' } },
 ]
 
 // ───────────── Registry API: rules and response contract (ТЗ 3, 9.2, 9.4) ─────────────

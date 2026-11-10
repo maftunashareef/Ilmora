@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { hasMarkup, isStir, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey, STUDENT_ADDABLE_TYPES } from './registry.js'
+import { hasMarkup, isStir, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey, registrySearchText, STUDENT_ADDABLE_TYPES } from './registry.js'
+import { UZ_REGIONS } from './organization.js'
+
+describe('registrySearchText', () => {
+  it('joins the normalized names once each and skips empty ones', () => {
+    expect(registrySearchText('Andijon texnikumi', 'Андижанский техникум', 'Andijon kolleji')).toBe('andijon texnikumi andijanskiy texnikum andijon kolleji')
+    expect(registrySearchText('Dasturlash', 'Дастурлаш', null, undefined, '  ')).toBe('dasturlash')
+  })
+})
 
 describe('registrySearchKey', () => {
   const same = (...names: string[]) => {
@@ -44,6 +52,10 @@ describe('registry reference data', () => {
     expect(REGISTRY_REGIONS).toHaveLength(14)
     expect(new Set(REGISTRY_REGIONS.map((r) => r.code)).size).toBe(14)
     for (const r of REGISTRY_REGIONS) expect(r.code).toMatch(/^17\d{2}$/)
+  })
+
+  it('maps every region of the web app (UZ_REGIONS) to one SOATO region', () => {
+    expect(REGISTRY_REGIONS.map((r) => r.slug).sort()).toEqual(UZ_REGIONS.map((r) => r.id).sort())
   })
 
   it('validates a STIR as exactly 9 digits', () => {

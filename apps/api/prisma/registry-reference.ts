@@ -15,10 +15,11 @@ export async function seedRegistryReference(prisma: PrismaClient, tenantId: stri
     })
   }
   for (const [i, region] of REGISTRY_REGIONS.entries()) {
+    // The slug links the region to the web app's ids; filling it in never touches a name the Super Admin edited.
     await prisma.region.upsert({
       where: { tenantId_code: { tenantId, code: region.code } },
-      update: {},
-      create: { tenantId, code: region.code, name: region.name as Prisma.InputJsonValue, sortOrder: i },
+      update: { slug: region.slug },
+      create: { tenantId, code: region.code, slug: region.slug, name: region.name as Prisma.InputJsonValue, sortOrder: i },
     })
   }
   return { industries: REGISTRY_INDUSTRIES.length, regions: REGISTRY_REGIONS.length }
