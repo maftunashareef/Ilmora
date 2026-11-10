@@ -101,3 +101,23 @@ describe('403 password_change_required from any request', () => {
     }
   })
 })
+
+describe('«Забыли пароль?»: SMS code, then the new password (PR #54)', () => {
+  it('asks for a code for the phone in the site language, without the session', async () => {
+    apiMock.mockResolvedValueOnce({ expiresInSeconds: 300 })
+    const store = createIlmoraStore(initialMock)
+    await store.getState().requestPasswordCode('+998901234567')
+    expect(apiMock).toHaveBeenCalledWith('/auth/otp/request', expect.objectContaining({ method: 'POST', body: { phone: '+998901234567', lang: 'uz' }, auth: false }))
+  })
+
+  it('the code and the new password sign in (the answer is a session)', async () => {
+    const student = { ...ministry, id: 'u-student', login: 'anvar', roles: ['STUDENT'] } as AuthUser
+    apiMock.mockResolvedValueOnce({ accessToken: 'fresh', user: student })
+    apiMock.mockResolvedValue({})
+    const store = createIlmoraStore(initialMock)
+    const user = await store.getState().resetPasswordBySms('+998901234567', '123456', 'Yangi-parol-2026')
+    expect(apiMock).toHaveBeenCalledWith('/auth/password/reset', expect.objectContaining({ method: 'POST', body: { phone: '+998901234567', code: '123456', newPassword: 'Yangi-parol-2026' }, credentials: true, auth: false }))
+    expect(user.id).toBe('u-student')
+    expect(store.getState().auth.status).toBe('authenticated')
+  })
+})

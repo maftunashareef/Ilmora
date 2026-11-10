@@ -1,14 +1,24 @@
 'use client'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { CompanyReviewDto, CompanyReviewItemDto, InstitutionReviewDto, InstitutionReviewItemDto, TKey } from '@ilmora/shared'
-import { Badge, Button, EmptyState, Icon, Modal, Notice, PageTitle, Tabs, Textarea } from '../../components/ui'
+import type {
+  AdminCompanyItemDto, AdminInstitutionItemDto, AdminPage, CompanyPendingChanges, CompanyReviewDto, CompanyReviewItemDto, DistrictDto, InstitutionPendingChanges,
+  InstitutionReviewDto, InstitutionReviewItemDto, RegionDto, RegistryInstitutionStatus, TKey,
+} from '@ilmora/shared'
+import { Badge, Button, EmptyState, Icon, Input, Modal, Notice, PageTitle, Select, Tabs, Textarea } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
-import { nameDiffers, REASON_MAX, REASON_MIN, reasonOk, reviews } from '../../services/reviews'
+import { registryApi, useIndustries } from '../../services/registry'
+import { changedKeys, nameDiffers, REASON_MAX, REASON_MIN, reasonOk, reviews, type ChangeKey, type RecordSearch } from '../../services/reviews'
 import { useStore } from '../../store/useStore'
 
 type Kind = 'institutions' | 'companies'
+type Tab = Kind | 'all'
+const CHANGE_LABELS: Record<ChangeKey, TKey> = {
+  name: 'rev.field.name', stir: 'auth.org.stir', type: 'rev.type', ownership: 'auth.org.ownershipLabel', regionId: 'rev.field.region', districtId: 'rev.field.district', industryIds: 'rev.industries',
+}
+const INSTITUTION_STATUSES: RegistryInstitutionStatus[] = ['UNCLAIMED', 'DRAFT', 'PENDING', 'APPROVED', 'REJECTED']
+const COMPANY_STATUSES: RegistryInstitutionStatus[] = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED']
 type Open = { kind: Kind; id: string }
 type Action = 'reject' | 'release'
 type History = { action: string; reason: string | null; at: string; by: string | null }
@@ -27,7 +37,7 @@ const HISTORY_KEYS: Record<string, TKey> = {
  */
 export function AdminReviews() {
   const { t, lang } = useT()
-  const [tab, setTab] = useState<Kind>('institutions')
+  const [tab, setTab] = useState<Tab>('institutions')
   const [institutions, setInstitutions] = useState<InstitutionReviewItemDto[] | null>(null)
   const [companies, setCompanies] = useState<CompanyReviewItemDto[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -44,7 +54,8 @@ export function AdminReviews() {
   }, [lang, round])
   const refresh = useCallback(() => setRound((r) => r + 1), [])
   const close = useCallback(() => setOpen(null), [])
-  const list = tab === 'institutions' ? institutions : companies
+  const list = tab === 'institutions' ? institutions : tab === 'companies' ? companies : null
+  const openRecord = useCallback((kind: Kind, id: string) => setOpen({ kind, id }), [])
 
   return (
     <div>
@@ -53,10 +64,15 @@ export function AdminReviews() {
         className="mb-4"
         value={tab}
         onChange={setTab}
-        tabs={[{ id: 'institutions', label: t('rev.institutions'), count: institutions?.length }, { id: 'companies', label: t('rev.companies'), count: companies?.length }]}
+        tabs={[
+          { id: 'institutions', label: t('rev.institutions'), count: institutions?.length },
+          { id: 'companies', label: t('rev.companies'), count: companies?.length },
+          { id: 'all', label: t('rev.all') },
+        ]}
       />
       {loadError && <Notice tone="warn" className="mb-4">{loadError} <button type="button" className="ml-1 font-medium underline" onClick={refresh}>{t('admin.ministry.retry')}</button></Notice>}
-      {!list && !loadError && <p className="text-sm text-charcoal/55">{t('common.loading')}</p>}
+      {tab === 'all' && <AllRecords round={round} onOpen={openRecord} />}
+      {tab !== 'all' && !list && !loadError && <p className="text-sm text-charcoal/55">{t('common.loading')}</p>}
       {list && list.length === 0 && <EmptyState icon={<Icon name="check" className="h-6 w-6" />} title={t('rev.empty')} body={t('rev.emptyBody')} />}
       {tab === 'institutions' && institutions && institutions.length > 0 && (
         <ul className="space-y-2" aria-label={t('rev.institutions')}>
@@ -68,8 +84,74 @@ export function AdminReviews() {
           {companies.map((it) => <li key={it.id}><CompanyRow item={it} onOpen={() => setOpen({ kind: 'companies', id: it.id })} /></li>)}
         </ul>
       )}
-      <Notice tone="info" className="mt-6 text-xs">{t('rev.releaseHint')}</Notice>
+      <Notice tone="info" className="mt-6 text-xs">{t(tab === 'all' ? 'rev.allHint' : 'rev.releaseHint')}</Notice>
       {open && <ReviewCard open={open} onClose={close} onChanged={refresh} />}
+    </div>
+  )
+}
+
+/**
+ * «Все записи» (issue #50): any record by STIR (9 digits, exact) or name, filtered by status — approved ones and drafts
+ * too, so the Super Admin can open the card and unlink a representative who holds a record that is not theirs.
+ */
+function AllRecords({ round, onOpen }: { round: number; onOpen: (kind: Kind, id: string) => void }) {
+  const { t, lang } = useT()
+  const [kind, setKind] = useState<Kind>('institutions')
+  const [text, setText] = useState('')
+  const [query, setQuery] = useState<RecordSearch>({ text: '', status: '', page: 1 })
+  const [result, setResult] = useState<AdminPage<AdminInstitutionItemDto> | AdminPage<AdminCompanyItemDto> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const statuses = kind === 'institutions' ? INSTITUTION_STATUSES : COMPANY_STATUSES
+
+  useEffect(() => {
+    let live = true
+    const load = kind === 'institutions' ? reviews.institutions.search(query) : reviews.companies.search(query)
+    load.then((r) => { if (live) { setResult(r); setError(null) } }, (err) => { if (live) setError(apiErrorText(err, lang)) })
+    return () => { live = false }
+  }, [kind, query, round, lang])
+
+  const switchKind = (k: Kind) => {
+    if (k === kind) return
+    setKind(k); setResult(null)
+    setQuery((q) => ({ ...q, status: k === 'companies' && q.status === 'UNCLAIMED' ? '' : q.status, page: 1 }))
+  }
+  const pages = result ? Math.max(1, Math.ceil(result.total / result.pageSize)) : 1
+
+  return (
+    <div>
+      <div className="mb-3 inline-flex rounded-control border border-charcoal/12 bg-paper p-1" role="group" aria-label={t('rev.all')}>
+        {(['institutions', 'companies'] as const).map((k) => (
+          <button key={k} type="button" aria-pressed={kind === k} onClick={() => switchKind(k)} className={`rounded-[10px] px-3 py-1.5 text-sm font-medium transition ${kind === k ? 'bg-forest text-ivory' : 'text-charcoal/65 hover:text-forest'}`}>{t(k === 'institutions' ? 'rev.institutions' : 'rev.companies')}</button>
+        ))}
+      </div>
+      <form className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_15rem_auto]" role="search" onSubmit={(e) => { e.preventDefault(); setQuery((q) => ({ ...q, text, page: 1 })) }}>
+        <Input id="records-search" aria-label={t('rev.searchPlaceholder')} placeholder={t('rev.searchPlaceholder')} value={text} maxLength={200} onChange={(e) => setText(e.target.value)} />
+        <Select aria-label={t('common.status')} value={query.status} onChange={(e) => setQuery((q) => ({ ...q, text, status: e.target.value as RegistryInstitutionStatus | '', page: 1 }))}>
+          <option value="">{t('rev.statusAll')}</option>
+          {statuses.map((s) => <option key={s} value={s}>{t(`rev.status.${s}`)}</option>)}
+        </Select>
+        <Button type="submit" variant="secondary"><Icon name="search" className="h-4 w-4" />{t('common.search')}</Button>
+      </form>
+      {error && <Notice tone="warn" className="mb-3">{error}</Notice>}
+      {!result && !error && <p className="text-sm text-charcoal/55">{t('common.loading')}</p>}
+      {result && <p className="mb-2 text-xs text-charcoal/55">{t('rev.found', { n: result.total })}</p>}
+      {result && result.items.length === 0 && <EmptyState icon={<Icon name="search" className="h-6 w-6" />} title={t('rev.nothingFound')} />}
+      {result && result.items.length > 0 && (
+        <ul className="space-y-2" aria-label={t('rev.all')}>
+          {kind === 'institutions'
+            ? (result.items as AdminInstitutionItemDto[]).map((it) => <li key={it.id}><InstitutionRow item={it} onOpen={() => onOpen('institutions', it.id)} /></li>)
+            : (result.items as AdminCompanyItemDto[]).map((it) => <li key={it.id}><CompanyRow item={it} onOpen={() => onOpen('companies', it.id)} /></li>)}
+        </ul>
+      )}
+      {result && pages > 1 && (
+        <div className="mt-4 flex items-center justify-between text-xs text-charcoal/55">
+          <span>{t('rev.page', { page: result.page, pages })}</span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" disabled={result.page <= 1} onClick={() => setQuery((q) => ({ ...q, page: q.page - 1 }))}>{t('common.back')}</Button>
+            <Button size="sm" variant="ghost" disabled={result.page >= pages} onClick={() => setQuery((q) => ({ ...q, page: q.page + 1 }))}>{t('common.next')}</Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -91,7 +173,23 @@ function OfficialName({ entered, official, large = false }: { entered: string; o
 
 const when = (iso: string | null, lang: Parameters<typeof formatDate>[1]) => (iso ? `${formatDate(iso, lang)}, ${formatTime(iso, lang)}` : '—')
 
-function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto; onOpen: () => void }) {
+/** In «Все записи» a row also shows the record's status and whether it is blocked. */
+function RecordBadges({ item }: { item: { status?: string; blocked?: boolean } }) {
+  const { t } = useT()
+  if (!item.status) return null
+  const tone = item.status === 'APPROVED' ? 'forest' : item.status === 'REJECTED' ? 'danger' : item.status === 'PENDING' ? 'champagne' : 'muted'
+  return <><Badge tone={tone}>{t(`rev.status.${item.status as RegistryInstitutionStatus}`)}</Badge>{item.blocked && <Badge tone="danger"><Icon name="lock" className="mr-1 h-3 w-3" />{t('rev.blocked')}</Badge>}</>
+}
+
+/** In the queue: which reviewed fields the representative changed after approval (the new values wait for a decision). */
+function ChangedLine({ changes }: { changes: InstitutionPendingChanges | CompanyPendingChanges | null | undefined }) {
+  const { t } = useT()
+  const keys = changedKeys(changes)
+  if (!keys.length) return null
+  return <p className="mt-1 flex items-center gap-1.5 text-xs text-charcoal/75"><Icon name="edit" className="h-3.5 w-3.5 text-champagne" />{t('rev.changedFields', { fields: keys.map((k) => t(CHANGE_LABELS[k])).join(', ') })}</p>
+}
+
+function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto & { status?: string; blocked?: boolean }; onOpen: () => void }) {
   const { t, tr, lang } = useT()
   const place = [tr(it.region?.name), it.district ? tr(it.district.name) : it.districtName].filter(Boolean).join(', ')
   return (
@@ -100,21 +198,23 @@ function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto; 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-charcoal">{it.name}</span>
+            <RecordBadges item={it} />
             <Badge>{t(`inst.type.${it.type}`)}</Badge>
             {it.reReview && <Badge tone="champagne">{t('rev.reReview')}</Badge>}
             {it.inRegistry ? <Badge tone="sage">{t('rev.inRegistry')}</Badge> : <Badge tone="warn">{t('rev.notInRegistry')}</Badge>}
           </div>
-          <OfficialName entered={it.name} official={it.officialName} />
+          <ChangedLine changes={it.pendingChanges} />
+          <OfficialName entered={it.pendingChanges?.name ?? it.name} official={it.officialName} />
           <div className="mt-1 text-xs text-charcoal/60">{[it.stir ? `${t('auth.org.stir')}: ${it.stir}` : null, place || null].filter(Boolean).join(' · ')}</div>
           {it.representative && <div className="text-xs text-charcoal/50">{[it.representative.name, it.representative.jobTitle, it.representative.login ? `@${it.representative.login}` : null].filter(Boolean).join(' · ')}</div>}
         </div>
-        <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>
+        {it.submittedAt && <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>}
       </div>
     </button>
   )
 }
 
-function CompanyRow({ item: it, onOpen }: { item: CompanyReviewItemDto; onOpen: () => void }) {
+function CompanyRow({ item: it, onOpen }: { item: CompanyReviewItemDto & { status?: string; blocked?: boolean }; onOpen: () => void }) {
   const { t, tr, lang } = useT()
   return (
     <button type="button" onClick={onOpen} className="card block w-full p-4 text-left transition hover:border-forest/40">
@@ -122,13 +222,15 @@ function CompanyRow({ item: it, onOpen }: { item: CompanyReviewItemDto; onOpen: 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-charcoal">{it.name}</span>
+            <RecordBadges item={it} />
             {it.reReview && <Badge tone="champagne">{t('rev.reReview')}</Badge>}
             {it.certificateUploaded ? <Badge tone="sage">{t('rev.certificateYes')}</Badge> : <Badge tone="warn">{t('rev.certificateNo')}</Badge>}
           </div>
+          <ChangedLine changes={it.pendingChanges} />
           <div className="mt-1 text-xs text-charcoal/60">{[`${t('auth.org.stir')}: ${it.stir}`, tr(it.region?.name) || null, it.industries.map((x) => tr(x.name)).join(', ') || null].filter(Boolean).join(' · ')}</div>
           {it.representative && <div className="text-xs text-charcoal/50">{[it.representative.name, it.representative.jobTitle, it.representative.email, it.representative.login ? `@${it.representative.login}` : null].filter(Boolean).join(' · ')}</div>}
         </div>
-        <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>
+        {it.submittedAt && <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>}
       </div>
     </button>
   )
@@ -226,7 +328,8 @@ function InstitutionFacts({ review }: { review: InstitutionReviewDto }) {
   const rep = review.representative
   return (
     <>
-      {review.officialName ? <OfficialName entered={p.name} official={review.officialName} large /> : <Notice tone="warn" className="text-xs">{t('rev.notInRegistryLong')}</Notice>}
+      {p.pendingChanges && changedKeys(p.pendingChanges).length > 0 && <InstitutionChanges current={p} changes={p.pendingChanges} />}
+      {review.officialName ? <OfficialName entered={p.pendingChanges?.name ?? p.name} official={review.officialName} large /> : <Notice tone="warn" className="text-xs">{t('rev.notInRegistryLong')}</Notice>}
       <dl className="mt-4">
         <Fact label={t('rev.enteredName')}>{p.name}</Fact>
         <Fact label={t('rev.officialName')}>{review.officialName}</Fact>
@@ -282,6 +385,7 @@ function CompanyFacts({ review }: { review: CompanyReviewDto }) {
   }
   return (
     <>
+      {p.pendingChanges && changedKeys(p.pendingChanges).length > 0 && <CompanyChanges current={p} changes={p.pendingChanges} />}
       <dl>
         <Fact label={t('rev.enteredName')}>{p.name}</Fact>
         <Fact label={t('auth.org.stir')}>{p.stir}</Fact>
@@ -307,6 +411,70 @@ function CompanyFacts({ review }: { review: CompanyReviewDto }) {
       </div>
     </>
   )
+}
+
+/** «Было → станет» for each changed field; the record keeps the approved values until the decision. */
+function ChangesTable({ rows }: { rows: { key: ChangeKey; was: ReactNode; becomes: ReactNode }[] }) {
+  const { t } = useT()
+  return (
+    <section className="mb-4 rounded-control border border-champagne/60 bg-champagne/10 p-3">
+      <h3 className="mb-1 flex items-center gap-1.5 font-body text-sm font-semibold text-charcoal"><Icon name="edit" className="h-4 w-4" />{t('rev.changes')}</h3>
+      <p className="mb-2 text-xs leading-relaxed text-charcoal/65">{t('rev.changesNote')}</p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[28rem] text-left text-sm">
+          <thead className="text-xs text-charcoal/50"><tr><th className="py-1 pr-3 font-medium">{t('rev.field')}</th><th className="py-1 pr-3 font-medium">{t('rev.was')}</th><th className="py-1 font-medium">{t('rev.becomes')}</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="border-t border-champagne/40 align-top">
+                <td className="py-1.5 pr-3 text-charcoal/60">{t(CHANGE_LABELS[r.key])}</td>
+                <td className="py-1.5 pr-3 text-charcoal/55 line-through decoration-charcoal/30">{r.was ?? '—'}</td>
+                <td className="py-1.5 font-medium text-charcoal">{r.becomes ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function InstitutionChanges({ current: p, changes: c }: { current: InstitutionReviewDto['passport']; changes: InstitutionPendingChanges }) {
+  const { t, tr } = useT()
+  const [regions, setRegions] = useState<RegionDto[] | null>(null)
+  const [districts, setDistricts] = useState<DistrictDto[] | null>(null)
+  const newRegion = c.regionId ?? p.region?.id ?? null
+  useEffect(() => {
+    let live = true
+    if (c.regionId) registryApi.regions().then((r) => { if (live) setRegions(r) }, () => undefined)
+    if (c.districtId && newRegion) registryApi.districts(newRegion).then((d) => { if (live) setDistricts(d) }, () => undefined)
+    return () => { live = false }
+  }, [c.regionId, c.districtId, newRegion])
+  const regionName = (id: string) => { const r = regions?.find((x) => x.id === id || x.slug === id); return r ? tr(r.name) : id }
+  const districtName = (id: string) => { const d = districts?.find((x) => x.id === id); return d ? tr(d.name) : id }
+  const own = (o: string | null | undefined) => (o ? t(o === 'STATE' ? 'auth.org.stateInst' : 'auth.org.privateInst') : null)
+  const rows = changedKeys(c).map((key) => {
+    switch (key) {
+      case 'name': return { key, was: p.name, becomes: c.name }
+      case 'stir': return { key, was: p.stir, becomes: c.stir }
+      case 'type': return { key, was: t(`inst.type.${p.type}`), becomes: c.type ? t(`inst.type.${c.type}`) : null }
+      case 'ownership': return { key, was: own(p.ownership), becomes: own(c.ownership) }
+      case 'regionId': return { key, was: tr(p.region?.name) || null, becomes: c.regionId ? regionName(c.regionId) : null }
+      default: return { key, was: p.district ? tr(p.district.name) : p.districtName, becomes: c.districtId ? districtName(c.districtId) : null }
+    }
+  })
+  return <ChangesTable rows={rows} />
+}
+
+function CompanyChanges({ current: p, changes: c }: { current: CompanyReviewDto['profile']; changes: CompanyPendingChanges }) {
+  const { tr } = useT()
+  const industries = useIndustries()
+  const industryName = (id: string) => { const x = industries.list.find((i) => i.id === id); return x ? tr(x.name) : id }
+  const rows = changedKeys(c).map((key) => {
+    if (key === 'name') return { key, was: p.name, becomes: c.name }
+    if (key === 'stir') return { key, was: p.stir, becomes: c.stir }
+    return { key, was: p.industries.map((x) => tr(x.name)).join(', ') || null, becomes: (c.industryIds ?? []).map(industryName).join(', ') || null }
+  })
+  return <ChangesTable rows={rows} />
 }
 
 /** The reason for a rejection or for unlinking the representative; the representative sees it. API errors stay here. */

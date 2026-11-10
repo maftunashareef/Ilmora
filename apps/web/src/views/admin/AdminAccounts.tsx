@@ -5,6 +5,7 @@ import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate } from '../../lib/format'
+import { TemporaryPasswordDialog } from '../../components/TemporaryPasswordDialog'
 import { ministryAccounts } from '../../services/ministryAccounts'
 import { useStore } from '../../store/useStore'
 
@@ -26,6 +27,8 @@ export function AdminAccounts() {
   const [page, setPage] = useState<Page | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState<Account | null>(null)
+  const [issued, setIssued] = useState<{ name: string; login: string; password: string } | null>(null)
+  const closeIssued = useCallback(() => setIssued(null), [])
 
   const load = useCallback(async (p = 1) => {
     const qs = new URLSearchParams({ page: String(p), pageSize: '50', ...(role ? { role } : {}), ...(query.trim() ? { search: query.trim() } : {}) })
@@ -47,6 +50,12 @@ export function AdminAccounts() {
     const reason = prompt(t('admin.accounts.deleteReason'))?.trim()
     if (!reason || reason.length < 3) return
     return act(a.id, () => api(`/admin/users/${a.id}`, { method: 'DELETE', body: { reason } }), t('admin.accounts.deleted'))
+  }
+  /** A temporary password for an account with a login (not a Super Admin, not oneself); shown once in a dialog. */
+  const resetPassword = (a: Account) => {
+    if (!a.login || !confirm(t('admin.accounts.resetPasswordConfirm', { name: a.displayName }))) return
+    const login = a.login
+    return act(a.id, async () => { const r = await ministryAccounts.resetAccountPassword(a.id); setIssued({ name: a.displayName, login, password: r.temporaryPassword }) }, t('admin.accounts.passwordIssued'))
   }
   /** Lost phone of another Super Admin: unlink the authenticator app (the API refuses one's own). */
   const resetApp = (a: Account) => {
@@ -76,6 +85,7 @@ export function AdminAccounts() {
               {a.id !== me && (
                 <>
                   <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => setEditing(a)}><Icon name="user" className="h-3.5 w-3.5" />{t('admin.accounts.roles')}</Button>
+                  {a.login && !a.roles.includes('PLATFORM_ADMIN') && <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void resetPassword(a)}><Icon name="lock" className="h-3.5 w-3.5" />{t('admin.accounts.resetPassword')}</Button>}
                   {a.roles.includes('PLATFORM_ADMIN') && <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void resetApp(a)}><Icon name="refresh" className="h-3.5 w-3.5" />{t('admin.ministry.resetApp')}</Button>}
                   {/* Block and delete stay off Super Admin accounts; change them through the Roles dialog instead. */}
                   {!a.roles.includes('PLATFORM_ADMIN') && (
@@ -97,6 +107,17 @@ export function AdminAccounts() {
         </div>
       )}
       <Notice tone="info" className="mt-6 text-xs">{t('admin.accounts.ownerProtected')}</Notice>
+      {issued && (
+        <TemporaryPasswordDialog
+          title={t('admin.ministry.passwordTitle')}
+          name={issued.name}
+          login={issued.login}
+          password={issued.password}
+          note={t('admin.accounts.passwordNextSignIn')}
+          handedLabel={t('admin.accounts.handedOver')}
+          onClose={closeIssued}
+        />
+      )}
       {editing && (
         <RolesEditor
           account={editing}
