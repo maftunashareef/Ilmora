@@ -129,10 +129,18 @@ export class PaymentsService {
     if (!payment) return false
     if (payment.state === 'REFUNDED') return true
     if (payment.state !== 'PAID') return false
+    // Part of it was already returned by a refund request: a whole cancellation would return that part a second time.
+    // The provider is refused; the rest goes back through a request (security review 10.11 №42, Timur's note 4).
+    if (payment.refundedMinor > 0n) return false
     const journal = await tx.ledgerJournal.findUnique({ where: { tenantId_kind_referenceType_referenceId: { tenantId: payment.tenantId, kind: 'PAYMENT_SETTLED', referenceType: 'Payment', referenceId: payment.id } } })
     if (journal) await this.ledger.reverse(tx, journal.id, 'PAYMENT_REFUNDED', reason, actorId)
     // The whole payment is returned (the database checks that REFUNDED means refundedMinor = amountMinor).
     await tx.payment.update({ where: { id: payment.id }, data: { state: 'REFUNDED', refundedAt: new Date(), refundedMinor: payment.amountMinor } })
+    // A request waiting for this money is settled by it: returned in full through the provider.
+    await tx.refundRequest.updateMany({
+      where: { paymentId: payment.id, status: { in: ['PENDING', 'APPROVED'] } },
+      data: { status: 'PAID', openKey: null, approvedMinor: payment.amountMinor, paidAt: new Date(), decidedAt: new Date(), providerRef: reason, decisionNote: 'Returned in full by the provider' },
+    })
     const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId } })
     const now = new Date()
     const cancelSub = async (subId: string) => {

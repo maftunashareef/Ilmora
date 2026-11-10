@@ -32,11 +32,11 @@ describe('Audit log access', () => {
     expect(wheres).toEqual([{ tenantId: 't' }, { tenantId: 't', entityType: 'User' }])
   })
 
-  it('a finance admin gets payments and subscriptions only — never contact views, reviews or accounts', async () => {
+  it('a finance admin gets payments, subscriptions and refund requests only — never contact views, reviews or accounts', async () => {
     const { service, wheres } = setup()
     await service.audits('t', finance, {})
     await service.audits('t', finance, { entityType: 'Payment', entityId: 'p1' })
-    expect(wheres).toEqual([{ tenantId: 't', entityType: { in: ['Payment', 'Subscription'] } }, { tenantId: 't', entityType: 'Payment', entityId: 'p1' }])
+    expect(wheres).toEqual([{ tenantId: 't', entityType: { in: ['Payment', 'Subscription', 'RefundRequest'] } }, { tenantId: 't', entityType: 'Payment', entityId: 'p1' }])
     for (const entityType of ['User', 'StudentCertificate', 'Institution', 'Company', 'ContactRequest']) {
       expect(await service.audits('t', finance, { entityType })).toMatchObject({ total: 0, items: [] })
     }

@@ -19,7 +19,7 @@ import type { AvatarUploadUrlInput, CenterStatusInput, CourseInput, CoursePatch,
 import { Role } from '../../generated/prisma/enums'
 
 /** What a finance admin reads in the audit log: the money records only. */
-const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription']
+const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription', 'RefundRequest']
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
