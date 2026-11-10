@@ -16,6 +16,7 @@ import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
 import { ONLINE_PROVIDER } from './online-provider'
 import type { AvatarUploadUrlInput, CenterStatusInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
+import { Role } from '../../generated/prisma/enums'
 
 /** What a finance admin reads in the audit log: the money records only. */
 const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription']
@@ -726,7 +727,7 @@ export class ManageService {
         await tx.subscription.update({ where: { id: s.id }, data: { status: 'CANCELLED', cancelledAt: now } })
       }
       if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { userId: null } })
-      await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, roles: [], centerId: null } })
+      await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, googleId: null, roles: [], centerId: null } })
       await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId }, reason })
     })
     return { ok: true }
@@ -930,6 +931,7 @@ export class ManageService {
   async listUsers(tenantId: string, q: { role?: string; search?: string; page?: number; pageSize?: number }) {
     const page = Math.max(1, q.page ?? 1), pageSize = Math.min(200, Math.max(10, q.pageSize ?? 50))
     // The phone clause only applies to searches that contain digits: an empty digit string would match every phone number.
+    if (q.role && !(Object.values(Role) as string[]).includes(q.role)) throw AppError.invalid('validation_failed', 'Unknown role')
     const search = q.search?.trim()
     const digits = search?.replace(/\D/g, '') ?? ''
     const where = { tenantId, ...(q.role ? { roles: { has: q.role as 'STUDENT' } } : {}), ...(search ? { OR: [{ displayName: { contains: search, mode: 'insensitive' as const } }, { login: { contains: search.toLowerCase() } }, ...(digits ? [{ phoneE164: { contains: digits } }] : [])] } : {}) }

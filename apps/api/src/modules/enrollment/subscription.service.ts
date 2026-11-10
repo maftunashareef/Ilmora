@@ -1,5 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common'
-import { dueReminder, finalPriceMinor, MAX_CART_COURSES, nextLifecycleStep, overlaps, subscriptionAccess, type SubscriptionAccess } from '@ilmora/shared'
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
+import { dueReminder, finalPriceMinor, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, subscriptionAccess, type SubscriptionAccess } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addMonthsUtc } from '../../common/time'
 import { ENV, type Env } from '../../config/env'
@@ -143,6 +143,7 @@ export class SubscriptionService {
    * the provider adapters will settle. Group rows are locked so capacity is re-checked atomically.
    */
   async checkout(tenantId: string, studentId: string, provider: PaymentProvider) {
+    await this.assertOfferAccepted(studentId)
     const draft = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: 'DRAFT' } })
     if (!draft) throw AppError.invalid('incomplete', 'Choose a package and your courses first')
     const pkg = draft.packageId ? await this.prisma.client.package.findFirst({ where: { tenantId, id: draft.packageId } }) : null
@@ -207,6 +208,7 @@ export class SubscriptionService {
    * ahead — №8; and only while every course is still open: published, its center active, the group not deleted — №9.
    */
   async renew(tenantId: string, studentId: string, provider: PaymentProvider) {
+    await this.assertOfferAccepted(studentId)
     const sub = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE'] } }, include: { package: true } })
     if (!sub) throw AppError.notFound('Active subscription')
     const pending = await this.prisma.client.payment.findFirst({ where: { tenantId, subscriptionId: sub.id, state: 'PENDING' } })
@@ -416,6 +418,15 @@ export class SubscriptionService {
     await tx.payment.updateMany({ where: { subscriptionId, state: 'PENDING' }, data: { state: 'CANCELLED', cancelledAt: now } })
     await this.audit.record({ tx, action: 'subscription.cancel', entityType: 'Subscription', entityId: subscriptionId, reason })
     return true
+  }
+
+  /**
+   * A purchase needs the current edition of the offer accepted and the personal-data consent (security review 10.11
+   * №31): the site asks for them, the server checks — an account opened by SMS has neither until it confirms.
+   */
+  private async assertOfferAccepted(studentId: string) {
+    const u = await this.prisma.client.user.findFirst({ where: { id: studentId }, select: { offerAcceptedAt: true, offerVersion: true, consentAt: true } })
+    if (!u?.offerAcceptedAt || u.offerVersion !== OFFER_VERSION || !u.consentAt) throw new AppError('offer_required', 'Accept the offer and the personal-data consent first', HttpStatus.FORBIDDEN)
   }
 
   private async grantCourseIds(tenantId: string, groupIds: string[]): Promise<string[]> {

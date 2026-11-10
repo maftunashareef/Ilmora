@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { normalizeUzPhone, subscriptionAccess } from '@ilmora/shared'
 import { randomToken } from '../../common/crypto'
 import { AppError } from '../../common/errors'
-import { isoToDateColumn, localDate } from '../../common/time'
+import { isCalendarDate, isoToDateColumn, localDate } from '../../common/time'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -101,7 +101,8 @@ export class CenterService {
 
   async attendanceDay(tenantId: string, actor: RequestActor, date?: string) {
     const center = await this.own(tenantId, actor)
-    const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : localDate(new Date(), DEFAULT_TZ)
+    if (date && !isCalendarDate(date)) throw AppError.invalid('validation_failed', 'Not a date')
+    const day = date ?? localDate(new Date(), DEFAULT_TZ)
     return { date: day, sessions: await this.todaySessions(tenantId, center.id, day) }
   }
 

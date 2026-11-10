@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Put } from '@nestjs/common'
 import { MAX_CART_COURSES } from '@ilmora/shared'
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Length, ValidateIf } from 'class-validator'
-import { AuthThrottle, CurrentActor, CurrentTenantId } from '../../common/decorators'
+import { AuthThrottle, CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { PaymentsService } from '../payments/payments.service'
 import { SubscriptionService } from './subscription.service'
@@ -23,7 +23,9 @@ class CancelDto {
   @IsOptional() @IsString() @Length(0, 300) reason?: string
 }
 
+/** Subscriptions are students' (security review 10.11 №32): a teacher, a center or a company does not take seats. */
 @Controller('student/subscription')
+@Roles('STUDENT')
 export class EnrollmentController {
   constructor(private readonly subscriptions: SubscriptionService, private readonly payments: PaymentsService) {}
 

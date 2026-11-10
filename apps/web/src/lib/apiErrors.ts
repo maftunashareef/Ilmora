@@ -113,6 +113,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   // cart and subscription
   renewal_too_early: 'apiError.renewalTooEarly',
   renewal_unavailable: 'apiError.renewalUnavailable',
+  offer_required: 'apiError.offerRequired',
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
   'no-package': 'builder.pickPackageFirst',

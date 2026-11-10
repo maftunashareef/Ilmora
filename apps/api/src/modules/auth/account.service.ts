@@ -123,6 +123,7 @@ export class AccountService {
     tenantId: string,
     input: { role: SelfServiceRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; jobTitle?: string; lang?: 'uz' | 'ru' | 'en' },
     meta: SessionMeta,
+    attempt = 1,
   ): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
     if (!roles) throw AppError.invalid('invalid_role', 'Choose Student, Teacher, Educational Center, Institution or Company')
@@ -190,6 +191,10 @@ export class AccountService {
         return created
       })
     } catch (err) {
+      const target = String((err as { meta?: { target?: unknown } }).meta?.target ?? '')
+      // Two centers (or teachers) of one name registered at once collide on the slug, not the login: try once more,
+      // the free-slug lookup then sees the other one (security review №35).
+      if ((err as { code?: string }).code === 'P2002' && target.includes('slug') && attempt < 3) return this.register(tenantId, input, meta, attempt + 1)
       if ((err as { code?: string }).code === 'P2002') throw AppError.conflict('login_taken', 'This login is already in use')
       throw err
     }
@@ -221,8 +226,9 @@ export class AccountService {
     if (phoneParsed.ok) {
       user = await this.prisma.client.user.findFirst({ where: { tenantId, phoneE164: phoneParsed.e164 }, include: USER_INCLUDE })
     }
-    if (!user && LOGIN_RE.test(login)) {
-      user = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: USER_INCLUDE })
+    // A login made of digits stays a login when an account opened by SMS has the same number but no password (№33).
+    if ((!user || !user.passwordHash) && LOGIN_RE.test(login)) {
+      user = (await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: USER_INCLUDE })) ?? user
     }
     // The failure counter follows the account — its login and its phone share one lock — and is counted before the
     // password is checked: attempts sent at once cannot all slip under the limit (security review 10.11 №3).

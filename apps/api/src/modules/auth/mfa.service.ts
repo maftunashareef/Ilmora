@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import type { MfaChallengeDto, MfaSetupDto } from '@ilmora/shared'
-import { decryptString, encryptString, sha256 } from '../../common/crypto'
+import { decryptString, encryptString, hmacSha256, sha256 } from '../../common/crypto'
 import { AppError } from '../../common/errors'
 import { matchTotp, newRecoveryCodes, newTotpSecret, normalizeRecoveryCode, otpauthUrl } from '../../common/totp'
 import { ENV, type Env } from '../../config/env'
@@ -12,6 +12,8 @@ import { MFA_CHALLENGE_SECONDS, TokenService } from './token.service'
 
 /** Tolerated difference between the database and API clocks when comparing a session with the moment the app was linked. */
 const CLOCK_DRIFT_MS = 120_000
+/** How long a session opened with the authenticator code lives, however often it is renewed. */
+const MFA_SESSION_HOURS = 12
 
 type MfaUser = { id: string; tenantId: string; roles: Role[]; isOwner: boolean; totpEnabledAt: Date | null }
 
@@ -77,7 +79,9 @@ export class MfaService {
     if (!this.configured || !user.totpEnabledAt) return false
     const first = await this.prisma.client.refreshSession.findFirst({ where: { userId: user.id, familyId }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
     // createdAt comes from the database clock, totpEnabledAt from the API's: allow for a small drift between them.
-    return !!first && first.createdAt.getTime() >= user.totpEnabledAt.getTime() - CLOCK_DRIFT_MS
+    if (!first || first.createdAt.getTime() < user.totpEnabledAt.getTime() - CLOCK_DRIFT_MS) return false
+    // A session opened with the code lives MFA_SESSION_HOURS at most, however often it is renewed (security review №28).
+    return Date.now() - first.createdAt.getTime() <= MFA_SESSION_HOURS * 3_600_000
   }
 
   /** First sign-in: a new secret for the app (shown as a QR code). Asking again replaces it until the first code is confirmed. */
@@ -106,7 +110,7 @@ export class MfaService {
     await this.prisma.client.$transaction(async (tx) => {
       await tx.user.update({ where: { id: user.id }, data: { totpEnabledAt: now } })
       await tx.totpRecoveryCode.deleteMany({ where: { userId: user.id } })
-      await tx.totpRecoveryCode.createMany({ data: recoveryCodes.map((c) => ({ tenantId: user.tenantId, userId: user.id, codeHash: sha256(normalizeRecoveryCode(c)) })) })
+      await tx.totpRecoveryCode.createMany({ data: recoveryCodes.map((c) => ({ tenantId: user.tenantId, userId: user.id, codeHash: this.recoveryHash(c) })) })
     })
     await this.remember(`mfa:step:${user.id}`, step)
     await this.clear(failKey)
@@ -122,13 +126,15 @@ export class MfaService {
     await this.assertNotLocked(failKey)
     const stepKey = `mfa:step:${user.id}`
     const step = matchTotp(decryptString(user.totpSecretEnc, this.key()), code, new Date())
-    if (step !== null && step > (await this.recall(stepKey))) {
+    // A code is taken once, atomically: requests sent at once with the same code open one session (security review №27).
+    if (step !== null && step > (await this.recall(stepKey)) && (await this.claimStep(user.id, step))) {
       await this.remember(stepKey, step)
       await this.clear(failKey)
       return { userId: user.id, method: 'totp' }
     }
     if (step === null && /[a-z]/i.test(code)) {
-      const used = await this.prisma.client.totpRecoveryCode.updateMany({ where: { userId: user.id, codeHash: sha256(normalizeRecoveryCode(code)), usedAt: null }, data: { usedAt: new Date() } })
+      // Codes issued before the keyed hash (plain SHA-256) still work until used.
+      const used = await this.prisma.client.totpRecoveryCode.updateMany({ where: { userId: user.id, codeHash: { in: [this.recoveryHash(code), sha256(normalizeRecoveryCode(code))] }, usedAt: null }, data: { usedAt: new Date() } })
       if (used.count === 1) {
         await this.clear(failKey)
         await this.audit.record({ action: 'auth.mfa.recovery_code', entityType: 'User', entityId: user.id, tenantId: user.tenantId })
@@ -183,6 +189,30 @@ export class MfaService {
     } catch {
       /* counting must never turn a wrong code into a 500; the route throttle still applies */
     }
+  }
+
+  /**
+   * Marks one time step of one account as used — atomically (Redis SET NX; in memory, one process). If Redis cannot
+   * answer, the code is refused: the second factor never opens without its replay check (security review №27).
+   */
+  private async claimStep(userId: string, step: number): Promise<boolean> {
+    const key = `mfa:used:${userId}:${step}`
+    if (this.redis.off) {
+      const rec = this.memory.get(key)
+      if (rec && rec.expires > Date.now()) return false
+      this.memory.set(key, { value: step, expires: Date.now() + 300_000 })
+      return true
+    }
+    try {
+      return (await this.redis.cache.set(key, '1', 'EX', 300, 'NX')) === 'OK'
+    } catch {
+      throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
+    }
+  }
+
+  /** Recovery codes are kept as an HMAC with a key derived from the server's: a leaked database alone cannot try 2^40 codes (№37). */
+  private recoveryHash(code: string): string {
+    return hmacSha256(`${this.key()}:recovery`, normalizeRecoveryCode(code))
   }
 
   /** Keeps a number for a few minutes (the last accepted time step: a code is not accepted twice). */
