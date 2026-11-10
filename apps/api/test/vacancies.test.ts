@@ -188,6 +188,13 @@ describe.skipIf(!DB_AVAILABLE)('Practice and internships (ТЗ 5.4)', () => {
       expect(sent).toEqual([expect.objectContaining({ type: 'vacancy.applicationInvited', userIds: [me.id] })])
       await expect(service.setStatus(s.tenantId, s.softCo.actor, app.id, 'REJECTED')).rejects.toMatchObject({ code: 'application_decided' })
 
+      // «Мои контакты»: the application is there with its vacancy; one card opens on its own, audited.
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([expect.objectContaining({ id: app.id, source: 'VACANCY', status: 'INVITED', vacancy: { id: v.id, title: 'Python amaliyoti' }, student: { id: me.id, name: 'Aziz Karimov', full: null } })])
+      expect(await contacts.companyList(s.otherCo.actor)).toEqual([])
+      expect((await service.application(s.tenantId, s.softCo.actor, app.id)).student).toMatchObject({ name: 'Aziz Karimov', phone: '+998935554433' })
+      await expect(service.application(s.tenantId, s.otherCo.actor, app.id)).rejects.toMatchObject({ code: 'not_found' })
+      expect(await ctx.prisma.client.auditEvent.count({ where: { action: 'vacancy.application.view', entityId: me.id } })).toBe(4)
+
       const [mine] = await service.myApplications(me)
       expect(mine).toMatchObject({ status: 'INVITED', note: 'Python bilaman', vacancy: { id: v.id, title: 'Python amaliyoti', company: { name: 'Soft Co' } } })
       // A closed vacancy leaves the list, the application stays with the student.

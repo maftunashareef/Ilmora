@@ -222,8 +222,8 @@ describe.skipIf(!DB_AVAILABLE)('Graduation announcements and contact requests (�
 
       const [req] = await contacts.studentList(s.aziz)
       expect(req).toMatchObject({ source: 'GRADUATE', status: 'PENDING', company: { name: 'Soft Co', website: 'https://401111111.uz' } })
-      const [pending] = await contacts.companyList(s.softCo.actor)
-      expect(pending).toMatchObject({ status: 'PENDING', student: { name: 'Aziz', full: null } })
+      // «Мои контакты» hold only students whose contacts the company has: a pending request is not there yet.
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([])
       expect((await contacts.companyContact(s.softCo.actor, req.id)).student.full).toBeNull()
       await expect(contacts.decide(s.tenantId, s.bobur, req.id, true)).rejects.toMatchObject({ code: 'not_found' })
 
@@ -235,6 +235,7 @@ describe.skipIf(!DB_AVAILABLE)('Graduation announcements and contact requests (�
       expect(await ctx.prisma.client.studentConsent.findMany({ where: { userId: s.aziz.id, kind: 'COMPANY_CONTACTS' }, select: { companyId: true, ip: true, revokedAt: true } })).toEqual([{ companyId: s.softCo.row.id, ip: '10.0.0.1', revokedAt: null }])
       await expect(contacts.decide(s.tenantId, s.aziz, req.id, false)).rejects.toMatchObject({ code: 'contact_request_decided' })
 
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([expect.objectContaining({ id: req.id, source: 'GRADUATE', status: 'ACCEPTED', vacancy: null, student: { id: s.aziz.id, name: 'Aziz', full: null } })])
       const open = await contacts.companyContact(s.softCo.actor, req.id)
       expect(open.student.full).toMatchObject({ name: 'Aziz', phone: '+998935554433', email: expect.stringContaining('@mail.uz'), institution: 'IT texnikumi', graduationYear: YEAR, certificates: [expect.objectContaining({ title: 'IELTS 7.0' })] })
       expect((await contacts.certificateLink(s.softCo.actor, req.id, cert.id)).url).toContain(cert.fileKey)

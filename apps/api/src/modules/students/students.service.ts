@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import {
-  type InstitutionStudentDto, isMinor, normalizeUzPhone, QUESTIONNAIRE_STEPS, registrySearchKey, STUDENT_CONSENT_KEYS, STUDENT_CONSENT_TEXT_VERSION,
+  type InstitutionStudentDto, isMinor, type StudentConsentDto, normalizeUzPhone, QUESTIONNAIRE_STEPS, registrySearchKey, STUDENT_CONSENT_KEYS, STUDENT_CONSENT_TEXT_VERSION,
   type StudentConsentKey, type StudentQuestionnaire, validateQuestionnaireStep,
 } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
@@ -122,6 +122,15 @@ export class StudentsService {
     await this.audit.record({ action: before ? 'student.questionnaire.update' : 'student.questionnaire.create', entityType: 'StudentProfile', entityId: actor.id, after: { mode: data.mode, institutionId, directionId, studyConfirmation: confirmation.studyConfirmation ?? before?.studyConfirmation } })
     if (confirmation.studyConfirmation === 'PENDING' && institutionId) await this.askInstitution(tenantId, institutionId, q.fullName)
     return this.questionnaire(actor)
+  }
+
+  /** The consent journal (ТЗ 8): every consent given, newest first, with the date it was taken back; nothing is erased. */
+  async consents(actor: RequestActor): Promise<StudentConsentDto[]> {
+    const rows = await this.prisma.client.studentConsent.findMany({
+      where: { userId: actor.id }, orderBy: [{ givenAt: 'desc' }, { id: 'desc' }], take: 1000,
+      select: { id: true, kind: true, textVersion: true, givenAt: true, revokedAt: true, company: { select: { id: true, name: true } } },
+    })
+    return rows.map((r) => ({ id: r.id, kind: r.kind, company: r.company, textVersion: r.textVersion, givenAt: r.givenAt.toISOString(), revokedAt: r.revokedAt?.toISOString() ?? null, active: r.revokedAt === null }))
   }
 
   // ───────────── the institution confirms its students (ТЗ 4.1 «Подтверждение учёбы») ─────────────

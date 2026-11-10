@@ -52,11 +52,23 @@ export class ContactsService {
     return id
   }
 
-  /** The company's requests; the full card is opened one by one (`full`), so every view is in the audit log. */
+  /**
+   * «Мои контакты» (ТЗ 4.3): accepted contact requests and the applications to the company's vacancies (applying is the
+   * student's consent), newest first. Names only — the full card is opened one by one, so every view is audited.
+   * Pending and declined requests show on the cards where they were sent (announcements, contract help).
+   */
   async companyList(actor: RequestActor): Promise<CompanyContactDto[]> {
     const companyId = await this.ownCompany(actor)
-    const rows = await this.prisma.client.contactRequest.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, user: { select: { id: true, displayName: true } } } })
-    return rows.map((r) => ({ id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), student: { id: r.user.id, name: r.user.displayName, full: null } }))
+    const student = { select: { id: true, displayName: true } } as const
+    const [requests, applications] = await Promise.all([
+      this.prisma.client.contactRequest.findMany({ where: { companyId, status: 'ACCEPTED' }, orderBy: { decidedAt: 'desc' }, take: 500, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, user: student } }),
+      this.prisma.client.vacancyApplication.findMany({ where: { vacancy: { companyId } }, orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, status: true, createdAt: true, statusChangedAt: true, vacancy: { select: { id: true, title: true } }, user: student } }),
+    ])
+    const items: (CompanyContactDto & { at: number })[] = [
+      ...requests.map((r) => ({ id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.user.id, name: r.user.displayName, full: null }, at: (r.decidedAt ?? r.createdAt).getTime() })),
+      ...applications.map((a) => ({ id: a.id, source: 'VACANCY' as const, status: a.status, createdAt: a.createdAt.toISOString(), decidedAt: iso(a.statusChangedAt), vacancy: a.vacancy, student: { id: a.user.id, name: a.user.displayName, full: null }, at: a.createdAt.getTime() })),
+    ]
+    return items.sort((a, b) => b.at - a.at).map(({ at: _at, ...dto }) => dto)
   }
 
   /** One accepted request with the full card. */
@@ -66,7 +78,7 @@ export class ContactsService {
     if (!r) throw AppError.notFound('Contact request')
     const full = r.status === 'ACCEPTED' ? await this.fullCard(r.userId) : null
     if (full) await this.audit.record({ action: 'contact.view', entityType: 'User', entityId: r.userId, after: { companyId, requestId: id } })
-    return { id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), student: { id: r.userId, name: r.user.displayName, full } }
+    return { id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.userId, name: r.user.displayName, full } }
   }
 
   /** A certificate file of a student who accepted — a 5-minute link, audited (ТЗ 8 «скачал файл»). */

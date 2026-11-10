@@ -665,14 +665,33 @@ export interface CompanyAnnouncementDto {
   myResponse: { id: string; status: MatchStatus; lines: { lineId: string; wantedCount: number }[]; comment: string | null; contacts: PartyContactsDto | null } | null
 }
 
-/** A company's request to open a student's contacts, as the company sees it; the full card only once accepted. */
+/**
+ * «Мои контакты» of a company (ТЗ 4.3): accepted contact requests and applications to its vacancies — the students
+ * whose contacts it has. `source` tells where the item came from: a contact request (GRADUATE, CONTRACT_HELP — `id` is
+ * the request, the card opens at `…/contacts/:id`) or VACANCY (`id` is the application, the card opens at
+ * `…/vacancy-applications/:id`). The list carries names only; the full card is opened one by one, each time audited.
+ */
 export interface CompanyContactDto {
   id: string
-  source: ContactSource
-  status: MatchStatus
+  source: ContactSource | 'VACANCY'
+  status: MatchStatus | ApplicationStatus
   createdAt: string
   decidedAt: string | null
+  /** The vacancy of an application. */
+  vacancy: { id: string; title: string } | null
   student: { id: string; name: string; full: StudentFullCardDto | null }
+}
+
+/** One row of the student's consent journal (ТЗ 8): given, and when taken back; nothing is overwritten. */
+export interface StudentConsentDto {
+  id: string
+  kind: 'GRADUATE_CARD' | 'CONTRACT_HELP_CARD' | 'COMPANY_CONTACTS' | 'PARENT_CONSENT'
+  /** COMPANY_CONTACTS: the company the contacts were opened to. */
+  company: { id: string; name: string } | null
+  textVersion: string
+  givenAt: string
+  revokedAt: string | null
+  active: boolean
 }
 
 /** The full card (ТЗ 5.3, 9.4) — only for a company the student accepted: name, phone, e-mail, certificate files. */

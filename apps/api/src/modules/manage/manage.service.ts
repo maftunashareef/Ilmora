@@ -17,6 +17,9 @@ import { SiteService } from '../site/site.service'
 import { ONLINE_PROVIDER } from './online-provider'
 import type { AvatarUploadUrlInput, CenterStatusInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
 
+/** What a finance admin reads in the audit log: the money records only. */
+const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription']
+
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
 const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'item'
@@ -1009,9 +1012,16 @@ export class ManageService {
     return { courses: courses.map((c) => toCourse(c)), videos: videos.map(toVideo), playlists: playlists.map(toPlaylist), resources: resources.map(toResource) }
   }
 
-  async audits(tenantId: string, q: { entityType?: string; entityId?: string; page?: number; pageSize?: number }) {
+  /**
+   * The audit log. The Super Admin reads all of it; a finance admin only the money records (payments and
+   * subscriptions) — never who opened a student's contacts, the reviews or the accounts (ТЗ 8, 9.4).
+   */
+  async audits(tenantId: string, actor: RequestActor, q: { entityType?: string; entityId?: string; page?: number; pageSize?: number }) {
     const page = Math.max(1, q.page ?? 1), pageSize = Math.min(200, Math.max(10, q.pageSize ?? 50))
-    const where = { tenantId, ...(q.entityType ? { entityType: q.entityType } : {}), ...(q.entityId ? { entityId: q.entityId } : {}) }
+    const financeOnly = !actor.roles.includes('PLATFORM_ADMIN')
+    if (financeOnly && q.entityType && !FINANCE_AUDIT_ENTITIES.includes(q.entityType)) return { page, pageSize, total: 0, items: [] }
+    const entityType = q.entityType ? q.entityType : financeOnly ? { in: FINANCE_AUDIT_ENTITIES } : undefined
+    const where = { tenantId, ...(entityType ? { entityType } : {}), ...(q.entityId ? { entityId: q.entityId } : {}) }
     const [items, total] = await Promise.all([
       this.prisma.client.auditEvent.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { actor: { select: { id: true, displayName: true } } } }),
       this.prisma.client.auditEvent.count({ where }),

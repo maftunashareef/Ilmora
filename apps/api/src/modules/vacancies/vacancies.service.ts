@@ -143,6 +143,18 @@ export class VacanciesService {
     return out
   }
 
+  /** One application with the full card («Мои контакты» opens it from there); the view is audited, a new one becomes «просмотрен». */
+  async application(tenantId: string, actor: RequestActor, applicationId: string): Promise<VacancyApplicationDto> {
+    const company = await this.ownCompany(actor)
+    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, vacancy: { companyId: company.id } }, select: { id: true, userId: true, vacancy: { select: { title: true } } } })
+    if (!a) throw AppError.notFound('Application')
+    const moved = await this.prisma.client.vacancyApplication.updateMany({ where: { id: applicationId, status: 'NEW' }, data: { status: 'VIEWED', statusChangedAt: new Date() } })
+    if (moved.count === 1) await this.tellStudent(tenantId, a, 'VIEWED', company.name, a.vacancy.title)
+    const r = await this.prisma.client.vacancyApplication.findUniqueOrThrow({ where: { id: applicationId }, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true } })
+    await this.audit.record({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, applicationId } })
+    return { id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId)) } }
+  }
+
   /** «Пригласить» / «Отказать»: from new or viewed only; the student is told. */
   async setStatus(tenantId: string, actor: RequestActor, applicationId: string, status: 'INVITED' | 'REJECTED'): Promise<VacancyApplicationDto[]> {
     const company = await this.ownCompany(actor)
