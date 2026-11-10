@@ -1229,6 +1229,10 @@ export const dict = {
   'checkout.pending': d('Tölov hali tasdiqlanmadi. Bu sahifa avtomatik yangilanadi.', 'Оплата ещё не подтверждена. Страница обновится автоматически.', 'Payment not confirmed yet. This page refreshes automatically.'),
   'checkout.failed': d('Tölov bekor qilindi yoki muddati ötdi. Qaytadan urinib köring.', 'Оплата отменена или истекла. Попробуйте снова.', 'Payment was cancelled or expired. Please try again.'),
   'checkout.receipt': d('Kvitansiya', 'Квитанция', 'Receipt'),
+  'checkout.uncheckedTitle': d('Tölovni tekşirib bölmadi', 'Не удалось проверить оплату', 'Could not check the payment'),
+  'checkout.uncheckedBody': d('Server bilan aloqa yöq. Tölagan bölsangiz, tölov «Abonementim» bölimida çiqadi — qayta tölaş şart emas.', 'Нет связи с сервером. Если вы уже оплатили, оплата появится в разделе «Моя подписка» — платить ещё раз не нужно.', 'No connection to the server. If you have paid, the payment will show up in “My subscription” — there is no need to pay again.'),
+  'checkout.stillPending': d('Tölov hali tasdiqlanmadi. Tölagan bölsangiz, u bir neça daqiqada «Abonementim» bölimida çiqadi.', 'Оплата ещё не подтверждена. Если вы оплатили, она появится в «Моей подписке» в течение нескольких минут.', 'The payment is not confirmed yet. If you have paid, it will show up in “My subscription” within a few minutes.'),
+  'checkout.checkAgain': d('Qayta tekşiriş', 'Проверить снова', 'Check again'),
   'checkout.renew': d('Keyingi oyni tölaş', 'Оплатить следующий месяц', 'Pay the next month'),
   // ── Attendance (authenticated check-in) ──────────────────────────────────
   'attend.signInToCheckIn': d('Davomatni belgilaş uçun öz raqamingiz bilan kiring. Keyin avtomatik qaytasiz.', 'Войдите по своему номеру, чтобы отметиться. После входа вы вернётесь сюда автоматически.', 'Sign in with your own number to check in. You will return here automatically.'),
