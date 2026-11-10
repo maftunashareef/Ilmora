@@ -171,6 +171,40 @@ enum JournalKind {
   REVERSAL
 }
 
+/// A refund request (offer 6.3–6.6): waits for the finance admin → approved / rejected → the money is sent; the
+/// student can withdraw it before the decision.
+enum RefundRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+  WITHDRAWN
+}
+
+/// The reason, from the offer's appendix 2 and 6.5 (the center's or the operator's fault: refunded without a deduction
+/// for the lessons held).
+enum RefundReason {
+  /// The student's refusal (6.3, 6.4)
+  REFUSAL
+  /// The schedule or the teacher changed (6.5 c)
+  SCHEDULE_CHANGED
+  /// The group was not formed, closed, did not start (6.5 a)
+  GROUP_CLOSED
+  /// The center cancelled lessons and did not hold them (6.5 b)
+  LESSONS_NOT_HELD
+  /// The course is not as described (6.5 d)
+  NOT_AS_DESCRIBED
+  /// No access through the operator's fault (6.5 e)
+  PLATFORM_FAULT
+  OTHER
+}
+
+/// Where the request came from: the student's cabinet, or a finance admin entered a letter sent by e-mail (6.6).
+enum RefundSource {
+  CABINET
+  EMAIL
+}
+
 enum OtpPurpose {
   LOGIN
   PHONE_CHANGE
@@ -234,6 +268,9 @@ model Tenant {
   sessions        LessonSession[]
   attendance      AttendanceRecord[]
   payments        Payment[]
+  paymentLines    PaymentLine[]
+  refundRequests  RefundRequest[]
+  refundRequestLines RefundRequestLine[]
   transactions    PaymentTransaction[]
   journals        LedgerJournal[]
   ledgerEntries   LedgerEntry[]
@@ -336,6 +373,7 @@ model User {
   attendance      AttendanceRecord[]  @relation("AttendanceStudent")
   recordedAttend  AttendanceRecord[]  @relation("AttendanceRecordedBy")
   payments        Payment[]
+  refundRequests  RefundRequest[]     @relation("RefundRequestStudent")
   refreshSessions RefreshSession[]
   savedItems      SavedItem[]
   auditEvents     AuditEvent[]
@@ -582,6 +620,8 @@ model Course {
   sessions    LessonSession[]
   videos      Video[]
   resources   Resource[]
+  paymentLines PaymentLine[]
+  refundLines  RefundRequestLine[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, status, visibility, deletedAt])
@@ -793,6 +833,7 @@ model Subscription {
 
   enrollments Enrollment[]
   payments    Payment[]
+  refundRequests RefundRequest[]
 
   @@index([tenantId, studentId, status])
   @@index([tenantId, status, currentPeriodEnd])
@@ -816,6 +857,9 @@ model Enrollment {
   cancelledAt    DateTime?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+
+  paymentLines PaymentLine[]
+  refundLines  RefundRequestLine[]
 
   @@unique([subscriptionId, groupId])
   @@index([tenantId, groupId, status])
@@ -918,17 +962,46 @@ model Payment {
   paidAt         DateTime?
   cancelledAt    DateTime?
   refundedAt     DateTime?
+  /// Returned so far (partial refunds by RefundRequest add up here). Checked by the database: 0 <= refundedMinor <=
+  /// amountMinor, and state = REFUNDED only with refundedMinor = amountMinor (everything returned).
+  refundedMinor  BigInt          @default(0)
   expiresAt      DateTime
   createdById    String?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  transactions PaymentTransaction[]
-  receipt      Receipt?
+  transactions   PaymentTransaction[]
+  receipt        Receipt?
+  lines          PaymentLine[]
+  refundRequests RefundRequest[]
 
   @@index([tenantId, studentId, state])
   @@index([tenantId, state, createdAt])
   @@index([tenantId, subscriptionId])
+}
+
+/// What one payment paid for each course, written with the payment (checkout, renewal). A course's refund (offer 6.4)
+/// is counted from these amounts: the price and the discount of the course may have changed since. The lines of a
+/// payment add up to its amountMinor.
+model PaymentLine {
+  id             String      @id @default(cuid())
+  tenantId       String
+  tenant         Tenant      @relation(fields: [tenantId], references: [id])
+  paymentId      String
+  payment        Payment     @relation(fields: [paymentId], references: [id])
+  /// Null once a seat hold of an unpaid checkout is deleted (a new checkout of the same draft replaces the holds).
+  enrollmentId   String?
+  enrollment     Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  courseId       String
+  course         Course      @relation(fields: [courseId], references: [id])
+  /// The course's price for the period, without the discount.
+  listPriceMinor BigInt
+  /// Paid for this course: the price less the discount active at the payment.
+  amountMinor    BigInt
+
+  @@unique([paymentId, enrollmentId])
+  @@index([tenantId, courseId])
+  @@index([enrollmentId])
 }
 
 model PaymentTransaction {
@@ -1036,6 +1109,83 @@ model Receipt {
   channel     String?
 
   @@unique([tenantId, number])
+}
+
+/// A refund request for one payment (offer 6.3–6.6, appendix 2): from the cabinet, or entered by a finance admin from a
+/// letter. A cancellation with the next period already paid makes two requests: one per payment.
+model RefundRequest {
+  id             String              @id @default(cuid())
+  tenantId       String
+  tenant         Tenant              @relation(fields: [tenantId], references: [id])
+  studentId      String
+  student        User                @relation("RefundRequestStudent", fields: [studentId], references: [id])
+  subscriptionId String
+  subscription   Subscription        @relation(fields: [subscriptionId], references: [id])
+  /// The payment the money is returned from (its subscription is subscriptionId).
+  paymentId      String
+  payment        Payment             @relation(fields: [paymentId], references: [id])
+  status         RefundRequestStatus @default(PENDING)
+  reason         RefundReason
+  /// «Another reason»: up to 1000 characters (checked by the API).
+  reasonText     String?
+  source         RefundSource
+  /// «Return to another account». The account details are not stored (personal data): the finance admin contacts the student.
+  toOtherAccount Boolean             @default(false)
+  /// Counted by the formula of 6.4: the sum of the lines.
+  requestedMinor BigInt
+  /// The finance admin's decision (may differ from the count, explained in decisionNote).
+  approvedMinor  BigInt?
+  currency       String              @default("UZS")
+  /// The decision is due by createdAt + 10 calendar days (6.6).
+  decisionDueAt  DateTime
+  decidedAt      DateTime?
+  decidedById    String?
+  decisionNote   String?
+  /// The money was sent to the student.
+  paidAt         DateTime?
+  paidById       String?
+  /// The bank transfer's or Payme's reference.
+  providerRef    String?
+  /// = paymentId while the request is open (PENDING or APPROVED), null once it is closed: one open request per payment
+  /// (the openKey pattern of ContractHelpRequest).
+  openKey        String?             @unique
+  createdById    String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  lines RefundRequestLine[]
+
+  /// The finance admins' queue and the requests past their 10 days.
+  @@index([tenantId, status, decisionDueAt])
+  @@index([tenantId, studentId])
+  @@index([tenantId, paymentId])
+  @@index([subscriptionId])
+}
+
+/// One course of a refund request, with the numbers of its count, so the finance admin and an audit see where the amount
+/// came from even after the schedule changes.
+model RefundRequestLine {
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  refundRequestId String
+  refundRequest   RefundRequest @relation(fields: [refundRequestId], references: [id], onDelete: Cascade)
+  enrollmentId    String
+  enrollment      Enrollment    @relation(fields: [enrollmentId], references: [id])
+  courseId        String
+  course          Course        @relation(fields: [courseId], references: [id])
+  /// What the payment paid for this course (PaymentLine.amountMinor).
+  priceMinor      BigInt
+  /// The course's lessons in the period by the schedule.
+  lessonsTotal    Int
+  /// Held or due to be held, the student's absences included (6.4); 0 when the center is at fault (6.5).
+  lessonsHeld     Int
+  /// To return for this course.
+  amountMinor     BigInt
+
+  @@unique([refundRequestId, enrollmentId])
+  @@index([tenantId, courseId])
+  @@index([enrollmentId])
 }
 
 /// Transactional outbox: durable notification/side-effect intents written in the same DB transaction as the state change.

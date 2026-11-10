@@ -25,12 +25,13 @@ function setup(opts: { priceMinor?: bigint; open?: { id: string; status: string 
   const tx = {
     $queryRawUnsafe: spy('tx.$queryRawUnsafe', []),
     group: { findMany: vi.fn(async () => [group(opts.priceMinor ?? 50_000_00n)]) },
-    enrollment: { groupBy: vi.fn(async () => []), deleteMany: spy('enrollment.deleteMany', { count: 0 }), createMany: spy('enrollment.createMany', { count: 1 }), updateMany: spy('enrollment.updateMany', { count: 1 }), findMany: vi.fn(async () => []) },
+    enrollment: { groupBy: vi.fn(async () => []), deleteMany: spy('enrollment.deleteMany', { count: 0 }), createManyAndReturn: spy('enrollment.createManyAndReturn', [{ id: 'e1', groupId: 'g1' }]), updateMany: spy('enrollment.updateMany', { count: 1 }), findMany: vi.fn(async () => []) },
     subscription: {
       updateMany: spy('subscription.updateMany', { count: opts.raceLost ? 0 : 1 }),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { (calls['subscription.update'] ??= []).push(data); return { ...draft, kind: 'PERIOD', lessonsTotal: null, ...data } }),
       findFirst: vi.fn(async () => ({ ...draft, status: opts.subStatus ?? 'PENDING_PAYMENT', kind: 'PERIOD', startedAt: null, currentPeriodEnd: null, amountMinor: 0n, package: null, student: { displayName: 'S' } })),
     },
+    paymentLine: { createMany: spy('paymentLine.createMany', { count: 1 }) },
     payment: {
       updateMany: spy('payment.updateMany', { count: 1 }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { (calls['payment.create'] ??= []).push(data); return { id: 'pay-new', state: 'PENDING', provider: null, paidAt: null, ...data } }),
@@ -93,6 +94,8 @@ describe('free checkout', () => {
     const { payment } = await subscriptions.checkout('t', 's1', 'PAYME')
     expect(calls['payment.create']?.[0]).toMatchObject({ amountMinor: 50_000_00n, provider: 'PAYME' })
     expect(calls['payment.create']?.[0]).not.toHaveProperty('state')
+    // What the payment pays for each course is kept with it: a refund is counted from it (security review №42).
+    expect(calls['paymentLine.createMany']?.[0]).toEqual({ data: [{ tenantId: 't', paymentId: 'pay-new', enrollmentId: 'e1', courseId: 'c1', listPriceMinor: 50_000_00n, amountMinor: 50_000_00n }] })
     expect(calls['enrollment.updateMany']).toBeUndefined()
     expect(payment.state).toBe('PENDING')
   })

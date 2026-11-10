@@ -60,6 +60,21 @@ Everything here is enforced on the server; the web app only reflects it.
   new period or a fresh lesson balance, reminders reset; the student is notified (`payment.confirmed`).
 - Reminders: `subscription.expiring` 3 days before the period ends (once per period), `subscription.lessonsLow` when 2
   lessons remain, `subscription.expired` on blocking, `subscription.ended` when the seats are released.
+- **What a payment paid per course** (`PaymentLine`, written with the payment at checkout and renewal): the enrollment,
+  the course's price for the period and what was paid for it after the discount; the lines add up to
+  `Payment.amountMinor`. A course's refund is counted from them, never from today's price. Payments made before
+  migration `20261117000000_refund_requests_payment_lines` have no lines (split their amount by the courses' prices).
+- **Refund requests** (offer 6.3–6.6, appendix 2; security review 10.11 №42): `RefundRequest` per payment (a
+  cancellation with the next period paid ahead makes two), with `RefundRequestLine` per course and the numbers of the
+  6.4 count (price, lessons in the period, lessons held, amount). Statuses `PENDING` → `APPROVED` / `REJECTED` → `PAID`,
+  or `WITHDRAWN` by the student; decision due in 10 days (`decisionDueAt`). Partial refunds add up in
+  `Payment.refundedMinor`; the payment becomes `REFUNDED` only once all of it is returned. Payme cancels a transaction
+  only in full, so partial refunds go by bank transfer (`providerRef`). Account details for «another account» are not
+  stored (`toOtherAccount` only).
+- The database enforces: `0 ≤ refundedMinor ≤ amountMinor` and `REFUNDED` only with all of it returned; non-negative
+  amounts, a line returns no more than was paid for its course and counts no more lessons held than in the period; a
+  request is open (`PENDING`, `APPROVED`) exactly while `openKey` = its `paymentId` — set it to null when closing the
+  request.
 
 ## 5. Notifications
 
