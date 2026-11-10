@@ -24,6 +24,9 @@ export class StudentsController {
     return this.students.save(t, a, dto, ci.ip)
   }
 
+  /** The consent journal: what is in force and the history (ТЗ 8). Consents are given and taken back with the questionnaire. */
+  @Get('consents') consents(@CurrentActor() a: RequestActor) { return this.students.consents(a) }
+
   @Get('certificates') certificatesList(@CurrentActor() a: RequestActor) { return this.certificates.list(a) }
 
   @Post('certificates/upload-url')

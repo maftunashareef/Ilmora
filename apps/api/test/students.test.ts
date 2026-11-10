@@ -168,6 +168,13 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
       const journal = await ctx.prisma.client.studentConsent.findMany({ where: { userId: me.id, kind: 'GRADUATE_CARD' }, orderBy: { givenAt: 'asc' } })
       expect(journal.map((r) => r.revokedAt === null)).toEqual([false, true])
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'PARENT_CONSENT', revokedAt: null } })).toBe(1)
+      // GET /v1/students/me/consents: in force and the history, nothing erased; one's own only.
+      const history = await service.consents(me)
+      expect(history.filter((c) => c.kind === 'GRADUATE_CARD').map((c) => c.active).sort()).toEqual([false, true])
+      expect(history.filter((c) => c.active).map((c) => c.kind).sort()).toEqual(['CONTRACT_HELP_CARD', 'GRADUATE_CARD', 'PARENT_CONSENT'])
+      expect(history.find((c) => !c.active)).toMatchObject({ company: null, textVersion: '2026-11-10', revokedAt: expect.any(String) })
+      expect(Object.keys(history[0]).sort()).toEqual(['active', 'company', 'givenAt', 'id', 'kind', 'revokedAt', 'textVersion'])
+      expect(await service.consents(await s.student())).toEqual([])
     })
   })
 

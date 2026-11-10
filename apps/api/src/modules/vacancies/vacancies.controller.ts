@@ -27,6 +27,8 @@ export class CompanyVacanciesController {
   @Post('vacancies/:id/close') close(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.close(a, id) }
   @Get('vacancies/:id/applications') applications(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.applications(t, a, id) }
 
+  @Get('vacancy-applications/:id') application(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.application(t, a, id) }
+
   @Post('vacancy-applications/:id/status')
   status(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(ApplicationStatusInput)) dto: ApplicationStatusInput) {
     return this.vacancies.setStatus(t, a, id, dto.status)
