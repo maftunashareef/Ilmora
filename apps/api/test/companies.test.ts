@@ -289,6 +289,20 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
     })
   })
 
+  it('the Super Admin finds any company by STIR, name, status — not only the queue (issue #50)', async () => {
+    const s = await setup('co-search')
+    await s.inT(async () => {
+      const rep = await s.representative()
+      await s.complete(rep, '307777777')
+      const { id } = await service.profile(rep)
+      expect(await review.search({ page: 1 })).toMatchObject({ total: 1, items: [{ id, stir: '307777777', status: 'DRAFT', approvedAt: null, blocked: false, certificateUploaded: true }] })
+      expect((await review.search({ stir: '307777777', page: 1 })).total).toBe(1)
+      expect((await review.search({ q: 'mebel plus', page: 1 })).items.map((i) => i.id)).toEqual([id])
+      expect((await review.search({ status: 'APPROVED', page: 1 })).total).toBe(0)
+      expect((await review.search({ stir: '300000000', page: 1 })).total).toBe(0)
+    })
+  })
+
   it('rejects with a reason; one decision when two reviewers act at once', async () => {
     const s = await setup('co-reject')
     await s.inT(async () => {

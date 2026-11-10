@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { type InstitutionPassportDto, type InstitutionPendingChanges, type InstitutionReviewDto, type InstitutionReviewItemDto, registrySearchKey, registrySearchText, TECHNIKUMS } from '@ilmora/shared'
+import { type AdminInstitutionItemDto, type AdminPage, type InstitutionPassportDto, type InstitutionPendingChanges, type InstitutionReviewDto, type InstitutionReviewItemDto, registrySearchKey, registrySearchText, TECHNIKUMS } from '@ilmora/shared'
 
 /**
  * The official name of a record from the ministry's list, for the reviewer to compare with what the representative
@@ -9,7 +9,8 @@ const OFFICIAL_NAMES = new Map(TECHNIKUMS.map((t) => [t.id, t.name]))
 export const officialName = (id: string, source: string, stored: string | null = null) => (source === 'IMPORT' ? (stored ?? OFFICIAL_NAMES.get(id) ?? null) : null)
 import { AppError } from '../../common/errors'
 import { Prisma } from '../../generated/prisma/client'
-import { isUniqueViolation } from '../registry/registry.mappers'
+import { isUniqueViolation, regionIdByRef } from '../registry/registry.mappers'
+import type { AdminInstitutionsQuery } from './institutions-admin.controller'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
@@ -18,6 +19,20 @@ import { PLACE_SELECT, toPlace } from '../registry/registry.mappers'
 import { InstitutionsService } from './institutions.service'
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
+const ADMIN_PAGE = 50
+const ITEM_SELECT = {
+  id: true, name: true, type: true, stir: true, source: true, submittedAt: true, approvedAt: true, officialName: true, pendingChanges: true, ...PLACE_SELECT,
+  representative: { select: { displayName: true, jobTitle: true, login: true } },
+} as const satisfies Prisma.InstitutionSelect
+const toItem = (r: Prisma.InstitutionGetPayload<{ select: typeof ITEM_SELECT }>): InstitutionReviewItemDto => ({
+  id: r.id, name: r.name, type: r.type, stir: r.stir, ...toPlace(r),
+  submittedAt: iso(r.submittedAt),
+  reReview: r.approvedAt !== null,
+  inRegistry: r.source === 'IMPORT',
+  officialName: officialName(r.id, r.source, r.officialName),
+  pendingChanges: (r.pendingChanges as InstitutionPendingChanges | null) ?? null,
+  representative: r.representative ? { name: r.representative.displayName, jobTitle: r.representative.jobTitle, login: r.representative.login } : null,
+})
 /** Audit actions shown as the review history of one institution. */
 const HISTORY_ACTIONS = ['institution.claim', 'institution.create', 'institution.submit', 'institution.update.review', 'institution.approve', 'institution.reject', 'institution.change.approve', 'institution.change.reject', 'institution.block', 'institution.unblock', 'institution.release']
 /** Waiting for a decision: a first review, or a change of an approved record (security review №13). */
@@ -40,24 +55,31 @@ export class InstitutionReviewService {
 
   /** The queue: profiles waiting for a decision, oldest first. */
   async queue(): Promise<InstitutionReviewItemDto[]> {
-    const rows = await this.prisma.client.institution.findMany({
-      where: { ...WAITING, mergedIntoId: null },
-      orderBy: { submittedAt: 'asc' },
-      take: 500,
-      select: {
-        id: true, name: true, type: true, stir: true, source: true, submittedAt: true, approvedAt: true, officialName: true, pendingChanges: true, ...PLACE_SELECT,
-        representative: { select: { displayName: true, jobTitle: true, login: true } },
-      },
-    })
-    return rows.map((r) => ({
-      id: r.id, name: r.name, type: r.type, stir: r.stir, ...toPlace(r),
-      submittedAt: iso(r.submittedAt),
-      reReview: r.approvedAt !== null,
-      inRegistry: r.source === 'IMPORT',
-      officialName: officialName(r.id, r.source, r.officialName),
-      pendingChanges: (r.pendingChanges as InstitutionPendingChanges | null) ?? null,
-      representative: r.representative ? { name: r.representative.displayName, jobTitle: r.representative.jobTitle, login: r.representative.login } : null,
-    }))
+    const rows = await this.prisma.client.institution.findMany({ where: { ...WAITING, mergedIntoId: null }, orderBy: { submittedAt: 'asc' }, take: 500, select: ITEM_SELECT })
+    return rows.map(toItem)
+  }
+
+  /**
+   * Every record, for «Отвязать представителя» and the like (issue #50): a STIR (exact), a name (also the official
+   * one from the ministry list), a status, a type, a region. Without a status — the records somebody represents.
+   */
+  async search(q: AdminInstitutionsQuery): Promise<AdminPage<AdminInstitutionItemDto>> {
+    const key = q.q ? registrySearchKey(q.q) : ''
+    const regionId = q.regionId ? await regionIdByRef(this.prisma, q.regionId) : null
+    if (q.regionId && !regionId) return { items: [], total: 0, page: q.page, pageSize: ADMIN_PAGE }
+    const where: Prisma.InstitutionWhereInput = {
+      mergedIntoId: null,
+      ...(q.status ? { status: q.status } : { representative: { isNot: null } }),
+      ...(q.stir ? { stir: q.stir } : {}),
+      ...(q.type ? { type: q.type } : {}),
+      ...(regionId ? { regionId } : {}),
+      ...(key ? { OR: [{ searchKey: { contains: key } }, { searchText: { contains: key } }, { officialName: { contains: q.q!.trim(), mode: 'insensitive' } }] } : {}),
+    }
+    const [rows, total] = await Promise.all([
+      this.prisma.client.institution.findMany({ where, orderBy: [{ name: 'asc' }, { id: 'asc' }], skip: (q.page - 1) * ADMIN_PAGE, take: ADMIN_PAGE, select: { ...ITEM_SELECT, status: true, blockedAt: true } }),
+      this.prisma.client.institution.count({ where }),
+    ])
+    return { items: rows.map((r) => ({ ...toItem(r), status: r.status, approvedAt: iso(r.approvedAt), blocked: r.blockedAt !== null })), total, page: q.page, pageSize: ADMIN_PAGE }
   }
 
   /** One profile with what the reviewer needs: the passport, whether the STIR came from the registry, the history. */

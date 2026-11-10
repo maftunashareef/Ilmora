@@ -426,6 +426,11 @@ export interface CompanyReviewItemDto {
   representative: { name: string; jobTitle: string | null; login: string | null; email: string | null } | null
 }
 
+/** A record in the Super Admin's search (issue #50): the review item with its status — any status, not only the queue. */
+export type AdminInstitutionItemDto = InstitutionReviewItemDto & { status: RegistryInstitutionStatus; approvedAt: string | null; blocked: boolean }
+export type AdminCompanyItemDto = CompanyReviewItemDto & { status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED'; approvedAt: string | null; blocked: boolean }
+export interface AdminPage<T> { items: T[]; total: number; page: number; pageSize: number }
+
 export interface CompanyReviewDto {
   profile: CompanyProfileDto
   representative: { name: string; jobTitle: string | null; login: string | null; email: string | null } | null
