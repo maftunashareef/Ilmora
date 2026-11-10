@@ -188,7 +188,7 @@ describe('Registry access: @Approved', () => {
   it('finds the organization by its representative in the database and needs approvedAt', async () => {
     const { prisma, seen } = prismaWith({ institution: ['u-rep'] })
     await expect(new ApprovedGuard(new Reflector(), prisma).canActivate(ctxFor('institution', rep))).resolves.toBe(true)
-    expect(seen[0]).toEqual({ representative: { is: { id: 'u-rep' } }, approvedAt: { not: null }, mergedIntoId: null })
+    expect(seen[0]).toEqual({ representative: { is: { id: 'u-rep' } }, approvedAt: { not: null }, blockedAt: null, mergedIntoId: null })
     await expect(new ApprovedGuard(new Reflector(), prismaWith({}).prisma).canActivate(ctxFor('institution', rep))).rejects.toMatchObject({ code: 'not_approved' })
     // An institution account is not a company, even when its institution is approved.
     await expect(new ApprovedGuard(new Reflector(), prisma).canActivate(ctxFor('company', rep))).rejects.toMatchObject({ code: 'not_approved' })

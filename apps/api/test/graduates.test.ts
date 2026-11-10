@@ -247,6 +247,11 @@ describe.skipIf(!DB_AVAILABLE)('Graduation announcements and contact requests (Ð
       const audited = await ctx.prisma.client.auditEvent.findMany({ where: { action: { in: ['contact.view', 'contact.certificate.download'] }, entityId: { in: [s.aziz.id, cert.id] } }, select: { action: true } })
       expect(audited.map((a) => a.action).sort()).toEqual(['contact.certificate.download', 'contact.view'])
 
+      // The company keeps the contacts the student had when accepting, not later ones (security review â„–15).
+      await ctx.prisma.client.studentProfile.update({ where: { userId: s.aziz.id }, data: { contactPhone: '+998971112233' } })
+      await ctx.prisma.client.user.update({ where: { id: s.aziz.id }, data: { displayName: 'Aziz Yangi', email: 'new@mail.uz' } })
+      expect((await contacts.companyContact(s.softCo.actor, req.id)).student).toMatchObject({ name: 'Aziz', full: { name: 'Aziz', phone: '+998935554433', email: expect.stringContaining('@mail.uz') } })
+      expect((await contacts.companyContact(s.softCo.actor, req.id)).student.full!.email).not.toBe('new@mail.uz')
       // A certificate added after the consent is not shared (security review â„–15).
       const later = await ctx.prisma.client.studentCertificate.create({ data: { tenantId: s.tenantId, userId: s.aziz.id, title: 'Yangi', fileKey: `student-certs/${s.tenantId}/${s.aziz.id}/2.pdf`, contentType: 'application/pdf', sizeBytes: 100, createdAt: new Date(Date.now() + 1000) } })
       expect((await contacts.companyContact(s.softCo.actor, req.id)).student.full!.certificates.map((c) => c.title)).toEqual(['IELTS 7.0'])
@@ -260,9 +265,16 @@ describe.skipIf(!DB_AVAILABLE)('Graduation announcements and contact requests (Ð
       await expect(contacts.certificateLink(s.softCo.actor, req.id, cert.id)).rejects.toMatchObject({ code: 'not_found' })
       expect(await contacts.companyList(s.softCo.actor)).toEqual([])
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: s.aziz.id, kind: 'COMPANY_CONTACTS', revokedAt: null } })).toBe(0)
+      // The copy of the contacts goes with the consent.
+      expect(await ctx.prisma.client.contactRequest.findUniqueOrThrow({ where: { id: req.id }, select: { sharedName: true, sharedPhone: true, sharedEmail: true } })).toEqual({ sharedName: null, sharedPhone: null, sharedEmail: null })
       await expect(contacts.revoke(s.aziz, req.id)).rejects.toMatchObject({ code: 'contact_not_open' })
       await expect(service.invite(s.tenantId, s.softCo.actor, s.aziz.id, ann.id)).rejects.toMatchObject({ code: 'contact_request_exists' })
 
+      // A blocked institution's announcements leave the companies' lists.
+      await ctx.prisma.client.institution.update({ where: { id: s.inst.id }, data: { blockedAt: new Date() } })
+      expect(await service.companyList(s.softCo.actor, {})).toEqual([])
+      await expect(service.companyGet(s.softCo.actor, ann.id)).rejects.toMatchObject({ code: 'not_found' })
+      await ctx.prisma.client.institution.update({ where: { id: s.inst.id }, data: { blockedAt: null } })
       // A disabled account leaves the cards (security review â„–47).
       await ctx.prisma.client.user.update({ where: { id: s.aziz.id }, data: { isActive: false } })
       expect((await service.companyGet(s.softCo.actor, ann.id)).graduates!.map((g) => g.name)).toEqual(['Bobur'])

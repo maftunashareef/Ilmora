@@ -134,10 +134,10 @@ export class VacanciesService {
       await this.prisma.client.vacancyApplication.updateMany({ where: { id: { in: fresh.map((a) => a.id) }, status: 'NEW' }, data: { status: 'VIEWED', statusChangedAt: new Date() } })
       for (const a of fresh) await this.tellStudent(tenantId, a, 'VIEWED', company.name, v.title)
     }
-    const rows = await this.prisma.client.vacancyApplication.findMany({ where: { vacancyId: id }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true } })
+    const rows = await this.prisma.client.vacancyApplication.findMany({ where: { vacancyId: id }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true, sharedName: true, sharedPhone: true, sharedEmail: true } })
     // The cards in two queries and the audit rows in one insert, however many applied.
     // Certificates the student had when applying — the application is the consent (ТЗ 5.4, 8).
-    const cards = await this.contacts.fullCards(rows.map((r) => r.userId), new Map(rows.map((r) => [r.userId, r.createdAt])))
+    const cards = await this.contacts.fullCards(rows.map((r) => r.userId), new Map(rows.map((r) => [r.userId, r.createdAt])), new Map(rows.map((r) => [r.userId, r])))
     await this.audit.recordMany(rows.map((r) => ({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, vacancyId: id, applicationId: r.id } })))
     return rows.filter((r) => cards.has(r.userId)).map((r) => ({
       id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...cards.get(r.userId)! },
@@ -151,9 +151,9 @@ export class VacanciesService {
     if (!a) throw AppError.notFound('Application')
     const moved = await this.prisma.client.vacancyApplication.updateMany({ where: { id: applicationId, status: 'NEW' }, data: { status: 'VIEWED', statusChangedAt: new Date() } })
     if (moved.count === 1) await this.tellStudent(tenantId, a, 'VIEWED', company.name, a.vacancy.title)
-    const r = await this.prisma.client.vacancyApplication.findUniqueOrThrow({ where: { id: applicationId }, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true } })
+    const r = await this.prisma.client.vacancyApplication.findUniqueOrThrow({ where: { id: applicationId }, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true, sharedName: true, sharedPhone: true, sharedEmail: true } })
     await this.audit.record({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, applicationId } })
-    return { id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId, r.createdAt)) } }
+    return { id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId, r.createdAt, r)) } }
   }
 
   /** «Пригласить» / «Отказать»: from new or viewed only; the student is told. */
@@ -213,7 +213,8 @@ export class VacanciesService {
     if (!(await this.students.questionnaire(actor)).complete) throw AppError.invalid('questionnaire_incomplete', 'Fill in the questionnaire first')
     let applicationId: string
     try {
-      applicationId = (await this.prisma.client.vacancyApplication.create({ data: { tenantId, vacancyId: id, userId: actor.id, note: input.note ?? null }, select: { id: true } })).id
+      // Applying is the consent: the company keeps the contacts the student had now (security review №15).
+      applicationId = (await this.prisma.client.vacancyApplication.create({ data: { tenantId, vacancyId: id, userId: actor.id, note: input.note ?? null, ...(await this.contacts.snapshotOf(actor.id)) }, select: { id: true } })).id
     } catch (err) {
       if (isUniqueViolation(err)) throw AppError.conflict('application_exists', 'You have already applied')
       throw err
@@ -246,7 +247,7 @@ export class VacanciesService {
   // ───────────── helpers ─────────────
 
   private visible(): Prisma.VacancyWhereInput {
-    return { status: 'OPEN', company: { approvedAt: { not: null } }, OR: [{ deadline: null }, { deadline: { gte: todayUtc() } }] }
+    return { status: 'OPEN', company: { approvedAt: { not: null }, blockedAt: null }, OR: [{ deadline: null }, { deadline: { gte: todayUtc() } }] }
   }
 
   private async withMine(actor: RequestActor, rows: VacancyRow[]): Promise<VacancyDto[]> {

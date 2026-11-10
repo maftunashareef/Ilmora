@@ -9,6 +9,8 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, toIndustry } from '../registry/registry.mappers'
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
+/** The contacts a student agreed to show, as copied into a request or an application (security review №15). */
+export interface SharedContacts { sharedName: string | null; sharedPhone: string | null; sharedEmail: string | null }
 const COMPANY_CARD = {
   id: true, name: true, about: true, website: true, address: true, region: { select: { id: true, name: true } },
   representative: { select: { displayName: true, jobTitle: true, email: true } },
@@ -61,12 +63,12 @@ export class ContactsService {
     const companyId = await this.ownCompany(actor)
     const student = { select: { id: true, displayName: true } } as const
     const [requests, applications] = await Promise.all([
-      this.prisma.client.contactRequest.findMany({ where: { companyId, status: 'ACCEPTED' }, orderBy: { decidedAt: 'desc' }, take: 500, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, user: student } }),
-      this.prisma.client.vacancyApplication.findMany({ where: { vacancy: { companyId } }, orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, status: true, createdAt: true, statusChangedAt: true, vacancy: { select: { id: true, title: true } }, user: student } }),
+      this.prisma.client.contactRequest.findMany({ where: { companyId, status: 'ACCEPTED' }, orderBy: { decidedAt: 'desc' }, take: 500, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, sharedName: true, user: student } }),
+      this.prisma.client.vacancyApplication.findMany({ where: { vacancy: { companyId } }, orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, status: true, createdAt: true, statusChangedAt: true, sharedName: true, vacancy: { select: { id: true, title: true } }, user: student } }),
     ])
     const items: (CompanyContactDto & { at: number })[] = [
-      ...requests.map((r) => ({ id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.user.id, name: r.user.displayName, full: null }, at: (r.decidedAt ?? r.createdAt).getTime() })),
-      ...applications.map((a) => ({ id: a.id, source: 'VACANCY' as const, status: a.status, createdAt: a.createdAt.toISOString(), decidedAt: iso(a.statusChangedAt), vacancy: a.vacancy, student: { id: a.user.id, name: a.user.displayName, full: null }, at: a.createdAt.getTime() })),
+      ...requests.map((r) => ({ id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.user.id, name: r.sharedName ?? r.user.displayName, full: null }, at: (r.decidedAt ?? r.createdAt).getTime() })),
+      ...applications.map((a) => ({ id: a.id, source: 'VACANCY' as const, status: a.status, createdAt: a.createdAt.toISOString(), decidedAt: iso(a.statusChangedAt), vacancy: a.vacancy, student: { id: a.user.id, name: a.sharedName ?? a.user.displayName, full: null }, at: a.createdAt.getTime() })),
     ]
     return items.sort((a, b) => b.at - a.at).map(({ at: _at, ...dto }) => dto)
   }
@@ -74,12 +76,12 @@ export class ContactsService {
   /** One accepted request with the full card. */
   async companyContact(actor: RequestActor, id: string): Promise<CompanyContactDto> {
     const companyId = await this.ownCompany(actor)
-    const r = await this.prisma.client.contactRequest.findFirst({ where: { id, companyId }, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, userId: true, user: { select: { displayName: true } } } })
+    const r = await this.prisma.client.contactRequest.findFirst({ where: { id, companyId }, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, userId: true, sharedName: true, sharedPhone: true, sharedEmail: true, user: { select: { displayName: true } } } })
     if (!r) throw AppError.notFound('Contact request')
     const consent = r.status === 'ACCEPTED' ? await this.activeConsent(r.userId, companyId) : null
-    const full = consent ? await this.fullCard(r.userId, consent.givenAt) : null
+    const full = consent ? await this.fullCard(r.userId, consent.givenAt, r) : null
     if (full) await this.audit.record({ action: 'contact.view', entityType: 'User', entityId: r.userId, after: { companyId, requestId: id } })
-    return { id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.userId, name: r.user.displayName, full } }
+    return { id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.userId, name: r.sharedName ?? r.user.displayName, full } }
   }
 
   /** A certificate file of a student who accepted — a 5-minute link, audited (ТЗ 8 «скачал файл»). */
@@ -112,8 +114,10 @@ export class ContactsService {
     const r = await this.prisma.client.contactRequest.findFirst({ where: { id, userId: actor.id }, select: { id: true, companyId: true, company: { select: { representative: { select: { id: true } } } } } })
     if (!r) throw AppError.notFound('Contact request')
     const now = new Date()
+    // What the student opens is what they have now: the company keeps this copy, not later contacts (security review №15).
+    const snapshot = accept ? await this.snapshotOf(actor.id) : {}
     await this.prisma.client.$transaction(async (tx) => {
-      const moved = await tx.contactRequest.updateMany({ where: { id, status: 'PENDING' }, data: { status: accept ? 'ACCEPTED' : 'DECLINED', decidedAt: now } })
+      const moved = await tx.contactRequest.updateMany({ where: { id, status: 'PENDING' }, data: { status: accept ? 'ACCEPTED' : 'DECLINED', decidedAt: now, ...snapshot } })
       if (moved.count !== 1) throw AppError.conflict('contact_request_decided', 'This request is already decided')
       if (accept) await tx.studentConsent.create({ data: { tenantId, userId: actor.id, kind: 'COMPANY_CONTACTS', companyId: r.companyId, textVersion: 'contact-request', ip: ip ?? null, givenAt: now } })
     })
@@ -137,7 +141,8 @@ export class ContactsService {
     if (!r) throw AppError.notFound('Contact request')
     const now = new Date()
     await this.prisma.client.$transaction(async (tx) => {
-      const moved = await tx.contactRequest.updateMany({ where: { id, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now } })
+      // The copy of the contacts is personal data: it goes with the consent.
+      const moved = await tx.contactRequest.updateMany({ where: { id, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
       if (moved.count !== 1) throw AppError.conflict('contact_not_open', 'Only opened contacts can be taken back')
       await tx.studentConsent.updateMany({ where: { userId: actor.id, kind: 'COMPANY_CONTACTS', companyId: r.companyId, revokedAt: null }, data: { revokedAt: now } })
     })
@@ -154,14 +159,24 @@ export class ContactsService {
    * The full card: name, phone (contact phone, else the SMS sign-in number), e-mail, study, certificates — those the
    * student had by `certificatesUntil` (when they agreed), not the ones added later.
    */
-  async fullCard(userId: string, certificatesUntil?: Date): Promise<StudentFullCardDto> {
-    const card = (await this.fullCards([userId], certificatesUntil ? new Map([[userId, certificatesUntil]]) : undefined)).get(userId)
+  async fullCard(userId: string, certificatesUntil?: Date, shared?: SharedContacts): Promise<StudentFullCardDto> {
+    const card = (await this.fullCards([userId], certificatesUntil ? new Map([[userId, certificatesUntil]]) : undefined, shared ? new Map([[userId, shared]]) : undefined)).get(userId)
     if (!card) throw AppError.notFound('Student')
     return card
   }
 
-  /** Full cards of many students in two queries (a company opening its applications). */
-  async fullCards(userIds: string[], certificatesUntil?: Map<string, Date>): Promise<Map<string, StudentFullCardDto>> {
+  /**
+   * The contacts the student had when agreeing (accepting a request, applying), copied into the request or the
+   * application; the full card shows this copy, not what the student changed later.
+   */
+  async snapshotOf(userId: string): Promise<SharedContacts> {
+    const card = await this.fullCards([userId])
+    const c = card.get(userId)
+    return { sharedName: c?.name ?? null, sharedPhone: c?.phone ?? null, sharedEmail: c?.email ?? null }
+  }
+
+  /** Full cards of many students in two queries (a company opening its applications); `shared` — their copies of the contacts. */
+  async fullCards(userIds: string[], certificatesUntil?: Map<string, Date>, shared?: Map<string, SharedContacts>): Promise<Map<string, StudentFullCardDto>> {
     if (!userIds.length) return new Map()
     const users = await this.prisma.client.user.findMany({
       where: { id: { in: userIds } },
@@ -172,7 +187,12 @@ export class ContactsService {
     })
     const certs = await this.prisma.client.studentCertificate.findMany({ where: { userId: { in: userIds } }, orderBy: { createdAt: 'desc' }, select: { userId: true, id: true, title: true, issuer: true, issuedAt: true, contentType: true, sizeBytes: true, createdAt: true } })
     const until = (userId: string) => certificatesUntil?.get(userId)?.getTime() ?? Infinity
-    return new Map(users.map((u) => [u.id, this.toFullCard(u, certs.filter((c) => c.userId === u.id && c.createdAt.getTime() <= until(u.id)))]))
+    return new Map(users.map((u) => {
+      const card = this.toFullCard(u, certs.filter((c) => c.userId === u.id && c.createdAt.getTime() <= until(u.id)))
+      // A copy made when the student agreed wins (older rows have none — then the current contacts, as before).
+      const s = shared?.get(u.id)
+      return [u.id, s?.sharedName ? { ...card, name: s.sharedName, phone: s.sharedPhone, email: s.sharedEmail } : card]
+    }))
   }
 
   private toFullCard(

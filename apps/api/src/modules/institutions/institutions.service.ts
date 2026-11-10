@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common'
 import {
-  INSTITUTION_REVIEW_FIELDS, type InstitutionClaimResult, type InstitutionPassportDto, type InstitutionRequiredField,
+  INSTITUTION_REVIEW_FIELDS, type InstitutionClaimResult, type InstitutionPassportDto, type InstitutionPendingChanges, type InstitutionRequiredField,
   normalizeUzPhone, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey, registrySearchText,
 } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
-import type { Prisma } from '../../generated/prisma/client'
+import { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
@@ -15,6 +15,7 @@ import type { ClaimInput, DirectionsInput, InstitutionPatch } from './institutio
 const PASSPORT_SELECT = {
   id: true, type: true, ownership: true, name: true, nameRu: true, formerName: true, stir: true, address: true, phone: true, email: true, website: true, directorName: true,
   status: true, rejectReason: true, submittedAt: true, approvedAt: true, regionId: true, districtId: true,
+  pendingChanges: true, blockedAt: true, blockReason: true,
   ...PLACE_SELECT,
   directions: { select: { id: true, department: true, studentsCount: true, direction: { select: DIRECTION_WITH_MAIN } }, orderBy: { createdAt: 'asc' } },
   representative: { select: { displayName: true, jobTitle: true } },
@@ -23,6 +24,7 @@ const PASSPORT_SELECT = {
 type PassportRow = Prisma.InstitutionGetPayload<{ select: typeof PASSPORT_SELECT }>
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
+const sortKeys = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))
 /** While the first review is pending the reviewer looks at exactly this version: nothing changes under it. */
 const isLocked = (r: { status: string; approvedAt: Date | null }) => r.status === 'PENDING' && !r.approvedAt
 
@@ -33,11 +35,13 @@ function toPassport(r: PassportRow): InstitutionPassportDto {
     ...toPlace(r),
     address: r.address, phone: r.phone, email: r.email, website: r.website, directorName: r.directorName,
     status: r.status, rejectReason: r.rejectReason, submittedAt: iso(r.submittedAt), approvedAt: iso(r.approvedAt),
-    workspaceOpen: r.approvedAt !== null,
+    workspaceOpen: r.approvedAt !== null && r.blockedAt === null,
     editable: !isLocked(r),
     directions,
     totals: { students: directions.reduce((n, d) => n + d.studentsCount, 0), directions: directions.length },
     representative: { name: r.representative?.displayName ?? '', jobTitle: r.representative?.jobTitle ?? null },
+    pendingChanges: (r.pendingChanges as InstitutionPendingChanges | null) ?? null,
+    blocked: r.blockedAt ? { at: r.blockedAt.toISOString(), reason: r.blockReason } : null,
   }
 }
 
@@ -89,7 +93,7 @@ export class InstitutionsService {
       try {
         await this.prisma.client.$transaction(async (tx) => {
           // Only while still UNCLAIMED: of two people claiming one STIR at once, exactly one wins.
-          const taken = await tx.institution.updateMany({ where: { id: existing.id, status: 'UNCLAIMED' }, data: { status: 'DRAFT' } })
+          const taken = await tx.institution.updateMany({ where: { id: existing.id, status: 'UNCLAIMED' }, data: { status: 'DRAFT', claimedAt: new Date() } })
           if (taken.count !== 1) throw alreadyClaimed()
           await tx.user.update({ where: { id: actor.id }, data: { institutionId: existing.id } })
         })
@@ -106,7 +110,7 @@ export class InstitutionsService {
     try {
       createdId = await this.prisma.client.$transaction(async (tx) => {
         const row = await tx.institution.create({
-          data: { tenantId, stir: input.stir, type: input.type!, name: input.name!, searchKey: registrySearchKey(input.name!), searchText: registrySearchText(input.name!), source: 'SELF', status: 'DRAFT', createdById: actor.id },
+          data: { tenantId, stir: input.stir, type: input.type!, name: input.name!, searchKey: registrySearchKey(input.name!), searchText: registrySearchText(input.name!), source: 'SELF', status: 'DRAFT', claimedAt: new Date(), createdById: actor.id },
           select: { id: true },
         })
         await tx.user.update({ where: { id: actor.id }, data: { institutionId: row.id } })
@@ -125,10 +129,11 @@ export class InstitutionsService {
    * claimed, created or reviewed.
    */
   private async isAbandoned(id: string): Promise<boolean> {
-    const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true } })
+    const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true, claimedAt: true } })
     if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
-    const claimed = await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'Institution', entityId: id, action: { in: ['institution.claim', 'institution.create'] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
-    const last = Math.max(row.createdAt.getTime(), claimed?.createdAt.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
+    // `claimedAt` (Timur's #46); a record claimed before it has the time of that release, or the claim in the journal.
+    const claimed = row.claimedAt ?? (await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'Institution', entityId: id, action: { in: ['institution.claim', 'institution.create'] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }))?.createdAt
+    const last = Math.max(row.createdAt.getTime(), claimed?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
     return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
   }
 
@@ -142,7 +147,7 @@ export class InstitutionsService {
     if (!row.representative) throw AppError.conflict('not_claimed', 'Nobody represents this record')
     await this.prisma.client.$transaction(async (tx) => {
       await tx.user.update({ where: { id: row.representative!.id }, data: { institutionId: null } })
-      await tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null } })
+      await tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null, claimedAt: null, pendingChanges: Prisma.DbNull } })
     })
     await this.audit.record({ action: 'institution.release', entityType: 'Institution', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, reason })
     await this.notifications.safely('registry.released', () =>
@@ -156,8 +161,8 @@ export class InstitutionsService {
 
   /**
    * Saves the profile in parts (ТЗ 4.2). Locked while the first review is pending. After approval, a change of the
-   * name, STIR, type, ownership or region sends the profile back to review (status PENDING, `approvedAt` stays,
-   * the workspace keeps working); the other fields change at once. Every change is written to the audit log.
+   * name, STIR, type, ownership or region waits in `pendingChanges` for the Super Admin (the approved values stay
+   * live, the workspace keeps working); the other fields change at once. Every change is written to the audit log.
    */
   async update(tenantId: string, actor: RequestActor, input: InstitutionPatch): Promise<InstitutionPassportDto> {
     const id = await this.ownId(actor)
@@ -188,10 +193,33 @@ export class InstitutionsService {
     }
     if (input.regionId !== undefined || input.districtId !== undefined) Object.assign(data, await this.place(current, input))
 
-    const changed = Object.keys(data).filter((k) => k !== 'searchKey' && k !== 'searchText' && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
-    const backToReview = current.approvedAt !== null && current.status !== 'PENDING' && INSTITUTION_REVIEW_FIELDS.some((f) => changed.includes(f))
+    // After approval the reviewed fields wait for the Super Admin in `pendingChanges`; the live record keeps the approved
+    // values, so the ministry's figures, search and the companies see only what was approved (security review №13).
     const now = new Date()
-    if (backToReview) Object.assign(data, { status: 'PENDING', submittedAt: now, rejectReason: null })
+    let backToReview = false
+    let pending: Record<string, unknown> | null = null
+    if (current.approvedAt !== null) {
+      const was = (current.pendingChanges ?? {}) as Record<string, unknown>
+      const next: Record<string, unknown> = { ...was }
+      const d = data as Record<string, unknown>
+      const fields: string[] = [...INSTITUTION_REVIEW_FIELDS, ...('regionId' in d && d.regionId !== current.regionId ? ['districtId'] : [])]
+      for (const f of fields) {
+        if (!(f in d)) continue
+        if (d[f] === (current as Record<string, unknown>)[f]) delete next[f]
+        else next[f] = d[f]
+        delete d[f]
+      }
+      if (!('name' in d)) { delete d.searchKey; delete d.searchText }
+      if (typeof next.stir === 'string' && next.stir !== was.stir && (await this.prisma.client.institution.findFirst({ where: { stir: next.stir, id: { not: id } }, select: { id: true } }))) {
+        throw AppError.conflict('stir_taken', 'Another institution is registered with this STIR')
+      }
+      backToReview = JSON.stringify(sortKeys(next)) !== JSON.stringify(sortKeys(was))
+      if (backToReview) {
+        pending = Object.keys(next).length ? next : null
+        Object.assign(data, { pendingChanges: pending ?? Prisma.DbNull, ...(pending ? { submittedAt: now, rejectReason: null } : {}) })
+      }
+    }
+    const changed = Object.keys(data).filter((k) => !['searchKey', 'searchText', 'pendingChanges', 'submittedAt', 'rejectReason'].includes(k) && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
 
     const rep = input.representative ?? {}
     const repData = { ...(rep.name !== undefined ? { displayName: rep.name } : {}), ...(rep.jobTitle !== undefined ? { jobTitle: rep.jobTitle } : {}) }
@@ -205,15 +233,15 @@ export class InstitutionsService {
       throw err
     }
 
-    if (changed.length || Object.keys(repData).length) {
+    if (changed.length || backToReview || Object.keys(repData).length) {
       const pick = (o: object, keys: string[]) => Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k]]))
       await this.audit.record({
         action: backToReview ? 'institution.update.review' : 'institution.update', entityType: 'Institution', entityId: id,
         before: { ...pick(current, changed), ...(Object.keys(repData).length ? { representative: current.representative } : {}) },
-        after: { ...pick(data, changed), ...(Object.keys(repData).length ? { representative: repData } : {}) },
+        after: { ...pick(data, changed), ...(backToReview ? { pendingChanges: pending } : {}), ...(Object.keys(repData).length ? { representative: repData } : {}) },
       })
     }
-    if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'institution.changed', `inst-review:${id}:${now.getTime()}`)
+    if (backToReview && pending) await this.notifyReviewers(tenantId, id, current.name, 'institution.changed', `inst-review:${id}:${now.getTime()}`)
     return this.passportOf(id)
   }
 

@@ -26,7 +26,7 @@ const COLS = {
 }
 
 /** Where an institution is counted officially: approved once, not merged, not a student-added record (ТЗ 7). */
-const OFFICIAL: Prisma.InstitutionWhereInput = { approvedAt: { not: null }, mergedIntoId: null, source: { not: 'STUDENT' } }
+const OFFICIAL: Prisma.InstitutionWhereInput = { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null, source: { not: 'STUDENT' } }
 
 type Ctx = {
   f: MinistryStatsFilters & { regionDbId?: string }
@@ -109,7 +109,7 @@ export class MinistryStatsService {
     const count = (where: Prisma.InstitutionWhereInput) => this.prisma.client.institution.count({ where: { ...base, mergedIntoId: null, ...where } })
     const [inList, registered, pending, approved, rejected, approvedSelf] = await Promise.all([
       count({ source: 'IMPORT' }), count({ source: 'IMPORT', status: { not: 'UNCLAIMED' } }), count({ source: { not: 'STUDENT' }, status: 'PENDING' }),
-      count({ source: { not: 'STUDENT' }, approvedAt: { not: null } }), count({ source: { not: 'STUDENT' }, status: 'REJECTED' }), count({ source: 'SELF', approvedAt: { not: null } }),
+      count({ source: { not: 'STUDENT' }, approvedAt: { not: null }, blockedAt: null }), count({ source: { not: 'STUDENT' }, status: 'REJECTED' }), count({ source: 'SELF', approvedAt: { not: null }, blockedAt: null }),
     ])
     return {
       key: 'coverage', title: T('Qamrov', 'Охват реестра', 'Registry coverage'),
@@ -356,11 +356,11 @@ export class MinistryStatsService {
    * automatic scope covers only top-level queries of tenant models.
    */
   private companyWhere(ctx: Ctx): Prisma.CompanyWhereInput {
-    return { tenantId: TenantContext.requireTenantId(), approvedAt: { not: null }, ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}) }
+    return { tenantId: TenantContext.requireTenantId(), approvedAt: { not: null }, blockedAt: null, ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}) }
   }
 
   private requestWhere(ctx: Ctx): Prisma.TrainingRequestWhereInput {
-    return { company: { approvedAt: { not: null } }, ...(ctx.f.regionDbId ? { OR: [{ regionId: ctx.f.regionDbId }, { regionId: null, company: { regionId: ctx.f.regionDbId } }] } : {}), ...(ctx.f.year ? { byYear: ctx.f.year } : {}) }
+    return { company: { approvedAt: { not: null }, blockedAt: null }, ...(ctx.f.regionDbId ? { OR: [{ regionId: ctx.f.regionDbId }, { regionId: null, company: { regionId: ctx.f.regionDbId } }] } : {}), ...(ctx.f.year ? { byYear: ctx.f.year } : {}) }
   }
 
   private studentWhere(ctx: Ctx): Prisma.StudentProfileWhereInput {

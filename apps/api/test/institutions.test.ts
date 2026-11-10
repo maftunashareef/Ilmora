@@ -13,6 +13,9 @@ import { InstitutionsService } from '../src/modules/institutions/institutions.se
 import type { NotifyInput, NotificationsService } from '../src/modules/notifications/notifications.service'
 import { DB_AVAILABLE, TestContext } from './helpers'
 import { mfaStub } from './stubs'
+import type { ExecutionContext } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+import { APPROVED_KEY, ApprovedGuard } from '../src/common/registry-access'
 
 describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions, submit (ТЗ 4.2)', () => {
   const ctx = new TestContext()
@@ -69,7 +72,8 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       await expect(service.claim(tenantId, real, { stir: '011111111' })).rejects.toMatchObject({ code: 'already_claimed' })
       const old = new Date(Date.now() - 15 * 86_400_000)
       await db.auditEvent.updateMany({ where: { entityId: imported.id, action: 'institution.claim' }, data: { createdAt: old } })
-      await db.institution.update({ where: { id: imported.id }, data: { createdAt: old } })
+      expect((await db.institution.findUniqueOrThrow({ where: { id: imported.id } })).claimedAt).not.toBeNull()
+      await db.institution.update({ where: { id: imported.id }, data: { createdAt: old, claimedAt: old } })
       sent.length = 0
       const r = await service.claim(tenantId, real, { stir: '011111111' })
       expect(r.institution).toMatchObject({ id: imported.id, status: 'DRAFT', representative: { name: 'Aziz Karimov' } })
@@ -85,6 +89,8 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
     expect(officialName(t.id, 'IMPORT')).toBe(t.name)
     expect(officialName(t.id, 'SELF')).toBeNull()
     expect(officialName('not-in-the-list', 'IMPORT')).toBeNull()
+    // The column from the import (Timur's #46) comes first.
+    expect(officialName(t.id, 'IMPORT', 'Saqlangan nom')).toBe('Saqlangan nom')
   })
 
   it('registers an institution representative with the role, the name and the position — never MINISTRY', async () => {
@@ -217,7 +223,7 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
     })
   })
 
-  it('after approval: key fields go back to review with the workspace open, others change at once', async () => {
+  it('after approval: key fields wait for review in pendingChanges — the record keeps the approved ones; others change at once (security review №13)', async () => {
     const { tenantId, inT, imported, dasturlash, representative } = await setup('inst-approved')
     await inT(async () => {
       const rep = await representative()
@@ -229,14 +235,21 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       expect(sent).toEqual([])
       await expect(service.submit(tenantId, rep)).rejects.toMatchObject({ code: 'already_approved' })
 
-      const renamed = await service.update(tenantId, rep, { name: 'Toşkent IT texnikumi' })
-      expect(renamed).toMatchObject({ status: 'PENDING', workspaceOpen: true, editable: true, name: 'Toşkent IT texnikumi' })
+      const renamed = await service.update(tenantId, rep, { name: 'Toşkent IT texnikumi', ownership: 'PRIVATE' })
+      // The live record — what the ministry, search and the companies see — keeps the approved values.
+      expect(renamed).toMatchObject({ status: 'APPROVED', workspaceOpen: true, editable: true, name: 'Toşkent axborot texnikumi', ownership: 'STATE', pendingChanges: { name: 'Toşkent IT texnikumi', ownership: 'PRIVATE' } })
       expect(sent.map((s) => s.type)).toEqual(['institution.changed'])
-      expect(await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id: imported.id } })).toMatchObject({ searchKey: 'toshkent it texnikumi' })
+      expect(await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id: imported.id } })).toMatchObject({ searchKey: registrySearchKey('Toşkent axborot texnikumi') })
+      // Back to the approved value: that part is no longer waiting.
+      expect((await service.update(tenantId, rep, { ownership: 'STATE' })).pendingChanges).toEqual({ name: 'Toşkent IT texnikumi' })
       // Directions and counts change at once, also while the key fields are re-reviewed.
       expect((await service.setDirections(tenantId, rep, { directions: [{ directionId: dasturlash.id, studentsCount: 5 }] })).totals.students).toBe(5)
-      const audit = await ctx.prisma.client.auditEvent.findFirstOrThrow({ where: { action: 'institution.update.review' } })
-      expect(audit).toMatchObject({ before: { name: 'Toşkent axborot texnikumi' }, after: { name: 'Toşkent IT texnikumi' } })
+      const audit = await ctx.prisma.client.auditEvent.findFirstOrThrow({ where: { action: 'institution.update.review', entityId: imported.id }, orderBy: { createdAt: 'asc' } })
+      expect(audit).toMatchObject({ after: { pendingChanges: { name: 'Toşkent IT texnikumi', ownership: 'PRIVATE' } } })
+      // A STIR held by another record is refused at once.
+      await ctx.prisma.client.institution.create({ data: { tenantId, type: 'TECHNIKUM', name: 'Boşqa', searchKey: 'boshqa', stir: '055555555', source: 'SELF' } })
+      await ctx.prisma.client.institution.update({ where: { id: imported.id }, data: { source: 'SELF' } })
+      await expect(service.update(tenantId, rep, { stir: '055555555' })).rejects.toMatchObject({ code: 'stir_taken' })
     })
   })
 
@@ -343,14 +356,41 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       })
     })
 
-    it('a rejected re-review keeps the workspace of an institution approved once', async () => {
+    it('a change after approval: rejected — the approved values stay; approved — they move into the record; one decision of two', async () => {
       const { tenantId, inT, id, rep, admin } = await submitted('rev-again')
       await inT(async () => {
         await review.approve(tenantId, admin, id)
         await service.update(tenantId, rep, { name: 'Boşqa nom' })
-        expect((await review.queue())[0]).toMatchObject({ id, reReview: true })
+        expect((await review.queue())[0]).toMatchObject({ id, reReview: true, name: 'Toşkent axborot texnikumi', pendingChanges: { name: 'Boşqa nom' } })
         const p = await review.reject(tenantId, admin, id, 'Name differs from the documents')
-        expect(p).toMatchObject({ status: 'REJECTED', workspaceOpen: true })
+        expect(p).toMatchObject({ status: 'APPROVED', workspaceOpen: true, name: 'Toşkent axborot texnikumi', pendingChanges: null, rejectReason: 'Name differs from the documents' })
+        expect(await review.queue()).toEqual([])
+
+        await service.update(tenantId, rep, { name: 'Toşkent IT texnikumi' })
+        const results = await Promise.allSettled([review.approve(tenantId, admin, id), review.approve(tenantId, admin, id)])
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+        expect(await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id } })).toMatchObject({ name: 'Toşkent IT texnikumi', searchKey: registrySearchKey('Toşkent IT texnikumi'), status: 'APPROVED', pendingChanges: null, rejectReason: null })
+        expect((await review.detail(id)).history.map((h) => h.action)).toEqual(expect.arrayContaining(['institution.change.reject', 'institution.change.approve']))
+      })
+    })
+
+    it('the Super Admin blocks and unblocks with a reason: the workspace closes, the status stays, the institution is told', async () => {
+      const { tenantId, inT, id, rep, admin } = await submitted('rev-block')
+      await inT(async () => {
+        await review.approve(tenantId, admin, id)
+        sent.length = 0
+        const blocked = await review.setBlocked(tenantId, admin, id, true, 'Documents are forged')
+        expect(blocked).toMatchObject({ status: 'APPROVED', workspaceOpen: false, blocked: { reason: 'Documents are forged' } })
+        expect(sent).toEqual([expect.objectContaining({ type: 'registry.blocked', userIds: [rep.id] })])
+        await expect(review.setBlocked(tenantId, admin, id, true, 'Again')).rejects.toMatchObject({ code: 'already_blocked' })
+        const guard = new ApprovedGuard(new Reflector(), ctx.prisma)
+        const handler = () => undefined
+        Reflect.defineMetadata(APPROVED_KEY, 'institution', handler)
+        const ctxFor = { getHandler: () => handler, getClass: () => class {}, switchToHttp: () => ({ getRequest: () => ({ actor: rep }) }) } as unknown as ExecutionContext
+        await expect(guard.canActivate(ctxFor)).rejects.toMatchObject({ code: 'not_approved' })
+        expect(await review.setBlocked(tenantId, admin, id, false)).toMatchObject({ workspaceOpen: true, blocked: null })
+        await expect(guard.canActivate(ctxFor)).resolves.toBe(true)
+        expect(await ctx.prisma.client.auditEvent.count({ where: { entityId: id, action: { in: ['institution.block', 'institution.unblock'] } } })).toBe(2)
       })
     })
 
