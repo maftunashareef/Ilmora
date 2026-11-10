@@ -1292,6 +1292,7 @@ export const dict = {
   'apiError.forbidden': d('Bu amalni bajarişga ruxsatingiz yöq.', 'У вас нет прав на это действие.', 'You are not allowed to do this.'),
   'apiError.session': d('Kiriş muddati tugagan. Iltimos, qayta kiring.', 'Сессия истекла. Пожалуйста, войдите снова.', 'Your session has ended. Please sign in again.'),
   'apiError.unavailable': d('Xizmat vaqtinça işlamayapti. Birozdan söng qayta urinib köring.', 'Сервис временно недоступен. Попробуйте чуть позже.', 'The service is temporarily unavailable. Please try again shortly.'),
+  'apiError.refreshLimited': d('Juda köp sörov — bir daqiqadan söng qayta urinib köring. Siz tizimda qolasiz.', 'Слишком много запросов — повторите через минуту. Выходить из аккаунта не нужно.', 'Too many requests — try again in a minute. You stay signed in.'),
   'apiError.validation': d('Ma’lumotlar notöğri töldirilgan. Maydonlarni tekşirib, qayta urinib köring.', 'Данные заполнены неверно. Проверьте поля и попробуйте ещё раз.', 'Some fields are filled in incorrectly. Check them and try again.'),
   'apiError.duplicateRecord': d('Bunday qiymatga ega yozuv allaqaçon mavjud.', 'Запись с таким значением уже существует.', 'A record with the same value already exists.'),
   'apiError.versionConflict': d('Sozlamalarni boşqa administrator özgartirgan. Sahifani yangilab, qayta urinib köring.', 'Настройки изменил другой администратор. Обновите страницу и повторите.', 'Someone else changed the settings. Reload the page and try again.'),

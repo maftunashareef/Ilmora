@@ -15,6 +15,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   invalid_refresh: 'apiError.session',
   unavailable: 'apiError.unavailable',
   rate_limited: 'auth.err.tooMany',
+  // №19: too many refreshes of the sign-in — the session stays, try again shortly (made by the web client, not the API).
+  session_refresh_limited: 'apiError.refreshLimited',
   validation_failed: 'apiError.validation',
   version_conflict: 'apiError.versionConflict',
   // sign-in and registration

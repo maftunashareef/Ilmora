@@ -27,7 +27,8 @@ export interface CartBundle { presetId: string; directionId?: string; courseIds:
 export type PresetCartResult =
   | { ok: true; added: number; /** The Flex/Winx package the cart left for a custom selection, if it did. */ switchedFrom: string | null }
   | { ok: false; reason: 'unavailable' | 'limit' | 'full' | 'conflict'; courseId?: string; conflictWith?: string }
-export type PaymentProviderId = 'PAYME' | 'CLICK'
+/** Payment goes through Payme only (decision of 10.11, security review №5, №6: Click removed from the API). */
+export type PaymentProviderId = 'PAYME'
 
 export interface AuthUser {
   id: string
@@ -559,13 +560,21 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         set({ auth: { status: 'loading', user: null } })
         // Only call /auth/refresh when the API left its session flag cookie; anonymous visitors cause no 401 noise.
         const hasSession = typeof document !== 'undefined' && /(?:^|;\s*)ilmora_session=1(?:;|$)/.test(document.cookie)
-        const ok = session.token ? true : hasSession ? await refreshSession() : false
-        if (!ok) { applyAuth(null); return }
+        // №19: too many requests right now (e.g. a class on one Wi-Fi) — the cookie is still valid. Keep waiting on
+        // «checking», say «повторите позже» and try again by itself after the pause the API asked for; never sign out.
+        const retryLater = () => {
+          get().notify(apiErrorText(new ApiError(429, REFRESH_LIMITED, ''), get().lang), 'warn')
+          setTimeout(() => { set({ auth: { status: 'idle', user: null } }); void get().bootstrap() }, Math.min(60, Math.max(5, refreshRetryAfterSeconds())) * 1000)
+        }
+        const outcome = session.token ? 'ok' : hasSession ? await refreshSessionOutcome() : 'denied'
+        if (outcome === 'limited') { retryLater(); return }
+        if (outcome !== 'ok') { applyAuth(null); return }
         try {
           const user = await api<AuthUser>('/auth/me')
           applyAuth(user)
           if (user.roles.includes('STUDENT')) await get().loadStudentOverview()
-        } catch {
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 429) { retryLater(); return }
           session.set(null)
           applyAuth(null)
         }
