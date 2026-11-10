@@ -125,6 +125,11 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       expect(p).toMatchObject({ stir: '301234567', name: 'Mebel Plus', status: 'DRAFT', workspaceOpen: false, editable: true, certificateUploaded: false, representative: { name: 'Dilnoza Rahimova', jobTitle: 'HR menejer' } })
       await expect(service.create(s.tenantId, rep, { stir: '301234568', name: 'Ikkinçi' })).rejects.toMatchObject({ code: 'already_has_company' })
       await expect(service.create(s.tenantId, await s.representative(), { stir: '301234567', name: 'Nusxa' })).rejects.toMatchObject({ code: 'company_registered' })
+      // ТЗ 8: five representatives claim one STIR at once — one company, the others a clear 409, never a 500.
+      const reps = await Promise.all(Array.from({ length: 5 }, () => s.representative()))
+      const results = await Promise.allSettled(reps.map((r) => service.create(s.tenantId, r, { stir: '309999999', name: 'Bir vaqtda' })))
+      expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1)
+      expect(results.filter((x) => x.status === 'rejected').map((x) => (x as PromiseRejectedResult).reason.code)).toEqual(Array(4).fill('company_registered'))
       await expect(service.create(s.tenantId, s.admin, { stir: '301234569', name: 'Admin' })).rejects.toMatchObject({ code: 'forbidden' })
       await expect(accounts.register(s.tenantId, { role: 'COMPANY', login: 'co-nojob', password: 'company-password-1', displayName: 'Ali' }, {})).rejects.toMatchObject({ code: 'invalid_job_title' })
     })

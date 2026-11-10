@@ -14,6 +14,7 @@ import type { NotifyInput, NotificationsService } from '../src/modules/notificat
 import { RegistryService } from '../src/modules/registry/registry.service'
 import { StudentsService } from '../src/modules/students/students.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
+import { deepKeys, PRIVATE_KEYS } from './support/keys'
 
 const Y = new Date().getUTCFullYear()
 const INPUT = { motivation: 'Oilada imkon yöq, IT sohasida işlamoqçiman.', yearsToWork: 3, workRegion: 'OWN' as const, consent: true as const }
@@ -128,6 +129,7 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
         institution: { name: 'Toşkent IT texnikumi', type: 'TECHNIKUM' }, direction: { id: s.dasturlash.id, industry: { id: s.it.id } },
         mode: 'STUDYING', course: 2, studyForm: 'CONTRACT', contractAmount: 5_000_000, yearsToWork: 3, certificates: ['IELTS 7.0'], studyConfirmed: false, contactRequest: null,
       })
+      expect([...deepKeys(await service.feed(s.softCo.actor, {}))].filter((k) => PRIVATE_KEYS.includes(k))).toEqual([])
       const text = JSON.stringify(card)
       for (const secret of ['Aziz', 'Karimov', 'aziz@mail.uz', '+998935554433', `${Y - 20}-05-01`, me.id, 'student-certs', 'Python']) expect(text).not.toContain(secret)
       expect(Object.keys(card)).not.toEqual(expect.arrayContaining(['userId', 'name', 'birthDate', 'phone', 'email']))
