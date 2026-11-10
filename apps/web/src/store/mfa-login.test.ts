@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sampleData, type MfaChallengeDto } from '@ilmora/shared'
-import { api } from '../lib/api'
+import { api, ApiError, session } from '../lib/api'
 import type { AuthUser, InitialData } from './useStore'
 import { createIlmoraStore, isMfaChallenge } from './useStore'
 
@@ -119,5 +119,26 @@ describe('«Забыли пароль?»: SMS code, then the new password (PR #5
     expect(apiMock).toHaveBeenCalledWith('/auth/password/reset', expect.objectContaining({ method: 'POST', body: { phone: '+998901234567', code: '123456', newPassword: 'Yangi-parol-2026' }, credentials: true, auth: false }))
     expect(user.id).toBe('u-student')
     expect(store.getState().auth.status).toBe('authenticated')
+  })
+})
+
+describe('№19: a 429 while the page opens does not sign out', () => {
+  it('keeps checking, says «try again shortly» and checks again later', async () => {
+    vi.useFakeTimers()
+    try {
+      session.set('access-token')
+      apiMock.mockRejectedValueOnce(new ApiError(429, 'session_refresh_limited', 'Too many sign-in refreshes'))
+      const store = createIlmoraStore(initialMock)
+      await store.getState().bootstrap()
+      expect(store.getState().auth.status).toBe('loading')
+      expect(session.token).toBe('access-token')
+      expect(store.getState().toasts.at(-1)?.tone).toBe('warn')
+      apiMock.mockResolvedValueOnce(ministry)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(store.getState().auth.status).toBe('authenticated')
+    } finally {
+      vi.useRealTimers()
+      session.set(null)
+    }
   })
 })
