@@ -3,7 +3,10 @@
 Модель для ТЗ «ILMORA — реестр учреждений, компании, студенты» (9 ноября 2026). Схема —
 `apps/api/prisma/schema.prisma`, раздел «Registry», миграции `20261113000000_registry_institutions_companies_students`
 `20261114000000_institution_names_region_slug` (названия техникумов на русском и прежние, район текстом, slug региона)
-и `20261115000000_student_contact_phone` (контактный телефон студента).
+`20261115000000_student_contact_phone` (контактный телефон студента) и
+`20261116000000_registry_pending_changes_block_contact_snapshot` (доработки по проверке безопасности 10.11: правка
+после одобрения на проверке, блокировка, контакты на момент согласия, занятие записи, официальное название,
+временный пароль).
 Старая часть ILMORA (центры, курсы, подписки, оплата) не менялась.
 
 > **Схему и миграции меняет только чат БД (дата-инженер).** Нужно поле или таблица — через него. Остальные чаты
@@ -72,6 +75,15 @@
 (`IMPORT` / `SELF` / `STUDENT`), `submittedAt`, `approvedAt`, `reviewedAt`, `reviewedById`, `rejectReason`,
 `centerId` (связь с учебным центром ILMORA), `mergedIntoId`. Представитель — `User` с `institutionId` и ролью
 `INSTITUTION_ADMIN`; должность — `User.jobTitle`.
+- `officialName` — название из официального списка министерства. Ставит импорт (`prisma/import-technikums.ts`), у
+  занятых записей тоже; представитель его не меняет. Проверяющий видит его рядом с `name`.
+- `claimedAt` — когда представитель занял запись. Черновик, не отправленный на проверку за N дней от этой даты,
+  освобождается. У записей, занятых до 11.11, — дата релиза миграции.
+- `pendingChanges` (Json) — правка ключевых полей **после одобрения**: `{ name?, stir?, type?, ownership?, regionId?,
+  districtId? }`. Основные поля до решения Super Admin не меняются; одобрение переносит правку в них, отказ —
+  очищает. СТИР внутри `pendingChanges` уникальный индекс не держит: при одобрении API проверяет, что он свободен (иначе 409).
+- `blockedAt`, `blockReason`, `blockedById` — блокировка Super Admin: кабинет закрыт, в цифрах и поиске записи нет.
+  Это не статус проверки: `status` остаётся каким был.
 - `InstitutionDirection` — направление учреждения: `directionId`, `department` (отделение), `studentsCount`.
   «Всего студентов» = сумма `studentsCount`.
 
@@ -83,12 +95,16 @@ UNCLAIMED (импорт или добавлено студентом) → DRAFT 
 APPROVED → правка названия / СТИР / типа / собственности / региона → PENDING (approvedAt остаётся, кабинет работает)
 ```
 
-Кабинет открыт, если `approvedAt` не пустой. В официальные цифры министерства идут только `APPROVED`.
+Кабинет открыт, если `approvedAt` не пустой и `blockedAt` пустой. В официальные цифры министерства идут только
+`APPROVED` без блокировки (`blockedAt IS NULL`), с основными полями — не с `pendingChanges`. Правка после одобрения
+(схема выше) с 11.11 лежит в `pendingChanges`, а не меняет запись сразу.
 
 **Компания** — `Company`: `stir`, `name`, `searchKey`, `regionId`, `districtId`, `address`, `website`, `about`,
 `certificateFileKey` (свидетельство в закрытом бакете `ilmora-docs`), `status` (`DRAFT` → `PENDING` → `APPROVED` /
 `REJECTED`), `submittedAt`, `approvedAt`, `reviewedAt`, `reviewedById`, `rejectReason`. Отрасли — `CompanyIndustry`,
 направления — `CompanyDirection`. Представитель — `User.companyId`, роль `COMPANY_ADMIN`.
+- `pendingChanges` (Json) — правка после одобрения: `{ name?, stir?, industryIds? }`, смена отраслей тоже идёт на
+  проверку. `blockedAt`, `blockReason`, `blockedById` — блокировка, как у учреждения.
 
 **Студент**
 - ФИО и email — в `User` (`displayName`, `email`). `User.phoneE164` — **номер для входа по SMS**, уникальный; анкета
@@ -121,11 +137,15 @@ APPROVED → правка названия / СТИР / типа / собств�
   `status` (`ACTIVE` → `INTERESTED` → `SIGNED` / `WITHDRAWN`), `openKey`, `signedWithCompanyId`, `signedAt`,
   `withdrawnAt`.
 - `ContactRequest` — запрос контакта: `companyId`, `userId`, `source` (`GRADUATE` / `CONTRACT_HELP`),
-  `contractHelpId` или `announcementId`, `status`. При принятии — строка `COMPANY_CONTACTS` в `StudentConsent`.
+  `contractHelpId` или `announcementId`, `status`. При принятии — строка `COMPANY_CONTACTS` в `StudentConsent` и
+  копия того, что студент открыл: `sharedName`, `sharedPhone`, `sharedEmail`. Компания видит эту копию, а не
+  текущие контакты (сменил номер — новый компании не уходит). **Это персональные данные:** отозвал согласие или
+  запрос — копию стереть. Пустые поля у старых записей — API показывает текущие контакты, как раньше.
 - `Vacancy` — практика или стажировка: `kind`, `title`, `regionId`, `districtId`, `address`, `format`
   (`ONSITE` / `REMOTE` / `HYBRID`), `paid`, `stipendMinor`, `duration`, `seats`, `requirements`, `deadline`,
   `status` (`OPEN` / `CLOSED`); направления — `VacancyDirection`. `VacancyApplication` — отклик: `note`, `status`
-  (`NEW` → `VIEWED` → `INVITED` / `REJECTED`).
+  (`NEW` → `VIEWED` → `INVITED` / `REJECTED`), копия контактов на момент отклика `sharedName`, `sharedPhone`,
+  `sharedEmail` (те же правила, что у `ContactRequest`).
 - Ответы на отклики и запросы (`MatchStatus`): `PENDING`, `ACCEPTED`, `DECLINED`, `WITHDRAWN`.
 
 **Роли и вход**
@@ -133,6 +153,8 @@ APPROVED → правка названия / СТИР / типа / собств�
 - Второй фактор (TOTP) для министерства и модераторов: `User.totpSecretEnc` (секрет, зашифрованный API — в открытом
   виде не хранить), `User.totpEnabledAt`; резервные коды — `TotpRecoveryCode` (`codeHash`, `usedAt`), 10 штук,
   каждый одноразовый.
+- `User.passwordIssuedAt` — пароль выдал Super Admin (аккаунт министерства, сброс), владелец его ещё не сменил:
+  при входе — смена пароля. Сменил — поле пустое. У старых аккаунтов пусто (на переходное время API смотрит журнал).
 
 ## Справочники и тестовые данные
 

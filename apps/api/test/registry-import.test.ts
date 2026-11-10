@@ -38,7 +38,7 @@ describe.skipIf(!DB_AVAILABLE)('technikum import', () => {
 
     await importTechnikums(prisma, tenantId, { list, apply: true })
     const one = await prisma.institution.findUniqueOrThrow({ where: { id: id(1) }, include: { region: true } })
-    expect(one).toMatchObject({ tenantId, stir: '100000001', type: 'TECHNIKUM', source: 'IMPORT', status: 'UNCLAIMED', districtName: 'Asaka tumani', searchKey: registrySearchKey('Test 1 texnikumi') })
+    expect(one).toMatchObject({ tenantId, stir: '100000001', type: 'TECHNIKUM', source: 'IMPORT', status: 'UNCLAIMED', districtName: 'Asaka tumani', searchKey: registrySearchKey('Test 1 texnikumi'), officialName: 'Test 1 texnikumi' })
     expect(one.region).toMatchObject({ code: '1703', slug: 'andijan' })
     // Found by the Russian and the former name too.
     expect(one.searchText).toContain(registrySearchKey('Тестовый техникум 1'))
@@ -53,7 +53,7 @@ describe.skipIf(!DB_AVAILABLE)('technikum import', () => {
     await importTechnikums(prisma, tenantId, { list: [t(3, { inn: '100000003', district: 'Xonobod' })], apply: true })
     const r = await importTechnikums(prisma, tenantId, { list: [t(3, { name: 'Test 3 texnikumi (yangi)' })], apply: true })
     expect(r.updated).toEqual([id(3)])
-    expect(await prisma.institution.findUniqueOrThrow({ where: { id: id(3) } })).toMatchObject({ name: 'Test 3 texnikumi (yangi)', stir: '100000003', districtName: 'Xonobod' })
+    expect(await prisma.institution.findUniqueOrThrow({ where: { id: id(3) } })).toMatchObject({ name: 'Test 3 texnikumi (yangi)', officialName: 'Test 3 texnikumi (yangi)', stir: '100000003', districtName: 'Xonobod' })
   })
 
   it('leaves what a representative entered and fills only the empty informational fields', async () => {
@@ -64,7 +64,8 @@ describe.skipIf(!DB_AVAILABLE)('technikum import', () => {
     const r = await importTechnikums(prisma, tenantId, { list: [t(4, { name: 'List name', formerName: 'Old name' })], apply: true })
     expect(r.enriched).toEqual([id(4)])
     const row = await prisma.institution.findUniqueOrThrow({ where: { id: id(4) } })
-    expect(row).toMatchObject({ name: 'Our own name', nameRu: 'Тестовый техникум 4', formerName: 'Old name', status: 'DRAFT' })
+    // The representative's name stays; the list's name is kept beside it for the reviewer.
+    expect(row).toMatchObject({ name: 'Our own name', officialName: 'List name', nameRu: 'Тестовый техникум 4', formerName: 'Old name', status: 'DRAFT' })
     expect(row.searchText).toContain('our own name')
   })
 
