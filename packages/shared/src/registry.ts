@@ -390,3 +390,81 @@ export interface CompanyReviewDto {
   representative: { name: string; jobTitle: string | null; login: string | null; email: string | null } | null
   history: { action: string; reason: string | null; at: string; by: string | null }[]
 }
+
+// ───────────── Training requests and offers (ТЗ 5.2) ─────────────
+
+export type TrainingRequestStatus = 'OPEN' | 'CLOSED'
+export type MatchStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN'
+
+/** How far ahead a company can ask for graduates / an institution can promise them. */
+export const TRAINING_YEARS_AHEAD = 10
+export const TRAINING_COUNT_MAX = 10_000
+
+/** Contacts the other side sees only after an offer is accepted (ТЗ 5: ILMORA only brings the sides together). */
+export interface PartyContactsDto {
+  phone: string | null
+  email: string | null
+  website: string | null
+  address: string | null
+  representative: { name: string; jobTitle: string | null; email: string | null } | null
+}
+
+/** A company as an institution sees it on a request: no contacts until the offer is accepted. */
+export interface CompanyCardDto {
+  id: string
+  name: string
+  region: PlaceRefDto | null
+  industries: IndustryDto[]
+  about: string | null
+}
+
+/** An institution as a company sees it in an offer. */
+export interface InstitutionCardDto {
+  id: string
+  name: string
+  type: RegistryInstitutionType
+  region: PlaceRefDto | null
+}
+
+/** One offer on a company's request. */
+export interface TrainingOfferDto {
+  id: string
+  institution: InstitutionCardDto
+  count: number
+  byYear: number
+  comment: string | null
+  status: MatchStatus
+  createdAt: string
+  decidedAt: string | null
+  /** Only once the company accepted the offer. */
+  contacts: PartyContactsDto | null
+}
+
+/** A request as its company sees it, with the offers. */
+export interface TrainingRequestDto {
+  id: string
+  direction: DirectionDto
+  count: number
+  byYear: number
+  region: PlaceRefDto | null
+  requirements: string | null
+  status: TrainingRequestStatus
+  createdAt: string
+  closedAt: string | null
+  offers: TrainingOfferDto[]
+  /** Pending, accepted and the sum of graduates the accepted offers promise. */
+  summary: { pending: number; accepted: number; promised: number }
+}
+
+/** A request as an institution sees it: the company card, and its own offer if it made one. */
+export interface IncomingTrainingRequestDto {
+  id: string
+  direction: DirectionDto
+  count: number
+  byYear: number
+  region: PlaceRefDto | null
+  requirements: string | null
+  createdAt: string
+  company: CompanyCardDto
+  myOffer: { id: string; count: number; byYear: number; comment: string | null; status: MatchStatus; contacts: PartyContactsDto | null } | null
+}

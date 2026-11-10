@@ -71,6 +71,10 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   company_registered: 'apiError.companyRegistered',
   file_not_uploaded: 'apiError.fileNotUploaded',
   invalid_file: 'apiError.invalidFile',
+  // training requests
+  request_closed: 'apiError.requestClosed',
+  offer_decided: 'apiError.offerDecided',
+  offer_exists: 'apiError.offerExists',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
