@@ -161,6 +161,7 @@ describe.skipIf(!DB_AVAILABLE)('Practice and internships (ТЗ 5.4)', () => {
       const v = await service.create(s.tenantId, s.softCo.actor, s.input())
       await expect(service.apply(s.tenantId, await s.student(false), v.id, { consent: true })).rejects.toMatchObject({ code: 'questionnaire_incomplete' })
       const me = await s.student()
+      const cert = await ctx.prisma.client.studentCertificate.create({ data: { tenantId: s.tenantId, userId: me.id, title: 'IELTS 7.0', fileKey: `student-certs/${s.tenantId}/${me.id}/1.pdf`, contentType: 'application/pdf', sizeBytes: 100 } })
       sent.length = 0
       const applied = await service.apply(s.tenantId, me, v.id, { note: 'Python bilaman', consent: true })
       expect(applied.myApplication).toMatchObject({ status: 'NEW' })
@@ -168,7 +169,6 @@ describe.skipIf(!DB_AVAILABLE)('Practice and internships (ТЗ 5.4)', () => {
       await expect(service.apply(s.tenantId, me, v.id, { consent: true })).rejects.toMatchObject({ code: 'application_exists' })
       expect((await service.companyGet(s.softCo.actor, v.id)).applications.NEW).toBe(1)
 
-      const cert = await ctx.prisma.client.studentCertificate.create({ data: { tenantId: s.tenantId, userId: me.id, title: 'IELTS 7.0', fileKey: `student-certs/${s.tenantId}/${me.id}/1.pdf`, contentType: 'application/pdf', sizeBytes: 100 } })
       sent.length = 0
       const [app] = await service.applications(s.tenantId, s.softCo.actor, v.id)
       expect(app).toMatchObject({ status: 'VIEWED', note: 'Python bilaman', student: { id: me.id, name: 'Aziz Karimov', phone: '+998935554433', email: 'aziz@mail.uz', certificates: [expect.objectContaining({ title: 'IELTS 7.0' })] } })
@@ -202,6 +202,15 @@ describe.skipIf(!DB_AVAILABLE)('Practice and internships (ТЗ 5.4)', () => {
       expect(await service.list(me, {})).toEqual([])
       expect(await service.myApplications(me)).toHaveLength(1)
       await expect(service.apply(s.tenantId, await s.student(), v.id, { consent: true })).rejects.toMatchObject({ code: 'not_found' })
+
+      // A certificate added after applying is not shared; «Отозвать отклик» closes the card (security review №15).
+      const later = await ctx.prisma.client.studentCertificate.create({ data: { tenantId: s.tenantId, userId: me.id, title: 'Yangi', fileKey: `student-certs/${s.tenantId}/${me.id}/2.pdf`, contentType: 'application/pdf', sizeBytes: 100, createdAt: new Date(Date.now() + 1000) } })
+      expect((await service.application(s.tenantId, s.softCo.actor, app.id)).student.certificates.map((c) => c.title)).toEqual(['IELTS 7.0'])
+      await expect(service.certificateLink(s.softCo.actor, app.id, later.id)).rejects.toMatchObject({ code: 'not_found' })
+      await expect(service.withdraw(await s.student(), app.id)).rejects.toMatchObject({ code: 'not_found' })
+      expect(await service.withdraw(me, app.id)).toEqual([])
+      await expect(service.application(s.tenantId, s.softCo.actor, app.id)).rejects.toMatchObject({ code: 'not_found' })
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([])
     })
   })
 })

@@ -246,6 +246,26 @@ describe.skipIf(!DB_AVAILABLE)('Graduation announcements and contact requests (�
       await expect(contacts.certificateLink(s.mebelCo.actor, req.id, cert.id)).rejects.toMatchObject({ code: 'not_found' })
       const audited = await ctx.prisma.client.auditEvent.findMany({ where: { action: { in: ['contact.view', 'contact.certificate.download'] }, entityId: { in: [s.aziz.id, cert.id] } }, select: { action: true } })
       expect(audited.map((a) => a.action).sort()).toEqual(['contact.certificate.download', 'contact.view'])
+
+      // A certificate added after the consent is not shared (security review №15).
+      const later = await ctx.prisma.client.studentCertificate.create({ data: { tenantId: s.tenantId, userId: s.aziz.id, title: 'Yangi', fileKey: `student-certs/${s.tenantId}/${s.aziz.id}/2.pdf`, contentType: 'application/pdf', sizeBytes: 100, createdAt: new Date(Date.now() + 1000) } })
+      expect((await contacts.companyContact(s.softCo.actor, req.id)).student.full!.certificates.map((c) => c.title)).toEqual(['IELTS 7.0'])
+      await expect(contacts.certificateLink(s.softCo.actor, req.id, later.id)).rejects.toMatchObject({ code: 'not_found' })
+
+      // «Отозвать доступ»: the card and the files close at once, the consent row gets its date, the company does not ask again.
+      await expect(contacts.revoke(s.bobur, req.id)).rejects.toMatchObject({ code: 'not_found' })
+      const [revoked] = await contacts.revoke(s.aziz, req.id)
+      expect(revoked).toMatchObject({ status: 'WITHDRAWN', contacts: null })
+      expect((await contacts.companyContact(s.softCo.actor, req.id)).student.full).toBeNull()
+      await expect(contacts.certificateLink(s.softCo.actor, req.id, cert.id)).rejects.toMatchObject({ code: 'not_found' })
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([])
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: s.aziz.id, kind: 'COMPANY_CONTACTS', revokedAt: null } })).toBe(0)
+      await expect(contacts.revoke(s.aziz, req.id)).rejects.toMatchObject({ code: 'contact_not_open' })
+      await expect(service.invite(s.tenantId, s.softCo.actor, s.aziz.id, ann.id)).rejects.toMatchObject({ code: 'contact_request_exists' })
+
+      // A disabled account leaves the cards (security review №47).
+      await ctx.prisma.client.user.update({ where: { id: s.aziz.id }, data: { isActive: false } })
+      expect((await service.companyGet(s.softCo.actor, ann.id)).graduates!.map((g) => g.name)).toEqual(['Bobur'])
     })
   })
 

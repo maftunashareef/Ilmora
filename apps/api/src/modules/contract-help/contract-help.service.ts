@@ -167,7 +167,8 @@ export class ContractHelpService {
     const direction: Prisma.DirectionWhereInput = { OR: [{ mergedIntoId: null, industryId: { in: industries } }, { mergedInto: { industryId: { in: industries } } }] }
     return {
       status: { in: [...OPEN] },
-      user: { studentConsents: { some: active('CONTRACT_HELP_CARD') }, studentProfile: { is: { direction, ...(regionId ? { regionId } : {}) } } },
+      // A disabled or deleted account leaves the feed (a relation filter skips the soft-delete scope).
+      user: { isActive: true, deletedAt: null, studentConsents: { some: active('CONTRACT_HELP_CARD') }, studentProfile: { is: { direction, ...(regionId ? { regionId } : {}) } } },
     }
   }
 

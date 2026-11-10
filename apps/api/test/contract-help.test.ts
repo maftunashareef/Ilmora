@@ -139,6 +139,11 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       expect(await service.feed(s.softCo.actor, { region: 'andijan' })).toEqual([])
       expect(await service.feed(s.softCo.actor, { region: 'tashkent-city' })).toHaveLength(1)
 
+      // A disabled account leaves the feed (security review №47).
+      await ctx.prisma.client.user.update({ where: { id: me.id }, data: { isActive: false } })
+      expect(await service.feed(s.softCo.actor, {})).toEqual([])
+      await expect(service.card(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })
+      await ctx.prisma.client.user.update({ where: { id: me.id }, data: { isActive: true } })
       // Consent 2 revoked in the questionnaire — the card is gone at once; withdrawn — too.
       await students.save(s.tenantId, me, s.studying({ consents: { CONTRACT_HELP_CARD: false } }) as never)
       expect(await service.feed(s.softCo.actor, {})).toEqual([])

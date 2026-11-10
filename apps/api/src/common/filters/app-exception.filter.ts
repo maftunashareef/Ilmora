@@ -46,6 +46,8 @@ export class AppExceptionFilter implements ExceptionFilter {
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       if (exception.code === 'P2002') return { status: HttpStatus.CONFLICT, body: { error: { code: 'conflict', message: 'A record with the same unique value already exists', requestId } } }
       if (exception.code === 'P2025') return { status: HttpStatus.NOT_FOUND, body: { error: { code: 'not_found', message: 'Record not found', requestId } } }
+      // A NUL character («%00») in an id, a search or a name: PostgreSQL text cannot hold it — the input is wrong, not the server.
+      if (exception.code === 'P2039') return { status: HttpStatus.BAD_REQUEST, body: { error: { code: 'validation_failed', message: 'Text must not contain the NUL character', requestId } } }
     }
     return { status: HttpStatus.INTERNAL_SERVER_ERROR, body: { error: { code: 'internal_error', message: 'Internal server error', requestId } } }
   }

@@ -17,8 +17,11 @@ type LineRow = Prisma.AnnouncementLineGetPayload<{ select: typeof LINE_SELECT }>
 const industryOf = (l: LineRow) => (l.direction.mergedInto ?? l.direction).industry.id
 const REP = { select: { displayName: true, jobTitle: true, email: true } } as const
 const rep = (r: { displayName: string; jobTitle: string | null; email: string | null } | null) => (r ? { name: r.displayName, jobTitle: r.jobTitle, email: r.email } : null)
-/** Students whose cards an announcement may show (ТЗ 5.1 step 3): confirmed by the institution, with a current GRADUATE_CARD consent. */
-const CARD_CONSENT: Prisma.UserWhereInput = { studentConsents: { some: { kind: 'GRADUATE_CARD', revokedAt: null, companyId: null } } }
+/**
+ * Students whose cards an announcement may show (ТЗ 5.1 step 3): confirmed by the institution, with a current
+ * GRADUATE_CARD consent, an account that is neither disabled nor deleted (a relation filter skips the soft-delete scope).
+ */
+const CARD_CONSENT: Prisma.UserWhereInput = { isActive: true, deletedAt: null, studentConsents: { some: { kind: 'GRADUATE_CARD', revokedAt: null, companyId: null } } }
 
 /**
  * Graduation announcements (ТЗ 5.1). The institution announces, per direction, how many graduate in a year; the cards

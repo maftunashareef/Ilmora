@@ -15,6 +15,8 @@ describe('Certificate input', () => {
     expect(pipe.transform({ key: 'student-certs/t/u/1.pdf', title: ' IELTS  7.0 ', issuedAt: '2026-01-15' })).toMatchObject({ title: 'IELTS 7.0' })
     expect(() => pipe.transform({ key: 'student-certs/t/u/1.pdf', title: '<b>x</b>' })).toThrow()
     expect(() => pipe.transform({ key: 'student-certs/t/u/1.pdf', title: 'IELTS', issuedAt: '2999-01-01' })).toThrow()
+    // Not a calendar day: «31 February» is refused, not turned into 2 March (security review №54).
+    expect(() => pipe.transform({ key: 'student-certs/t/u/1.pdf', title: 'IELTS', issuedAt: '2024-02-31' })).toThrow()
     expect(() => new ZodValidationPipe(CertificatePatch).transform({ fileKey: 'other' })).toThrow()
   })
 })

@@ -94,8 +94,11 @@ export class StudentsService {
     // The contact phone (checked by the step rules above): its own field — the sign-in number User.phoneE164 is never touched.
     const contactPhone = normalizeUzPhone(q.phone)
 
-    const before = await this.prisma.client.studentProfile.findFirst({ where: { userId: actor.id }, select: { institutionId: true, studyConfirmation: true, mode: true } })
-    const confirmation = await this.confirmationFor(studying, institutionId, before)
+    const before = await this.prisma.client.studentProfile.findFirst({ where: { userId: actor.id }, select: { institutionId: true, studyConfirmation: true, mode: true, directionId: true, graduationYear: true, user: { select: { displayName: true } } } })
+    const fullName = q.fullName.trim().replace(/\s+/g, ' ')
+    // What the institution confirmed: the name, the direction and the year of graduation (ТЗ 4.1). A change asks again.
+    const confirmedChanged = !!before && (before.user.displayName !== fullName || before.directionId !== directionId || before.graduationYear !== (studying ? q.graduationYear : null))
+    const confirmation = await this.confirmationFor(studying, institutionId, before, confirmedChanged)
     const data = {
       mode: q.status!,
       institutionType: type,
@@ -116,7 +119,7 @@ export class StudentsService {
     }
     await this.prisma.client.$transaction(async (tx) => {
       await tx.studentProfile.upsert({ where: { userId: actor.id }, create: { tenantId, userId: actor.id, ...data }, update: data })
-      await tx.user.update({ where: { id: actor.id }, data: { displayName: q.fullName.trim().replace(/\s+/g, ' '), district: q.district.trim(), email: q.email.trim() || null } })
+      await tx.user.update({ where: { id: actor.id }, data: { displayName: fullName, district: q.district.trim(), email: q.email.trim() || null } })
       await this.syncConsents(tx, tenantId, actor.id, { GRADUATE_CARD: !!q.consents.GRADUATE_CARD, CONTRACT_HELP_CARD: !!q.consents.CONTRACT_HELP_CARD, PARENT_CONSENT: minor && q.guardianConsent }, ip, now)
     })
     await this.audit.record({ action: before ? 'student.questionnaire.update' : 'student.questionnaire.create', entityType: 'StudentProfile', entityId: actor.id, after: { mode: data.mode, institutionId, directionId, studyConfirmation: confirmation.studyConfirmation ?? before?.studyConfirmation } })
@@ -210,9 +213,13 @@ export class StudentsService {
    * Studying at an approved institution: the institution confirms it (PENDING); a new institution starts over. Applying,
    * or an institution not (yet) in ILMORA: nothing to confirm.
    */
-  private async confirmationFor(studying: boolean, institutionId: string | null, before: { institutionId: string | null; studyConfirmation: string; mode: string } | null) {
+  /**
+   * The confirmation stays only while the student studies at the same institution under the same name, direction and
+   * year; otherwise it starts over — «ждёт» at an approved institution, «нечего подтверждать» elsewhere.
+   */
+  private async confirmationFor(studying: boolean, institutionId: string | null, before: { institutionId: string | null; studyConfirmation: string; mode: string } | null, confirmedChanged: boolean) {
     if (!studying || !institutionId) return { studyConfirmation: 'NONE' as const, studyConfirmedAt: null, studyConfirmedById: null }
-    if (before && before.mode === 'STUDYING' && before.institutionId === institutionId && before.studyConfirmation !== 'NONE') return {}
+    if (before && before.mode === 'STUDYING' && before.institutionId === institutionId && before.studyConfirmation !== 'NONE' && !confirmedChanged) return {}
     const approved = await this.prisma.client.institution.findFirst({ where: { id: institutionId, approvedAt: { not: null } }, select: { id: true } })
     return { studyConfirmation: approved ? ('PENDING' as const) : ('NONE' as const), studyConfirmedAt: null, studyConfirmedById: null }
   }

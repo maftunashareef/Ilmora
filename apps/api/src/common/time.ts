@@ -62,6 +62,8 @@ export function addDays(isoDate: string, days: number): string {
 
 /** Prisma returns DATE columns as a Date at UTC midnight; convert back to "YYYY-MM-DD". */
 export const dateColumnToIso = (d: Date): string => d.toISOString().slice(0, 10)
+/** A real calendar day «YYYY-MM-DD»: «2024-02-31» is not one (JavaScript would quietly turn it into 2 March). */
+export const isCalendarDate = (s: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s
 /** Convert "YYYY-MM-DD" to the UTC-midnight Date Prisma expects for a DATE column. */
 export const isoToDateColumn = (iso: string): Date => new Date(`${iso}T00:00:00.000Z`)
 

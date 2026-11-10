@@ -130,6 +130,16 @@ describe.skipIf(!DB_AVAILABLE)('Ministry figures match a hand-counted data set (
     })
   })
 
+  it('«Выпуск по годам» and companies by industry count this tenant only (lines and company industries carry no tenantId)', async () => {
+    const s = await setup('st-years')
+    await setup('st-years-other')
+    await TenantContext.forTenant(s.tenantId, async () => {
+      const { tables } = await stats.all({ year: Y })
+      expect(table(tables, 'graduates_by_year').rows.map((r) => [r.year, (r.industry as { ru: string }).ru, r.graduates])).toEqual([[Y, 'IT и связь', 40], [Y, 'Мебель и деревообработка', 10]])
+      expect(row(table(tables, 'demand_supply'), 'industry', 'IT и связь')).toMatchObject({ companies: 1, graduates: 40 })
+    })
+  })
+
   it('coverage and regions: the official list against who registered and was approved', async () => {
     const s = await setup('st-cover')
     await TenantContext.forTenant(s.tenantId, async () => {

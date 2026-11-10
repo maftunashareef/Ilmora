@@ -79,7 +79,9 @@ export class InstitutionReviewService {
       data: { status: 'APPROVED', approvedAt: current.approvedAt ?? now, reviewedAt: now, reviewedById: actor.id, rejectReason: null },
     })
     if (moved.count !== 1) throw notPending()
-    await this.audit.record({ action: 'institution.approve', entityType: 'Institution', entityId: id, before: { status: 'PENDING' }, after: { status: 'APPROVED' } })
+    // Students who named it before it was approved had nothing to wait for: now the institution confirms them (ТЗ 4.1).
+    const toConfirm = (await this.prisma.client.studentProfile.updateMany({ where: { institutionId: id, mode: 'STUDYING', studyConfirmation: 'NONE' }, data: { studyConfirmation: 'PENDING' } })).count
+    await this.audit.record({ action: 'institution.approve', entityType: 'Institution', entityId: id, before: { status: 'PENDING' }, after: { status: 'APPROVED', studentsToConfirm: toConfirm } })
     await this.tell(tenantId, current.representativeId, 'institution.approved', { institutionName: current.name, institutionId: id }, `inst-decision:${id}:${now.getTime()}`)
     return this.institutions.passportOf(id)
   }

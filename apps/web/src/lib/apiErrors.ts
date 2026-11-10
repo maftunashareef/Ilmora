@@ -81,6 +81,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   // graduation announcements and contact requests
   contact_request_exists: 'apiError.contactRequestExists',
   contact_request_decided: 'apiError.contactRequestDecided',
+  contact_not_open: 'apiError.contactNotOpen',
   announcement_closed: 'apiError.announcementClosed',
   announcement_not_draft: 'apiError.announcementNotDraft',
   announcement_not_published: 'apiError.announcementNotPublished',

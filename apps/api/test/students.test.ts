@@ -199,4 +199,23 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
       expect((await service.save(s.tenantId, me, s.studying({ institution: { id: s.unclaimed.row.id, name: s.unclaimed.row.name, region: 'tashkent-city' } }) as never)).studyConfirmed).toBeNull()
     })
   })
+
+  it('what the institution confirmed — name, direction, year — changed: «ждёт» again (security review №14)', async () => {
+    const s = await setup('st-reconfirm')
+    await TenantContext.forTenant(s.tenantId, async () => {
+      const other = await ctx.prisma.client.direction.create({ data: { tenantId: s.tenantId, name: 'Kiberxavfsizlik', searchKey: registrySearchKey('Kiberxavfsizlik'), industryId: s.it.id } })
+      for (const change of [{ fullName: 'Boşqa Odam' }, { direction: { id: other.id, name: 'Kiberxavfsizlik' } }, { graduationYear: Y + 2 }]) {
+        const me = await s.student()
+        await service.save(s.tenantId, me, s.studying() as never)
+        await service.decideStudy(s.tenantId, s.approved.actor!, me.id, true)
+        expect((await service.save(s.tenantId, me, s.studying({ fullName: ' Aziz   Karimov ', about: 'Yangi' }) as never)).studyConfirmed).toBe('CONFIRMED')
+        expect((await service.save(s.tenantId, me, s.studying(change) as never)).studyConfirmed).toBe('PENDING')
+      }
+      // A rejected student who fixes the questionnaire is asked about again.
+      const me = await s.student()
+      await service.save(s.tenantId, me, s.studying() as never)
+      await service.decideStudy(s.tenantId, s.approved.actor!, me.id, false)
+      expect((await service.save(s.tenantId, me, s.studying({ graduationYear: Y + 2 }) as never)).studyConfirmed).toBe('PENDING')
+    })
+  })
 })

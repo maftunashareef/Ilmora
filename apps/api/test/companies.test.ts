@@ -39,7 +39,7 @@ describe('Private documents', () => {
   it('sign a PUT for the private bucket with the type fixed, and a 5-minute GET', async () => {
     const docs = new PrivateDocsService(testEnv({ S3_ENDPOINT: 'https://s3.test', S3_DOCS_BUCKET: 'ilmora-docs', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' }))
     expect(await docs.uploadUrl('company-certs/t/c/1.pdf', 'application/pdf', 1000)).toMatch(/^https:\/\/s3\.test\/ilmora-docs\/company-certs\/t\/c\/1\.pdf\?.*X-Amz-Signature=/)
-    expect(await docs.downloadUrl('company-certs/t/c/1.pdf')).toMatch(/X-Amz-Expires=300/)
+    expect(await docs.downloadUrl('company-certs/t/c/1.pdf')).toMatch(/X-Amz-Expires=300.*response-content-disposition=attachment/)
   })
 
   it('certificate input: PDF, JPG, PNG up to 10 MB; the company profile takes no status or certificate key', () => {
