@@ -80,3 +80,13 @@ export const addMonthsUtc = (d: Date, months: number): Date => {
   out.setUTCDate(Math.min(d.getUTCDate(), lastDay))
   return out
 }
+
+/**
+ * Calendar months on the wall clock of `timeZone` (Asia/Tashkent by default): a period paid at 01:00 on 1 March in
+ * Tashkent (still 28 February in UTC) ends on 1 April, not on 29 March (Н7). Same clamping as addMonthsUtc.
+ */
+export const addMonthsInZone = (d: Date, months: number, timeZone = 'Asia/Tashkent'): Date => {
+  const offset = tzOffsetMinutes(d, timeZone) * 60_000
+  const shifted = addMonthsUtc(new Date(d.getTime() + offset), months)
+  return new Date(shifted.getTime() - tzOffsetMinutes(shifted, timeZone) * 60_000)
+}

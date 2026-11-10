@@ -67,8 +67,8 @@ describe.skipIf(!DB_AVAILABLE)('attendance: sessions, tokens, check-in rules', (
     const asTenant = <T>(fn: () => Promise<T>) => TenantContext.forTenant(t.tenantId, fn, { actor: teacher })
 
     await expect(asTenant(() => attendance.open(session.id, stranger))).rejects.toMatchObject({ code: 'forbidden' })
-    // closed: a scan before the teacher opens attendance is rejected
-    expect(await asTenant(() => attendance.checkIn(student.id, { sessionId: session.id, token: 'whatever' }, {}))).toMatchObject({ ok: false, reason: 'invalid-link' })
+    // closed: a scan before the teacher opens attendance is rejected — the group's student is told it is closed (Н16)
+    expect(await asTenant(() => attendance.checkIn(student.id, { sessionId: session.id, token: 'whatever' }, {}))).toMatchObject({ ok: false, reason: 'closed' })
 
     const opened = await asTenant(() => attendance.open(session.id, teacher))
     expect(opened.url).toContain(`/attend/${session.id}?t=${opened.token}`)

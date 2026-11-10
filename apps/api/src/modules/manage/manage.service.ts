@@ -184,12 +184,15 @@ export class ManageService {
   private async ensureOnlineProvider(tenantId: string): Promise<{ centerId: string; teacherId: string }> {
     const db = this.prisma.client
     const slug = ONLINE_PROVIDER.slug
-    let center = await db.center.findFirst({ where: { tenantId, slug } })
+    // A deleted platform center or profile is found and restored, not created again next to it: its slug is still taken,
+    // and a second one would fail on it — online courses could not be created any more (Н17).
+    let center = await db.center.findFirst({ where: { tenantId, slug }, includeDeleted: true } as never) as Awaited<ReturnType<typeof db.center.findFirst>>
     if (!center) center = await db.center.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, district: ONLINE_PROVIDER.district as Json, description: ONLINE_PROVIDER.description as Json, tone: ONLINE_PROVIDER.tone } })
-    else if (center.deletedAt) center = await db.center.update({ where: { id: center.id }, data: { deletedAt: null } })
-    let teacher = await db.teacherProfile.findFirst({ where: { tenantId, slug } })
-    if (!teacher) teacher = await db.teacherProfile.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, title: ONLINE_PROVIDER.teacherTitle as Json, bio: ONLINE_PROVIDER.description as Json, tagline: ONLINE_PROVIDER.teacherTagline as Json, centerId: center.id, channelActive: false } })
-    else if (teacher.deletedAt) teacher = await db.teacherProfile.update({ where: { id: teacher.id }, data: { deletedAt: null } })
+    else if (center.deletedAt) center = await db.center.update({ where: { id: center.id }, data: { deletedAt: null }, includeDeleted: true } as never)
+    let teacher = await db.teacherProfile.findFirst({ where: { tenantId, slug }, includeDeleted: true } as never) as Awaited<ReturnType<typeof db.teacherProfile.findFirst>>
+    if (!teacher) teacher = await db.teacherProfile.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, title: ONLINE_PROVIDER.teacherTitle as Json, bio: ONLINE_PROVIDER.description as Json, tagline: ONLINE_PROVIDER.teacherTagline as Json, centerId: center!.id, channelActive: false } })
+    else if (teacher.deletedAt) teacher = await db.teacherProfile.update({ where: { id: teacher.id }, data: { deletedAt: null, centerId: center!.id }, includeDeleted: true } as never)
+    if (!center || !teacher) throw new Error('Online provider could not be prepared')
     return { centerId: center.id, teacherId: teacher.id }
   }
 

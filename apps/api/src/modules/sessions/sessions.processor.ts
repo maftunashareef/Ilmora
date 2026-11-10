@@ -12,6 +12,9 @@ import { SmsService } from '../sms/sms.service'
 import { TenantsService } from '../tenants/tenants.service'
 import { SessionsService } from './sessions.service'
 
+/** A daily run still «RUNNING» after this long was interrupted and may be run again (Н13). */
+export const STALE_RUN_MS = 30 * 60_000
+
 /**
  * Worker for the `sessions` queue.
  *  - generate-daily: runs once per local date (job id + JobRun row make it exclusive across workers),
@@ -77,10 +80,13 @@ export class SessionsProcessor extends WorkerHost implements OnModuleInit {
       run = await TenantContext.system(() => this.prisma.client.jobRun.create({ data: { queue, jobKey: key, workerId: this.workerId } }))
     } catch (err) {
       if ((err as { code?: string }).code === 'P2002') {
-        // A run that failed earlier today is taken over; one that succeeded or is still running is left alone.
-        const failed = await TenantContext.system(() => this.prisma.client.jobRun.findFirst({ where: { queue, jobKey: key, status: 'FAILED' }, select: { id: true } }))
+        // A run that failed earlier today is taken over, and so is one still «RUNNING» long after it started — its worker
+        // was stopped mid-run (deploy, crash) and will never finish it (Н13). A finished or live run is left alone.
+        const stale = new Date(Date.now() - STALE_RUN_MS)
+        const failed = await TenantContext.system(() => this.prisma.client.jobRun.findFirst({ where: { queue, jobKey: key, OR: [{ status: 'FAILED' }, { status: 'RUNNING', startedAt: { lt: stale } }] }, select: { id: true } }))
         if (failed) {
-          await TenantContext.system(() => this.prisma.client.jobRun.delete({ where: { id: failed.id } }))
+          // deleteMany: two workers taking over the same run — only one deletes it, the other one's create then fails.
+          await TenantContext.system(() => this.prisma.client.jobRun.deleteMany({ where: { id: failed.id } }))
           return this.runOnce(queue, key, fn)
         }
         this.logger.log(`Skipping ${queue}/${key}: already executed by another worker`)

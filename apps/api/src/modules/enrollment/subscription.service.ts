@@ -1,8 +1,8 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import { dueReminder, finalPriceMinor, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, subscriptionAccess, type SubscriptionAccess } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
-import { addMonthsUtc } from '../../common/time'
-import { ENV, type Env } from '../../config/env'
+import { addMonthsInZone } from '../../common/time'
+import { clickConfigured, ENV, type Env, paymeConfigured } from '../../config/env'
 import type { PaymentProvider, SubscriptionStatus } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
@@ -129,7 +129,7 @@ export class SubscriptionService {
 
   /** End of a paid period: the package's periodDays, or one calendar month (custom selections and packages without periodDays). */
   private periodEnd(start: Date, pkg: PackageAccess): Date {
-    return pkg?.periodDays ? new Date(start.getTime() + pkg.periodDays * DAY_MS) : addMonthsUtc(start, 1)
+    return pkg?.periodDays ? new Date(start.getTime() + pkg.periodDays * DAY_MS) : addMonthsInZone(start, 1)
   }
 
   /** Access columns copied from the package when a subscription is created or renewed. */
@@ -196,6 +196,11 @@ export class SubscriptionService {
    */
   private async createPayment(tx: TransactionClient, now: Date, data: { tenantId: string; studentId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor: bigint; currency: string; provider: PaymentProvider; expiresAt: Date; createdById: string }) {
     const free = data.amountMinor === 0n
+    // A provider that is not connected could never confirm the payment: refuse before any seat is held (Н12). The
+    // transaction is rolled back, the holds with it.
+    if (!free && !(data.provider === 'PAYME' ? paymeConfigured(this.env) : data.provider === 'CLICK' ? clickConfigured(this.env) : true)) {
+      throw new AppError('payment_unavailable', 'This payment method is not connected yet', HttpStatus.SERVICE_UNAVAILABLE)
+    }
     const payment = await tx.payment.create({ data: free ? { ...data, provider: null, state: 'PAID', paidAt: now } : data })
     if (free) await this.applySettlement(tx, payment)
     return payment
@@ -295,8 +300,8 @@ export class SubscriptionService {
     const updated = await db.subscription.update({ where: { id: sub.id }, data: { lessonsUsed: { increment: 1 } } })
     await db.attendanceRecord.update({ where: { id: recordId }, data: { lessonCounted: true } })
     if (updated.lessonsTotal != null && updated.lessonsUsed >= updated.lessonsTotal) {
-      await this.block(db, { id: sub.id, tenantId, studentId }, 'lessons_exhausted', new Date())
-      return { counted: true, blocked: true }
+      const blocked = await this.block(db, updated, 'lessons_exhausted', new Date())
+      return { counted: true, blocked }
     }
     return { counted: true, blocked: false }
   }
@@ -313,10 +318,16 @@ export class SubscriptionService {
     await db.subscription.update({ where: { id: sub.id }, data: { lessonsUsed: used, ...(unblock ? { status: 'ACTIVE', blockedAt: null, blockReason: null, graceEndsAt: null } : {}) } })
   }
 
-  private async block(db: Db, sub: { id: string; tenantId: string; studentId: string }, reason: 'period_ended' | 'lessons_exhausted', now: Date) {
-    await db.subscription.update({ where: { id: sub.id }, data: { status: 'PAST_DUE', blockedAt: now, blockReason: reason, graceEndsAt: new Date(now.getTime() + this.env.SUBSCRIPTION_GRACE_DAYS * DAY_MS) } })
+  /**
+   * Blocks the subscription as it was read: if anything changed it meanwhile (a renewal was just paid, a lesson given
+   * back), nothing is written and false is returned — the nightly sweep never blocks a fresh renewal (security review №38).
+   */
+  private async block(db: Db, sub: { id: string; tenantId: string; studentId: string; updatedAt: Date }, reason: 'period_ended' | 'lessons_exhausted', now: Date): Promise<boolean> {
+    const locked = await db.subscription.updateMany({ where: { id: sub.id, status: 'ACTIVE', updatedAt: sub.updatedAt }, data: { status: 'PAST_DUE', blockedAt: now, blockReason: reason, graceEndsAt: new Date(now.getTime() + this.env.SUBSCRIPTION_GRACE_DAYS * DAY_MS) } })
+    if (locked.count !== 1) return false
     await this.audit.record({ tx: db as TransactionClient, tenantId: sub.tenantId, action: 'subscription.blocked', entityType: 'Subscription', entityId: sub.id, after: { reason } })
     await this.notifications.notify({ tenantId: sub.tenantId, userIds: [sub.studentId], type: 'subscription.expired', params: { reason, graceDays: this.env.SUBSCRIPTION_GRACE_DAYS }, dedupeKey: `subscription-blocked:${sub.id}:${now.toISOString().slice(0, 10)}` }, db)
+    return true
   }
 
   /**
@@ -333,8 +344,7 @@ export class SubscriptionService {
     for (const sub of active) {
       const step = nextLifecycleStep(sub, now)
       if (step === 'block_period' || step === 'block_lessons') {
-        await this.block(this.prisma.client, sub, step === 'block_period' ? 'period_ended' : 'lessons_exhausted', now)
-        out.blocked++
+        if (await this.block(this.prisma.client, sub, step === 'block_period' ? 'period_ended' : 'lessons_exhausted', now)) out.blocked++
         continue
       }
       const reminder = dueReminder(sub, now, this.env.SUBSCRIPTION_REMIND_DAYS)
@@ -400,9 +410,34 @@ export class SubscriptionService {
   async cancel(tenantId: string, studentId: string, reason?: string) {
     const sub = await this.prisma.client.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'] } } })
     if (!sub) throw AppError.notFound('Subscription')
-    const cancelled = await this.prisma.tx((tx) => this.cancelIn(tx, sub.id, ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'], reason))
-    if (!cancelled) throw AppError.notFound('Subscription')
-    return { ok: true }
+    const refund = await this.prisma.tx(async (tx) => {
+      if (!(await this.cancelIn(tx, sub.id, ['ACTIVE', 'PAST_DUE', 'PENDING_PAYMENT'], reason))) return null
+      return this.requestRefund(tx, sub, reason)
+    })
+    if (refund === null) throw AppError.notFound('Subscription')
+    return { ok: true, refundRequested: refund }
+  }
+
+  /**
+   * Cancelling a paid subscription is the student's refusal under the offer (6.3–6.4): the money of the period not yet
+   * used is owed back. The finance admins get a refund request in their notifications, and the audit log keeps it
+   * (security review 10.11 №42). Returns whether there was anything paid to look at.
+   */
+  private async requestRefund(tx: TransactionClient, sub: { id: string; tenantId: string; studentId: string; kind: string; lessonsTotal: number | null; lessonsUsed: number }, reason?: string): Promise<boolean> {
+    const now = new Date()
+    const paid = await tx.payment.findMany({ where: { subscriptionId: sub.id, state: 'PAID', periodEnd: { gt: now } }, select: { id: true, amountMinor: true } })
+    const lessonsLeft = sub.kind === 'LESSONS' && sub.lessonsTotal != null ? Math.max(0, sub.lessonsTotal - sub.lessonsUsed) : null
+    if (!paid.length || lessonsLeft === 0) return false
+    const amountMinor = paid.reduce((sum, p) => sum + p.amountMinor, 0n).toString()
+    const student = await tx.user.findFirst({ where: { id: sub.studentId }, select: { displayName: true } })
+    const finance = await tx.user.findMany({ where: { tenantId: sub.tenantId, isActive: true, OR: [{ roles: { has: 'FINANCE_ADMIN' } }, { isOwner: true }] }, select: { id: true } })
+    await this.audit.record({ tx, tenantId: sub.tenantId, action: 'refund.requested', entityType: 'Subscription', entityId: sub.id, after: { paymentIds: paid.map((p) => p.id), amountMinor, lessonsLeft }, reason })
+    await this.notifications.notify({
+      tenantId: sub.tenantId, userIds: finance.map((u) => u.id), type: 'refund.requested',
+      params: { studentName: student?.displayName ?? '', studentId: sub.studentId, subscriptionId: sub.id, amountMinor, lessonsLeft, reason: reason ?? null },
+      dedupeKey: `refund-requested:${sub.id}`,
+    }, tx)
+    return true
   }
 
   /**

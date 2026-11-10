@@ -85,16 +85,24 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
       receipt = await this.prisma.client.receipt.create({ data: { tenantId, paymentId, number: `R-${new Date().getUTCFullYear()}-${String(count + 1).padStart(6, '0')}` } })
     }
     if (!payment.student.phoneE164) return // receipt exists; the account has no phone to text
+    // The text goes once: the receipt is marked sent before the SMS is queued, atomically, so a retry of this event
+    // (a crash after the SMS, before the event was closed) finds it sent and stops (Н14). A failed queueing un-marks it.
+    const claimed = await this.prisma.client.receipt.updateMany({ where: { id: receipt.id, deliveredAt: null }, data: { deliveredAt: new Date(), channel: 'sms' } })
+    if (claimed.count !== 1) return
     const lang = payment.student.preferredLang
     const period = `${payment.periodStart.toISOString().slice(0, 10)} – ${payment.periodEnd.toISOString().slice(0, 10)}`
-    await this.sms.enqueue({
-      tenantId,
-      phoneE164: payment.student.phoneE164,
-      templateKey: 'sms.receipt',
-      lang,
-      vars: { amount: (payment.amountMinor / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '), number: receipt.number, period },
-    })
-    await this.prisma.client.receipt.update({ where: { id: receipt.id }, data: { deliveredAt: new Date(), channel: 'sms' } })
+    try {
+      await this.sms.enqueue({
+        tenantId,
+        phoneE164: payment.student.phoneE164,
+        templateKey: 'sms.receipt',
+        lang,
+        vars: { amount: (payment.amountMinor / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '), number: receipt.number, period },
+      })
+    } catch (err) {
+      await this.prisma.client.receipt.update({ where: { id: receipt.id }, data: { deliveredAt: null, channel: null } })
+      throw err
+    }
     void pick
   }
 }

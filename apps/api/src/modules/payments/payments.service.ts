@@ -17,6 +17,8 @@ export interface SettleInput {
   providerTransactionId: string
   performedAt: Date
   actorId?: string
+  /** Paid with Payme's test key: the payment activates the order, but books no revenue and sends no receipt (№39). */
+  sandbox?: boolean
 }
 
 /**
@@ -99,6 +101,11 @@ export class PaymentsService {
 
     await tx.payment.update({ where: { id: payment.id }, data: { state: 'PAID', paidAt: input.performedAt, provider: input.provider } })
     await this.subscriptions.applySettlement(tx, payment)
+    if (input.sandbox) {
+      // A test-key payment is no money: no revenue in the ledger, no receipt SMS (security review 10.11 №39).
+      await this.audit.record({ tx, tenantId: payment.tenantId, action: 'payment.settled', entityType: 'Payment', entityId: payment.id, after: { provider: input.provider, providerTransactionId: input.providerTransactionId, amountMinor: payment.amountMinor.toString(), sandbox: true } })
+      return { applied: true, paidAt: input.performedAt }
+    }
     await this.ledger.post(tx, {
       tenantId: payment.tenantId,
       kind: 'PAYMENT_SETTLED',
@@ -171,6 +178,10 @@ export class PaymentsService {
     return this.prisma.tx(async (tx) => {
       const payment = await this.lockPayment(tx, paymentId)
       if (!payment) throw AppError.notFound('Payment')
+      // Already paid: nothing to record — a second manual transaction would show up in reconciliation as money that never
+      // came (Н15). The answer is the same «not applied» a repeated provider callback gets.
+      if (payment.state === 'PAID') return { applied: false, paidAt: payment.paidAt ?? new Date() }
+      if (payment.state !== 'PENDING') throw AppError.conflict('payment_not_pending', `Payment is ${payment.state.toLowerCase()}`)
       const txRow = await tx.paymentTransaction.create({
         data: { tenantId: payment.tenantId, paymentId: payment.id, provider: 'MANUAL', providerTransactionId: `manual:${payment.id}:${Date.now()}`, state: 'PERFORMED', amountMinor: payment.amountMinor, currency: payment.currency, performedAt: new Date() },
       })
