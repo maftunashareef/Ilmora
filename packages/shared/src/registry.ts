@@ -592,3 +592,106 @@ export interface IlmoraCourseDto {
   lessonsAttended: number
   attendancePercent: number | null
 }
+
+// ───────────── Graduation announcements and contact requests (ТЗ 5.1, 5.3 «запрос контакта», 8) ─────────────
+
+export type AnnouncementStatus = 'DRAFT' | 'PUBLISHED' | 'CLOSED'
+export type ContactSource = 'GRADUATE' | 'CONTRACT_HELP'
+
+/** A graduate as a company sees them in an announcement (ТЗ 5.1): no phone, e-mail or files until they accept a request. */
+export interface GraduateCardDto {
+  studentId: string
+  name: string
+  institution: string
+  direction: DirectionDto
+  graduationYear: number
+  region: PlaceRefDto | null
+  about: string | null
+  /** Titles only; the files open after an accepted contact request. */
+  certificates: string[]
+  /** «Курсы в ILMORA»: titles of the learning-center courses the student took. */
+  ilmoraCourses: L[]
+  /** Only students the institution confirmed are shown. */
+  studyConfirmed: true
+  /** This company's contact request to the student, if any. */
+  contactRequest: MatchStatus | null
+}
+
+/** One line of an announcement: a direction (its industry decides which companies see it) and how many graduate. */
+export interface AnnouncementLineDto {
+  id: string
+  direction: DirectionDto
+  count: number
+}
+
+/** The institution's own announcement. */
+export interface AnnouncementDto {
+  id: string
+  year: number
+  status: AnnouncementStatus
+  publishedAt: string | null
+  closedAt: string | null
+  lines: (AnnouncementLineDto & {
+    /** Students with consent whose cards companies of this industry see; excluded ones are marked, not shown to companies. */
+    students: { studentId: string; name: string; course: number | null; excluded: boolean }[]
+  })[]
+  total: number
+  responses: { pending: number; accepted: number }
+}
+
+/** A company's answer to an announcement, as the institution sees it. */
+export interface AnnouncementResponseDto {
+  id: string
+  company: CompanyCardDto
+  lines: { lineId: string; direction: DirectionDto; wantedCount: number }[]
+  comment: string | null
+  status: MatchStatus
+  createdAt: string
+  /** Only once the institution accepted. */
+  contacts: PartyContactsDto | null
+}
+
+/** A published announcement as a company sees it: only the lines of its industries. */
+export interface CompanyAnnouncementDto {
+  id: string
+  year: number
+  publishedAt: string | null
+  institution: InstitutionCardDto
+  lines: AnnouncementLineDto[]
+  /** Sum of the visible lines. */
+  total: number
+  /** Graduates with consent on the visible lines (the detail view only). */
+  graduates?: GraduateCardDto[]
+  myResponse: { id: string; status: MatchStatus; lines: { lineId: string; wantedCount: number }[]; comment: string | null; contacts: PartyContactsDto | null } | null
+}
+
+/** A company's request to open a student's contacts, as the company sees it; the full card only once accepted. */
+export interface CompanyContactDto {
+  id: string
+  source: ContactSource
+  status: MatchStatus
+  createdAt: string
+  decidedAt: string | null
+  student: { id: string; name: string; full: StudentFullCardDto | null }
+}
+
+/** The full card (ТЗ 5.3, 9.4) — only for a company the student accepted: name, phone, e-mail, certificate files. */
+export interface StudentFullCardDto {
+  name: string
+  phone: string | null
+  email: string | null
+  institution: string | null
+  direction: DirectionDto | null
+  graduationYear: number | null
+  about: string | null
+  certificates: StudentCertificateDto[]
+}
+
+/** A contact request as the student sees it: who asks and why. */
+export interface StudentContactRequestDto {
+  id: string
+  source: ContactSource
+  status: MatchStatus
+  createdAt: string
+  company: CompanyCardDto & { website: string | null }
+}
