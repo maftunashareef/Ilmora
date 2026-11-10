@@ -71,6 +71,9 @@ services:
       APP_SURFACE: public
       ADMIN_ORIGIN: https://${ADMIN_DOMAIN}
       API_INTERNAL_URL: http://api:4000
+      GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
+      YANDEX_VERIFICATION: ${YANDEX_VERIFICATION:-}
+      BING_SITE_VERIFICATION: ${BING_SITE_VERIFICATION:-}
     depends_on:
       api:
         condition: service_healthy
