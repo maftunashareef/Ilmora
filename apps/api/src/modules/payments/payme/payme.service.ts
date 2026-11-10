@@ -98,7 +98,21 @@ export class PaymeService {
     if (!payment) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
     if (!(await this.payable(this.prisma.client, payment))) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
     if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
-    return { allow: true }
+    return {
+      allow: true,
+      // Fiscal receipt: one line for the whole amount (tiyins); codes and VAT come from env.
+      detail: {
+        receipt_type: 0,
+        items: [{
+          title: 'ILMORA — подписка на занятия',
+          price: Number(payment.amountMinor),
+          count: 1,
+          code: this.env.PAYME_FISCAL_IKPU,
+          package_code: this.env.PAYME_FISCAL_PACKAGE_CODE,
+          vat_percent: this.env.PAYME_FISCAL_VAT_PERCENT,
+        }],
+      },
+    }
   }
 
   /** The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. */

@@ -35,7 +35,8 @@ async function bootstrap() {
   // The default JSON limit (100 kB) is too small for the site configuration once it holds the university packages (one PUT
   // carries every package, in three languages). useBodyParser replaces Nest's default JSON parser and keeps rawBody for the
   // payment webhooks; request validation and rate limits are unchanged.
-  app.useBodyParser('json', { limit: '1mb' })
+  // Payme sends its JSON-RPC calls as text/json; without it the body arrives empty.
+  app.useBodyParser('json', { limit: '1mb', type: ['application/json', 'text/json'] })
   app.enableCors({
     origin: env.CORS_ORIGINS.length ? env.CORS_ORIGINS : env.NODE_ENV === 'production' ? false : true,
     credentials: true,
