@@ -7,13 +7,14 @@ import { AppThrottlerGuard } from '../src/common/guards'
 import { RedisService } from '../src/infra/redis/redis.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { AccountService } from '../src/modules/auth/account.service'
+import { MfaService } from '../src/modules/auth/mfa.service'
 import { AuthController } from '../src/modules/auth/auth.controller'
 import { AuthService } from '../src/modules/auth/auth.service'
 import type { TokenService } from '../src/modules/auth/token.service'
 import { ManageController } from '../src/modules/manage/manage.controller'
 import { NotificationsController } from '../src/modules/notifications/notifications.controller'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
-import { notificationsStub } from './stubs'
+import { notificationsStub, mfaStub } from './stubs'
 
 const meta = { ip: '127.0.0.1', userAgent: 'vitest' }
 const route = (cls: new (...a: never[]) => unknown, name: string) => ({ getHandler: () => (cls.prototype as Record<string, unknown>)[name], getClass: () => cls }) as unknown as ExecutionContext
@@ -37,7 +38,7 @@ describe('Ж1: the strict sign-in limit counts sign-in routes only, per client, 
 describe('Ж3: a Google token is accepted only when it was issued to our app', () => {
   afterEach(() => vi.unstubAllGlobals())
   const accounts = { loginWithGoogle: vi.fn(async () => ({ ok: true })) } as unknown as AccountService
-  const service = (clientId?: string) => new AuthService({} as never, {} as never, {} as unknown as TokenService, {} as never, accounts, testEnv({ NODE_ENV: 'test', GOOGLE_CLIENT_ID: clientId ?? '' }))
+  const service = (clientId?: string) => new AuthService({} as never, {} as never, {} as unknown as TokenService, {} as never, accounts, testEnv({ NODE_ENV: 'test', GOOGLE_CLIENT_ID: clientId ?? '' }), mfaStub)
   const tokeninfo = (aud: string) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ sub: 'g-1', email: 'a@b.uz', email_verified: true, name: 'A', aud }), { status: 200 })))
 
   it('refuses a token issued to another Google app', async () => {
@@ -92,7 +93,7 @@ describe('Ж8: sign-in, registration and codes answer only the site itself', () 
 describe.skipIf(!DB_AVAILABLE)('Ж7, Ж15: password sign-in lock against PostgreSQL', () => {
   const ctx = new TestContext()
   const env = testEnv({ REDIS_MODE: 'off', LOGIN_MAX_FAILURES: '3', LOGIN_LOCK_SECONDS: '60' })
-  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), notificationsStub, env)
+  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), notificationsStub, env, new MfaService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), env))
   beforeAll(() => ctx.connect())
   afterAll(() => ctx.close())
 

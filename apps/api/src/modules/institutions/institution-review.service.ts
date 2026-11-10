@@ -1,0 +1,113 @@
+import { Injectable } from '@nestjs/common'
+import type { InstitutionPassportDto, InstitutionReviewDto, InstitutionReviewItemDto } from '@ilmora/shared'
+import { AppError } from '../../common/errors'
+import { PrismaService } from '../../infra/prisma/prisma.service'
+import type { RequestActor } from '../../infra/tenancy/tenant-context'
+import { AuditService } from '../audit/audit.service'
+import { NotificationsService } from '../notifications/notifications.service'
+import { PLACE_SELECT, toPlace } from '../registry/registry.mappers'
+import { InstitutionsService } from './institutions.service'
+
+const iso = (d: Date | null) => d?.toISOString() ?? null
+/** Audit actions shown as the review history of one institution. */
+const HISTORY_ACTIONS = ['institution.claim', 'institution.create', 'institution.submit', 'institution.update.review', 'institution.approve', 'institution.reject']
+
+/**
+ * Review of institution profiles (ТЗ 4.2 step 5, 7.1). Decision of 10.11: the Super Admin approves or rejects — not
+ * the ministry, which sees the registry and the figures only. Approval opens the workspace (`approvedAt`); a rejection
+ * of a re-review after a key-field change keeps the workspace open (the institution was approved once) and drops it
+ * out of the official figures until it is fixed and approved again.
+ */
+@Injectable()
+export class InstitutionReviewService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
+    private readonly institutions: InstitutionsService,
+  ) {}
+
+  /** The queue: profiles waiting for a decision, oldest first. */
+  async queue(): Promise<InstitutionReviewItemDto[]> {
+    const rows = await this.prisma.client.institution.findMany({
+      where: { status: 'PENDING', mergedIntoId: null },
+      orderBy: { submittedAt: 'asc' },
+      take: 500,
+      select: {
+        id: true, name: true, type: true, stir: true, source: true, submittedAt: true, approvedAt: true, ...PLACE_SELECT,
+        representative: { select: { displayName: true, jobTitle: true, login: true } },
+      },
+    })
+    return rows.map((r) => ({
+      id: r.id, name: r.name, type: r.type, stir: r.stir, ...toPlace(r),
+      submittedAt: iso(r.submittedAt),
+      reReview: r.approvedAt !== null,
+      inRegistry: r.source === 'IMPORT',
+      representative: r.representative ? { name: r.representative.displayName, jobTitle: r.representative.jobTitle, login: r.representative.login } : null,
+    }))
+  }
+
+  /** One profile with what the reviewer needs: the passport, whether the STIR came from the registry, the history. */
+  async detail(id: string): Promise<InstitutionReviewDto> {
+    const row = await this.prisma.client.institution.findFirst({
+      where: { id, mergedIntoId: null },
+      select: { source: true, representative: { select: { displayName: true, jobTitle: true, login: true } } },
+    })
+    if (!row) throw AppError.notFound('Institution')
+    const [passport, history] = await Promise.all([
+      this.institutions.passportOf(id),
+      this.prisma.client.auditEvent.findMany({
+        where: { entityType: 'Institution', entityId: id, action: { in: HISTORY_ACTIONS } },
+        orderBy: { createdAt: 'asc' },
+        select: { action: true, reason: true, createdAt: true, actor: { select: { displayName: true } } },
+      }),
+    ])
+    return {
+      passport,
+      inRegistry: row.source === 'IMPORT',
+      representative: row.representative ? { name: row.representative.displayName, jobTitle: row.representative.jobTitle, login: row.representative.login } : null,
+      history: history.map((h) => ({ action: h.action, reason: h.reason, at: h.createdAt.toISOString(), by: h.actor?.displayName ?? null })),
+    }
+  }
+
+  async approve(tenantId: string, actor: RequestActor, id: string): Promise<InstitutionPassportDto> {
+    const current = await this.pending(id)
+    const now = new Date()
+    // Only while still PENDING: two reviewers deciding at once — one decision counts.
+    const moved = await this.prisma.client.institution.updateMany({
+      where: { id, status: 'PENDING' },
+      data: { status: 'APPROVED', approvedAt: current.approvedAt ?? now, reviewedAt: now, reviewedById: actor.id, rejectReason: null },
+    })
+    if (moved.count !== 1) throw notPending()
+    await this.audit.record({ action: 'institution.approve', entityType: 'Institution', entityId: id, before: { status: 'PENDING' }, after: { status: 'APPROVED' } })
+    await this.tell(tenantId, current.representativeId, 'institution.approved', { institutionName: current.name, institutionId: id }, `inst-decision:${id}:${now.getTime()}`)
+    return this.institutions.passportOf(id)
+  }
+
+  async reject(tenantId: string, actor: RequestActor, id: string, reason: string): Promise<InstitutionPassportDto> {
+    const current = await this.pending(id)
+    const now = new Date()
+    const moved = await this.prisma.client.institution.updateMany({
+      where: { id, status: 'PENDING' },
+      data: { status: 'REJECTED', reviewedAt: now, reviewedById: actor.id, rejectReason: reason },
+    })
+    if (moved.count !== 1) throw notPending()
+    await this.audit.record({ action: 'institution.reject', entityType: 'Institution', entityId: id, before: { status: 'PENDING' }, after: { status: 'REJECTED' }, reason })
+    await this.tell(tenantId, current.representativeId, 'institution.rejected', { institutionName: current.name, institutionId: id, reason }, `inst-decision:${id}:${now.getTime()}`)
+    return this.institutions.passportOf(id)
+  }
+
+  private async pending(id: string) {
+    const row = await this.prisma.client.institution.findFirst({ where: { id, mergedIntoId: null }, select: { name: true, status: true, approvedAt: true, representative: { select: { id: true } } } })
+    if (!row) throw AppError.notFound('Institution')
+    if (row.status !== 'PENDING') throw notPending()
+    return { name: row.name, approvedAt: row.approvedAt, representativeId: row.representative?.id ?? null }
+  }
+
+  private async tell(tenantId: string, userId: string | null, type: 'institution.approved' | 'institution.rejected', params: Record<string, unknown>, dedupeKey: string) {
+    if (!userId) return
+    await this.notifications.safely(type, () => this.notifications.notify({ tenantId, userIds: [userId], type, params, dedupeKey }))
+  }
+}
+
+const notPending = () => AppError.conflict('not_pending', 'The profile is not waiting for a decision')

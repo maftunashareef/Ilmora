@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import type { CookieOptions } from 'express'
 import { randomUUID } from 'node:crypto'
-import { randomToken, sha256 } from '../../common/crypto'
+import { hmacSha256, randomToken, sha256 } from '../../common/crypto'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { Role } from '../../generated/prisma/enums'
@@ -24,6 +24,9 @@ export interface AccessClaims {
 
 export interface SessionMeta { ip?: string; userAgent?: string }
 
+export type MfaStage = 'setup' | 'verify'
+export const MFA_CHALLENGE_SECONDS = 300
+
 export const REFRESH_COOKIE = 'ilmora_refresh'
 /** Non-HttpOnly companion of the refresh cookie: value \"1\" while a session exists. */
 export const SESSION_FLAG = 'ilmora_session'
@@ -38,6 +41,28 @@ export class TokenService {
       { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined },
       { subject: user.id, expiresIn: this.env.JWT_ACCESS_TTL_SECONDS },
     )
+  }
+
+  /**
+   * The pass between a correct password and the authenticator code (5 minutes). Signed with a key derived from the
+   * access secret and a different audience, so it can never be used as an access token.
+   */
+  signMfaChallenge(user: { id: string; tenantId: string }, stage: MfaStage): Promise<string> {
+    return this.jwt.signAsync({ tid: user.tenantId, stage }, { subject: user.id, expiresIn: MFA_CHALLENGE_SECONDS, secret: this.mfaSecret(), audience: 'ilmora-mfa' })
+  }
+
+  async verifyMfaChallenge(token: string): Promise<{ userId: string; tenantId: string; stage: MfaStage }> {
+    try {
+      const c = await this.jwt.verifyAsync<{ sub: string; tid: string; stage: MfaStage }>(token, { secret: this.mfaSecret(), audience: 'ilmora-mfa' })
+      if (!c.sub || !c.tid || (c.stage !== 'setup' && c.stage !== 'verify')) throw new Error('bad claims')
+      return { userId: c.sub, tenantId: c.tid, stage: c.stage }
+    } catch {
+      throw AppError.unauthorized('The sign-in step has expired; enter the login and password again', 'invalid_challenge')
+    }
+  }
+
+  private mfaSecret(): string {
+    return hmacSha256(this.env.JWT_ACCESS_SECRET, 'ilmora-mfa-challenge')
   }
 
   async verifyAccess(token: string): Promise<AccessClaims> {

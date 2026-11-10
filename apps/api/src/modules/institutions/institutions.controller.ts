@@ -9,7 +9,7 @@ import { InstitutionsService } from './institutions.service'
 const HOUR = 3_600_000
 
 /**
- * The institution's own profile (ТЗ 4.2, 9.2 «Учреждение»). Open before approval: until the ministry approves it,
+ * The institution's own profile (ТЗ 4.2, 9.2 «Учреждение»). Open before approval: until the Super Admin approves it,
  * this is all the institution can reach; the approved-only sections use `@Approved('institution')`.
  */
 @Controller('institutions')

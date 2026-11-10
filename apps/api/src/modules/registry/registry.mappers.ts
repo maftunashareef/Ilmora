@@ -1,4 +1,5 @@
-import type { DirectionDto, IndustryDto, L } from '@ilmora/shared'
+import type { DirectionDto, IndustryDto, L, PlaceRefDto } from '@ilmora/shared'
+import type { PrismaService } from '../../infra/prisma/prisma.service'
 
 /** Prisma selections and response mappers shared by the registry modules (reference data, institutions, companies). */
 
@@ -16,3 +17,25 @@ export const toDirection = (d: DirectionRow): DirectionDto => ({ id: d.id, name:
 export const mainOf = (d: DirectionRow & { mergedInto: DirectionRow | null }): DirectionDto => toDirection(d.mergedInto ?? d)
 
 export const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === 'P2002'
+
+/** Region and district as an institution or company refers to them. */
+export const PLACE_SELECT = {
+  region: { select: { id: true, slug: true, name: true } },
+  district: { select: { id: true, name: true } },
+  districtName: true,
+} as const
+type PlaceRow = { region: { id: string; slug: string | null; name: unknown } | null; district: { id: string; name: unknown } | null; districtName: string | null }
+export const toPlace = (r: PlaceRow) => ({
+  region: r.region ? { id: r.region.id, slug: r.region.slug, name: r.region.name as L } : null,
+  district: r.district ? ({ id: r.district.id, name: r.district.name as L } satisfies PlaceRefDto) : null,
+  districtName: r.districtName,
+})
+
+/**
+ * The region a request names: the web app sends the region's slug (UZ_REGIONS, e.g. «andijan»), other callers the
+ * database id — both are accepted (docs/registry/data-model.md). Null when there is no such region.
+ */
+export async function regionIdByRef(prisma: PrismaService, ref: string): Promise<string | null> {
+  const row = await prisma.client.region.findFirst({ where: { OR: [{ id: ref }, { slug: ref }] }, select: { id: true } })
+  return row?.id ?? null
+}

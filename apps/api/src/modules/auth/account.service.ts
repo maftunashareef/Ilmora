@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
-import { type Lang, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
+import { type Lang, type MfaChallengeDto, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { randomToken } from '../../common/crypto'
 import { AppError } from '../../common/errors'
@@ -9,6 +9,7 @@ import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma
 import { RedisService } from '../../infra/redis/redis.service'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { MfaService } from './mfa.service'
 import { type SessionMeta, TokenService } from './token.service'
 
 export interface PublicUser {
@@ -52,6 +53,7 @@ export type UserRow = {
   /** Registry: the institution / company this account represents (INSTITUTION_ADMIN / COMPANY_ADMIN). */
   institutionId: string | null
   companyId: string | null
+  totpEnabledAt: Date | null
   isActive: boolean
   offerAcceptedAt: Date | null
   offerVersion: string | null
@@ -92,6 +94,7 @@ export class AccountService {
     private readonly redis: RedisService,
     private readonly notifications: NotificationsService,
     @Inject(ENV) private readonly env: Env,
+    private readonly mfa: MfaService,
   ) {}
 
   /** Trim + lower-case + Unicode-normalize; the same form is stored and looked up. */
@@ -197,7 +200,7 @@ export class AccountService {
     return `${base}-${Date.now().toString(36)}`
   }
 
-  async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult> {
+  async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult | MfaChallengeDto> {
     const raw = input.login.trim()
     const login = raw.normalize('NFKC').toLowerCase()
     // The failure counter follows the account, not the spelling: every way of writing a phone shares one lock.
@@ -225,6 +228,9 @@ export class AccountService {
     // Do not reveal that the password was correct for a disabled account: answer exactly as for a wrong password (Ж15).
     if (!user.isActive) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     await this.clearFailures(key)
+    // The ministry and the Super Admins: the password only opens the next step — the authenticator code (MfaService).
+    const challenge = await this.mfa.gate(user)
+    if (challenge) return challenge
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'password' } })
     return this.openSession(updated, meta)
@@ -276,6 +282,7 @@ export class AccountService {
 
   private async finishGoogleLogin(user: UserRow, googleId: string, email: string, meta: SessionMeta): Promise<LoginResult> {
     if (!user.isActive) throw new AppError('account_disabled', 'Account disabled', HttpStatus.FORBIDDEN)
+    this.mfa.refuseOtherSignIn(user)
     const updated = await this.prisma.client.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: USER_INCLUDE })
     await this.audit.record({ action: 'auth.login', entityType: 'User', entityId: user.id, after: { method: 'google', googleId, email } })
     return this.openSession(updated, meta)

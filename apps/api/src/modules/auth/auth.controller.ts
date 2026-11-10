@@ -5,7 +5,7 @@ import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AccountService } from './account.service'
-import { ConsentDto, GoogleAuthDto, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
+import { ConsentDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
 import { AuthService, type LoginResult } from './auth.service'
 import { REFRESH_COOKIE, SESSION_FLAG, TokenService } from './token.service'
 
@@ -30,7 +30,37 @@ export class AuthController {
   async login(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
     this.assertSameSite(req, requestedWith)
     const result = await this.accounts.loginWithPassword(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent })
+    // The ministry and the Super Admins: no session yet — the pass for the authenticator step (no cookies).
+    if ('mfaRequired' in result) return result
     return this.respond(res, result)
+  }
+
+  /** Second factor, first sign-in: the secret of the authenticator app (QR code). */
+  @Public()
+  @AuthThrottle(10)
+  @Post('mfa/setup')
+  mfaSetup(@Req() req: Request, @Body() dto: MfaChallengeBody, @Headers('x-requested-with') requestedWith: string | undefined) {
+    this.assertSameSite(req, requestedWith)
+    return this.auth.mfaSetup(dto.challenge)
+  }
+
+  /** Second factor, first sign-in: the first code links the app and opens the session; answers the recovery codes once. */
+  @Public()
+  @AuthThrottle(10)
+  @Post('mfa/confirm')
+  async mfaConfirm(@Req() req: Request, @Body() dto: MfaCodeBody, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
+    const result = await this.auth.mfaConfirm(dto.challenge, dto.code, { ip: ci.ip, userAgent: ci.userAgent })
+    return { ...this.respond(res, result), recoveryCodes: result.recoveryCodes }
+  }
+
+  /** Second factor: a code from the app or a recovery code opens the session. */
+  @Public()
+  @AuthThrottle(10)
+  @Post('mfa/verify')
+  async mfaVerify(@Req() req: Request, @Body() dto: MfaCodeBody, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
+    return this.respond(res, await this.auth.mfaVerify(dto.challenge, dto.code, { ip: ci.ip, userAgent: ci.userAgent }))
   }
 
   /** Google Sign-In with ID token or authorization code; opens a session on success. */

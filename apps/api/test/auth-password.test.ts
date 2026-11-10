@@ -3,6 +3,7 @@ import type { AppError } from '../src/common/errors'
 import { RedisService } from '../src/infra/redis/redis.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { AccountService } from '../src/modules/auth/account.service'
+import { MfaService } from '../src/modules/auth/mfa.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 import { notificationsStub } from './stubs'
 
@@ -12,7 +13,7 @@ describe.skipIf(!DB_AVAILABLE)('login + password accounts and the owner rule', (
   const ctx = new TestContext()
   // Three failures lock a login; Redis off keeps the counter in memory for the test process.
   const env = testEnv({ REDIS_MODE: 'off', LOGIN_MAX_FAILURES: '3', LOGIN_LOCK_SECONDS: '60' })
-  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), notificationsStub, env)
+  const accounts = new AccountService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), notificationsStub, env, new MfaService(ctx.prisma, ctx.tokens, ctx.audit, new RedisService(env), env))
   beforeAll(() => ctx.connect())
   afterAll(() => ctx.close())
 
@@ -34,7 +35,7 @@ describe.skipIf(!DB_AVAILABLE)('login + password accounts and the owner rule', (
     // the same login (any casing) cannot be registered twice; the lookup is also case-insensitive
     await expect(inT(() => accounts.register(t.tenantId, { role: 'STUDENT', login: 'AZIZ.STUDENT', password: 'whatever works 1' }, meta))).rejects.toMatchObject({ code: 'login_taken' })
     const again = await inT(() => accounts.loginWithPassword(t.tenantId, { login: 'AZIZ.student', password: 'correct horse battery' }, meta))
-    expect(again.user.id).toBe(student.user.id)
+    expect('user' in again && again.user.id).toBe(student.user.id)
   })
 
   it('rejects privileged roles at registration and never stores a plaintext password', async () => {

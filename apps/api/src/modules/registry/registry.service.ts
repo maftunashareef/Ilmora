@@ -1,14 +1,15 @@
 import { Injectable } from '@nestjs/common'
 import {
   type DirectionAddResult, type DirectionDto, type DistrictDto, type IndustryDto, type InstitutionAddResult, type InstitutionSearchItemDto,
-  type L, type RegionDto, type RegistryInstitutionType, registrySearchKey, SUGGEST_LIMIT, SUGGEST_MIN_CHARS,
+  type L, type RegionDto, type RegistryInstitutionType, registrySearchKey, registrySearchText, SUGGEST_LIMIT, SUGGEST_MIN_CHARS,
 } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import type { InstitutionType } from '../../generated/prisma/enums'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { DIRECTION_SELECT, DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, toDirection, toIndustry } from './registry.mappers'
+import type { Prisma } from '../../generated/prisma/client'
+import { DIRECTION_SELECT, DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, PLACE_SELECT, regionIdByRef, toDirection, toIndustry, toPlace } from './registry.mappers'
 import type { DirectionInput, DirectionsQuery, InstitutionsQuery, StudentInstitutionInput } from './registry.schemas'
 
 // The shared contract and the database enum must name the same institution types.
@@ -20,21 +21,11 @@ void typesMatch
 const SUGGEST_SCAN = 100
 
 /** Public fields of an institution only (ТЗ 9.4): no STIR, director, phone, e-mail or address. */
-const INSTITUTION_PUBLIC = {
-  id: true, name: true, type: true, ownership: true, source: true,
-  region: { select: { id: true, name: true } }, district: { select: { id: true, name: true } },
-} as const
-
-type InstitutionRow = {
-  id: string; name: string; type: InstitutionType; ownership: 'STATE' | 'PRIVATE' | null; source: string
-  region: { id: string; name: unknown } | null; district: { id: string; name: unknown } | null
-}
+const INSTITUTION_PUBLIC = { id: true, name: true, nameRu: true, type: true, ownership: true, source: true, ...PLACE_SELECT } as const satisfies Prisma.InstitutionSelect
+type InstitutionRow = Prisma.InstitutionGetPayload<{ select: typeof INSTITUTION_PUBLIC }>
 
 const toInstitution = (i: InstitutionRow): InstitutionSearchItemDto => ({
-  id: i.id, name: i.name, type: i.type, ownership: i.ownership,
-  region: i.region ? { id: i.region.id, name: i.region.name as L } : null,
-  district: i.district ? { id: i.district.id, name: i.district.name as L } : null,
-  addedByStudent: i.source === 'STUDENT',
+  id: i.id, name: i.name, nameRu: i.nameRu, type: i.type, ownership: i.ownership, ...toPlace(i), addedByStudent: i.source === 'STUDENT',
 })
 
 /**
@@ -55,11 +46,14 @@ export class RegistryService {
   }
 
   async regions(): Promise<RegionDto[]> {
-    const rows = await this.prisma.client.region.findMany({ orderBy: { sortOrder: 'asc' }, select: { id: true, code: true, name: true } })
-    return rows.map((r) => ({ id: r.id, code: r.code, name: r.name as L }))
+    const rows = await this.prisma.client.region.findMany({ orderBy: { sortOrder: 'asc' }, select: { id: true, code: true, slug: true, name: true } })
+    return rows.map((r) => ({ id: r.id, code: r.code, slug: r.slug, name: r.name as L }))
   }
 
-  async districts(regionId: string): Promise<DistrictDto[]> {
+  /** Districts of a region given by id or by the web app's slug. */
+  async districts(regionRef: string): Promise<DistrictDto[]> {
+    const regionId = await regionIdByRef(this.prisma, regionRef)
+    if (!regionId) return []
     const rows = await this.prisma.client.district.findMany({ where: { regionId }, orderBy: { code: 'asc' }, select: { id: true, regionId: true, code: true, name: true } })
     return rows.map((d) => ({ id: d.id, regionId: d.regionId, code: d.code, name: d.name as L }))
   }
@@ -117,12 +111,21 @@ export class RegistryService {
     return { direction, created: true }
   }
 
-  /** Public search (ТЗ 9.4): public fields only, merged records hidden, 2+ characters. Student-added records go last. */
+  /**
+   * Public search (ТЗ 9.4): public fields only, merged records hidden, 2+ characters. Student-added records go last.
+   * Matches the official, Russian and former names (`searchText`); records created before it existed by `searchKey`.
+   */
   async searchInstitutions(q: InstitutionsQuery): Promise<InstitutionSearchItemDto[]> {
     const key = registrySearchKey(q.q)
     if (key.length < SUGGEST_MIN_CHARS) return []
+    let regionId: string | undefined
+    if (q.regionId) {
+      const found = await regionIdByRef(this.prisma, q.regionId)
+      if (!found) return []
+      regionId = found
+    }
     const rows = await this.prisma.client.institution.findMany({
-      where: { searchKey: { contains: key }, mergedIntoId: null, ...(q.type ? { type: q.type } : {}), ...(q.regionId ? { regionId: q.regionId } : {}) },
+      where: { OR: [{ searchText: { contains: key } }, { searchKey: { contains: key } }], mergedIntoId: null, ...(q.type ? { type: q.type } : {}), ...(regionId ? { regionId } : {}) },
       select: INSTITUTION_PUBLIC,
       orderBy: { name: 'asc' },
       take: SUGGEST_SCAN,
@@ -138,8 +141,9 @@ export class RegistryService {
    * «added by a student», with no STIR, status UNCLAIMED and outside the official figures until it is merged.
    */
   async addStudentInstitution(tenantId: string, actor: RequestActor, input: StudentInstitutionInput): Promise<InstitutionAddResult> {
-    const region = await this.prisma.client.region.findFirst({ where: { id: input.regionId }, select: { id: true } })
-    if (!region) throw AppError.invalid('invalid_region', 'Choose a region from the list')
+    const regionId = await regionIdByRef(this.prisma, input.regionId)
+    if (!regionId) throw AppError.invalid('invalid_region', 'Choose a region from the list')
+    const region = { id: regionId }
     if (input.districtId) {
       const district = await this.prisma.client.district.findFirst({ where: { id: input.districtId, regionId: region.id }, select: { id: true } })
       if (!district) throw AppError.invalid('invalid_district', 'Choose a district of the selected region')
@@ -150,7 +154,7 @@ export class RegistryService {
     if (existing) return { institution: toInstitution(existing), created: false }
     const row = await this.prisma.client.institution.create({
       data: {
-        tenantId, type: input.type, name: input.name, searchKey: key, regionId: region.id, districtId: input.districtId ?? null,
+        tenantId, type: input.type, name: input.name, searchKey: key, searchText: registrySearchText(input.name), regionId: region.id, districtId: input.districtId ?? null,
         source: 'STUDENT', status: 'UNCLAIMED', createdById: actor.id,
       },
       select: INSTITUTION_PUBLIC,

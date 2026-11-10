@@ -111,7 +111,7 @@ describe.skipIf(!DB_AVAILABLE)('Registry reference data (ТЗ 3, 9.2)', () => {
       const studentAdded = await inst('Toşkent axborot kolleji', { stir: null, source: 'STUDENT' })
       const hits = await service.searchInstitutions({ q: 'тошкент ахборот', type: 'TECHNIKUM', regionId: tashkent.id })
       expect(hits.map((h) => h.id)).toEqual([ait.id, studentAdded.id])
-      expect(Object.keys(hits[0]).sort()).toEqual(['addedByStudent', 'district', 'id', 'name', 'ownership', 'region', 'type'])
+      expect(Object.keys(hits[0]).sort()).toEqual(['addedByStudent', 'district', 'districtName', 'id', 'name', 'nameRu', 'ownership', 'region', 'type'])
       expect(hits[1].addedByStudent).toBe(true)
       expect(await service.searchInstitutions({ q: 't' })).toEqual([])
       expect(await service.searchInstitutions({ q: 'тошкент', type: 'UNIVERSITY' })).toEqual([])

@@ -132,11 +132,23 @@ export interface RegionDto {
   id: string
   /** SOATO code. */
   code: string
+  /** The region id the web app uses (UZ_REGIONS). Every `regionId` the API takes may be this slug or the database id. */
+  slug: string | null
   name: L
 }
 
-export interface DistrictDto extends RegionDto {
+export interface DistrictDto {
+  id: string
   regionId: string
+  /** SOATO code. */
+  code: string
+  name: L
+}
+
+/** A region or district as a record refers to it. */
+export interface PlaceRefDto {
+  id: string
+  name: L
 }
 
 /** One suggestion of the direction field: the chip shows the name and its industry. A merged alias answers its main direction. */
@@ -159,10 +171,14 @@ export interface DirectionAddResult {
 export interface InstitutionSearchItemDto {
   id: string
   name: string
+  /** Russian name from the official list, when there is one. */
+  nameRu: string | null
   type: RegistryInstitutionType
   ownership: RegistryOwnership | null
-  region: { id: string; name: L } | null
-  district: { id: string; name: L } | null
+  region: (PlaceRefDto & { slug: string | null }) | null
+  district: PlaceRefDto | null
+  /** District as written in the official list, until the districts' SOATO codes are loaded. */
+  districtName: string | null
   /** Added by a student — shown with a mark, outside the ministry's official figures. */
   addedByStudent: boolean
 }
@@ -202,9 +218,14 @@ export interface InstitutionPassportDto {
   type: RegistryInstitutionType
   ownership: RegistryOwnership | null
   name: string
+  /** From the official list (read-only): the Russian name and the name before the 2025 renaming. */
+  nameRu: string | null
+  formerName: string | null
   stir: string | null
-  region: { id: string; name: L } | null
-  district: { id: string; name: L } | null
+  region: (PlaceRefDto & { slug: string | null }) | null
+  district: PlaceRefDto | null
+  /** District as written in the official list, until the districts' SOATO codes are loaded. */
+  districtName: string | null
   address: string | null
   phone: string | null
   email: string | null
@@ -228,4 +249,70 @@ export interface InstitutionClaimResult {
   institution: InstitutionPassportDto
   /** True when the STIR was not in the registry and a new record was started. */
   created: boolean
+}
+
+// ───────────── Review of institution profiles (Super Admin, decision of 10.11) ─────────────
+
+/** One profile in the review queue. */
+export interface InstitutionReviewItemDto {
+  id: string
+  name: string
+  type: RegistryInstitutionType
+  stir: string | null
+  region: (PlaceRefDto & { slug: string | null }) | null
+  district: PlaceRefDto | null
+  districtName: string | null
+  submittedAt: string | null
+  /** Approved before and sent back by a change of key fields (the workspace stays open). */
+  reReview: boolean
+  /** The STIR came from the official registry (import) — otherwise the institution started the record itself. */
+  inRegistry: boolean
+  representative: { name: string; jobTitle: string | null; login: string | null } | null
+}
+
+/** What the reviewer sees for one profile: the passport, where it came from, and the history of decisions. */
+export interface InstitutionReviewDto {
+  passport: InstitutionPassportDto
+  inRegistry: boolean
+  representative: { name: string; jobTitle: string | null; login: string | null } | null
+  history: { action: string; reason: string | null; at: string; by: string | null }[]
+}
+
+// ───────────── Second factor: authenticator app (ministry and Super Admins) ─────────────
+
+/** `/auth/login` answers this instead of a session when the account needs the authenticator code. */
+export interface MfaChallengeDto {
+  mfaRequired: true
+  /** `setup`: first sign-in — link the app (`/auth/mfa/setup`, then `/auth/mfa/confirm`); `verify`: enter its code (`/auth/mfa/verify`). */
+  stage: 'setup' | 'verify'
+  /** Pass for the next step; valid for `expiresInSeconds`. */
+  challenge: string
+  expiresInSeconds: number
+}
+
+/** The secret to link the app: show `otpauthUrl` as a QR code and `secret` for typing in by hand. */
+export interface MfaSetupDto {
+  secret: string
+  otpauthUrl: string
+}
+
+// ───────────── Ministry accounts (created by the Super Admin) ─────────────
+
+export interface MinistryAccountDto {
+  id: string
+  login: string
+  name: string
+  jobTitle: string | null
+  email: string | null
+  active: boolean
+  /** The authenticator app is linked (the first sign-in links it). */
+  appLinked: boolean
+  lastLoginAt: string | null
+  createdAt: string
+}
+
+/** Answer to creating an account or resetting its password: the temporary password is shown this once. */
+export interface MinistryAccountCreatedDto {
+  account: MinistryAccountDto
+  temporaryPassword: string
 }
