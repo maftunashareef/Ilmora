@@ -66,6 +66,11 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   invalid_challenge: 'apiError.invalidChallenge',
   mfa_already_enabled: 'apiError.mfaAlreadyEnabled',
   mfa_setup_first: 'apiError.mfaSetupFirst',
+  // company profile
+  already_has_company: 'apiError.alreadyHasCompany',
+  company_registered: 'apiError.companyRegistered',
+  file_not_uploaded: 'apiError.fileNotUploaded',
+  invalid_file: 'apiError.invalidFile',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

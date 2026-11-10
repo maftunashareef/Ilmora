@@ -1,0 +1,19 @@
+import { Body, Controller, Get, Param, Post } from '@nestjs/common'
+import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
+import { ZodValidationPipe } from '../../common/zod.pipe'
+import type { RequestActor } from '../../infra/tenancy/tenant-context'
+import { RejectInput } from '../institutions/institutions-admin.controller'
+import { CompanyReviewService } from './company-review.service'
+
+/** Review of company profiles — the Super Admin only (ТЗ 4.3, 9.2 «Super Admin»). Every decision and certificate link is audited. */
+@Controller('admin/companies')
+@Roles('PLATFORM_ADMIN')
+export class CompaniesAdminController {
+  constructor(private readonly review: CompanyReviewService) {}
+
+  @Get('reviews') queue() { return this.review.queue() }
+  @Get(':id') detail(@Param('id') id: string) { return this.review.detail(id) }
+  @Get(':id/certificate') certificate(@Param('id') id: string) { return this.review.certificate(id) }
+  @Post(':id/approve') approve(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.review.approve(t, a, id) }
+  @Post(':id/reject') reject(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(RejectInput)) dto: RejectInput) { return this.review.reject(t, a, id, dto.reason) }
+}
