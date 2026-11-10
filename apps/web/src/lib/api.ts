@@ -112,6 +112,13 @@ export async function refreshSession(): Promise<boolean> {
   return refreshing
 }
 
+/**
+ * Called when the API answers 403 `password_change_required`: the account still uses the temporary password from the
+ * Super Admin (PR #48). The store marks the account, and the site shows the same change screen as for the flag.
+ */
+let onPasswordChangeRequired: (() => void) | null = null
+export const setPasswordChangeRequiredHandler = (fn: (() => void) | null) => { onPasswordChangeRequired = fn }
+
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = `${apiBase()}${path.startsWith('/health') ? '' : PREFIX}${path}`
   const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'ilmora', ...(opts.headers ?? {}) }
@@ -142,6 +149,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   const data = text ? (JSON.parse(text) as unknown) : undefined
   if (!res.ok) {
     const err = (data as { error?: { code?: string; message?: string; details?: unknown; requestId?: string } } | undefined)?.error
+    if (res.status === 403 && err?.code === 'password_change_required') onPasswordChangeRequired?.()
     throw new ApiError(res.status, err?.code ?? `http_${res.status}`, err?.message ?? res.statusText, err?.details, err?.requestId)
   }
   return data as T

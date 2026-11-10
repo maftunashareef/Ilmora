@@ -4,7 +4,7 @@ import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
-import { api, refreshSession, session } from '../lib/api'
+import { api, refreshSession, session, setPasswordChangeRequiredHandler } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
@@ -467,6 +467,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         presetsLoaded: false,
         site: s.site.presets ? publicSite(s.site) : s.site,
       }))
+    }
+    // The API's 403 password_change_required: the account still has the temporary password. Mark it, so the sign-in
+    // card, the workspace gate and PasswordChangeRedirect show the change screen (the same as for the flag).
+    // Browser only: the server renders without the visitor's session, and one module-level handler must not outlive a request.
+    if (typeof window !== 'undefined') {
+      setPasswordChangeRequiredHandler(() => {
+        const user = get().auth.user
+        if (user && !user.passwordChangeRequired) set({ auth: { status: 'authenticated', user: { ...user, passwordChangeRequired: true } } })
+      })
     }
     /** Store the access token, apply the account and warm the student overview; used by every sign-in path. */
     const openSession = async (r: { accessToken: string; user: AuthUser }) => {
