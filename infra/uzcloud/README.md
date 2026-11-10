@@ -20,7 +20,7 @@
 
 | Файл | Где | Что внутри |
 |---|---|---|
-| `api.env` | **на обеих машинах, одинаковый** | пароли базы и Redis, JWT/OTP-ключи, SMS, Payme/Click, `SEED_CATALOG` |
+| `api.env` | **на обеих машинах, одинаковый** | пароли базы и Redis, JWT/OTP-ключи, SMS, Payme, `SEED_CATALOG` |
 | `web/.env` | ilmora-web | адреса, домены, почта для сертификатов, кто видит админку, образы |
 | `admin/.env` | ilmora-admin | адреса, образы, ключи S3 для копий, ключ шифрования копий |
 
@@ -143,7 +143,7 @@ nano api.env
 `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `JWT_ACCESS_SECRET`, `OTP_JOB_ENCRYPTION_KEY` и `TOTP_ENCRYPTION_KEY`
 (ключ для кодов из приложения у министерства и Super Admin; без него министерство не войдёт, а Super Admin входят
 только по паролю; после установки не менять — подключённые приложения перестанут подходить). Остальное уже заполнено для
-запуска: домен `ilmoraa.uz`, пустой каталог (`SEED_CATALOG=false`), SMS без Eskiz (только в журнал), Payme/Click пусто.
+запуска: домен `ilmoraa.uz`, пустой каталог (`SEED_CATALOG=false`), SMS без Eskiz (только в журнал), Payme пусто.
 Сохранить: `Ctrl+O`, Enter, `Ctrl+X`.
 
 ```bash
@@ -225,10 +225,9 @@ sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate
 - **Ключ кодов из приложения** (`TOTP_ENCRYPTION_KEY`, нужен с релиза, где министерство и Super Admin входят с кодом):
   на ilmora-admin `openssl rand -hex 32`, строку — в `api.env` как `TOTP_ENCRYPTION_KEY=…`, дальше как в пункте ниже.
   Ключ — только на серверах (и в менеджере паролей), не в чатах и не в GitHub; поставленный ключ не менять.
-- **Поменять `api.env`** (ключи Payme, Click, Eskiz): правка на ilmora-admin, копия на ilmora-web (`scp -3`, как в
+- **Поменять `api.env`** (ключи Payme, Eskiz): правка на ilmora-admin, копия на ilmora-web (`scp -3`, как в
   шаге 7), затем на admin `… compose.sh admin up -d worker`, на web `… compose.sh web up -d api`.
-  Адреса для кабинетов Payme / Click: `https://ilmoraa.uz/payments/payme`,
-  `https://ilmoraa.uz/payments/click/prepare` и `https://ilmoraa.uz/payments/click/complete`.
+  Адрес для кабинета Payme: `https://ilmoraa.uz/payments/payme` (Click убран 10.11.2026).
 - **Закрыть админку по IP:** `ADMIN_ALLOW_IPS` в `web/.env`, затем `… compose.sh web up -d caddy`.
 
 ## Индексация в поисковиках

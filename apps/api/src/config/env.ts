@@ -101,13 +101,6 @@ export const EnvSchema = z.object({
   // «услуга (раз)» in the tax committee's unit list (checked 10.11, security review №41).
   PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501338'),
   PAYME_FISCAL_VAT_PERCENT: z.coerce.number().default(0),
-  CLICK_SERVICE_ID: z.string().optional(),
-  CLICK_MERCHANT_ID: z.string().optional(),
-  CLICK_MERCHANT_USER_ID: z.string().optional(),
-  CLICK_SECRET_KEY: z.string().optional(),
-  CLICK_API_URL: z.string().url().default('https://api.click.uz/v2/merchant'),
-  CLICK_PAY_URL: z.string().url().default('https://my.click.uz/services/pay'),
-  CLICK_ALLOWED_IPS: csv,
   /** Seats are held this long for an unpaid checkout (security review 10.11 №12: an hour, not a day). */
   PAYMENT_EXPIRES_HOURS: z.coerce.number().int().positive().default(1),
 
@@ -129,6 +122,8 @@ export const EnvSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   RATE_LIMIT_DEFAULT_PER_MINUTE: z.coerce.number().int().positive().default(240),
   RATE_LIMIT_AUTH_PER_MINUTE: z.coerce.number().int().positive().default(6),
+  /** Session refreshes per minute from one address, all sessions together (a classroom on one Wi-Fi), №19. */
+  RATE_LIMIT_REFRESH_PER_IP_MINUTE: z.coerce.number().int().positive().default(600),
   /** Password sign-in: after this many failures for one login the login is locked for LOGIN_LOCK_SECONDS. */
   LOGIN_MAX_FAILURES: z.coerce.number().int().positive().default(10),
   LOGIN_LOCK_SECONDS: z.coerce.number().int().positive().default(900),
@@ -159,12 +154,10 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
     if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
     if (env.PAYME_SANDBOX_PAYMENT_IDS.length) console.warn(`PAYME_SANDBOX_PAYMENT_IDS is set: the Payme test key is accepted for ${env.PAYME_SANDBOX_PAYMENT_IDS.length} test order(s). Clear it once Payme's tests pass.`)
-    if (clickConfigured(env) && env.CLICK_ALLOWED_IPS.length === 0) console.warn('CLICK_ALLOWED_IPS is empty: Click callbacks are accepted from any address (the signature is still checked)')
   }
   return env
 }
 
 export const isProd = (env: Env) => env.NODE_ENV === 'production'
 export const paymeConfigured = (env: Env) => !!(env.PAYME_MERCHANT_ID && (env.PAYME_KEY || env.PAYME_TEST_KEY))
-export const clickConfigured = (env: Env) => !!(env.CLICK_SERVICE_ID && env.CLICK_MERCHANT_ID && env.CLICK_SECRET_KEY)
 export const s3Configured = (env: Env) => !!(env.S3_ENDPOINT && env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY)

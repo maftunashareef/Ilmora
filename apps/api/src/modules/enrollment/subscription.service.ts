@@ -2,7 +2,7 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import { dueReminder, finalPriceMinor, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, subscriptionAccess, type SubscriptionAccess } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addMonthsInZone } from '../../common/time'
-import { clickConfigured, ENV, type Env, paymeConfigured } from '../../config/env'
+import { ENV, type Env, paymeConfigured } from '../../config/env'
 import type { PaymentProvider, SubscriptionStatus } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
@@ -198,7 +198,7 @@ export class SubscriptionService {
     const free = data.amountMinor === 0n
     // A provider that is not connected could never confirm the payment: refuse before any seat is held (Н12). The
     // transaction is rolled back, the holds with it.
-    if (!free && !(data.provider === 'PAYME' ? paymeConfigured(this.env) : data.provider === 'CLICK' ? clickConfigured(this.env) : true)) {
+    if (!free && !(data.provider === 'PAYME' && paymeConfigured(this.env))) {
       throw new AppError('payment_unavailable', 'This payment method is not connected yet', HttpStatus.SERVICE_UNAVAILABLE)
     }
     const payment = await tx.payment.create({ data: free ? { ...data, provider: null, state: 'PAID', paidAt: now } : data })

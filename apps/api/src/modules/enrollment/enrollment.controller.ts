@@ -16,7 +16,8 @@ class DraftDto {
   @IsBoolean() meyosGrant!: boolean
 }
 class CheckoutDto {
-  @IsIn(['PAYME', 'CLICK']) provider!: 'PAYME' | 'CLICK'
+  // Payme only: Click was removed (decision 10.11).
+  @IsIn(['PAYME']) provider!: 'PAYME'
   @IsOptional() @IsIn(['uz', 'ru', 'en']) lang?: 'uz' | 'ru' | 'en'
 }
 class CancelDto {

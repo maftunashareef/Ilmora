@@ -54,7 +54,7 @@ async function bootstrap() {
     }),
   )
   app.setGlobalPrefix(env.API_GLOBAL_PREFIX, {
-    exclude: ['health', 'health/live', 'health/ready', 'payments/payme', 'payments/click/prepare', 'payments/click/complete'],
+    exclude: ['health', 'health/live', 'health/ready', 'payments/payme'],
   })
   app.enableShutdownHooks()
 

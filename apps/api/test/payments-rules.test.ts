@@ -1,63 +1,13 @@
-import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaService, TransactionClient } from '../src/infra/prisma/prisma.service'
 import type { AuditService } from '../src/modules/audit/audit.service'
 import type { SubscriptionService } from '../src/modules/enrollment/subscription.service'
-import { ClickService } from '../src/modules/payments/click/click.service'
 import { LedgerService } from '../src/modules/payments/ledger.service'
 import type { OutboxService } from '../src/modules/payments/outbox.service'
 import { PaymentsService } from '../src/modules/payments/payments.service'
 import { ReconciliationService } from '../src/modules/payments/reconciliation.service'
 import { testEnv } from './helpers'
 
-const md5 = (s: string) => createHash('md5').update(s).digest('hex')
-const txOf = (stub: object) => vi.fn(async (fn: (t: TransactionClient) => Promise<unknown>) => fn(stub as unknown as TransactionClient))
-
-describe('Click callbacks for an invoice that can no longer be fulfilled', () => {
-  const env = testEnv({ CLICK_SERVICE_ID: '77', CLICK_MERCHANT_ID: '1', CLICK_SECRET_KEY: 'click-secret' })
-  const signTime = '2026-11-06 12:00:00'
-
-  function setup(paymentState: 'PENDING' | 'PAID' | 'CANCELLED', blocker: 'payment_not_pending' | 'subscription_closed' | null) {
-    const row = { id: 'ptx-1', seq: 7, tenantId: 't', paymentId: 'pay-1', provider: 'CLICK', providerTransactionId: '555', state: 'CREATED', amountMinor: 100n, currency: 'UZS' }
-    const payment = { id: 'pay-1', tenantId: 't', subscriptionId: 'sub-1', state: paymentState, amountMinor: 100n, currency: 'UZS', expiresAt: new Date(Date.now() + 3_600_000) }
-    const tx = {
-      paymentTransaction: { findUnique: vi.fn(async () => row), findFirst: vi.fn(async () => row), update: vi.fn(async () => row), create: vi.fn() },
-      payment: { findFirst: vi.fn(async () => payment) },
-      outboxEvent: { upsert: vi.fn(async () => ({})) },
-    }
-    const payments = { lockPayment: vi.fn(async () => payment), settleBlocker: vi.fn(async () => blocker), settle: vi.fn(async () => ({ applied: true, paidAt: new Date() })), cancelPending: vi.fn(async () => true) }
-    const click = new ClickService({ tx: txOf(tx) } as unknown as PrismaService, payments as unknown as PaymentsService, env)
-    const base = { click_trans_id: '555', service_id: '77', merchant_trans_id: 'pay-1', amount: '1.00', sign_time: signTime }
-    const complete = { ...base, action: '1', merchant_prepare_id: '7', error: '0', sign_string: md5(`555${'77'}click-secret${'pay-1'}${'7'}1.00${'1'}${signTime}`) }
-    const prepare = { ...base, action: '0', sign_string: md5(`555${'77'}click-secret${'pay-1'}1.00${'0'}${signTime}`) }
-    return { click, tx, payments, complete, prepare }
-  }
-
-  it('complete does not settle an invoice paid through the other provider: success per Click rules plus a refund for finance', async () => {
-    const { click, tx, payments, complete } = setup('PAID', 'payment_not_pending')
-    expect(await click.complete(complete)).toMatchObject({ error: 0, merchant_confirm_id: 7 })
-    expect(payments.settle).not.toHaveBeenCalled()
-    expect(tx.outboxEvent.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({ type: 'payment.refund_required', payload: expect.objectContaining({ paymentId: 'pay-1', reason: 'payment_not_pending', paymentState: 'PAID' }) }),
-    }))
-  })
-
-  it('complete settles a pending invoice once', async () => {
-    const { click, tx, payments, complete } = setup('PENDING', null)
-    expect(await click.complete(complete)).toMatchObject({ error: 0, merchant_confirm_id: 7 })
-    expect(payments.settle).toHaveBeenCalledTimes(1)
-    expect(tx.outboxEvent.upsert).not.toHaveBeenCalled()
-  })
-
-  it('prepare refuses an invoice that is already paid, and one whose subscription is closed', async () => {
-    const paid = setup('PAID', 'payment_not_pending')
-    expect((await paid.click.prepare(paid.prepare)).error).toBe(-4)
-    const closed = setup('PENDING', 'subscription_closed')
-    expect((await closed.click.prepare(closed.prepare)).error).toBe(-9)
-    expect(paid.tx.paymentTransaction.create).not.toHaveBeenCalled()
-    expect(closed.tx.paymentTransaction.create).not.toHaveBeenCalled()
-  })
-})
 
 describe('reconciliation files reversal journals under the payment they reverse', () => {
   function setup(journals: { id: string; referenceId: string; kind: string; reversalOf: { referenceId: string } | null }[]) {
@@ -67,7 +17,7 @@ describe('reconciliation files reversal journals under the payment they reverse'
     }
     const ledgerJournal = { findMany: vi.fn(async (_args: unknown) => journals.map((j) => ({ ...j, createdAt: new Date() }))) }
     const prisma = { client: { paymentTransaction: { findMany: vi.fn(async () => [row]), count: vi.fn(async () => 1) }, ledgerJournal } }
-    return { service: new ReconciliationService(prisma as unknown as PrismaService, {} as ClickService), ledgerJournal }
+    return { service: new ReconciliationService(prisma as unknown as PrismaService), ledgerJournal }
   }
 
   it('a refunded Payme payment whose reversal is posted reconciles clean', async () => {

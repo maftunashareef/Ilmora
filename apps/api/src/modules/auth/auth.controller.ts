@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Inject, Patch, Post, Req, Res } from '@nestjs/common'
 import type { Request, Response } from 'express'
-import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
+import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, SessionThrottle, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -104,7 +104,7 @@ export class AuthController {
 
   /** Cookie-based: requires the custom header (browsers only add it from same-origin JavaScript) and an allowed Origin. */
   @Public()
-  @AuthThrottle(30)
+  @SessionThrottle(30)
   @Post('refresh')
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Headers('x-requested-with') requestedWith: string | undefined, @ClientInfo() ci: ClientInfoValue) {
     this.assertSameSite(req, requestedWith)
