@@ -212,7 +212,10 @@ sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate
 
 ## Обычная работа
 
-- **Релиз:** Actions → «Release (UzCloud)» → Run workflow. Сначала admin (миграции), потом web.
+- **Релиз:** Actions → «Release (UzCloud)» → Run workflow. Сначала admin (миграции), потом web. Если шаг упал с
+  `Timeout, server not responding` или `Connection closed`, машина перезагрузилась или пропала из сети во время релиза:
+  проверить `uptime` и `… compose.sh … ps` на ней и запустить релиз заново (повторный запуск безопасен: копия базы,
+  миграции и выкатка повторяются).
 - **Состояние и журналы:**
   ```bash
   sh /opt/ilmora/infra/uzcloud/compose.sh web ps
