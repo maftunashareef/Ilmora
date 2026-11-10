@@ -135,7 +135,8 @@ export class RegistryService {
           // The ministry's list, the approved ones and the student-added (marked so); not a self-registered name nobody approved (security review №45).
           { OR: [{ source: { in: ['IMPORT', 'STUDENT'] } }, { approvedAt: { not: null } }] },
         ],
-        mergedIntoId: null, ...(q.type ? { type: q.type } : {}), ...(regionId ? { regionId } : {}),
+        // A record the Super Admin blocked is not offered either.
+        mergedIntoId: null, blockedAt: null, ...(q.type ? { type: q.type } : {}), ...(regionId ? { regionId } : {}),
       },
       select: INSTITUTION_PUBLIC,
       orderBy: { name: 'asc' },

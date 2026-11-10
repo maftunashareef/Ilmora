@@ -104,6 +104,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   // Super Admin: reference data
   industry_exists: 'apiError.industryExists',
   stir_locked: 'apiError.stirLocked',
+  already_blocked: 'apiError.alreadyBlocked',
+  not_blocked: 'apiError.notBlocked',
   not_claimed: 'apiError.notClaimed',
   direction_exists: 'apiError.directionExists',
   invalid_merge: 'apiError.invalidMerge',

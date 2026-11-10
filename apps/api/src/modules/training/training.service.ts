@@ -99,7 +99,7 @@ export class TrainingService {
     // ТЗ 5.2 step 2: approved institutions with a direction of this industry (and in this region, when one is set).
     await this.notifications.safely('training.request', async () => {
       const recipients = await this.prisma.client.user.findMany({
-        where: { isActive: true, institution: { is: { approvedAt: { not: null }, mergedIntoId: null, ...(regionId ? { regionId } : {}), directions: { some: { direction: inIndustries([main.industryId]) } } } } },
+        where: { isActive: true, institution: { is: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null, ...(regionId ? { regionId } : {}), directions: { some: { direction: inIndustries([main.industryId]) } } } } },
         select: { id: true },
       })
       await this.notifications.notify({ tenantId, userIds: recipients.map((u) => u.id), type: 'training.request', params: { companyName: company.name, directionName: main.name, count: input.count, byYear: input.byYear, requestId: row.id }, dedupeKey: `training-request:${row.id}` })
@@ -230,7 +230,7 @@ export class TrainingService {
   private visibleTo(inst: { regionId: string | null }, industries: string[]): Prisma.TrainingRequestWhereInput {
     return {
       status: 'OPEN',
-      company: { approvedAt: { not: null } },
+      company: { approvedAt: { not: null }, blockedAt: null },
       direction: inIndustries(industries),
       OR: [{ regionId: null }, ...(inst.regionId ? [{ regionId: inst.regionId }] : [])],
     }

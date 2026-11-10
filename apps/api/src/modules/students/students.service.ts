@@ -220,7 +220,7 @@ export class StudentsService {
   private async confirmationFor(studying: boolean, institutionId: string | null, before: { institutionId: string | null; studyConfirmation: string; mode: string } | null, confirmedChanged: boolean) {
     if (!studying || !institutionId) return { studyConfirmation: 'NONE' as const, studyConfirmedAt: null, studyConfirmedById: null }
     if (before && before.mode === 'STUDYING' && before.institutionId === institutionId && before.studyConfirmation !== 'NONE' && !confirmedChanged) return {}
-    const approved = await this.prisma.client.institution.findFirst({ where: { id: institutionId, approvedAt: { not: null } }, select: { id: true } })
+    const approved = await this.prisma.client.institution.findFirst({ where: { id: institutionId, approvedAt: { not: null }, blockedAt: null }, select: { id: true } })
     return { studyConfirmation: approved ? ('PENDING' as const) : ('NONE' as const), studyConfirmedAt: null, studyConfirmedById: null }
   }
 

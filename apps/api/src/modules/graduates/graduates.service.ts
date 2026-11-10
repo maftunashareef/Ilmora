@@ -152,7 +152,7 @@ export class GraduatesService {
     const company = await this.ownCompany(actor)
     if (!company.industries.length) return []
     const rows = await this.prisma.client.graduationAnnouncement.findMany({
-      where: { status: 'PUBLISHED', institution: { approvedAt: { not: null }, mergedIntoId: null }, ...(q.year ? { year: q.year } : {}), lines: { some: { direction: this.ofIndustries(company.industries) } } },
+      where: { status: 'PUBLISHED', institution: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null }, ...(q.year ? { year: q.year } : {}), lines: { some: { direction: this.ofIndustries(company.industries) } } },
       orderBy: { publishedAt: 'desc' }, take: 200, select: { id: true },
     })
     return Promise.all(rows.map((r) => this.companyAnnouncement(company, r.id, false)))
@@ -202,7 +202,7 @@ export class GraduatesService {
 
   private async companyAnnouncement(company: { id: string; industries: string[] }, id: string, withGraduates: boolean): Promise<CompanyAnnouncementDto> {
     const ann = await this.prisma.client.graduationAnnouncement.findFirst({
-      where: { id, status: 'PUBLISHED', institution: { approvedAt: { not: null }, mergedIntoId: null } },
+      where: { id, status: 'PUBLISHED', institution: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null } },
       select: { id: true, year: true, publishedAt: true, institutionId: true, institution: { select: { id: true, name: true, type: true, region: { select: { id: true, name: true } }, phone: true, email: true, website: true, address: true, representative: REP } }, lines: { select: LINE_SELECT } },
     })
     const lines = ann ? ann.lines.filter((l) => company.industries.includes(industryOf(l))) : []
@@ -283,7 +283,7 @@ export class GraduatesService {
     await this.notifications.safely('announcement.published', async () => {
       const ann = await this.prisma.client.graduationAnnouncement.findFirstOrThrow({ where: { id }, select: { year: true, lines: { select: LINE_SELECT } } })
       const industries = [...new Set(ann.lines.map(industryOf))]
-      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, industries: { some: { industryId: { in: industries } } } } } }, select: { id: true } })
+      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, blockedAt: null, industries: { some: { industryId: { in: industries } } } } } }, select: { id: true } })
       await this.notifications.notify({ tenantId, userIds: recipients.map((u) => u.id), type: 'announcement.published', params: { institutionName: inst.name, year: ann.year, announcementId: id }, dedupeKey: `announcement:${id}` })
     })
   }

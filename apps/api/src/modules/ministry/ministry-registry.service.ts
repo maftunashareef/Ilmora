@@ -37,7 +37,7 @@ export class MinistryRegistryService {
     // ТЗ 7.2: from the list but not registered / under review / approved / rejected / added by students.
     if (q.status === 'unclaimed') Object.assign(where, { status: 'UNCLAIMED', source: 'IMPORT' })
     if (q.status === 'pending') Object.assign(where, { status: 'PENDING', source: { not: 'STUDENT' } })
-    if (q.status === 'approved') Object.assign(where, { approvedAt: { not: null }, source: { not: 'STUDENT' } })
+    if (q.status === 'approved') Object.assign(where, { approvedAt: { not: null }, blockedAt: null, source: { not: 'STUDENT' } })
     if (q.status === 'rejected') Object.assign(where, { status: 'REJECTED', source: { not: 'STUDENT' } })
     if (q.status === 'student') where.source = 'STUDENT'
     const page = q.page ?? 1

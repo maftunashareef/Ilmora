@@ -18,9 +18,11 @@ export const APPROVED_KEY = 'ilmora:approved'
 export const Approved = (kind: OrgKind) => SetMetadata(APPROVED_KEY, kind)
 
 /**
- * Runs after AuthGuard and RolesGuard. The workspace is open once the organization the account represents was approved
- * (`approvedAt` set): an approved institution that edits its name goes back to PENDING and keeps working
- * (docs/registry/data-model.md). The organization is found by its representative in the database — not by the token —
+ * Runs after AuthGuard and RolesGuard. A record the Super Admin blocked (`blockedAt`) answers 403 `not_approved` as
+ * well — its workspace is closed whatever its review status.
+ * The workspace is open once the organization the account represents was approved
+ * (`approvedAt` set): an approved institution whose change of the name waits for review (`pendingChanges`) keeps
+ * working (docs/registry/data-model.md). The organization is found by its representative in the database — not by the token —
  * so a fresh claim works at once and a withdrawn approval or representative takes effect at once.
  * The Super Admin gets no bypass: approved-only routes act on one's own organization.
  */
@@ -39,7 +41,7 @@ export class ApprovedGuard implements CanActivate {
   }
 
   private async isApproved(kind: OrgKind, userId: string): Promise<boolean> {
-    const where = { representative: { is: { id: userId } }, approvedAt: { not: null } }
+    const where = { representative: { is: { id: userId } }, approvedAt: { not: null }, blockedAt: null }
     const row = kind === 'institution'
       ? await this.prisma.client.institution.findFirst({ where: { ...where, mergedIntoId: null }, select: { id: true } })
       : await this.prisma.client.company.findFirst({ where, select: { id: true } })

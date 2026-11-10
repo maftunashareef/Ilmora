@@ -106,7 +106,7 @@ export class ContractHelpService {
     await this.audit.record({ action: 'contract-help.create', entityType: 'ContractHelpRequest', entityId: id, after: { yearsToWork: input.yearsToWork, workRegion: input.workRegion } })
     const main = mainOf(profile.direction!)
     await this.notifications.safely('contractHelp.new', async () => {
-      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, industries: { some: { industryId: main.industry.id } } } } }, select: { id: true } })
+      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, blockedAt: null, industries: { some: { industryId: main.industry.id } } } } }, select: { id: true } })
       await this.notifications.notify({ tenantId, userIds: recipients.map((u) => u.id), type: 'contractHelp.new', params: { directionName: main.name, requestId: id }, dedupeKey: `contract-help:${id}` })
     })
     return this.ownDto(actor, id)

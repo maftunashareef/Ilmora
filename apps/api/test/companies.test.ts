@@ -240,10 +240,21 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       expect(detail.history.map((h) => h.action)).toEqual(['company.create', 'company.submit', 'company.approve'])
       expect(await ctx.prisma.client.auditEvent.count({ where: { action: 'company.certificate.download', entityId: item.id } })).toBe(1)
 
-      // After approval a new name — or a new certificate — goes back to review; the workspace stays open.
-      expect(await service.update(s.tenantId, rep, { about: 'Mebel işlab çiqariş' })).toMatchObject({ status: 'APPROVED' })
-      expect(await service.update(s.tenantId, rep, { name: 'Mebel Plus Group' })).toMatchObject({ status: 'PENDING', workspaceOpen: true })
-      await review.approve(s.tenantId, s.admin, item.id)
+      // After approval a new name or new industries wait for review; the record keeps the approved ones (security review №13, №46).
+      expect(await service.update(s.tenantId, rep, { about: 'Mebel işlab çiqariş' })).toMatchObject({ status: 'APPROVED', pendingChanges: null })
+      const changed = await service.update(s.tenantId, rep, { name: 'Mebel Plus Group', industryIds: [s.furniture.id, s.it.id] })
+      expect(changed).toMatchObject({ status: 'APPROVED', workspaceOpen: true, name: 'Mebel Plus', industries: [expect.objectContaining({ id: s.furniture.id })], pendingChanges: { name: 'Mebel Plus Group', industryIds: [s.furniture.id, s.it.id].sort() } })
+      expect(changed.industries).toHaveLength(1)
+      expect((await review.queue())[0]).toMatchObject({ id: item.id, reReview: true, pendingChanges: { name: 'Mebel Plus Group' } })
+      const approved = await review.approve(s.tenantId, s.admin, item.id)
+      expect(approved).toMatchObject({ name: 'Mebel Plus Group', status: 'APPROVED', pendingChanges: null })
+      expect(approved.industries.map((i) => i.id).sort()).toEqual([s.furniture.id, s.it.id].sort())
+      // Blocked: the workspace closes (guard by database), the status stays.
+      expect(await review.setBlocked(s.tenantId, s.admin, item.id, true, 'Fake company')).toMatchObject({ status: 'APPROVED', workspaceOpen: false })
+      await expect(guard.canActivate(ctxFor)).rejects.toMatchObject({ code: 'not_approved' })
+      await review.setBlocked(s.tenantId, s.admin, item.id, false)
+      await expect(guard.canActivate(ctxFor)).resolves.toBe(true)
+      // A new certificate goes back to the first-review path; the workspace stays open.
       expect((await s.upload(rep, PNG, 'image/png')).profile).toMatchObject({ status: 'PENDING', workspaceOpen: true })
     })
   })

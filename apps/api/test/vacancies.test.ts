@@ -152,6 +152,10 @@ describe.skipIf(!DB_AVAILABLE)('Practice and internships (ТЗ 5.4)', () => {
       const one = await service.get(me, python.id)
       expect(one).toMatchObject({ company: { name: 'Soft Co', industries: [expect.objectContaining({ slug: 'it' })] }, myApplication: null, requirements: 'Python asoslari' })
       for (const id of [closed.id, pending.id, late.id]) await expect(service.get(me, id)).rejects.toMatchObject({ code: 'not_found' })
+      // A blocked company's vacancies leave the list.
+      await ctx.prisma.client.company.update({ where: { id: s.softCo.row.id }, data: { blockedAt: new Date() } })
+      expect((await service.list(me, {})).map((v) => v.id)).toEqual([remote.id])
+      await ctx.prisma.client.company.update({ where: { id: s.softCo.row.id }, data: { blockedAt: null } })
     })
   })
 
@@ -203,6 +207,9 @@ describe.skipIf(!DB_AVAILABLE)('Practice and internships (ТЗ 5.4)', () => {
       expect(await service.myApplications(me)).toHaveLength(1)
       await expect(service.apply(s.tenantId, await s.student(), v.id, { consent: true })).rejects.toMatchObject({ code: 'not_found' })
 
+      // The contacts as they were when applying (security review №15).
+      await ctx.prisma.client.user.update({ where: { id: me.id }, data: { email: 'later@mail.uz' } })
+      expect((await service.application(s.tenantId, s.softCo.actor, app.id)).student).toMatchObject({ name: 'Aziz Karimov', email: 'aziz@mail.uz', phone: '+998935554433' })
       // A certificate added after applying is not shared; «Отозвать отклик» closes the card (security review №15).
       const later = await ctx.prisma.client.studentCertificate.create({ data: { tenantId: s.tenantId, userId: me.id, title: 'Yangi', fileKey: `student-certs/${s.tenantId}/${me.id}/2.pdf`, contentType: 'application/pdf', sizeBytes: 100, createdAt: new Date(Date.now() + 1000) } })
       expect((await service.application(s.tenantId, s.softCo.actor, app.id)).student.certificates.map((c) => c.title)).toEqual(['IELTS 7.0'])

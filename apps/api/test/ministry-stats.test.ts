@@ -137,6 +137,10 @@ describe.skipIf(!DB_AVAILABLE)('Ministry figures match a hand-counted data set (
       const { tables } = await stats.all({ year: Y })
       expect(table(tables, 'graduates_by_year').rows.map((r) => [r.year, (r.industry as { ru: string }).ru, r.graduates])).toEqual([[Y, 'IT и связь', 40], [Y, 'Мебель и деревообработка', 10]])
       expect(row(table(tables, 'demand_supply'), 'industry', 'IT и связь')).toMatchObject({ companies: 1, graduates: 40 })
+      // Blocked by the Super Admin: out of the official figures, whatever its status.
+      await ctx.prisma.client.institution.update({ where: { id: s.A.id }, data: { blockedAt: new Date() } })
+      const after = (await stats.all({ year: Y })).tables
+      expect(row(table(after, 'demand_supply'), 'industry', 'IT и связь')).toMatchObject({ students: 30, graduates: 0 })
     })
   })
 

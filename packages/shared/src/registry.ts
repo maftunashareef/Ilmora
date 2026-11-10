@@ -243,6 +243,30 @@ export interface InstitutionPassportDto {
   /** «Всего студентов» and «Всего направлений» are computed, not typed in. */
   totals: { students: number; directions: number }
   representative: { name: string; jobTitle: string | null }
+  /**
+   * A change of the reviewed fields after approval, waiting for the Super Admin (security review №13): the fields above
+   * keep the approved values meanwhile. Null — nothing waiting.
+   */
+  pendingChanges: InstitutionPendingChanges | null
+  /** Blocked by the Super Admin: the workspace is closed. */
+  blocked: { at: string; reason: string | null } | null
+}
+
+/** The reviewed fields an approved institution changed, as they wait for the Super Admin. */
+export interface InstitutionPendingChanges {
+  name?: string
+  stir?: string
+  type?: RegistryInstitutionType
+  ownership?: RegistryOwnership
+  regionId?: string
+  districtId?: string | null
+}
+
+/** The reviewed fields an approved company changed (industries included — security review №46). */
+export interface CompanyPendingChanges {
+  name?: string
+  stir?: string
+  industryIds?: string[]
 }
 
 export interface InstitutionClaimResult {
@@ -269,6 +293,8 @@ export interface InstitutionReviewItemDto {
   inRegistry: boolean
   /** The name in the ministry's list, to set against the name the representative entered (null — not from the list). */
   officialName: string | null
+  /** A change of an approved institution waiting for a decision: the new values (the record keeps the approved ones). */
+  pendingChanges: InstitutionPendingChanges | null
   representative: { name: string; jobTitle: string | null; login: string | null } | null
 }
 
@@ -367,6 +393,9 @@ export interface CompanyProfileDto {
   /** False only while the first review is pending. */
   editable: boolean
   representative: { name: string; jobTitle: string | null; email: string | null }
+  /** A change of the name, STIR or industries after approval, waiting for the Super Admin; the fields above stay approved. */
+  pendingChanges: CompanyPendingChanges | null
+  blocked: { at: string; reason: string | null } | null
 }
 
 /** Answer to «Загрузить свидетельство»: PUT the file to `uploadUrl` with this content type, then confirm `key`. */
@@ -392,6 +421,8 @@ export interface CompanyReviewItemDto {
   submittedAt: string | null
   reReview: boolean
   certificateUploaded: boolean
+  /** A change of an approved company waiting for a decision (name, STIR, industries). */
+  pendingChanges: CompanyPendingChanges | null
   representative: { name: string; jobTitle: string | null; login: string | null; email: string | null } | null
 }
 

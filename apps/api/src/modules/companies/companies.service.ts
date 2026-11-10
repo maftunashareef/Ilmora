@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
-import { COMPANY_REVIEW_FIELDS, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey } from '@ilmora/shared'
+import { COMPANY_REVIEW_FIELDS, type CompanyPendingChanges, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
-import type { Prisma } from '../../generated/prisma/client'
+import { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -13,6 +13,7 @@ import type { CertificateConfirmInput, CertificateUploadInput, CompanyCreateInpu
 export const PROFILE_SELECT = {
   id: true, stir: true, name: true, address: true, website: true, about: true, certificateFileKey: true,
   status: true, rejectReason: true, submittedAt: true, approvedAt: true, regionId: true, districtId: true,
+  pendingChanges: true, blockedAt: true, blockReason: true,
   region: { select: { id: true, slug: true, name: true } },
   district: { select: { id: true, name: true } },
   industries: { select: { industry: { select: { ...INDUSTRY_SELECT, sortOrder: true } } } },
@@ -23,6 +24,7 @@ export const PROFILE_SELECT = {
 type ProfileRow = Prisma.CompanyGetPayload<{ select: typeof PROFILE_SELECT }>
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
+const sortKeys = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))
 const isLocked = (r: { status: string; approvedAt: Date | null }) => r.status === 'PENDING' && !r.approvedAt
 const certPrefix = (tenantId: string, companyId: string) => `company-certs/${tenantId}/${companyId}/`
 
@@ -37,9 +39,11 @@ export function toProfile(r: ProfileRow): CompanyProfileDto {
     directions,
     certificateUploaded: r.certificateFileKey !== null,
     status: r.status, rejectReason: r.rejectReason, submittedAt: iso(r.submittedAt), approvedAt: iso(r.approvedAt),
-    workspaceOpen: r.approvedAt !== null,
+    workspaceOpen: r.approvedAt !== null && r.blockedAt === null,
     editable: !isLocked(r),
     representative: { name: r.representative?.displayName ?? '', jobTitle: r.representative?.jobTitle ?? null, email: r.representative?.email ?? null },
+    pendingChanges: (r.pendingChanges as CompanyPendingChanges | null) ?? null,
+    blocked: r.blockedAt ? { at: r.blockedAt.toISOString(), reason: r.blockReason } : null,
   }
 }
 
@@ -83,7 +87,7 @@ export class CompaniesService {
           if (holder) throw registered()
           await tx.companyIndustry.deleteMany({ where: { companyId: existing.id } })
           await tx.companyDirection.deleteMany({ where: { companyId: existing.id } })
-          await tx.company.update({ where: { id: existing.id }, data: { name: input.name, searchKey: registrySearchKey(input.name), status: 'DRAFT', approvedAt: null, submittedAt: null, reviewedAt: null, rejectReason: null, certificateFileKey: null, about: null, website: null, address: null } })
+          await tx.company.update({ where: { id: existing.id }, data: { name: input.name, searchKey: registrySearchKey(input.name), status: 'DRAFT', approvedAt: null, submittedAt: null, reviewedAt: null, rejectReason: null, certificateFileKey: null, about: null, website: null, address: null, pendingChanges: Prisma.DbNull } })
           await tx.user.update({ where: { id: actor.id }, data: { companyId: existing.id } })
           return existing.id
         }
@@ -117,7 +121,7 @@ export class CompaniesService {
     if (!row.representative) throw AppError.conflict('not_claimed', 'Nobody represents this company')
     await this.prisma.client.$transaction(async (tx) => {
       await tx.user.update({ where: { id: row.representative!.id }, data: { companyId: null } })
-      await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null } })
+      await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull } })
     })
     await this.audit.record({ action: 'company.release', entityType: 'Company', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, reason })
     await this.notifications.safely('registry.released', () =>
@@ -130,8 +134,9 @@ export class CompaniesService {
   }
 
   /**
-   * Saves the profile in parts. Locked while the first review is pending. After approval a change of the STIR or the
-   * name sends the profile back to review (the workspace keeps working); the rest changes at once. Audited.
+   * Saves the profile in parts. Locked while the first review is pending. After approval a change of the STIR, the
+   * name or the industries waits in `pendingChanges` for the Super Admin (the workspace keeps working with the approved
+   * ones); the rest changes at once. Audited.
    */
   async update(tenantId: string, actor: RequestActor, input: CompanyPatch): Promise<CompanyProfileDto> {
     const id = await this.ownId(actor)
@@ -145,13 +150,41 @@ export class CompaniesService {
     if (input.website !== undefined) data.website = input.website || null
     if (input.about !== undefined) data.about = input.about || null
     if (input.regionId !== undefined || input.districtId !== undefined) Object.assign(data, await this.place(current, input))
-    const industryIds = input.industryIds !== undefined ? await this.checkedIndustries(input.industryIds) : undefined
+    let industryIds = input.industryIds !== undefined ? await this.checkedIndustries(input.industryIds) : undefined
     const directionIds = input.directionIds !== undefined ? await this.mainDirections(input.directionIds) : undefined
 
-    const changed = Object.keys(data).filter((k) => k !== 'searchKey' && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
-    const backToReview = current.approvedAt !== null && current.status !== 'PENDING' && COMPANY_REVIEW_FIELDS.some((f) => changed.includes(f))
+    // After approval the name, the STIR and the industries wait for the Super Admin in `pendingChanges`; the approved
+    // ones stay live — a company cannot open other industries' announcements by itself (security review №13, №46).
     const now = new Date()
-    if (backToReview) Object.assign(data, { status: 'PENDING', submittedAt: now, rejectReason: null })
+    let backToReview = false
+    let pending: Record<string, unknown> | null = null
+    if (current.approvedAt !== null) {
+      const was = (current.pendingChanges ?? {}) as Record<string, unknown>
+      const next: Record<string, unknown> = { ...was }
+      const d = data as Record<string, unknown>
+      for (const f of COMPANY_REVIEW_FIELDS) {
+        if (!(f in d)) continue
+        if (d[f] === (current as Record<string, unknown>)[f]) delete next[f]
+        else next[f] = d[f]
+        delete d[f]
+      }
+      if (!('name' in d)) delete d.searchKey
+      if (industryIds) {
+        const live = current.industries.map((i) => i.industry.id).sort()
+        if (JSON.stringify([...industryIds].sort()) === JSON.stringify(live)) delete next.industryIds
+        else next.industryIds = [...industryIds].sort()
+        industryIds = undefined
+      }
+      if (typeof next.stir === 'string' && next.stir !== was.stir && (await this.prisma.client.company.findFirst({ where: { stir: next.stir, id: { not: id } }, select: { id: true } }))) {
+        throw AppError.conflict('stir_taken', 'Another company is registered with this STIR')
+      }
+      backToReview = JSON.stringify(sortKeys(next)) !== JSON.stringify(sortKeys(was))
+      if (backToReview) {
+        pending = Object.keys(next).length ? next : null
+        Object.assign(data, { pendingChanges: pending ?? Prisma.DbNull, ...(pending ? { submittedAt: now, rejectReason: null } : {}) })
+      }
+    }
+    const changed = Object.keys(data).filter((k) => !['searchKey', 'pendingChanges', 'submittedAt', 'rejectReason'].includes(k) && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
     const rep = input.representative ?? {}
     const repData = {
       ...(rep.name !== undefined ? { displayName: rep.name } : {}),
@@ -178,14 +211,14 @@ export class CompaniesService {
     }
 
     const pick = (o: object, keys: string[]) => Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k]]))
-    if (changed.length || industryIds || directionIds || Object.keys(repData).length) {
+    if (changed.length || industryIds || directionIds || backToReview || Object.keys(repData).length) {
       await this.audit.record({
         action: backToReview ? 'company.update.review' : 'company.update', entityType: 'Company', entityId: id,
         before: { ...pick(current, changed), ...(industryIds ? { industryIds: current.industries.map((i) => i.industry.id) } : {}) },
-        after: { ...pick(data, changed), ...(industryIds ? { industryIds } : {}), ...(directionIds ? { directionIds } : {}), ...(Object.keys(repData).length ? { representative: repData } : {}) },
+        after: { ...pick(data, changed), ...(industryIds ? { industryIds } : {}), ...(directionIds ? { directionIds } : {}), ...(backToReview ? { pendingChanges: pending } : {}), ...(Object.keys(repData).length ? { representative: repData } : {}) },
       })
     }
-    if (backToReview) await this.notifyReviewers(tenantId, id, (data.name as string | undefined) ?? current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)
+    if (backToReview && pending) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)
     return this.profileOf(id)
   }
 
