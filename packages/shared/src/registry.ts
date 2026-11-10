@@ -561,3 +561,34 @@ export interface InstitutionStudentDto {
   graduationYear: number | null
   confirmation: StudyConfirmationStatus
 }
+
+// ───────────── Student certificates and «Курсы в ILMORA» (ТЗ 5.5) ─────────────
+
+/** At most 20 certificate files per student, each PDF / JPG / PNG up to 10 MB. */
+export const STUDENT_CERTIFICATES_MAX = 20
+
+/** A certificate the student uploaded. Its authenticity is not checked; the file is private (5-minute links). */
+export interface StudentCertificateDto {
+  id: string
+  title: string
+  issuer: string | null
+  /** YYYY-MM-DD */
+  issuedAt: string | null
+  contentType: string
+  sizeBytes: number
+  createdAt: string
+}
+
+/** A course of a learning center the student had a subscription to — a record, not a certificate (ILMORA issues none). */
+export interface IlmoraCourseDto {
+  courseId: string
+  title: L
+  center: string
+  group: string
+  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED'
+  enrolledAt: string
+  /** Lessons held while enrolled, attended (present) and the share in percent; null before the first lesson. */
+  lessonsHeld: number
+  lessonsAttended: number
+  attendancePercent: number | null
+}
