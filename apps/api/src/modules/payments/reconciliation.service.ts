@@ -1,20 +1,19 @@
 import { Injectable } from '@nestjs/common'
 import type { PaymentProvider } from '../../generated/prisma/enums'
 import { PrismaService } from '../../infra/prisma/prisma.service'
-import { ClickService } from './click/click.service'
 
 export interface ReconciliationFilter { provider?: PaymentProvider; from?: Date; to?: Date; status?: string; page?: number; pageSize?: number }
 
 /**
  * Two layers, reported separately:
  *  1. internal consistency — provider callback state vs. payment state vs. ledger posting (always available);
- *  2. provider verification — Click Merchant API `payment/status` where configured. Payme's Merchant API has no
- *     pull endpoint (GetStatement is Payme calling us), so Payme rows are marked "provider check unavailable".
+ *  2. provider verification — none: Payme's Merchant API has no pull endpoint (GetStatement is Payme calling us), so
+ *     rows are marked "provider check unavailable". (Click, the provider that had one, was removed on 10.11.)
  * Reconciliation never changes balances; discrepancies are surfaced for a human decision.
  */
 @Injectable()
 export class ReconciliationService {
-  constructor(private readonly prisma: PrismaService, private readonly click: ClickService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async list(tenantId: string, f: ReconciliationFilter) {
     const page = Math.max(1, f.page ?? 1)
@@ -84,14 +83,14 @@ export class ReconciliationService {
     return null
   }
 
-  /** Independent provider check for one transaction (Click only). Result is returned, never applied. */
+  /**
+   * Independent provider check for one transaction: not available — Payme has no status endpoint to ask. Kept so the
+   * finance screen's «Check» button keeps working; it answers the same for every row.
+   */
   async verifyWithProvider(tenantId: string, transactionId: string) {
     const row = await this.prisma.client.paymentTransaction.findFirst({ where: { tenantId, id: transactionId } })
     if (!row) return { available: false, reason: 'not_found' }
-    if (row.provider !== 'CLICK') return { available: false, reason: 'provider_check_unavailable', note: 'Payme Merchant API has no status pull endpoint; reconcile against the cabinet statement (GetStatement is served by this API).' }
-    const status = await this.click.fetchProviderStatus(row.providerTransactionId)
-    if (!status) return { available: false, reason: 'click_not_configured' }
-    return { available: true, provider: 'CLICK', providerTransactionId: row.providerTransactionId, providerResponse: status, internalState: row.state }
+    return { available: false, reason: 'provider_check_unavailable', note: 'Payme Merchant API has no status pull endpoint; reconcile against the cabinet statement (GetStatement is served by this API).' }
   }
 
   /** Simple balances per ledger account for the finance dashboard header. */

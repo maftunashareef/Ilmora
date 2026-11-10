@@ -20,7 +20,7 @@ Internet ──> ilmora-web (public IP)
 ```
 
 Only Caddy on ilmora-web publishes ports to the internet. The admin API (`/v1/admin/*`) answers only on the admin
-domain; Payme and Click call `/payments/*` on the public domain, outside the `/v1` prefix.
+domain; Payme calls `/payments/*` on the public domain, outside the `/v1` prefix.
 
 ### Availability statement
 
@@ -59,7 +59,7 @@ or write a forward migration that reverts the change.
 Measure with `docker image inspect <image> --format '{{.Size}}'` (uncompressed bytes). The Dockerfiles use
 `node:24-alpine`, prune dev dependencies and copy only `dist/` + production `node_modules`.
 
-## 5. Payme / Click
+## 5. Payme
 
-Contracts, keys, callback URLs and the sandbox: `docs/payments/onboarding-checklist.md`. Protocol references used by
-the adapters: `docs/payments/payme-merchant-api.md`, `docs/payments/click-shop-api.md`.
+Contracts, keys, callback URLs and the sandbox: `docs/payments/onboarding-checklist.md`. Protocol reference used by
+the adapter: `docs/payments/payme-merchant-api.md`. Click was removed on 10.11.2026.

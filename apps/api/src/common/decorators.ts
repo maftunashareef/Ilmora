@@ -53,6 +53,16 @@ export const AUTH_THROTTLE_KEY = 'ilmora:auth-throttle'
  */
 export const AuthThrottle = (limit: number, ttl = 60_000) => applyDecorators(SetMetadata(AUTH_THROTTLE_KEY, true), Throttle({ auth: { limit, ttl } }))
 
+export const SESSION_THROTTLE_KEY = 'ilmora:session-throttle'
+/**
+ * The session refresh (security review 10.11 №19): like @AuthThrottle(limit), but counted per refresh cookie, not per
+ * address — a classroom on one Wi-Fi renews many sessions at the start of a lesson. Per address only the wide
+ * `refreshIp` limit (RATE_LIMIT_REFRESH_PER_IP_MINUTE) applies, against someone trying values in bulk.
+ */
+export const SessionThrottle = (limit: number, ttl = 60_000) => applyDecorators(AuthThrottle(limit, ttl), SetMetadata(SESSION_THROTTLE_KEY, true))
+export const isSessionThrottled = (ctx: ExecutionContext): boolean =>
+  reflector.getAllAndOverride<boolean | undefined>(SESSION_THROTTLE_KEY, [ctx.getHandler(), ctx.getClass()]) === true
+
 /** True when the handler (or its controller) opted into the "auth" throttler via @AuthThrottle(). */
 const reflector = new Reflector()
 export const isAuthThrottled = (ctx: ExecutionContext): boolean =>

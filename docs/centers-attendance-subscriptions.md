@@ -56,7 +56,7 @@ Everything here is enforced on the server; the web app only reflects it.
   are used up (`lessons_exhausted`). Blocked students cannot check in and lose access to private course materials; their
   seats are kept for `SUBSCRIPTION_GRACE_DAYS` (default 7). After the grace period the subscription becomes `EXPIRED` and
   the enrollments are cancelled (seats released). The worker runs this every 10 minutes with the payment expiry job.
-- **Activation:** settlement of a payment (Payme, Click or a manual settlement) unblocks instantly: status `ACTIVE`,
+- **Activation:** settlement of a payment (Payme or a manual settlement) unblocks instantly: status `ACTIVE`,
   new period or a fresh lesson balance, reminders reset; the student is notified (`payment.confirmed`).
 - Reminders: `subscription.expiring` 3 days before the period ends (once per period), `subscription.lessonsLow` when 2
   lessons remain, `subscription.expired` on blocking, `subscription.ended` when the seats are released.

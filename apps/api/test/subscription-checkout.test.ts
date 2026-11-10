@@ -81,11 +81,11 @@ describe('checkout after a failed, cancelled or abandoned payment', () => {
 describe('free checkout', () => {
   it('records the payment as paid without a provider and activates the subscription on the spot', async () => {
     const { subscriptions, payments, calls } = setup({ priceMinor: 0n })
-    const { payment } = await subscriptions.checkout('t', 's1', 'CLICK')
+    const { payment } = await subscriptions.checkout('t', 's1', 'PAYME')
     expect(calls['payment.create']?.[0]).toMatchObject({ amountMinor: 0n, provider: null, state: 'PAID' })
     expect(calls['enrollment.updateMany']?.[0]).toMatchObject({ where: { subscriptionId: 'sub-draft', status: 'PENDING' }, data: { status: 'ACTIVE' } })
     expect(calls['subscription.update']?.map((d) => (d as { status: string }).status)).toEqual(['PENDING_PAYMENT', 'ACTIVE'])
-    expect(payments.checkoutLink(payment, 'CLICK', 'uz')).toEqual({ paymentId: 'pay-new', provider: null, url: null, expiresAt: payment.expiresAt, free: true })
+    expect(payments.checkoutLink(payment, 'PAYME', 'uz')).toEqual({ paymentId: 'pay-new', provider: null, url: null, expiresAt: payment.expiresAt, free: true })
   })
 
   it('a priced checkout stays pending for the provider', async () => {
