@@ -66,8 +66,9 @@ export class AuthService {
       throw AppError.unauthorized('Sign in again with the authenticator code', 'invalid_refresh')
     }
     const roles = await this.accounts.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
-    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: await this.accounts.publicUser(user, roles) }
+    const pub = await this.accounts.publicUser(user, roles)
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
+    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: pub }
   }
 
   /** Second factor, first sign-in: the secret for the app (QR code). */

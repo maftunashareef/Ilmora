@@ -24,6 +24,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   wrong_password: 'apiError.wrongPassword',
   same_password: 'apiError.samePassword',
   password_is_login: 'apiError.passwordIsLogin',
+  password_change_required: 'apiError.passwordChangeRequired',
   account_disabled: 'auth.err.disabled',
   invalid_phone: 'auth.err.phone',
   invalid_code: 'apiError.invalidCode',

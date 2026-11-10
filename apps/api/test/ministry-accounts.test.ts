@@ -89,8 +89,15 @@ describe.skipIf(!DB_AVAILABLE)('Ministry accounts (ТЗ 4.4)', () => {
       await expect(accounts.changePassword(me, { currentPassword: temporaryPassword, newPassword: temporaryPassword }, meta)).rejects.toMatchObject({ code: 'same_password' })
       await expect(accounts.changePassword(me, { currentPassword: temporaryPassword, newPassword: 'vazirlik.uch' }, meta)).rejects.toMatchObject({ code: 'password_is_login' })
 
+      expect((await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: account.id } })).passwordIssuedAt).not.toBeNull()
+      // A session opened with the issued password carries the claim the guard closes everything with.
+      const row = await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: account.id }, include: { teacherProfile: true } })
+      expect((await ctx.tokens.verifyAccess((await accounts.openSession(row as never, meta)).accessToken)).pwc).toBe(true)
+
       const done = await accounts.changePassword(me, { currentPassword: temporaryPassword, newPassword: 'Yangi-parol-2026' }, meta)
       expect(done.user).toMatchObject({ id: account.id, passwordChangeRequired: false })
+      expect((await ctx.tokens.verifyAccess(done.accessToken)).pwc).toBeUndefined()
+      expect((await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: account.id } })).passwordIssuedAt).toBeNull()
       expect(await ctx.prisma.client.refreshSession.count({ where: { userId: account.id, revokedAt: null } })).toBe(1)
       await expect(accounts.loginWithPassword(tenantId, { login: 'vazirlik.uch', password: temporaryPassword }, meta)).rejects.toMatchObject({ code: 'invalid_credentials' })
       expect(await accounts.loginWithPassword(tenantId, { login: 'vazirlik.uch', password: 'Yangi-parol-2026' }, meta)).toMatchObject({ mfaRequired: true })

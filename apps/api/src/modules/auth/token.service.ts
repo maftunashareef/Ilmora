@@ -18,6 +18,8 @@ export interface AccessClaims {
   /** Registry: institution and company of the account (INSTITUTION_ADMIN / COMPANY_ADMIN). */
   iid?: string | null
   coid?: string | null
+  /** The password was issued by the Super Admin and not changed yet: everything but the change answers 403. */
+  pwc?: boolean
   iat: number
   exp: number
 }
@@ -36,9 +38,9 @@ export const SESSION_FLAG = 'ilmora_session'
 export class TokenService {
   constructor(private readonly jwt: JwtService, @Inject(ENV) private readonly env: Env, private readonly prisma: PrismaService) {}
 
-  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null }): Promise<string> {
+  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null; passwordChangeRequired?: boolean }): Promise<string> {
     return this.jwt.signAsync(
-      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined },
+      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined, pwc: user.passwordChangeRequired || undefined },
       { subject: user.id, expiresIn: this.env.JWT_ACCESS_TTL_SECONDS },
     )
   }

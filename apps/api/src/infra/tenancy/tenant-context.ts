@@ -9,6 +9,8 @@ export interface RequestActor {
   /** Registry: the institution (INSTITUTION_ADMIN) or company (COMPANY_ADMIN) this account represents — one each. */
   institutionId?: string | null
   companyId?: string | null
+  /** A password issued by the Super Admin, not changed yet (token claim `pwc`): PasswordChangeGuard closes the rest. */
+  passwordChangeRequired?: boolean
 }
 
 export interface TenantContextValue {

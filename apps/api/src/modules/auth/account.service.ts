@@ -350,11 +350,12 @@ export class AccountService {
   }
 
   /**
-   * A password the Super Admin issued (ministry account created or reset) and not changed by its owner since. Read from
-   * the audit log, which records both — no extra column.
+   * A password the Super Admin issued (ministry account created or reset) and not changed by its owner since:
+   * `User.passwordIssuedAt`; for accounts from before that column, the audit log, which records both.
    */
-  async passwordChangeRequired(user: { id: string; tenantId: string }, roles: Role[]): Promise<boolean> {
+  async passwordChangeRequired(user: { id: string; tenantId: string; passwordIssuedAt?: Date | null }, roles: Role[]): Promise<boolean> {
     if (!roles.includes('MINISTRY')) return false
+    if (user.passwordIssuedAt) return true
     // The account's own tenant: a refresh runs before any tenant is known.
     return TenantContext.forTenant(user.tenantId, async () => {
       const issued = await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'User', entityId: user.id, action: { in: [...ADMIN_ISSUED_PASSWORD] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
@@ -375,7 +376,7 @@ export class AccountService {
     if (!(await argon2.verify(row.passwordHash, input.currentPassword))) throw AppError.invalid('wrong_password', 'The current password is wrong')
     if (input.newPassword === input.currentPassword) throw AppError.invalid('same_password', 'Choose a password different from the current one')
     if (row.login && input.newPassword.toLowerCase() === row.login) throw AppError.invalid('password_is_login', 'The password must not be the login')
-    const updated = await this.prisma.client.user.update({ where: { id: row.id }, data: { passwordHash: await argon2.hash(input.newPassword, PASSWORD_HASH) }, include: USER_INCLUDE })
+    const updated = await this.prisma.client.user.update({ where: { id: row.id }, data: { passwordHash: await argon2.hash(input.newPassword, PASSWORD_HASH), passwordIssuedAt: null }, include: USER_INCLUDE })
     await this.tokens.revokeAllForUser(row.tenantId, row.id, 'password-changed')
     await this.audit.record({ tenantId: row.tenantId, action: 'auth.password.change', entityType: 'User', entityId: row.id })
     return this.openSession(updated, meta)
@@ -394,9 +395,10 @@ export class AccountService {
 
   async openSession(user: UserRow, meta: SessionMeta): Promise<LoginResult> {
     const roles = await this.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
+    const pub = await this.publicUser(user, roles)
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
     const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta)
-    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: await this.publicUser(user, roles) }
+    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: pub }
   }
 
   private toPublic(user: UserRow, roles: Role[], passwordChangeRequired: boolean): PublicUser {
