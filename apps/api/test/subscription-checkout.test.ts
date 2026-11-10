@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { OFFER_VERSION } from '@ilmora/shared'
 import type { Env } from '../src/config/env'
 import type { PrismaService, TransactionClient } from '../src/infra/prisma/prisma.service'
 import type { AuditService } from '../src/modules/audit/audit.service'
@@ -39,6 +40,8 @@ function setup(opts: { priceMinor?: bigint; open?: { id: string; status: string 
     client: {
       subscription: { findFirst: vi.fn(async (args: { where: { status: unknown } }) => (args.where.status === 'DRAFT' ? draft : opts.open ?? null)) },
       package: { findFirst: vi.fn(async () => null) },
+      // The student has accepted the current offer and the personal-data consent (security review №31).
+      user: { findFirst: vi.fn(async () => ({ offerAcceptedAt: new Date(), offerVersion: OFFER_VERSION, consentAt: new Date() })) },
     },
     tx: vi.fn(async (fn: (t: TransactionClient) => Promise<unknown>) => fn(tx as unknown as TransactionClient)),
   }

@@ -1,4 +1,5 @@
 import { JwtService } from '@nestjs/jwt'
+import { OFFER_VERSION } from '@ilmora/shared'
 import { randomUUID } from 'node:crypto'
 import { type Env, validateEnv } from '../src/config/env'
 import { PrismaService } from '../src/infra/prisma/prisma.service'
@@ -57,7 +58,7 @@ export class TestContext {
   }
 
   async makeStudent(tenantId: string, n = Math.floor(Math.random() * 90_000) + 10_000) {
-    return TenantContext.system(() => this.prisma.client.user.create({ data: { tenantId, phoneE164: `+9989000${String(n).padStart(5, '0')}`, displayName: `Student ${n}`, roles: ['STUDENT'] } }))
+    return TenantContext.system(() => this.prisma.client.user.create({ data: { tenantId, phoneE164: `+9989000${String(n).padStart(5, '0')}`, displayName: `Student ${n}`, roles: ['STUDENT'], offerAcceptedAt: new Date(), offerVersion: OFFER_VERSION, consentAt: new Date() } }))
   }
 
   /** Draft + checkout for the given groups; returns the pending payment and subscription. */

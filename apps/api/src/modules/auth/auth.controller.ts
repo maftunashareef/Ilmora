@@ -167,7 +167,8 @@ export class AuthController {
 
   private assertSameSite(req: Request, requestedWith: string | undefined) {
     if (requestedWith !== 'ilmora') throw AppError.forbidden('Missing X-Requested-With header', { code: 'csrf' })
-    const origin = req.headers.origin ?? (req.headers.referer ? new URL(req.headers.referer).origin : undefined)
+    // A Referer that is not a URL is not our site (it used to answer 500 — security review №34).
+    const origin = req.headers.origin ?? (req.headers.referer ? (URL.canParse(req.headers.referer) ? new URL(req.headers.referer).origin : 'invalid') : undefined)
     if (origin && this.env.CORS_ORIGINS.length && !this.env.CORS_ORIGINS.includes(origin)) throw AppError.forbidden('Origin not allowed', { code: 'csrf' })
   }
 }

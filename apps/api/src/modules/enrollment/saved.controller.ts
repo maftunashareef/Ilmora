@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Put } from '@nestjs/common'
 import { IsBoolean, IsIn, IsString, Length } from 'class-validator'
-import { CurrentActor, CurrentTenantId } from '../../common/decorators'
+import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 
@@ -12,6 +12,7 @@ class SavedDto {
 
 /** Bookmarked courses and teachers (per account). */
 @Controller('student/saved')
+@Roles('STUDENT')
 export class SavedController {
   constructor(private readonly prisma: PrismaService) {}
 
