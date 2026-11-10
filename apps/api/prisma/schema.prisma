@@ -292,6 +292,8 @@ model User {
   login           String?
   /** argon2id hash. Null for accounts that have only ever signed in with a one-time code. */
   passwordHash    String?
+  /** The Super Admin issued this password (ministry account created, password reset) and the owner has not changed it yet. */
+  passwordIssuedAt DateTime?
   /** Google account id (ID token "sub"); the only key Google Sign-In may match an account by. Unique per tenant. */
   googleId        String?
   displayName     String
@@ -1461,6 +1463,20 @@ model Institution {
   reviewedAt   DateTime?
   reviewedById String?
   rejectReason String?
+  /**
+   * A change to the reviewed fields after approval, waiting for the Super Admin: { name?, stir?, type?, ownership?,
+   * regionId?, districtId? }. The live fields keep the approved values meanwhile; approval moves the change into them
+   * (the API checks the STIR is still free), rejection clears it.
+   */
+  pendingChanges Json?
+  /** Blocked by the Super Admin: cabinet closed, left out of the ministry's figures and of search. Not a review status. */
+  blockedAt    DateTime?
+  blockReason  String?
+  blockedById  String?
+  /** When the representative took the record. An unsubmitted draft is released after N days counted from here. */
+  claimedAt    DateTime?
+  /** Name in the ministry's official list (set by the import); the representative cannot change it. */
+  officialName String?
   /** The learning center that already works in ILMORA, when the Super Admin links one. */
   centerId     String?           @unique
   center       Center?           @relation(fields: [centerId], references: [id])
@@ -1529,6 +1545,12 @@ model Company {
   reviewedAt         DateTime?
   reviewedById       String?
   rejectReason       String?
+  /** A change after approval waiting for the Super Admin: { name?, stir?, industryIds? } (as on Institution). */
+  pendingChanges     Json?
+  /** Blocked by the Super Admin: cabinet closed, no requests or responses. Not a review status. */
+  blockedAt          DateTime?
+  blockReason        String?
+  blockedById        String?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -1835,6 +1857,14 @@ model ContactRequest {
   announcement   GraduationAnnouncement? @relation(fields: [announcementId], references: [id])
   status         MatchStatus             @default(PENDING)
   decidedAt      DateTime?
+  /**
+   * Contacts the student agreed to show, copied when accepting: the company keeps seeing these, not later ones.
+   * Personal data: cleared when the student withdraws; empty on older rows (the API then shows the current ones).
+   */
+  sharedName     String?
+  /** E.164. */
+  sharedPhone    String?
+  sharedEmail    String?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
@@ -1900,6 +1930,10 @@ model VacancyApplication {
   note            String?
   status          ApplicationStatus @default(NEW)
   statusChangedAt DateTime?
+  /** Contacts at the moment of applying (as on ContactRequest); cleared when the student withdraws. */
+  sharedName      String?
+  sharedPhone     String?
+  sharedEmail     String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { COMPANY_REVIEW_FIELDS, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, registrySearchKey } from '@ilmora/shared'
+import { COMPANY_REVIEW_FIELDS, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
@@ -71,19 +71,58 @@ export class CompaniesService {
     // RolesGuard lets the Super Admin through every route; a company is represented by its own account only.
     if (!actor.roles.includes('COMPANY_ADMIN')) throw AppError.forbidden('Only a company account can register a company')
     if (await this.representedId(actor)) throw AppError.conflict('already_has_company', 'This account already represents a company')
+    const registered = () => AppError.conflict('company_registered', 'A company with this STIR is already registered. Write to support if it is yours.')
+    // A record nobody represents (released by the Super Admin, or abandoned) is taken over as a fresh draft (security review №17).
+    const existing = await this.prisma.client.company.findFirst({ where: { stir: input.stir }, select: { id: true, representative: { select: { id: true } } } })
+    if (existing?.representative && (await this.isAbandoned(existing.id))) await this.release(tenantId, existing.id, 'abandoned-draft')
     let id: string
     try {
       id = await this.prisma.client.$transaction(async (tx) => {
+        if (existing) {
+          const holder = await tx.user.findFirst({ where: { companyId: existing.id }, select: { id: true } })
+          if (holder) throw registered()
+          await tx.companyIndustry.deleteMany({ where: { companyId: existing.id } })
+          await tx.companyDirection.deleteMany({ where: { companyId: existing.id } })
+          await tx.company.update({ where: { id: existing.id }, data: { name: input.name, searchKey: registrySearchKey(input.name), status: 'DRAFT', approvedAt: null, submittedAt: null, reviewedAt: null, rejectReason: null, certificateFileKey: null, about: null, website: null, address: null } })
+          await tx.user.update({ where: { id: actor.id }, data: { companyId: existing.id } })
+          return existing.id
+        }
         const row = await tx.company.create({ data: { tenantId, stir: input.stir, name: input.name, searchKey: registrySearchKey(input.name) }, select: { id: true } })
         await tx.user.update({ where: { id: actor.id }, data: { companyId: row.id } })
         return row.id
       })
     } catch (err) {
-      if (isUniqueViolation(err)) throw AppError.conflict('company_registered', 'A company with this STIR is already registered. Write to support if it is yours.')
+      if (isUniqueViolation(err)) throw registered()
       throw err
     }
-    await this.audit.record({ action: 'company.create', entityType: 'Company', entityId: id, after: { stir: input.stir, name: input.name, representativeId: actor.id } })
+    await this.audit.record({ action: existing ? 'company.takeover' : 'company.create', entityType: 'Company', entityId: id, after: { stir: input.stir, name: input.name, representativeId: actor.id } })
     return this.profileOf(id)
+  }
+
+  /** Abandoned: never approved, a draft (or rejected) untouched for REGISTRY_DRAFT_HOLD_DAYS since it was created or reviewed. */
+  private async isAbandoned(id: string): Promise<boolean> {
+    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true } })
+    if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
+    const last = Math.max(row.createdAt.getTime(), row.reviewedAt?.getTime() ?? 0)
+    return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
+  }
+
+  /**
+   * Releases the company from its representative (the Super Admin, or an abandoned draft): the account no longer
+   * represents it and the workspace closes; the next representative of the STIR starts it over as a draft.
+   */
+  async release(tenantId: string, id: string, reason: string): Promise<void> {
+    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, representative: { select: { id: true } } } })
+    if (!row) throw AppError.notFound('Company')
+    if (!row.representative) throw AppError.conflict('not_claimed', 'Nobody represents this company')
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: row.representative!.id }, data: { companyId: null } })
+      await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null } })
+    })
+    await this.audit.record({ action: 'company.release', entityType: 'Company', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, reason })
+    await this.notifications.safely('registry.released', () =>
+      this.notifications.notify({ tenantId, userIds: [row.representative!.id], type: 'registry.released', params: { name: row.name }, dedupeKey: `registry-released:${id}:${Date.now()}` }),
+    )
   }
 
   async profile(actor: RequestActor): Promise<CompanyProfileDto> {

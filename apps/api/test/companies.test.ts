@@ -135,6 +135,30 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
     })
   })
 
+  it('a company draft abandoned for 14 days, or released by the Super Admin, is taken over as a fresh draft (security review №17)', async () => {
+    const s = await setup('co-abandon')
+    await s.inT(async () => {
+      const db = ctx.prisma.client
+      const squatter = await s.representative()
+      const first = await service.create(s.tenantId, squatter, { stir: '305555555', name: 'Begona' })
+      await service.update(s.tenantId, squatter, { about: 'Squatter text', industryIds: [s.furniture.id] })
+      const real = await s.representative()
+      await expect(service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })).rejects.toMatchObject({ code: 'company_registered' })
+      await db.company.update({ where: { id: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000) } })
+      sent.length = 0
+      const taken = await service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })
+      expect(taken).toMatchObject({ id: first.id, name: 'Haqiqiy', status: 'DRAFT', about: null, industries: [] })
+      expect((await db.user.findUniqueOrThrow({ where: { id: squatter.id } })).companyId).toBeNull()
+      expect(sent).toEqual([expect.objectContaining({ type: 'registry.released', userIds: [squatter.id] })])
+
+      // The Super Admin releases the new holder; the STIR is free for the next one.
+      await review.release(s.tenantId, first.id, 'Not the company representative')
+      expect((await db.user.findUniqueOrThrow({ where: { id: real.id } })).companyId).toBeNull()
+      await expect(review.release(s.tenantId, first.id, 'Again, nobody')).rejects.toMatchObject({ code: 'not_claimed' })
+      expect(await service.create(s.tenantId, await s.representative(), { stir: '305555555', name: 'Uçinçi' })).toMatchObject({ id: first.id, name: 'Uçinçi' })
+    })
+  })
+
   it('saves industries, directions (alias → main), region by slug and the contact; refuses unknown industries', async () => {
     const s = await setup('co-patch')
     await s.inT(async () => {
