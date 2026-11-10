@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
-  registrySearchKey, SUGGEST_MIN_CHARS, type DirectionAddResult, type DirectionDto, type IndustryDto, type InstitutionAddResult,
-  type InstitutionSearchItemDto, type RegistryInstitutionType,
+  registrySearchKey, SUGGEST_MIN_CHARS, type DirectionAddResult, type DirectionDto, type DistrictDto, type IndustryDto, type InstitutionAddResult,
+  type InstitutionSearchItemDto, type RegionDto, type RegistryInstitutionType,
 } from '@ilmora/shared'
 import { api } from '../lib/api'
 
@@ -15,6 +15,9 @@ const query = (params: Record<string, string | null | undefined>) =>
 
 export const registryApi = {
   industries: () => api<IndustryDto[]>('/registry/industries'),
+  regions: () => api<RegionDto[]>('/registry/regions'),
+  /** `regionId` may be the region slug. */
+  districts: (regionId: string) => api<DistrictDto[]>(`/registry/districts?${query({ regionId })}`),
   /** Suggestions for what was typed (at least SUGGEST_MIN_CHARS letters), official directions first. */
   directions: (q: string, industryId?: string) => api<DirectionDto[]>(`/registry/directions?${query({ q, industryId })}`),
   /** Adds a direction to the shared directory; an existing one with the same key comes back with `created: false`. */

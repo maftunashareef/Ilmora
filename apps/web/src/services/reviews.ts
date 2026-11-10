@@ -1,6 +1,6 @@
 import type {
-  AdminCompanyItemDto, AdminInstitutionItemDto, AdminPage, CompanyProfileDto, CompanyReviewDto, CompanyReviewItemDto, DocumentLinkDto, InstitutionPassportDto,
-  InstitutionReviewDto, InstitutionReviewItemDto, RegistryInstitutionStatus,
+  AdminCompanyItemDto, AdminInstitutionItemDto, AdminPage, CompanyPendingChanges, CompanyProfileDto, CompanyReviewDto, CompanyReviewItemDto, DocumentLinkDto, InstitutionPassportDto,
+  InstitutionPendingChanges, InstitutionReviewDto, InstitutionReviewItemDto, RegistryInstitutionStatus,
 } from '@ilmora/shared'
 import { api } from '../lib/api'
 
@@ -15,6 +15,13 @@ export const nameDiffers = (entered: string, official: string | null) =>
   !!official && official.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase() !== entered.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()
 
 const id = (s: string) => encodeURIComponent(s)
+
+/** The reviewed fields a change after approval may touch (security review №13, PR #51), in the order shown. */
+export const CHANGE_KEYS = ['name', 'stir', 'type', 'ownership', 'regionId', 'districtId', 'industryIds'] as const
+export type ChangeKey = (typeof CHANGE_KEYS)[number]
+/** Which fields wait for a decision: the keys present in `pendingChanges` (a cleared district is a change too). */
+export const changedKeys = (c: InstitutionPendingChanges | CompanyPendingChanges | null | undefined): ChangeKey[] =>
+  c ? CHANGE_KEYS.filter((k) => Object.prototype.hasOwnProperty.call(c, k)) : []
 
 /** What the Super Admin typed in «Все записи»: 9 digits are a STIR (exact), anything else a name. */
 export interface RecordSearch { text: string; status: RegistryInstitutionStatus | ''; page: number }
