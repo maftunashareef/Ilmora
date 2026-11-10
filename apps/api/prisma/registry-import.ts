@@ -9,7 +9,7 @@ export interface TechnikumImportReport {
   created: string[]
   /** Unclaimed imported records whose official fields changed in the list. */
   updated: string[]
-  /** Claimed records (a representative is filling them in): only the empty informational fields were filled. */
+  /** Claimed records (a representative is filling them in): only the official name and the empty informational fields. */
   enriched: string[]
   unchanged: number
   /** The list's STIR already belongs to another record (e.g. a self-registration): not written, merge by hand. */
@@ -32,6 +32,8 @@ export interface TechnikumImportReport {
  * - Unclaimed imported records follow the list; a value the list lacks (STIR, district) is never cleared.
  * - Claimed records (DRAFT and later: the representative owns name, STIR, region) get only the empty Russian name, former
  *   name and district, and their search text.
+ * - Every listed record carries the list's name in `officialName` (the reviewer sees it next to the representative's);
+ *   it follows the list whether the record is claimed or not.
  * - A STIR already held by another record is reported, not written: one institution per STIR (unique index), and the
  *   self-registered record is the one people use. The two are merged by hand.
  * Everything is written in one transaction.
@@ -52,7 +54,7 @@ export async function importTechnikums(
 
   const rows = await prisma.institution.findMany({
     where: { tenantId },
-    select: { id: true, name: true, nameRu: true, formerName: true, searchKey: true, searchText: true, stir: true, ownership: true, regionId: true, districtName: true, source: true, status: true, mergedIntoId: true },
+    select: { id: true, name: true, officialName: true, nameRu: true, formerName: true, searchKey: true, searchText: true, stir: true, ownership: true, regionId: true, districtName: true, source: true, status: true, mergedIntoId: true },
   })
   const byId = new Map(rows.map((r) => [r.id, r]))
   const holder = (r: (typeof rows)[number]): Holder => ({ id: r.id, name: r.name, source: r.source, status: r.status })
@@ -81,7 +83,7 @@ export async function importTechnikums(
       const twin = rows.find((r) => r.searchKey === searchKey && r.regionId === regionId && !r.mergedIntoId)
       if (twin) report.sameName.push({ id: t.id, name: t.name, holder: holder(twin) })
       creates.push({
-        id: t.id, tenantId, type: 'TECHNIKUM', ownership: t.ownership, name: t.name, nameRu: t.nameRu ?? null, formerName: t.formerName ?? null,
+        id: t.id, tenantId, type: 'TECHNIKUM', ownership: t.ownership, name: t.name, officialName: t.name, nameRu: t.nameRu ?? null, formerName: t.formerName ?? null,
         searchKey, searchText: registrySearchText(t.name, t.nameRu, t.formerName), stir, regionId, districtName: t.district ?? null,
         source: 'IMPORT', status: 'UNCLAIMED',
       })
@@ -93,11 +95,11 @@ export async function importTechnikums(
     const unclaimed = row.source === 'IMPORT' && row.status === 'UNCLAIMED'
     const wanted: Record<string, unknown> = unclaimed
       ? {
-          name: t.name, searchKey, ownership: t.ownership, regionId,
+          name: t.name, officialName: t.name, searchKey, ownership: t.ownership, regionId,
           nameRu: t.nameRu ?? row.nameRu, formerName: t.formerName ?? row.formerName,
           stir: stir ?? row.stir, districtName: t.district ?? row.districtName,
         }
-      : { nameRu: row.nameRu ?? t.nameRu ?? null, formerName: row.formerName ?? t.formerName ?? null, districtName: row.districtName ?? t.district ?? null }
+      : { officialName: t.name, nameRu: row.nameRu ?? t.nameRu ?? null, formerName: row.formerName ?? t.formerName ?? null, districtName: row.districtName ?? t.district ?? null }
     const name = (wanted.name as string | undefined) ?? row.name
     wanted.searchText = registrySearchText(name, wanted.nameRu as string | null, wanted.formerName as string | null)
 
