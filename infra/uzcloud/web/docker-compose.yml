@@ -29,7 +29,9 @@ services:
       ADMIN_ALLOW_IPS: ${ADMIN_ALLOW_IPS}
       ACME_EMAIL: ${ACME_EMAIL}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The folder, not the file: the release unpacks a new Caddyfile (a new inode), and a file mount would keep showing
+      # Caddy the old one, so `caddy reload` re-read the old config (security review 10.11, №24).
+      - ./caddy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:

@@ -70,6 +70,25 @@ pull_images() {
   echo "could not pull from the registry:$missing"; return 1
 }
 
+# The new Caddyfile is validated in a throwaway container — the file this release copied and the real values from
+# web/.env — before the running Caddy sees it. A broken file stops the release here and the site keeps its current
+# configuration; without this, the error would surface only when Caddy next starts, with the site down. An empty
+# ADMIN_ALLOW_IPS passes `caddy validate` but answers 403 to every address on the admin domain, so it is checked too.
+check_caddyfile() {
+  echo "== caddy validate"
+  out=$($COMPOSE run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile 2>&1) || {
+    echo "$out" | grep -v ' Container ' | tail -n 3
+    echo "the new Caddyfile is invalid: release stopped, the running Caddy is untouched"
+    exit 1
+  }
+  echo "Caddyfile: valid configuration"
+  allow=$(sed -n 's/^ADMIN_ALLOW_IPS=//p' .env | tr -d "\"' ")
+  if [ -z "$allow" ]; then
+    echo "ADMIN_ALLOW_IPS is empty in web/.env: the admin domain would answer 403 to everyone (\"0.0.0.0/0 ::/0\" = open)"
+    exit 1
+  fi
+}
+
 case "$ROLE" in
   admin)
     check_disk
@@ -106,8 +125,9 @@ case "$ROLE" in
   web)
     check_disk
     pull_images
+    check_caddyfile
     $COMPOSE up -d
-    # The Caddyfile is mounted read-only and re-read only on reload; the release copies it fresh every time.
+    # caddy/ is mounted as a folder, so reload reads the Caddyfile this release copied (security review 10.11, №24).
     $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile || echo "caddy reload skipped (container not up yet)"
     wait_healthy api
     wait_healthy web
