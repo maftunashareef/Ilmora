@@ -19,6 +19,11 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   version_conflict: 'apiError.versionConflict',
   // sign-in and registration
   invalid_credentials: 'auth.err.invalid',
+  // change of password
+  no_password: 'apiError.noPassword',
+  wrong_password: 'apiError.wrongPassword',
+  same_password: 'apiError.samePassword',
+  password_is_login: 'apiError.passwordIsLogin',
   account_disabled: 'auth.err.disabled',
   invalid_phone: 'auth.err.phone',
   invalid_code: 'apiError.invalidCode',

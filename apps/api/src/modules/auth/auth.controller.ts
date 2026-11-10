@@ -5,7 +5,7 @@ import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AccountService } from './account.service'
-import { ConsentDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
+import { ChangePasswordDto, ConsentDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
 import { AuthService, type LoginResult } from './auth.service'
 import { REFRESH_COOKIE, SESSION_FLAG, TokenService } from './token.service'
 
@@ -128,6 +128,16 @@ export class AuthController {
   consent(@CurrentActor() actor: RequestActor, @Body() dto: ConsentDto) {
     void dto
     return this.accounts.giveConsent(actor.id)
+  }
+
+  /**
+   * «Сменить пароль» (any signed-in account with a password; the ministry right after the first sign-in, when
+   * `passwordChangeRequired`). Ends every session of the account and answers like a sign-in: a fresh session here.
+   */
+  @Post('password')
+  @AuthThrottle(5)
+  async changePassword(@CurrentActor() actor: RequestActor, @CurrentTenantId() tenantId: string, @ClientInfo() ci: ClientInfoValue, @Body() dto: ChangePasswordDto, @Res({ passthrough: true }) res: Response) {
+    return this.respond(res, await this.accounts.changePassword({ id: actor.id, tenantId }, dto, { ip: ci.ip, userAgent: ci.userAgent }))
   }
 
   @Patch('me')

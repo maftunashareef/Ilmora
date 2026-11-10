@@ -108,6 +108,17 @@ export class ConsentDto {
   consentPersonalData!: true
 }
 
+/** «Сменить пароль»: the current one and the new one (the same length rules as at registration). */
+export class ChangePasswordDto {
+  @IsString()
+  @Length(1, 128)
+  currentPassword!: string
+
+  @IsString()
+  @Length(8, 128)
+  newPassword!: string
+}
+
 export class PasswordLoginDto {
   @IsString()
   @Length(1, 64)

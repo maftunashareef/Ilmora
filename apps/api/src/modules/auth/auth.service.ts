@@ -67,7 +67,7 @@ export class AuthService {
     }
     const roles = await this.accounts.effectiveRoles(user)
     const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
-    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: this.accounts.toPublic(user, roles) }
+    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: await this.accounts.publicUser(user, roles) }
   }
 
   /** Second factor, first sign-in: the secret for the app (QR code). */
@@ -100,7 +100,7 @@ export class AuthService {
   async me(userId: string): Promise<PublicUser> {
     const user = await this.prisma.client.user.findUnique({ where: { id: userId }, include: USER_INCLUDE })
     if (!user) throw AppError.notFound('User')
-    return this.accounts.toPublic(user, await this.accounts.effectiveRoles(user))
+    return this.accounts.publicUser(user)
   }
 
   async updateProfile(userId: string, input: { displayName?: string; district?: string; preferredLang?: 'uz' | 'ru' | 'en'; reminders?: boolean }): Promise<PublicUser> {
@@ -110,7 +110,7 @@ export class AuthService {
     if (input.preferredLang !== undefined) data.preferredLang = input.preferredLang
     if (input.reminders !== undefined) data.reminders = input.reminders
     const user = await this.prisma.client.user.update({ where: { id: userId }, data, include: USER_INCLUDE })
-    return this.accounts.toPublic(user, await this.accounts.effectiveRoles(user))
+    return this.accounts.publicUser(user)
   }
 
   /**
