@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, refreshSession, session } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
@@ -37,7 +37,7 @@ export interface AuthUser {
   district: string | null
   preferredLang: Lang
   reminders: boolean
-  roles: ('PLATFORM_ADMIN' | 'FINANCE_ADMIN' | 'CENTER_ADMIN' | 'TEACHER' | 'STUDENT')[]
+  roles: ('PLATFORM_ADMIN' | 'FINANCE_ADMIN' | 'CENTER_ADMIN' | 'TEACHER' | 'STUDENT' | 'INSTITUTION_ADMIN' | 'COMPANY_ADMIN' | 'MINISTRY')[]
   centerId: string | null
   teacherProfileId: string | null
   offerAcceptedAt: string | null
@@ -45,6 +45,9 @@ export interface AuthUser {
   consentAt: string | null
   marketing: boolean
 }
+
+/** `/auth/login` answered with the authenticator step instead of a session. */
+export const isMfaChallenge = (r: unknown): r is MfaChallengeDto => !!r && typeof r === 'object' && (r as { mfaRequired?: unknown }).mfaRequired === true
 
 export interface ConsentInput { acceptOffer: true; consentPersonalData: true; consentAbroad?: boolean; marketing?: boolean }
 export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'COMPANY'
@@ -94,7 +97,17 @@ interface Actions {
   dismissToast: (id: number) => void
   bootstrap: () => Promise<void>
   register: (input: RegisterInput) => Promise<AuthUser>
-  login: (login: string, password: string) => Promise<AuthUser>
+  /**
+   * Login + password. The ministry and the Super Admins get no session yet but the authenticator step (`MfaChallengeDto`):
+   * `setup` on the first sign-in (mfaSetup, then mfaConfirm), `verify` afterwards (mfaVerify).
+   */
+  login: (login: string, password: string) => Promise<AuthUser | MfaChallengeDto>
+  /** First sign-in with the second factor: the secret to link the authenticator app (QR code). */
+  mfaSetup: (challenge: string) => Promise<MfaSetupDto>
+  /** The first code from the app links it and opens the session; the 10 recovery codes come only in this answer. */
+  mfaConfirm: (challenge: string, code: string) => Promise<{ user: AuthUser; recoveryCodes: string[] }>
+  /** A code from the app, or a recovery code, opens the session. */
+  mfaVerify: (challenge: string, code: string) => Promise<AuthUser>
   loginAsDemo: (role: 'STUDENT' | 'TEACHER', customUser?: Partial<AuthUser>) => Promise<AuthUser>
   giveConsent: (input: ConsentInput) => Promise<AuthUser>
   logout: () => Promise<void>
@@ -532,7 +545,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         }
       },
       register: (input) => api<{ accessToken: string; user: AuthUser }>('/auth/register', { method: 'POST', body: { ...input, lang: get().lang }, credentials: true, auth: false }).then(openSession),
-      login: (login, password) => api<{ accessToken: string; user: AuthUser }>('/auth/login', { method: 'POST', body: { login, password }, credentials: true, auth: false }).then(openSession),
+      login: (login, password) =>
+        api<{ accessToken: string; user: AuthUser } | MfaChallengeDto>('/auth/login', { method: 'POST', body: { login, password }, credentials: true, auth: false })
+          .then<AuthUser | MfaChallengeDto>((r) => (isMfaChallenge(r) ? r : openSession(r))),
+      mfaSetup: (challenge) => api<MfaSetupDto>('/auth/mfa/setup', { method: 'POST', body: { challenge }, auth: false }),
+      mfaConfirm: async (challenge, code) => {
+        const r = await api<{ accessToken: string; user: AuthUser; recoveryCodes: string[] }>('/auth/mfa/confirm', { method: 'POST', body: { challenge, code }, credentials: true, auth: false })
+        return { user: await openSession(r), recoveryCodes: r.recoveryCodes }
+      },
+      mfaVerify: (challenge, code) => api<{ accessToken: string; user: AuthUser }>('/auth/mfa/verify', { method: 'POST', body: { challenge, code }, credentials: true, auth: false }).then(openSession),
       loginAsDemo: async (role, customUser) => {
         if (!DEMO_LOGIN_ENABLED) throw new Error('demo_login_disabled')
         const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'

@@ -1,6 +1,6 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
-import { INSTITUTION_REGISTRY, INSTITUTION_TYPES, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, isUzRegion, type InstitutionChoice, type InstitutionType, type OrgOwnership } from '@ilmora/shared'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { INSTITUTION_REGISTRY, INSTITUTION_TYPES, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, isUzRegion, type InstitutionChoice, type InstitutionType, type OrgOwnership, type MfaChallengeDto } from '@ilmora/shared'
 import { ConsentFields, consentComplete, EMPTY_CONSENT, type ConsentState } from '../../components/ConsentGate'
 import { InstitutionSearch } from '../../components/InstitutionSearch'
 import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../../components/ui'
@@ -13,7 +13,8 @@ import { Link, useNavigate, useSearchParams } from '../../lib/router'
 import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { startCompany } from '../../services/companies'
 import { claimInstitution } from '../../services/institutions'
-import { useStore, type RegisterRole } from '../../store/useStore'
+import { MfaSignIn } from '../../components/MfaSignIn'
+import { isMfaChallenge, useStore, type AuthUser, type RegisterRole } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
 type FieldKey = 'role' | 'name' | 'phone' | 'login' | 'password' | 'confirm' | 'centerName' | 'position' | 'instType' | 'ownership' | 'institution' | 'inn' | 'companyName' | 'email'
@@ -99,11 +100,29 @@ export function LoginPage() {
   }
   const isOrg = mode === 'register' && isOrgRole(role)
   
+  /** Where a signed-in account goes: its first stop after sign-up, the page it came from (if it may open it), or its home. */
+  const destination = useCallback(
+    (roles: readonly string[]) => firstStop.current ?? (safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles)),
+    [safeNext],
+  )
   useEffect(() => {
     if (auth.status !== 'authenticated' || holdRedirect.current) return
-    const roles = auth.user?.roles ?? []
-    nav(firstStop.current ?? (safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles)), { replace: true })
-  }, [auth.status, auth.user, nav, safeNext])
+    nav(destination(auth.user?.roles ?? []), { replace: true })
+  }, [auth.status, auth.user, nav, destination])
+
+  /** The authenticator step after the password (ministry, Super Admins); the page waits for it before moving on. */
+  const [mfa, setMfa] = useState<MfaChallengeDto | null>(null)
+  const finishMfa = (user: AuthUser) => {
+    notify(t('auth.welcome', { name: user.displayName }))
+    holdRedirect.current = false
+    setMfa(null)
+    nav(destination(user.roles), { replace: true })
+  }
+  const restartMfa = () => {
+    holdRedirect.current = false
+    setMfa(null)
+    setPassword('')
+  }
 
   const switchMode = (m: Mode) => {
     setMode(m)
@@ -236,8 +255,14 @@ export function LoginPage() {
         }
         if (role === 'COMPANY') await startCompanyAfterSignUp()
       } else {
-        const user = await login(loginName.trim(), password)
-        notify(t('auth.welcome', { name: user.displayName }))
+        const result = await login(loginName.trim(), password)
+        if (isMfaChallenge(result)) {
+          // Hold the redirect: the first sign-in shows the recovery codes once the session is already open.
+          holdRedirect.current = true
+          setMfa(result)
+        } else {
+          notify(t('auth.welcome', { name: result.displayName }))
+        }
       }
     } catch (err) {
       holdRedirect.current = false
@@ -268,6 +293,11 @@ export function LoginPage() {
           <h1 className="font-display text-3xl text-charcoal">{t('auth.title')}</h1>
           <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t('auth.subtitle')}</p>
 
+          {mfa ? (
+            <div className="mt-6 border-t border-charcoal/10 pt-6">
+              <MfaSignIn challenge={mfa} onSignedIn={finishMfa} onRestart={restartMfa} />
+            </div>
+          ) : (<>
           <Tabs<Mode>
             className="mt-6"
             value={mode}
@@ -585,6 +615,7 @@ export function LoginPage() {
               </button>
             </p>
           </form>
+          </>)}
         </Card>
         <p className="mt-4 text-center text-[11px] text-charcoal/45">
           <Link to="/" className="underline hover:text-charcoal/70">{t('common.goHome')}</Link>
