@@ -195,6 +195,13 @@ jobs:
             IdentitiesOnly yes
             StrictHostKeyChecking yes
             ProxyJump web
+          # A machine that reboots or drops off the network mid-release fails the step within 2 minutes instead of
+          # hanging until the job timeout (10 Nov 2026: ilmora-admin was rebooted during release 47, which waited 30
+          # minutes on a dead connection). Short network blips under 2 minutes do not break the session.
+          Host *
+            ServerAliveInterval 20
+            ServerAliveCountMax 6
+            ConnectTimeout 20
           EOF
           ssh web true && ssh admin true && echo "both machines reachable"
 
