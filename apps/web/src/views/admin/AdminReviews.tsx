@@ -1,14 +1,20 @@
 'use client'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { CompanyReviewDto, CompanyReviewItemDto, InstitutionReviewDto, InstitutionReviewItemDto, TKey } from '@ilmora/shared'
-import { Badge, Button, EmptyState, Icon, Modal, Notice, PageTitle, Tabs, Textarea } from '../../components/ui'
+import type {
+  AdminCompanyItemDto, AdminInstitutionItemDto, AdminPage, CompanyReviewDto, CompanyReviewItemDto, InstitutionReviewDto, InstitutionReviewItemDto,
+  RegistryInstitutionStatus, TKey,
+} from '@ilmora/shared'
+import { Badge, Button, EmptyState, Icon, Input, Modal, Notice, PageTitle, Select, Tabs, Textarea } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
-import { nameDiffers, REASON_MAX, REASON_MIN, reasonOk, reviews } from '../../services/reviews'
+import { nameDiffers, REASON_MAX, REASON_MIN, reasonOk, reviews, type RecordSearch } from '../../services/reviews'
 import { useStore } from '../../store/useStore'
 
 type Kind = 'institutions' | 'companies'
+type Tab = Kind | 'all'
+const INSTITUTION_STATUSES: RegistryInstitutionStatus[] = ['UNCLAIMED', 'DRAFT', 'PENDING', 'APPROVED', 'REJECTED']
+const COMPANY_STATUSES: RegistryInstitutionStatus[] = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED']
 type Open = { kind: Kind; id: string }
 type Action = 'reject' | 'release'
 type History = { action: string; reason: string | null; at: string; by: string | null }
@@ -27,7 +33,7 @@ const HISTORY_KEYS: Record<string, TKey> = {
  */
 export function AdminReviews() {
   const { t, lang } = useT()
-  const [tab, setTab] = useState<Kind>('institutions')
+  const [tab, setTab] = useState<Tab>('institutions')
   const [institutions, setInstitutions] = useState<InstitutionReviewItemDto[] | null>(null)
   const [companies, setCompanies] = useState<CompanyReviewItemDto[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -44,7 +50,8 @@ export function AdminReviews() {
   }, [lang, round])
   const refresh = useCallback(() => setRound((r) => r + 1), [])
   const close = useCallback(() => setOpen(null), [])
-  const list = tab === 'institutions' ? institutions : companies
+  const list = tab === 'institutions' ? institutions : tab === 'companies' ? companies : null
+  const openRecord = useCallback((kind: Kind, id: string) => setOpen({ kind, id }), [])
 
   return (
     <div>
@@ -53,10 +60,15 @@ export function AdminReviews() {
         className="mb-4"
         value={tab}
         onChange={setTab}
-        tabs={[{ id: 'institutions', label: t('rev.institutions'), count: institutions?.length }, { id: 'companies', label: t('rev.companies'), count: companies?.length }]}
+        tabs={[
+          { id: 'institutions', label: t('rev.institutions'), count: institutions?.length },
+          { id: 'companies', label: t('rev.companies'), count: companies?.length },
+          { id: 'all', label: t('rev.all') },
+        ]}
       />
       {loadError && <Notice tone="warn" className="mb-4">{loadError} <button type="button" className="ml-1 font-medium underline" onClick={refresh}>{t('admin.ministry.retry')}</button></Notice>}
-      {!list && !loadError && <p className="text-sm text-charcoal/55">{t('common.loading')}</p>}
+      {tab === 'all' && <AllRecords round={round} onOpen={openRecord} />}
+      {tab !== 'all' && !list && !loadError && <p className="text-sm text-charcoal/55">{t('common.loading')}</p>}
       {list && list.length === 0 && <EmptyState icon={<Icon name="check" className="h-6 w-6" />} title={t('rev.empty')} body={t('rev.emptyBody')} />}
       {tab === 'institutions' && institutions && institutions.length > 0 && (
         <ul className="space-y-2" aria-label={t('rev.institutions')}>
@@ -68,8 +80,74 @@ export function AdminReviews() {
           {companies.map((it) => <li key={it.id}><CompanyRow item={it} onOpen={() => setOpen({ kind: 'companies', id: it.id })} /></li>)}
         </ul>
       )}
-      <Notice tone="info" className="mt-6 text-xs">{t('rev.releaseHint')}</Notice>
+      <Notice tone="info" className="mt-6 text-xs">{t(tab === 'all' ? 'rev.allHint' : 'rev.releaseHint')}</Notice>
       {open && <ReviewCard open={open} onClose={close} onChanged={refresh} />}
+    </div>
+  )
+}
+
+/**
+ * «Все записи» (issue #50): any record by STIR (9 digits, exact) or name, filtered by status — approved ones and drafts
+ * too, so the Super Admin can open the card and unlink a representative who holds a record that is not theirs.
+ */
+function AllRecords({ round, onOpen }: { round: number; onOpen: (kind: Kind, id: string) => void }) {
+  const { t, lang } = useT()
+  const [kind, setKind] = useState<Kind>('institutions')
+  const [text, setText] = useState('')
+  const [query, setQuery] = useState<RecordSearch>({ text: '', status: '', page: 1 })
+  const [result, setResult] = useState<AdminPage<AdminInstitutionItemDto> | AdminPage<AdminCompanyItemDto> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const statuses = kind === 'institutions' ? INSTITUTION_STATUSES : COMPANY_STATUSES
+
+  useEffect(() => {
+    let live = true
+    const load = kind === 'institutions' ? reviews.institutions.search(query) : reviews.companies.search(query)
+    load.then((r) => { if (live) { setResult(r); setError(null) } }, (err) => { if (live) setError(apiErrorText(err, lang)) })
+    return () => { live = false }
+  }, [kind, query, round, lang])
+
+  const switchKind = (k: Kind) => {
+    if (k === kind) return
+    setKind(k); setResult(null)
+    setQuery((q) => ({ ...q, status: k === 'companies' && q.status === 'UNCLAIMED' ? '' : q.status, page: 1 }))
+  }
+  const pages = result ? Math.max(1, Math.ceil(result.total / result.pageSize)) : 1
+
+  return (
+    <div>
+      <div className="mb-3 inline-flex rounded-control border border-charcoal/12 bg-paper p-1" role="group" aria-label={t('rev.all')}>
+        {(['institutions', 'companies'] as const).map((k) => (
+          <button key={k} type="button" aria-pressed={kind === k} onClick={() => switchKind(k)} className={`rounded-[10px] px-3 py-1.5 text-sm font-medium transition ${kind === k ? 'bg-forest text-ivory' : 'text-charcoal/65 hover:text-forest'}`}>{t(k === 'institutions' ? 'rev.institutions' : 'rev.companies')}</button>
+        ))}
+      </div>
+      <form className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_15rem_auto]" role="search" onSubmit={(e) => { e.preventDefault(); setQuery((q) => ({ ...q, text, page: 1 })) }}>
+        <Input id="records-search" aria-label={t('rev.searchPlaceholder')} placeholder={t('rev.searchPlaceholder')} value={text} maxLength={200} onChange={(e) => setText(e.target.value)} />
+        <Select aria-label={t('common.status')} value={query.status} onChange={(e) => setQuery((q) => ({ ...q, text, status: e.target.value as RegistryInstitutionStatus | '', page: 1 }))}>
+          <option value="">{t('rev.statusAll')}</option>
+          {statuses.map((s) => <option key={s} value={s}>{t(`rev.status.${s}`)}</option>)}
+        </Select>
+        <Button type="submit" variant="secondary"><Icon name="search" className="h-4 w-4" />{t('common.search')}</Button>
+      </form>
+      {error && <Notice tone="warn" className="mb-3">{error}</Notice>}
+      {!result && !error && <p className="text-sm text-charcoal/55">{t('common.loading')}</p>}
+      {result && <p className="mb-2 text-xs text-charcoal/55">{t('rev.found', { n: result.total })}</p>}
+      {result && result.items.length === 0 && <EmptyState icon={<Icon name="search" className="h-6 w-6" />} title={t('rev.nothingFound')} />}
+      {result && result.items.length > 0 && (
+        <ul className="space-y-2" aria-label={t('rev.all')}>
+          {kind === 'institutions'
+            ? (result.items as AdminInstitutionItemDto[]).map((it) => <li key={it.id}><InstitutionRow item={it} onOpen={() => onOpen('institutions', it.id)} /></li>)
+            : (result.items as AdminCompanyItemDto[]).map((it) => <li key={it.id}><CompanyRow item={it} onOpen={() => onOpen('companies', it.id)} /></li>)}
+        </ul>
+      )}
+      {result && pages > 1 && (
+        <div className="mt-4 flex items-center justify-between text-xs text-charcoal/55">
+          <span>{t('rev.page', { page: result.page, pages })}</span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" disabled={result.page <= 1} onClick={() => setQuery((q) => ({ ...q, page: q.page - 1 }))}>{t('common.back')}</Button>
+            <Button size="sm" variant="ghost" disabled={result.page >= pages} onClick={() => setQuery((q) => ({ ...q, page: q.page + 1 }))}>{t('common.next')}</Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -91,7 +169,15 @@ function OfficialName({ entered, official, large = false }: { entered: string; o
 
 const when = (iso: string | null, lang: Parameters<typeof formatDate>[1]) => (iso ? `${formatDate(iso, lang)}, ${formatTime(iso, lang)}` : '—')
 
-function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto; onOpen: () => void }) {
+/** In «Все записи» a row also shows the record's status and whether it is blocked. */
+function RecordBadges({ item }: { item: { status?: string; blocked?: boolean } }) {
+  const { t } = useT()
+  if (!item.status) return null
+  const tone = item.status === 'APPROVED' ? 'forest' : item.status === 'REJECTED' ? 'danger' : item.status === 'PENDING' ? 'champagne' : 'muted'
+  return <><Badge tone={tone}>{t(`rev.status.${item.status as RegistryInstitutionStatus}`)}</Badge>{item.blocked && <Badge tone="danger"><Icon name="lock" className="mr-1 h-3 w-3" />{t('rev.blocked')}</Badge>}</>
+}
+
+function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto & { status?: string; blocked?: boolean }; onOpen: () => void }) {
   const { t, tr, lang } = useT()
   const place = [tr(it.region?.name), it.district ? tr(it.district.name) : it.districtName].filter(Boolean).join(', ')
   return (
@@ -100,6 +186,7 @@ function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto; 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-charcoal">{it.name}</span>
+            <RecordBadges item={it} />
             <Badge>{t(`inst.type.${it.type}`)}</Badge>
             {it.reReview && <Badge tone="champagne">{t('rev.reReview')}</Badge>}
             {it.inRegistry ? <Badge tone="sage">{t('rev.inRegistry')}</Badge> : <Badge tone="warn">{t('rev.notInRegistry')}</Badge>}
@@ -108,13 +195,13 @@ function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto; 
           <div className="mt-1 text-xs text-charcoal/60">{[it.stir ? `${t('auth.org.stir')}: ${it.stir}` : null, place || null].filter(Boolean).join(' · ')}</div>
           {it.representative && <div className="text-xs text-charcoal/50">{[it.representative.name, it.representative.jobTitle, it.representative.login ? `@${it.representative.login}` : null].filter(Boolean).join(' · ')}</div>}
         </div>
-        <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>
+        {it.submittedAt && <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>}
       </div>
     </button>
   )
 }
 
-function CompanyRow({ item: it, onOpen }: { item: CompanyReviewItemDto; onOpen: () => void }) {
+function CompanyRow({ item: it, onOpen }: { item: CompanyReviewItemDto & { status?: string; blocked?: boolean }; onOpen: () => void }) {
   const { t, tr, lang } = useT()
   return (
     <button type="button" onClick={onOpen} className="card block w-full p-4 text-left transition hover:border-forest/40">
@@ -122,13 +209,14 @@ function CompanyRow({ item: it, onOpen }: { item: CompanyReviewItemDto; onOpen: 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-charcoal">{it.name}</span>
+            <RecordBadges item={it} />
             {it.reReview && <Badge tone="champagne">{t('rev.reReview')}</Badge>}
             {it.certificateUploaded ? <Badge tone="sage">{t('rev.certificateYes')}</Badge> : <Badge tone="warn">{t('rev.certificateNo')}</Badge>}
           </div>
           <div className="mt-1 text-xs text-charcoal/60">{[`${t('auth.org.stir')}: ${it.stir}`, tr(it.region?.name) || null, it.industries.map((x) => tr(x.name)).join(', ') || null].filter(Boolean).join(' · ')}</div>
           {it.representative && <div className="text-xs text-charcoal/50">{[it.representative.name, it.representative.jobTitle, it.representative.email, it.representative.login ? `@${it.representative.login}` : null].filter(Boolean).join(' · ')}</div>}
         </div>
-        <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>
+        {it.submittedAt && <span className="text-[11px] text-charcoal/45">{t('rev.submitted')}: {when(it.submittedAt, lang)}</span>}
       </div>
     </button>
   )
