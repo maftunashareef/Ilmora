@@ -98,7 +98,8 @@ export const EnvSchema = z.object({
   // payment ids (the test orders) and the sandbox transactions on them. Empty (default) = test key refused in production.
   PAYME_SANDBOX_PAYMENT_IDS: csv,
   PAYME_FISCAL_IKPU: z.string().default('10399001001000000'),
-  PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501337'),
+  // «услуга (раз)» in the tax committee's unit list (checked 10.11, security review №41).
+  PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501338'),
   PAYME_FISCAL_VAT_PERCENT: z.coerce.number().default(0),
   CLICK_SERVICE_ID: z.string().optional(),
   CLICK_MERCHANT_ID: z.string().optional(),

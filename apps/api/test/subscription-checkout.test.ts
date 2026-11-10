@@ -9,7 +9,7 @@ import type { OutboxService } from '../src/modules/payments/outbox.service'
 import { PaymentsService } from '../src/modules/payments/payments.service'
 import { notificationsStub } from './stubs'
 
-const env = { PAYMENT_EXPIRES_HOURS: 24, PUBLIC_WEB_URL: 'http://localhost:3000' } as unknown as Env
+const env = { PAYMENT_EXPIRES_HOURS: 24, PUBLIC_WEB_URL: 'http://localhost:3000', PAYME_MERCHANT_ID: 'm', PAYME_TEST_KEY: 'k' } as unknown as Env
 const audit = { record: async () => undefined } as unknown as AuditService
 
 const group = (priceMinor: bigint) => ({

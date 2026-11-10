@@ -114,6 +114,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   renewal_too_early: 'apiError.renewalTooEarly',
   renewal_unavailable: 'apiError.renewalUnavailable',
   offer_required: 'apiError.offerRequired',
+  payment_unavailable: 'apiError.paymentUnavailable',
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
   'no-package': 'builder.pickPackageFirst',
