@@ -59,6 +59,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   already_submitted: 'apiError.alreadySubmitted',
   already_approved: 'apiError.alreadyApproved',
   incomplete_profile: 'apiError.incompleteProfile',
+  not_pending: 'apiError.notPending',
   // cart and subscription
   full: 'capacity.full',
   duplicate: 'builder.duplicate',
