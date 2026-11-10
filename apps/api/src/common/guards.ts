@@ -2,7 +2,7 @@ import { type CanActivate, type ExecutionContext, HttpStatus, Injectable } from 
 import { Reflector } from '@nestjs/core'
 import { ThrottlerGuard } from '@nestjs/throttler'
 import type { Role } from '../generated/prisma/enums'
-import { type AuthenticatedRequest, IS_PUBLIC_KEY, ROLES_KEY, WITH_ISSUED_PASSWORD_KEY } from './decorators'
+import { type AuthenticatedRequest, IS_PUBLIC_KEY, isAuthThrottled, ROLES_KEY, WITH_ISSUED_PASSWORD_KEY } from './decorators'
 import { AppError } from './errors'
 
 /** Requires an authenticated actor unless the handler/class is marked @Public(). */
@@ -51,14 +51,17 @@ export class RolesGuard implements CanActivate {
 }
 
 /**
- * Throttler keyed by actor id for authenticated traffic and by client IP otherwise.
+ * Throttler keyed by actor id for authenticated traffic and by client IP otherwise. The strict «auth» routes (sign-in,
+ * one-time codes, registration, password) always count by IP: a token attached to them must not give a fresh counter
+ * (security review 10.11 №2).
  * Never key on request-body fields (e.g. phone): the client controls them, so each new value would get a fresh
  * counter and one IP could send OTP SMS to any number of phones. Per-phone limits live in OtpService instead.
  */
 @Injectable()
 export class AppThrottlerGuard extends ThrottlerGuard {
-  protected override async getTracker(req: Record<string, unknown>): Promise<string> {
+  protected override async getTracker(req: Record<string, unknown>, context?: ExecutionContext): Promise<string> {
     const r = req as unknown as AuthenticatedRequest
+    if (context && isAuthThrottled(context)) return `ip:${r.ip ?? 'unknown'}`
     if (r.actor?.id) return `u:${r.actor.id}`
     return `ip:${r.ip ?? 'unknown'}`
   }

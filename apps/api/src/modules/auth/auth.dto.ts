@@ -119,6 +119,21 @@ export class ChangePasswordDto {
   newPassword!: string
 }
 
+/** «Забыл пароль»: the phone of the account, the SMS code (from POST /auth/otp/request) and the new password. */
+export class ResetPasswordDto {
+  @IsString()
+  @Length(7, 20)
+  phone!: string
+
+  @IsString()
+  @Matches(/^\d{4,8}$/)
+  code!: string
+
+  @IsString()
+  @Length(8, 128)
+  newPassword!: string
+}
+
 export class PasswordLoginDto {
   @IsString()
   @Length(1, 64)

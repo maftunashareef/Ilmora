@@ -19,6 +19,9 @@ export class MinistryAdminController {
   @Post('ministry-accounts/:id/reset-password') resetPassword(@CurrentTenantId() t: string, @Param('id') id: string) { return this.accounts.resetPassword(t, id) }
 
   /** Lost phone: unlink the authenticator app of a ministry account or of another Super Admin. */
+  /** «Сбросить пароль» for any account but a Super Admin; the temporary password is shown once. */
+  @Post('accounts/:id/reset-password') resetAccountPassword(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.accounts.resetAccountPassword(t, a, id) }
+
   @Post('accounts/:id/reset-second-factor')
   async resetSecondFactor(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) {
     await this.accounts.resetSecondFactor(t, a, id)
