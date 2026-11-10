@@ -754,3 +754,64 @@ export interface ContractHelpCardDto {
   /** This company's contact request to the student, if any (from any source). */
   contactRequest: MatchStatus | null
 }
+
+// ───────────── practice and internships (ТЗ 5.4) ─────────────
+
+export type VacancyKind = 'PRACTICE' | 'INTERNSHIP'
+export type WorkFormat = 'ONSITE' | 'REMOTE' | 'HYBRID'
+export type VacancyStatus = 'OPEN' | 'CLOSED'
+/** новый → просмотрен → приглашён / отказ. */
+export type ApplicationStatus = 'NEW' | 'VIEWED' | 'INVITED' | 'REJECTED'
+export const VACANCY_SEATS_MAX = 1000
+export const VACANCY_DIRECTIONS_MAX = 10
+
+/** A vacancy as a student sees it (approved companies, open, deadline not passed). */
+export interface VacancyDto {
+  id: string
+  kind: VacancyKind
+  title: string
+  company: { id: string; name: string; industries: IndustryDto[] }
+  directions: DirectionDto[]
+  region: PlaceRefDto
+  district: PlaceRefDto | null
+  address: string | null
+  format: WorkFormat
+  paid: boolean
+  /** Monthly stipend, so'm, when stated. */
+  stipend: number | null
+  duration: string | null
+  seats: number
+  requirements: string | null
+  /** YYYY-MM-DD, the last day to apply; null — until closed. */
+  deadline: string | null
+  status: VacancyStatus
+  createdAt: string
+  /** The student's own application, if any. */
+  myApplication: { id: string; status: ApplicationStatus } | null
+}
+
+/** The company's own vacancy with the applications by status. */
+export interface CompanyVacancyDto extends Omit<VacancyDto, 'myApplication'> {
+  closedAt: string | null
+  applications: Record<ApplicationStatus, number>
+}
+
+/** An application as the company sees it: the student agreed by applying to show the full card (ТЗ 5.4, 9.4). */
+export interface VacancyApplicationDto {
+  id: string
+  status: ApplicationStatus
+  note: string | null
+  createdAt: string
+  statusChangedAt: string | null
+  student: StudentFullCardDto & { id: string }
+}
+
+/** The student's application with the vacancy. */
+export interface StudentApplicationDto {
+  id: string
+  status: ApplicationStatus
+  note: string | null
+  createdAt: string
+  statusChangedAt: string | null
+  vacancy: Omit<VacancyDto, 'myApplication'>
+}

@@ -19,6 +19,7 @@ import { CompaniesModule } from './modules/companies/companies.module'
 import { ContactsModule } from './modules/contacts/contacts.module'
 import { GraduatesModule } from './modules/graduates/graduates.module'
 import { ContractHelpModule } from './modules/contract-help/contract-help.module'
+import { VacanciesModule } from './modules/vacancies/vacancies.module'
 import { StudentsModule } from './modules/students/students.module'
 import { TrainingModule } from './modules/training/training.module'
 import { InstitutionsModule } from './modules/institutions/institutions.module'
@@ -48,6 +49,7 @@ import { WorkerModule } from './worker.module'
     ContactsModule,
     GraduatesModule,
     ContractHelpModule,
+    VacanciesModule,
     MinistryModule,
     ...(process.env.APP_ROLE === 'api' || REDIS_OFF ? [] : [WorkerModule]),
   ],
