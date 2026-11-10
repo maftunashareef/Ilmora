@@ -94,6 +94,9 @@ export const EnvSchema = z.object({
   PAYME_LOGIN: z.string().default('Paycom'),
   PAYME_CHECKOUT_URL: z.string().url().default('https://checkout.paycom.uz'),
   PAYME_ALLOWED_IPS: csv,
+  // Payme acceptance tests without a staging machine: while set, production accepts PAYME_TEST_KEY, but only for these
+  // payment ids (the test orders) and the sandbox transactions on them. Empty (default) = test key refused in production.
+  PAYME_SANDBOX_PAYMENT_IDS: csv,
   PAYME_FISCAL_IKPU: z.string().default('10399001001000000'),
   PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501337'),
   PAYME_FISCAL_VAT_PERCENT: z.coerce.number().default(0),
@@ -153,6 +156,7 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     if (!env.TOTP_ENCRYPTION_KEY) console.warn('TOTP_ENCRYPTION_KEY is not set: the ministry cannot sign in, the Super Admins sign in without the authenticator code')
     // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
     if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
+    if (env.PAYME_SANDBOX_PAYMENT_IDS.length) console.warn(`PAYME_SANDBOX_PAYMENT_IDS is set: the Payme test key is accepted for ${env.PAYME_SANDBOX_PAYMENT_IDS.length} test order(s). Clear it once Payme's tests pass.`)
     if (clickConfigured(env) && env.CLICK_ALLOWED_IPS.length === 0) console.warn('CLICK_ALLOWED_IPS is empty: Click callbacks are accepted from any address (the signature is still checked)')
   }
   return env
