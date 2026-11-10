@@ -1,3 +1,4 @@
+import { REGISTRY_DISTRICT_DATA } from './districts.data.js'
 import { foldForSearch } from './format.js'
 import type { L } from './types.js'
 
@@ -79,8 +80,8 @@ export const REGISTRY_INDUSTRIES: RegistryIndustry[] = [
 export type RegistryRegion = { code: string; slug: string; name: L }
 
 /**
- * The 14 regions with their SOATO codes. Check the codes against the ministry's registry file or stat.uz before the
- * launch; districts are loaded only from an official list, never typed in by hand.
+ * The 14 regions with their SOATO codes, checked against the open data of the Statistics Agency (SIAT, the same files
+ * as the districts). Districts are loaded only from an official list, never typed in by hand.
  */
 export const REGISTRY_REGIONS: RegistryRegion[] = [
   { code: '1735', slug: 'karakalpakstan', name: { uz: 'Qoraqalpoğiston Respublikasi', ru: 'Республика Каракалпакстан', en: 'Republic of Karakalpakstan' } },
@@ -98,6 +99,69 @@ export const REGISTRY_REGIONS: RegistryRegion[] = [
   { code: '1733', slug: 'khorezm', name: { uz: 'Xorazm viloyati', ru: 'Хорезмская область', en: 'Khorezm Region' } },
   { code: '1726', slug: 'tashkent-city', name: { uz: 'Toşkent şahri', ru: 'город Ташкент', en: 'Tashkent City' } },
 ]
+
+/** A district (tuman) or a city of district status. `code`: 7-digit SOATO; `region`: the region's 4-digit SOATO code. */
+export type RegistryDistrict = { code: string; region: string; name: L }
+
+/** The 206 districts and cities of district status with their SOATO codes; source and date are in districts.data.ts. */
+export const REGISTRY_DISTRICTS: readonly RegistryDistrict[] = REGISTRY_DISTRICT_DATA
+
+const CITY_WORDS = new Set(['shahri', 'shahar', 'shaxri', 'city', 'gorod'])
+const DISTRICT_WORDS = new Set(['tumani', 'tuman', 'district', 'rayon', 'r', 'n'])
+/** x/h, q/k and a final d/t are written either way in Latin district names (Shahrixon, Marhamat, Samarqand). */
+const loose = (s: string) => s.replace(/x/g, 'h').replace(/q/g, 'k').replace(/d$/, 't')
+
+interface DistrictKey {
+  /** «… shahri» / «город …» / «… city», «… tumani» / «… район» / «… district», or not said. */
+  kind: 'city' | 'district' | null
+  /** The name without the kind word, spaces and signs: «Mirzo Ulugʻbek tumani» → «mirzoulugbek». */
+  base: string
+  loose: string
+  /** Consonants only: catches a vowel written differently (Toyloq / Tayloq, Kukdala / Koʻkdala). */
+  consonants: string
+  words: string[]
+}
+
+function districtKey(name: string): DistrictKey {
+  let kind: DistrictKey['kind'] = null
+  const words: string[] = []
+  for (const w of registrySearchKey(name).replace(/shahri\b/g, ' shahri').split(' ')) {
+    if (!w) continue
+    if (CITY_WORDS.has(w)) kind = 'city'
+    else if (DISTRICT_WORDS.has(w)) kind = 'district'
+    else words.push(w)
+  }
+  const base = words.join('')
+  return { kind, base, loose: loose(base), consonants: loose(base).replace(/[aeiou]/g, ''), words }
+}
+
+/**
+ * The district a name written in a list or by a person refers to, among the districts of its region (`candidates`),
+ * or null when it is not certain. Compared by any of the district's names (uz, ru, en), with the kind words dropped
+ * (a city is never matched to a district of the same name, and the reverse). Tried in order, the first test that
+ * finds exactly one district wins and a test that finds several gives null:
+ * the same name; x/h, q/k, final d/t written differently; an initial for the first word («Sh.Rashidov» = «Sharof
+ * Rashidov», «M.Ulugbek», «Q-bozor» = «Qorovulbozor»); a vowel written differently (names of 5+ letters).
+ */
+export function matchDistrict<T extends { name: L }>(name: string, candidates: readonly T[]): T | null {
+  const p = districtKey(name)
+  if (!p.base) return null
+  const keyed = candidates.map((c) => ({ c, keys: [...new Set([c.name.uz, c.name.ru, c.name.en])].filter(Boolean).map(districtKey) }))
+  const initial = p.words.length > 1 && p.words[0].length <= 2 ? p.words[0] : null
+  const last = loose(p.words[p.words.length - 1])
+  const tests: ((k: DistrictKey) => boolean)[] = [
+    (k) => k.base === p.base,
+    (k) => k.loose === p.loose,
+    (k) => !!initial && k.base.startsWith(initial) && k.loose.endsWith(last) && k.loose.length > last.length,
+    (k) => p.base.length >= 5 && k.consonants === p.consonants,
+  ]
+  for (const test of tests) {
+    const hits = keyed.filter(({ keys }) => keys.some((k) => (!p.kind || !k.kind || k.kind === p.kind) && test(k)))
+    if (hits.length === 1) return hits[0].c
+    if (hits.length > 1) return null
+  }
+  return null
+}
 
 // ───────────── Registry API: rules and response contract (ТЗ 3, 9.2, 9.4) ─────────────
 

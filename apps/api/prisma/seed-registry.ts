@@ -1,5 +1,5 @@
 /**
- * Registry reference data (industries, regions) for an existing tenant. Safe on production and repeatable.
+ * Registry reference data (industries, regions, districts) for an existing tenant. Safe on production and repeatable.
  *
  *   npm run prisma:seed:registry -w apps/api
  *   on the server: sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate npx tsx prisma/seed-registry.ts
@@ -8,7 +8,7 @@
  */
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../src/generated/prisma/client'
-import { seedRegistryReference } from './registry-reference'
+import { seedRegistryDistricts, seedRegistryReference } from './registry-reference'
 
 try {
   process.loadEnvFile?.('.env')
@@ -25,7 +25,8 @@ async function main() {
   const tenant = await prisma.tenant.findUnique({ where: { slug: TENANT_SLUG } })
   if (!tenant) throw new Error(`Tenant "${TENANT_SLUG}" does not exist: run prisma/seed.ts first`)
   const done = await seedRegistryReference(prisma, tenant.id)
-  console.log(`Registry reference data: ${done.industries} industries, ${done.regions} regions (existing rows kept as they are)`)
+  const districts = await seedRegistryDistricts(prisma, tenant.id)
+  console.log(`Registry reference data: ${done.industries} industries, ${done.regions} regions, ${districts.districts} districts (${districts.added} added; existing rows kept as they are)`)
 }
 
 main()

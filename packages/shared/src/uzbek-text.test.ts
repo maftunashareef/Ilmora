@@ -5,7 +5,7 @@ import { dict } from './translations.js'
 import * as sample from './sample-data.js'
 import { ONLINE_CATEGORIES, ONLINE_COURSES } from './online-courses.js'
 import { UNIVERSITIES, UNIVERSITY_PACKAGES } from './university-packages.js'
-import { REGISTRY_INDUSTRIES, REGISTRY_REGIONS } from './registry.js'
+import { REGISTRY_DISTRICTS, REGISTRY_INDUSTRIES, REGISTRY_REGIONS } from './registry.js'
 
 /**
  * ILMORA writes Uzbek with its own alphabet: Ğ ğ (for G‘ g‘), Ö ö (O‘ o‘), Ş ş (Sh sh) and Ç ç (Ch ch). English words,
@@ -29,7 +29,7 @@ function uzbekStrings(): [string, string, string][] {
   walk('sample', sample)
   walk('online', { ONLINE_CATEGORIES, ONLINE_COURSES })
   walk('universities', { UNIVERSITIES, UNIVERSITY_PACKAGES })
-  walk('registry', { REGISTRY_INDUSTRIES, REGISTRY_REGIONS })
+  walk('registry', { REGISTRY_INDUSTRIES, REGISTRY_REGIONS, REGISTRY_DISTRICTS })
   return out
 }
 

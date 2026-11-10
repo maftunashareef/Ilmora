@@ -6,13 +6,14 @@
  *   npm run prisma:import:technikums -w apps/api -- --apply   # write
  *   on the server: sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate npx tsx prisma/import-technikums.ts [--apply]
  *
- * With --apply it first fills the reference data (industries, regions with their slugs), as prisma/seed-registry.ts does.
+ * With --apply it first fills the reference data (industries, regions with their slugs, the SOATO districts), as
+ * prisma/seed-registry.ts does.
  * Rules: prisma/registry-import.ts and docs/registry/data-model.md.
  */
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../src/generated/prisma/client'
 import { importTechnikums } from './registry-import'
-import { seedRegistryReference } from './registry-reference'
+import { seedRegistryDistricts, seedRegistryReference } from './registry-reference'
 
 try {
   process.loadEnvFile?.('.env')
@@ -29,11 +30,17 @@ const apply = process.argv.includes('--apply')
 async function main() {
   const tenant = await prisma.tenant.findUnique({ where: { slug: TENANT_SLUG } })
   if (!tenant) throw new Error(`Tenant "${TENANT_SLUG}" does not exist: run prisma/seed.ts first`)
-  if (apply) await seedRegistryReference(prisma, tenant.id)
+  if (apply) {
+    await seedRegistryReference(prisma, tenant.id)
+    const d = await seedRegistryDistricts(prisma, tenant.id)
+    console.log(`reference data: ${d.districts} districts (${d.added} added)`)
+  }
 
   const r = await importTechnikums(prisma, tenant.id, { apply })
   console.log(apply ? '== technikum import: written' : '== technikum import: report only (add --apply to write)')
   console.log(`list ${r.total}: new ${r.created.length}, updated ${r.updated.length}, enriched ${r.enriched.length}, unchanged ${r.unchanged}`)
+  if (!r.districts.available) console.log('districts: none in the database yet, nothing linked (--apply loads them first)')
+  else console.log(`districts: ${r.districts.linked} records linked to a SOATO district; names not found, kept as text only: ${r.districts.unlinked.join('; ') || 'none'}`)
   if (r.missingRegion.length) console.log(`no region in the database for ${r.missingRegion.length} (run prisma/seed-registry.ts): ${r.missingRegion.join(', ')}`)
   if (r.stirConflicts.length) {
     console.log(`\nSTIR already held by another record — not written, merge by hand (${r.stirConflicts.length}):`)
