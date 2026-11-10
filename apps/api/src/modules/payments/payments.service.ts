@@ -131,7 +131,8 @@ export class PaymentsService {
     if (payment.state !== 'PAID') return false
     const journal = await tx.ledgerJournal.findUnique({ where: { tenantId_kind_referenceType_referenceId: { tenantId: payment.tenantId, kind: 'PAYMENT_SETTLED', referenceType: 'Payment', referenceId: payment.id } } })
     if (journal) await this.ledger.reverse(tx, journal.id, 'PAYMENT_REFUNDED', reason, actorId)
-    await tx.payment.update({ where: { id: payment.id }, data: { state: 'REFUNDED', refundedAt: new Date() } })
+    // The whole payment is returned (the database checks that REFUNDED means refundedMinor = amountMinor).
+    await tx.payment.update({ where: { id: payment.id }, data: { state: 'REFUNDED', refundedAt: new Date(), refundedMinor: payment.amountMinor } })
     const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId } })
     const now = new Date()
     const cancelSub = async (subId: string) => {
