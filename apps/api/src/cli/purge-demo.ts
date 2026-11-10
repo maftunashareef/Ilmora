@@ -139,8 +139,12 @@ async function buildPlan(db: Client, tenantId: string): Promise<Plan> {
   const subscriptionIds = ids(await db.subscription.findMany({ where: { studentId: { in: userIds } }, select: { id: true } }))
   const enrollmentWhere: Prisma.EnrollmentWhereInput = { OR: [{ studentId: { in: userIds } }, { subscriptionId: { in: subscriptionIds } }, { groupId: { in: groupIds } }, { courseId: { in: courseIds } }] }
   const paymentIds = ids(await db.payment.findMany({ where: { OR: [{ studentId: { in: userIds } }, { subscriptionId: { in: subscriptionIds } }] }, select: { id: true } }))
-  // Journals of demo payments, and the reversal journals that point at them (a reversal of a reversal does not exist, but the loop costs nothing).
-  const journalIds = ids(await db.ledgerJournal.findMany({ where: { referenceType: 'Payment', referenceId: { in: paymentIds } }, select: { id: true } }))
+  const refundRequestWhere: Prisma.RefundRequestWhereInput = { OR: [{ paymentId: { in: paymentIds } }, { studentId: { in: userIds } }, { subscriptionId: { in: subscriptionIds } }] }
+  const refundRequestIds = ids(await db.refundRequest.findMany({ where: refundRequestWhere, select: { id: true } }))
+  const refundLineWhere: Prisma.RefundRequestLineWhereInput = { OR: [{ refundRequestId: { in: refundRequestIds } }, { enrollment: enrollmentWhere }, { courseId: { in: courseIds } }] }
+  const paymentLineWhere: Prisma.PaymentLineWhereInput = { OR: [{ paymentId: { in: paymentIds } }, { courseId: { in: courseIds } }] }
+  // Journals of demo payments and of their refund requests, and the reversal journals that point at them (a reversal of a reversal does not exist, but the loop costs nothing).
+  const journalIds = ids(await db.ledgerJournal.findMany({ where: { OR: [{ referenceType: 'Payment', referenceId: { in: paymentIds } }, { referenceType: 'RefundRequest', referenceId: { in: refundRequestIds } }] }, select: { id: true } }))
   for (let before = -1; before !== journalIds.length;) {
     before = journalIds.length
     journalIds.push(...ids(await db.ledgerJournal.findMany({ where: { reversalOfId: { in: journalIds }, id: { notIn: journalIds } }, select: { id: true } })))
@@ -215,6 +219,9 @@ async function buildPlan(db: Client, tenantId: string): Promise<Plan> {
     step('LedgerEntry', 'of demo payment journals', (c) => c.ledgerEntry.count({ where: { journalId: { in: journalIds } } }), async (tx) => (await tx.ledgerEntry.deleteMany({ where: { journalId: { in: journalIds } } })).count),
     step('LedgerJournal', 'of demo payments (+ reversals)', (c) => c.ledgerJournal.count({ where: { id: { in: journalIds } } }), async (tx) => (await tx.ledgerJournal.deleteMany({ where: { id: { in: journalIds } } })).count),
     step('Receipt', 'of demo payments', (c) => c.receipt.count({ where: { paymentId: { in: paymentIds } } }), async (tx) => (await tx.receipt.deleteMany({ where: { paymentId: { in: paymentIds } } })).count),
+    step('RefundRequestLine', 'of demo refund requests, enrollments or courses', (c) => c.refundRequestLine.count({ where: refundLineWhere }), async (tx) => (await tx.refundRequestLine.deleteMany({ where: refundLineWhere })).count),
+    step('RefundRequest', 'of demo students/payments', (c) => c.refundRequest.count({ where: { id: { in: refundRequestIds } } }), async (tx) => (await tx.refundRequest.deleteMany({ where: { id: { in: refundRequestIds } } })).count),
+    step('PaymentLine', 'of demo payments or courses', (c) => c.paymentLine.count({ where: paymentLineWhere }), async (tx) => (await tx.paymentLine.deleteMany({ where: paymentLineWhere })).count),
     step('PaymentTransaction', 'of demo payments', (c) => c.paymentTransaction.count({ where: { paymentId: { in: paymentIds } } }), async (tx) => (await tx.paymentTransaction.deleteMany({ where: { paymentId: { in: paymentIds } } })).count),
     step('Payment', 'of demo students/subscriptions', (c) => c.payment.count({ where: { id: { in: paymentIds } } }), async (tx) => (await tx.payment.deleteMany({ where: { id: { in: paymentIds } } })).count),
     step('AttendanceRecord', 'demo students or demo lessons', (c) => c.attendanceRecord.count({ where: attendanceWhere }), async (tx) => (await tx.attendanceRecord.deleteMany({ where: attendanceWhere })).count),

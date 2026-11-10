@@ -59,7 +59,7 @@ describe('a provider refund takes the subscription down only for the period it p
   it('leaves a subscription alone whose newer period is paid', async () => {
     const { payments, tx } = setup({ periodEnd: new Date('2026-03-01T00:00:00.000Z') }, { status: 'ACTIVE', currentPeriodEnd: new Date('2026-04-01T00:00:00.000Z') })
     expect(await payments.refundPaid(tx as unknown as TransactionClient, 'pay-x', 'payme-cancel:5')).toBe(true)
-    expect(tx.payment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ state: 'REFUNDED' }) }))
+    expect(tx.payment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ state: 'REFUNDED', refundedMinor: 100n }) }))
     expect(tx.subscription.update).not.toHaveBeenCalled()
     expect(tx.enrollment.updateMany).not.toHaveBeenCalled()
   })

@@ -14,6 +14,8 @@ export interface DraftInput { packageId: string | null; groupIds: string[]; meyo
 
 type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; center: { status: string }; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; meyosGrant: boolean; status: string } }
 type Db = TransactionClient | PrismaService['client']
+/** One course of a payment (PaymentLine): its enrollment, its price for the period and what is paid for it. */
+type PaymentLineInput = { enrollmentId: string; courseId: string; listPriceMinor: bigint; amountMinor: bigint }
 type PackageAccess = { accessKind: 'PERIOD' | 'LESSONS'; periodDays: number | null; lessonCount: number | null } | null
 
 const DAY_MS = 86_400_000
@@ -171,8 +173,9 @@ export class SubscriptionService {
       const groups = await this.validateSelection(tenantId, draft.packageId, draft.draftGroupIds, studentId, tx)
       // Each course is charged its list price minus the discount active right now (none stacks with anything else); the server
       // decides the amount, the browser only displays it. The amount stays fixed for this payment's hold.
-      const listMinor = groups.reduce((sum, g) => sum + g.course.priceMinor, 0n)
-      const amountMinor = groups.reduce((sum, g) => sum + finalPriceMinor(g.course.priceMinor, discountWindow(g.course), now), 0n)
+      const priced = groups.map((g) => ({ groupId: g.id, courseId: g.courseId, listPriceMinor: g.course.priceMinor, amountMinor: finalPriceMinor(g.course.priceMinor, discountWindow(g.course), now) }))
+      const listMinor = priced.reduce((sum, l) => sum + l.listPriceMinor, 0n)
+      const amountMinor = priced.reduce((sum, l) => sum + l.amountMinor, 0n)
       const sub = await tx.subscription.update({
         where: { id: draft.id },
         data: { status: 'PENDING_PAYMENT', amountMinor, currency: 'UZS', currentPeriodStart: now, currentPeriodEnd: periodEnd, ...this.accessColumns(pkg) },
@@ -180,10 +183,13 @@ export class SubscriptionService {
       // Holds of an earlier attempt that failed or expired (CANCELLED, never active) make way for the new ones — they
       // would otherwise collide on (subscription, group) and answer 409 for the same groups (security review Н2).
       await tx.enrollment.deleteMany({ where: { subscriptionId: sub.id, status: 'CANCELLED' } })
-      await tx.enrollment.createMany({
+      const holds = await tx.enrollment.createManyAndReturn({
         data: groups.map((g) => ({ tenantId, subscriptionId: sub.id, studentId, groupId: g.id, courseId: g.courseId, status: 'PENDING' as const })),
+        select: { id: true, groupId: true },
       })
-      const payment = await this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd, amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId })
+      const enrollmentOf = new Map(holds.map((e) => [e.groupId, e.id]))
+      const lines = priced.map(({ groupId, ...l }) => ({ ...l, enrollmentId: enrollmentOf.get(groupId)! }))
+      const payment = await this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd, amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId }, lines)
       await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider: payment.provider, free: payment.state === 'PAID', amountMinor: amountMinor.toString(), listAmountMinor: listMinor.toString(), discountMinor: (listMinor - amountMinor).toString(), groupIds: draft.draftGroupIds, packageId: draft.packageId, kind: sub.kind, lessonsTotal: sub.lessonsTotal } })
       return { subscription: sub, payment }
     })
@@ -193,8 +199,10 @@ export class SubscriptionService {
   /**
    * The payment a provider adapter will settle. Nothing to collect (free courses) means nothing a provider could ever
    * confirm, so the payment is recorded as paid without a provider and the subscription starts on the spot.
+   * `lines`: what it pays for each course (PaymentLine), adding up to the amount; a course's refund is counted from them.
    */
-  private async createPayment(tx: TransactionClient, now: Date, data: { tenantId: string; studentId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor: bigint; currency: string; provider: PaymentProvider; expiresAt: Date; createdById: string }) {
+  private async createPayment(tx: TransactionClient, now: Date, data: { tenantId: string; studentId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor: bigint; currency: string; provider: PaymentProvider; expiresAt: Date; createdById: string }, lines: PaymentLineInput[]) {
+    if (lines.reduce((sum, l) => sum + l.amountMinor, 0n) !== data.amountMinor) throw new Error('Payment lines do not add up to the payment amount')
     const free = data.amountMinor === 0n
     // A provider that is not connected could never confirm the payment: refuse before any seat is held (Н12). The
     // transaction is rolled back, the holds with it.
@@ -202,6 +210,7 @@ export class SubscriptionService {
       throw new AppError('payment_unavailable', 'This payment method is not connected yet', HttpStatus.SERVICE_UNAVAILABLE)
     }
     const payment = await tx.payment.create({ data: free ? { ...data, provider: null, state: 'PAID', paidAt: now } : data })
+    await tx.paymentLine.createMany({ data: lines.map((l) => ({ ...l, tenantId: data.tenantId, paymentId: payment.id })) })
     if (free) await this.applySettlement(tx, payment)
     return payment
   }
@@ -224,16 +233,17 @@ export class SubscriptionService {
     }
     const seats = await this.prisma.client.enrollment.findMany({
       where: { subscriptionId: sub.id, status: 'ACTIVE' },
-      select: { group: { select: { deletedAt: true, course: { select: { priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, status: true, center: { select: { status: true } } } } } } },
+      select: { id: true, courseId: true, group: { select: { deletedAt: true, course: { select: { priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, status: true, center: { select: { status: true } } } } } } },
     })
     if (!seats.length || seats.some((e) => e.group.deletedAt || e.group.course.status !== 'PUBLISHED' || e.group.course.center.status !== 'ACTIVE')) {
       throw AppError.conflict('renewal_unavailable', 'One of the courses is no longer open: choose the courses again')
     }
-    const amountMinor = seats.reduce((sum, e) => sum + finalPriceMinor(e.group.course.priceMinor, discountWindow(e.group.course), now), 0n)
+    const lines = seats.map((e) => ({ enrollmentId: e.id, courseId: e.courseId, listPriceMinor: e.group.course.priceMinor, amountMinor: finalPriceMinor(e.group.course.priceMinor, discountWindow(e.group.course), now) }))
+    const amountMinor = lines.reduce((sum, l) => sum + l.amountMinor, 0n)
     // An early renewal continues after the current period; a renewal of a blocked subscription starts a fresh period now.
     const periodStart = sub.status === 'ACTIVE' && sub.kind === 'PERIOD' && sub.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now
     const payment = await this.prisma.tx((tx) =>
-      this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId }),
+      this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId }, lines),
     )
     await this.audit.record({ action: 'subscription.renew', entityType: 'Subscription', entityId: sub.id, after: { paymentId: payment.id, amountMinor: amountMinor.toString(), previousAmountMinor: sub.amountMinor.toString() } })
     return { subscription: sub, payment }
