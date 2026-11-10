@@ -33,11 +33,13 @@ describe('ministry accounts (Super Admin)', () => {
     await ministryAccounts.setActive('u1', true)
     await ministryAccounts.resetPassword('u1')
     await ministryAccounts.resetApp('u1')
+    await ministryAccounts.resetAccountPassword('u2')
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       'POST /admin/ministry-accounts/u1/disable',
       'POST /admin/ministry-accounts/u1/enable',
       'POST /admin/ministry-accounts/u1/reset-password',
       'POST /admin/accounts/u1/reset-second-factor',
+      'POST /admin/accounts/u2/reset-password',
     ])
   })
 

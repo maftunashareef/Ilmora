@@ -6,6 +6,7 @@ import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
 import { MINISTRY_LOGIN_RE, ministryAccounts, normalizeLogin, type MinistryAccountForm } from '../../services/ministryAccounts'
+import { TemporaryPasswordDialog } from '../../components/TemporaryPasswordDialog'
 import { useStore } from '../../store/useStore'
 
 type Ask = { kind: 'disable' | 'enable' | 'password' | 'app'; account: MinistryAccountDto }
@@ -116,7 +117,17 @@ export function AdminMinistry() {
       <Notice tone="info" className="mt-6 text-xs">{t('admin.ministry.howItWorks')}</Notice>
       {editing && <AccountEditor account={editing === 'new' ? null : editing} onClose={closeEditor} onSaved={saved} />}
       {ask && <ConfirmDialog ask={ask} onClose={closeAsk} onConfirm={confirm} />}
-      {shown && <PasswordDialog shown={shown} onClose={closeShown} />}
+      {shown && (
+        <TemporaryPasswordDialog
+          title={shown.created ? t('admin.ministry.created') : t('admin.ministry.passwordTitle')}
+          name={shown.account.name}
+          login={shown.account.login}
+          password={shown.password}
+          note={shown.account.appLinked ? undefined : t('admin.ministry.firstSignIn')}
+          handedLabel={t('admin.ministry.passwordSaved')}
+          onClose={closeShown}
+        />
+      )}
     </div>
   )
 }
@@ -198,41 +209,6 @@ function ConfirmDialog({ ask, onClose, onConfirm }: { ask: Ask; onClose: () => v
     >
       <p className="text-sm leading-relaxed text-charcoal/80">{t(text[ask.kind], { name })}</p>
       {error && <p className="mt-3 text-xs text-red-700" role="alert">{error}</p>}
-    </Modal>
-  )
-}
-
-/** The temporary password, shown once: copy it, hand it over, close. */
-function PasswordDialog({ shown, onClose }: { shown: Shown; onClose: () => void }) {
-  const { t } = useT()
-  const [copied, setCopied] = useState(false)
-  const [handed, setHanded] = useState(false)
-  // Closing (Esc, the cross, the backdrop) only after the Super Admin confirms the password was handed over.
-  const close = useCallback(() => { if (handed) onClose() }, [handed, onClose])
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(`${shown.account.login}\n${shown.password}`); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch { /* the text stays on screen to copy by hand */ }
-  }
-  return (
-    <Modal
-      open
-      onClose={close}
-      title={shown.created ? t('admin.ministry.created') : t('admin.ministry.passwordTitle')}
-      footer={<div className="flex justify-end"><Button disabled={!handed} onClick={onClose}>{t('mfa.continue')}</Button></div>}
-    >
-      <div className="space-y-4">
-        <p className="text-sm text-charcoal/75">{shown.account.name}</p>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 rounded-control border border-charcoal/12 bg-ivory/60 p-4 text-sm">
-          <dt className="text-charcoal/55">{t('auth.login')}</dt><dd className="select-all font-mono text-charcoal">{shown.account.login}</dd>
-          <dt className="text-charcoal/55">{t('admin.ministry.passwordTitle')}</dt><dd className="select-all break-all font-mono text-base tracking-wider text-charcoal">{shown.password}</dd>
-        </dl>
-        <Button type="button" size="sm" variant="secondary" onClick={() => void copy()}><Icon name={copied ? 'check' : 'file'} className="h-3.5 w-3.5" />{t(copied ? 'mfa.copied' : 'admin.ministry.copyBoth')}</Button>
-        <Notice tone="warn" className="text-xs">{t('admin.ministry.passwordOnce')}</Notice>
-        {!shown.account.appLinked && <p className="text-xs leading-relaxed text-charcoal/65">{t('admin.ministry.firstSignIn')}</p>}
-        <label className="flex cursor-pointer items-start gap-3 text-[13px] text-charcoal/80">
-          <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-forest" checked={handed} onChange={(e) => setHanded(e.target.checked)} />
-          <span>{t('admin.ministry.passwordSaved')}</span>
-        </label>
-      </div>
     </Modal>
   )
 }

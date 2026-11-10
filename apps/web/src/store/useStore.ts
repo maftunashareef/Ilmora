@@ -120,6 +120,13 @@ interface Actions {
    * Errors: wrong_password, same_password, password_is_login, no_password; 5 tries.
    */
   changePassword: (currentPassword: string, newPassword: string) => Promise<AuthUser>
+  /** «Забыли пароль?», step 1: an SMS code to the account's phone (`devCode` only on test servers). */
+  requestPasswordCode: (phone: string) => Promise<{ expiresInSeconds: number; devCode?: string }>
+  /**
+   * «Забыли пароль?», step 2: the code and the new password; every session ends and this browser signs in (the answer
+   * is a sign-in). Not for the ministry, Super Admins and finance (403 mfa_password_login) — the Super Admin resets those.
+   */
+  resetPasswordBySms: (phone: string, code: string, newPassword: string) => Promise<AuthUser>
   logout: () => Promise<void>
   ensureWorkspace: () => Promise<void>
   loadAdminPresets: () => Promise<void>
@@ -574,6 +581,9 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       mfaVerify: (challenge, code) => api<{ accessToken: string; user: AuthUser }>('/auth/mfa/verify', { method: 'POST', body: { challenge, code }, credentials: true, auth: false }).then(openSession),
       changePassword: (currentPassword, newPassword) => api<{ accessToken: string; user: AuthUser }>('/auth/password', { method: 'POST', body: { currentPassword, newPassword }, credentials: true }).then(openSession),
+      requestPasswordCode: (phone) => api<{ expiresInSeconds: number; devCode?: string }>('/auth/otp/request', { method: 'POST', body: { phone, lang: get().lang }, auth: false }),
+      resetPasswordBySms: (phone, code, newPassword) =>
+        api<{ accessToken: string; user: AuthUser }>('/auth/password/reset', { method: 'POST', body: { phone, code, newPassword }, credentials: true, auth: false }).then(openSession),
       loginAsDemo: async (role, customUser) => {
         if (!DEMO_LOGIN_ENABLED) throw new Error('demo_login_disabled')
         const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'

@@ -34,4 +34,9 @@ export const ministryAccounts = {
   resetPassword: (id: string) => api<MinistryAccountCreatedDto>(`/admin/ministry-accounts/${encodeURIComponent(id)}/reset-password`, { method: 'POST' }),
   /** Lost phone: unlinks the authenticator app of a ministry account or of another Super Admin; the next sign-in shows the QR code. */
   resetApp: (id: string) => api<{ ok: true }>(`/admin/accounts/${encodeURIComponent(id)}/reset-second-factor`, { method: 'POST' }),
+  /**
+   * «Сбросить пароль» for any account with a login but a Super Admin (PR #54): a temporary password shown once; every
+   * session ends and the next sign-in asks for a new password (403 password_change_required until then).
+   */
+  resetAccountPassword: (id: string) => api<{ temporaryPassword: string }>(`/admin/accounts/${encodeURIComponent(id)}/reset-password`, { method: 'POST' }),
 }
