@@ -78,6 +78,33 @@ describe.skipIf(!DB_AVAILABLE)('Ministry accounts (ТЗ 4.4)', () => {
     })
   })
 
+  it('the temporary password is changed by its owner: other sessions end, a fresh one opens; a reset asks again (security review №4)', async () => {
+    const { tenantId, inT } = await setup('min-password')
+    await inT(async () => {
+      const { account, temporaryPassword } = await service.create(tenantId, { login: 'vazirlik.uch', name: 'Uch' })
+      const me = { id: account.id, tenantId }
+      expect(await accounts.passwordChangeRequired({ id: account.id, tenantId }, ['MINISTRY'])).toBe(true)
+      await ctx.tokens.issueRefresh(account.id, tenantId, meta)
+      await expect(accounts.changePassword(me, { currentPassword: 'wrong-password', newPassword: 'Yangi-parol-2026' }, meta)).rejects.toMatchObject({ code: 'wrong_password' })
+      await expect(accounts.changePassword(me, { currentPassword: temporaryPassword, newPassword: temporaryPassword }, meta)).rejects.toMatchObject({ code: 'same_password' })
+      await expect(accounts.changePassword(me, { currentPassword: temporaryPassword, newPassword: 'vazirlik.uch' }, meta)).rejects.toMatchObject({ code: 'password_is_login' })
+
+      const done = await accounts.changePassword(me, { currentPassword: temporaryPassword, newPassword: 'Yangi-parol-2026' }, meta)
+      expect(done.user).toMatchObject({ id: account.id, passwordChangeRequired: false })
+      expect(await ctx.prisma.client.refreshSession.count({ where: { userId: account.id, revokedAt: null } })).toBe(1)
+      await expect(accounts.loginWithPassword(tenantId, { login: 'vazirlik.uch', password: temporaryPassword }, meta)).rejects.toMatchObject({ code: 'invalid_credentials' })
+      expect(await accounts.loginWithPassword(tenantId, { login: 'vazirlik.uch', password: 'Yangi-parol-2026' }, meta)).toMatchObject({ mfaRequired: true })
+      expect(await ctx.prisma.client.auditEvent.count({ where: { action: 'auth.password.change', entityId: account.id } })).toBe(1)
+
+      await service.resetPassword(tenantId, account.id)
+      expect(await accounts.passwordChangeRequired({ id: account.id, tenantId }, ['MINISTRY'])).toBe(true)
+      // Not the ministry, or no password at all.
+      const student = await ctx.makeStudent(tenantId)
+      expect(await accounts.passwordChangeRequired({ id: student.id, tenantId }, ['STUDENT'])).toBe(false)
+      await expect(accounts.changePassword({ id: student.id, tenantId }, { currentPassword: 'x', newPassword: 'Yangi-parol-2026' }, meta)).rejects.toMatchObject({ code: 'no_password' })
+    })
+  })
+
   it('touches ministry accounts only: a student is «not found»', async () => {
     const { tenantId, inT, admin } = await setup('min-scope')
     await inT(async () => {
