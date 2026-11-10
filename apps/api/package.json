@@ -29,6 +29,7 @@
     "prisma:seed:registry": "tsx prisma/seed-registry.ts",
     "prisma:seed:registry-demo": "tsx prisma/seed-registry-demo.ts",
     "prisma:import:technikums": "tsx prisma/import-technikums.ts",
+    "bench:ministry": "tsx prisma/bench-ministry-stats.ts",
     "prisma:restore:teachers": "tsx prisma/restore-teachers.ts",
     "owner:setup": "tsx src/cli/owner-setup.ts",
     "demo:purge": "tsx src/cli/purge-demo.ts",

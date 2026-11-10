@@ -229,11 +229,18 @@ export class MinistryStatsService {
     }
   }
 
-  /** ТЗ 7.3 «Абитуриенты»: who wants to enrol, by industry and year. */
+  /**
+   * ТЗ 7.3 «Абитуриенты»: who wants to enrol, by industry and year. Counted in the database by year and direction (a
+   * few hundred groups whatever the number of students), then folded into industries here.
+   */
   private async applicants(ctx: Ctx): Promise<StatsTableDto> {
-    const rows0 = await this.prisma.client.studentProfile.findMany({ where: { ...this.studentWhere(ctx), mode: 'APPLYING', ...(ctx.f.year ? { enrollYear: ctx.f.year } : {}) }, select: { directionId: true, enrollYear: true } })
+    const groups = await this.prisma.client.studentProfile.groupBy({
+      by: ['enrollYear', 'directionId'],
+      where: { ...this.studentWhere(ctx), mode: 'APPLYING', ...(ctx.f.year ? { enrollYear: ctx.f.year } : {}) },
+      _count: { _all: true },
+    })
     const by = new Map<string, number>()
-    for (const p of rows0) add(by, `${p.enrollYear ?? ''}|${p.directionId ? this.industryOf(ctx, p.directionId) : ''}`, 1)
+    for (const g of groups) add(by, `${g.enrollYear ?? ''}|${g.directionId ? this.industryOf(ctx, g.directionId) : ''}`, g._count._all)
     const order = new Map(ctx.industries.map((i) => [i.id, i]))
     const rows = [...by.entries()]
       .map(([k, applicants]) => { const [year, ind] = k.split('|'); return { year: year ? Number(year) : null, industry: order.get(ind)?.name ?? DASH, applicants, sort: order.get(ind)?.sortOrder ?? 99 } })
