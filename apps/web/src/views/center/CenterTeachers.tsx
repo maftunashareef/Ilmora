@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { countLabel, NOUNS } from '@ilmora/shared'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { Avatar, Badge, Button, EmptyState, Field, Icon, Input, LField, Modal, Notice, PageTitle } from '../../components/ui'
@@ -23,8 +23,8 @@ export function CenterTeachers() {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
 
-  const load = () => api<CenterTeacher[]>(`${scope.base}/teachers`).then(setList).catch(() => setFailed(true))
-  useEffect(() => { void load() }, [])
+  const load = useCallback(() => api<CenterTeacher[]>(`${scope.base}/teachers`).then(setList).catch(() => setFailed(true)), [scope.base])
+  useEffect(() => { void load() }, [load])
 
   const fail = (err: unknown) => notify(isApiError(err) ? apiErrorText(err, lang) : t('center.loadError'), 'warn')
   const save = async () => {

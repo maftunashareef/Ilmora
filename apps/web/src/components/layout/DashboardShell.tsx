@@ -19,6 +19,20 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
+  // The browser tab names the section (М17): «Цифры · Кабинет министерства — ILMORA». A page outside the menu (a card,
+  // a detail) takes the item it belongs to — the longest matching address.
+  const section = items
+    .filter((it) => loc.pathname === it.to || (!it.end && loc.pathname.startsWith(`${it.to}/`)))
+    .sort((a, b) => b.to.length - a.to.length)[0]?.label
+  const brand = site.brand.name || 'ILMORA'
+  const tabTitle = section ? `${section} · ${title} — ${brand}` : `${title} — ${brand}`
+  useEffect(() => {
+    document.title = tabTitle
+    // Next writes the layout's title back after a client navigation or a language switch: keep the section's.
+    const keep = new MutationObserver(() => { if (document.title !== tabTitle) document.title = tabTitle })
+    keep.observe(document.head, { subtree: true, childList: true, characterData: true })
+    return () => keep.disconnect()
+  }, [tabTitle])
 
   const sidebar = (
     <nav aria-label={title} className="flex flex-1 flex-col gap-0.5">

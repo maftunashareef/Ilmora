@@ -33,7 +33,7 @@ export function CenterSettings() {
   useEffect(() => {
     api<CenterOverview>(`${scope.base}/overview`).then((o) => { setCenter(o.center); setDraft(toDraft(o.center)) }).catch(() => { setFailed(true); notify(t('center.loadError'), 'warn') })
     api<CenterQr>(`${scope.base}/qr`).then(setQr).catch(() => undefined)
-  }, [notify, t])
+  }, [scope.base, notify, t])
 
   const fail = (err: unknown) => notify(isApiError(err) ? apiErrorText(err, lang) : t('center.loadError'), 'warn')
   const save = async () => {

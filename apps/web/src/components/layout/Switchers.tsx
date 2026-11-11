@@ -16,6 +16,11 @@ export const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: strin
 ] as const
 
 /** Language lives in the URL (/uz, /ru, /en); switching re-routes to the same page in the new locale. */
+/** The language for the next visit (read by the proxy on the first request). */
+function rememberLocale(code: 'uz' | 'ru' | 'en') {
+  document.cookie = `NEXT_LOCALE=${code}; path=/; max-age=31536000; samesite=lax`
+}
+
 export function LangSwitcher({ compact }: { compact?: boolean }) {
   const currentLocale = useLocale()
   const lang = useStore((s) => s.lang)
@@ -28,7 +33,7 @@ export function LangSwitcher({ compact }: { compact?: boolean }) {
 
   const choose = (code: 'uz' | 'ru' | 'en') => {
     setLang(code)
-    document.cookie = `NEXT_LOCALE=${code}; path=/; max-age=31536000; samesite=lax`
+    rememberLocale(code)
     const rest = stripLocale(pathname)
     const search = rest.includes('?') ? '' : (typeof window !== 'undefined' ? window.location.search : '')
     const hash = rest.includes('#') ? '' : (typeof window !== 'undefined' ? window.location.hash : '')

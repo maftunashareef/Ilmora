@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from '@/lib/router'
 import {
   Avatar,
@@ -37,9 +37,10 @@ export function StudioChannel() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
-  useEffect(() => {
-    setDraft(teacher ?? null)
-  }, [teacher?.id])
+  // Another teacher on screen: start from their profile. Only the id counts — a store refresh of the same teacher keeps
+  // what is being typed.
+  const [draftOf, setDraftOf] = useState(teacher?.id)
+  if (draftOf !== teacher?.id) { setDraftOf(teacher?.id); setDraft(teacher ?? null) }
 
   if (!teacher || !draft) return null
 

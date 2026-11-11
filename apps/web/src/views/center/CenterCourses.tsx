@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { discountFromDraft, discountToDraft, emptyDiscountDraft, type DiscountDraft, isDiscountActive, isoToTashkentLocal } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
@@ -34,12 +34,12 @@ export function CenterCourses() {
   const [draft, setDraft] = useState<DiscountDraft>(emptyDiscountDraft())
   const [busy, setBusy] = useState(false)
 
-  const load = () => api<Loaded>(`${scope.base}/courses`).then((d) => { publishSeatCounts(d.courses.flatMap((c) => c.groups)); setData(d) }).catch(() => setFailed(true))
+  const load = useCallback(() => api<Loaded>(`${scope.base}/courses`).then((d) => { publishSeatCounts(d.courses.flatMap((c) => c.groups)); setData(d) }).catch(() => setFailed(true)), [scope.base])
   useEffect(() => {
     if (!linked) return
     void load()
     api<CenterTeacher[]>(`${scope.base}/teachers`).then(setTeachers).catch(() => undefined)
-  }, [linked])
+  }, [linked, load, scope.base])
 
   if (!linked) return <EmptyState icon={<Icon name="building" className="h-5 w-5" />} title={t('center.noCenter')} body={t('center.noCenterHint')} />
 
