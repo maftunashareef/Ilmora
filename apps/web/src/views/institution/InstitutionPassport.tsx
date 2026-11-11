@@ -12,6 +12,7 @@ import {
 } from '../../services/institutionCabinet'
 import { INSTITUTION_TYPES, OWNERSHIPS } from '../../services/ministry'
 import { useRegions } from '../../services/registry'
+import { orgErrorText, type OrgAction } from '../../services/orgErrors'
 import { useStore } from '../../store/useStore'
 import { setPassport, usePassport } from './passportStore'
 
@@ -39,7 +40,7 @@ export function InstitutionPassport() {
   const [districts, setDistricts] = useState<{ region: string; list: DistrictDto[] } | null>(null)
   const [missing, setMissing] = useState<InstitutionRequiredField[]>([])
   const [busy, setBusy] = useState<'save' | 'dirs' | 'submit' | null>(null)
-  const [failure, setFailure] = useState<unknown>(null)
+  const [failure, setFailure] = useState<{ error: unknown; action?: OrgAction } | null>(null)
   const [touchedDirs, setTouchedDirs] = useState(false)
 
   const regionId = form?.regionId ?? ''
@@ -76,6 +77,8 @@ export function InstitutionPassport() {
   }
   const run = async (kind: 'save' | 'dirs' | 'submit') => {
     setBusy(kind); setFailure(null); setMissing([])
+    // Which request failed, for its hourly limit: «Отправить» saves the passport and the directions first.
+    let action: OrgAction = 'save'
     try {
       if (kind === 'dirs') {
         setTouchedDirs(true)
@@ -88,18 +91,19 @@ export function InstitutionPassport() {
         setTouchedDirs(true)
         if (Object.keys(problems).length) return
         await savePassport(); await saveDirections()
+        action = 'submit'
         setPassport(await institutionApi.submit()); notify(t('inst.p.submitted'))
       }
     } catch (e) {
       const list = isApiError(e) && e.code === 'incomplete_profile' ? (e.details as { missing?: InstitutionRequiredField[] } | undefined)?.missing : undefined
       if (list?.length) setMissing(list)
-      else setFailure(e)
+      else setFailure({ error: e, action })
     } finally {
       setBusy(null)
     }
   }
 
-  const banner = passport.blocked ? { tone: 'warn' as const, text: t('inst.p.blocked') }
+  const banner = passport.blocked ? { tone: 'warn' as const, text: t('org.blocked') }
     : passport.status === 'REJECTED' ? { tone: 'warn' as const, text: t('inst.p.status.REJECTED', { reason: passport.rejectReason ?? '—' }) }
       : passport.status === 'PENDING' && !passport.approvedAt ? { tone: 'info' as const, text: t('inst.p.status.PENDING') }
         : passport.approvedAt ? { tone: 'ok' as const, text: t('inst.p.status.APPROVED') }
@@ -115,7 +119,7 @@ export function InstitutionPassport() {
       <Notice tone={banner.tone} className="mb-3">{banner.text}</Notice>
       {passport.pendingChanges && <Notice className="mb-3">{t('inst.p.pendingChanges')}</Notice>}
       {missing.length > 0 && <Notice tone="warn" className="mb-3">{t('inst.p.missing', { fields: missing.map((m) => t(REQUIRED_LABEL[m])).join(', ') })}</Notice>}
-      {failure != null && <Notice tone="warn" className="mb-3">{apiErrorText(failure, lang)}</Notice>}
+      {failure != null && <Notice tone="warn" className="mb-3">{orgErrorText(failure.error, lang, failure.action)}</Notice>}
 
       <Card className="mb-6">
         <div className="grid gap-4 md:grid-cols-2">

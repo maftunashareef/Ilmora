@@ -104,7 +104,7 @@ Click убран из кода 10.11.2026 (решение: оплата толь
 | БЗ-5.2 | CORS: только точные домены сайта, без `*`; в production пустой список — ошибка старта | ✅ | `env.ts: validateEnv` |
 | БЗ-5.3 | Заголовки API: CSP `default-src 'none'`, `frame-ancestors 'none'`, `no-referrer`, HSTS, без `X-Powered-By` | ✅ | `apps/api/src/main.ts` (helmet) |
 | БЗ-5.4 | Заголовки сайта: CSP, `X-Frame-Options: DENY`, `nosniff`, Permissions-Policy, HSTS (Caddy) | ✅ | `apps/web/security-headers.ts`, `Caddyfile` |
-| БЗ-5.5 | **CSP без `'unsafe-inline'` в `script-src`** (через nonce) | ❌ | Сейчас `script-src 'self' 'unsafe-inline'` — ослабляет защиту от XSS. Перейти на nonce-CSP через middleware Next.js |
+| БЗ-5.5 | **CSP без `'unsafe-inline'` в `script-src`** (через nonce) | ✅ | `apps/web/proxy.ts` — новый nonce на каждый запрос страницы, `script-src 'self' 'nonce-…' 'strict-dynamic'`; статические файлы — без встроенных скриптов (`next.config.ts`); несуществующий адрес — своя страница 404 с nonce (`app/[locale]/[...missing]`); тесты `security-headers.test.ts`, `proxy.test.ts`. Стили — по-прежнему `'unsafe-inline'` (атрибуты `style`) |
 | БЗ-5.6 | Iframe только с плееров YouTube (no-cookie) и Vimeo; формы — только на свой домен и страницы оплаты Payme | ✅ | `frame-src`, `form-action` в `apps/web/security-headers.ts`; тест `security-headers.test.ts` |
 | БЗ-5.7 | JSON-LD и любой HTML от пользователей выводятся с экранированием; нет `dangerouslySetInnerHTML` с данными пользователя | ✅ ⚠️ | Ж18 закрыт; при каждом ревью проверять grep `dangerouslySetInnerHTML` |
 | БЗ-5.8 | Строгая валидация входных данных: лишние поля отклоняются (`whitelist`, `forbidNonWhitelisted`), схемы zod | ✅ | `main.ts`, `manage.schemas.ts` |
@@ -227,7 +227,7 @@ Click убран из кода 10.11.2026 (решение: оплата толь
 12. ⚠️ БЗ-2.15, 2.16 — экран сессий, политика паролей.
 
 ### Плановые улучшения
-13. ❌ БЗ-5.5 — nonce-CSP без `'unsafe-inline'`.
+13. ✅ БЗ-5.5 — nonce-CSP без `'unsafe-inline'` (М-3).
 14. ❌ БЗ-6.5 — антивирус для документов.
 15. ❌ БЗ-8.8 — сканирование Docker-образов.
 16. Внешний пентест перед активной рекламной кампанией.

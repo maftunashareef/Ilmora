@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { contentSecurityPolicy, newNonce } from './security-headers'
 
 const LOCALES = ['uz', 'ru', 'en'] as const
 type Locale = (typeof LOCALES)[number]
@@ -20,6 +21,19 @@ function preferred(req: NextRequest): Locale {
 
 const isAdminPath = (rest: string) => rest === '/admin' || rest.startsWith('/admin/')
 
+/**
+ * A page with its Content-Security-Policy (М-3): a fresh nonce per request. Next.js reads the policy from the request
+ * headers and puts the nonce on its own scripts; the browser gets the same policy, so a script without it does not run.
+ */
+function page(req: NextRequest) {
+  const csp = contentSecurityPolicy(newNonce())
+  const headers = new Headers(req.headers)
+  headers.set('Content-Security-Policy', csp)
+  const res = NextResponse.next({ request: { headers } })
+  res.headers.set('Content-Security-Policy', csp)
+  return res
+}
+
 /** Adds the locale segment to bare paths ("/courses" → "/uz/courses") and keeps each surface to its own pages. */
 export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl
@@ -32,7 +46,7 @@ export function proxy(req: NextRequest) {
 
   const rest = pathname.slice(first.length + 1)
   if (SURFACE === 'admin') {
-    if (isAdminPath(rest) || rest === '/login') return NextResponse.next()
+    if (isAdminPath(rest) || rest === '/login') return page(req)
     const url = req.nextUrl.clone()
     url.pathname = `/${first}/admin`
     url.search = ''
@@ -43,7 +57,7 @@ export function proxy(req: NextRequest) {
     if (ADMIN_ORIGIN) return NextResponse.redirect(`${ADMIN_ORIGIN}${pathname}${search}`, 307)
     return new NextResponse('Not found', { status: 404 })
   }
-  return NextResponse.next()
+  return page(req)
 }
 
 // `v1` is the same-origin API proxy (next.config.ts rewrites); it must never receive a locale prefix.

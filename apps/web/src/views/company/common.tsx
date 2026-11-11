@@ -6,10 +6,14 @@ import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
 import type { DocumentLinkDto } from '@ilmora/shared'
 import { useStore } from '../../store/useStore'
+import { useCompany } from './companyStore'
 
 /** Graduates, requests, vacancies, contract help and contacts open once the Super Admin approved the profile (403 `not_approved` before). */
 export function CompanyClosed() {
   const { t } = useT()
+  // A blocked company is closed whatever its review status: filling the profile in would not open anything.
+  const { profile } = useCompany()
+  if (profile?.blocked) return <EmptyState icon={<Icon name="lock" className="h-6 w-6" />} title={t('org.blocked')} />
   return <EmptyState icon={<Icon name="lock" className="h-6 w-6" />} title={t('inst.closed')} body={t('co.closedBody')} action={<LinkButton to="/company">{t('co.openProfile')}</LinkButton>} />
 }
 
