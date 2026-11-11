@@ -7,7 +7,7 @@ import { ROLES_KEY } from '../src/common/decorators'
 import { ApprovedGuard, APPROVED_KEY } from '../src/common/registry-access'
 import { ZodValidationPipe } from '../src/common/zod.pipe'
 import type { RedisService } from '../src/infra/redis/redis.service'
-import { PrivateDocsService, sniffDocType } from '../src/infra/storage/private-docs.service'
+import { finalKeyOf, PrivateDocsService, sniffDocType } from '../src/infra/storage/private-docs.service'
 import { TenantContext, type RequestActor } from '../src/infra/tenancy/tenant-context'
 import { AccountService } from '../src/modules/auth/account.service'
 import { CompaniesAdminController } from '../src/modules/companies/companies-admin.controller'
@@ -40,6 +40,29 @@ describe('Private documents', () => {
     const docs = new PrivateDocsService(testEnv({ S3_ENDPOINT: 'https://s3.test', S3_DOCS_BUCKET: 'ilmora-docs', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' }))
     expect(await docs.uploadUrl('company-certs/t/c/1.pdf', 'application/pdf', 1000)).toMatch(/^https:\/\/s3\.test\/ilmora-docs\/company-certs\/t\/c\/1\.pdf\?.*X-Amz-Signature=/)
     expect(await docs.downloadUrl('company-certs/t/c/1.pdf')).toMatch(/X-Amz-Expires=300.*response-content-disposition=attachment/)
+  })
+
+  it('purges uploads never confirmed after a day, page by page, and leaves the rest (security review №51)', async () => {
+    const now = Date.now()
+    const pages = [
+      { Contents: [{ Key: 'incoming/a/1.pdf', LastModified: new Date(now - 2 * 86_400_000) }, { Key: 'incoming/a/2.pdf', LastModified: new Date(now - 60_000) }], IsTruncated: true, NextContinuationToken: 't2' },
+      { Contents: [{ Key: 'incoming/b/3.png', LastModified: new Date(now - 3 * 86_400_000) }], IsTruncated: false },
+    ]
+    const deleted: string[] = []
+    const prefixes: string[] = []
+    class FakeS3Docs extends PrivateDocsService {
+      constructor() { super(testEnv({ S3_ENDPOINT: 'https://s3.test', S3_DOCS_BUCKET: 'ilmora-docs', S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' })) }
+      protected override s3() {
+        return { send: async (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => {
+          if (cmd.constructor.name === 'ListObjectsV2Command') { prefixes.push(String(cmd.input.Prefix)); return cmd.input.ContinuationToken ? pages[1] : pages[0] }
+          deleted.push(...((cmd.input.Delete as { Objects: { Key: string }[] }).Objects.map((o) => o.Key)))
+          return {}
+        } } as never
+      }
+    }
+    expect(await new FakeS3Docs().purgeIncoming()).toBe(2)
+    expect(deleted).toEqual(['incoming/a/1.pdf', 'incoming/b/3.png'])
+    expect(prefixes).toEqual(['incoming/', 'incoming/'])
   })
 
   it('certificate input: PDF, JPG, PNG up to 10 MB; the company profile takes no status or certificate key', () => {
@@ -75,6 +98,7 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
     override async downloadUrl(key: string) { return `https://s3.test/ilmora-docs/${key}?X-Amz-Expires=300` }
     override async inspect(key: string) { return objects.has(key) ? { size: objects.get(key)!.length, head: objects.get(key)!.subarray(0, 16) } : null }
     override async remove(key: string) { removed.push(key); objects.delete(key) }
+    override async copy(from: string, to: string) { objects.set(to, objects.get(from)!) }
   }
   const docs = new MemoryDocs()
   const service = new CompaniesService(ctx.prisma, ctx.audit, notifications, docs)
@@ -135,6 +159,37 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
     })
   })
 
+  it('a company draft abandoned for 14 days, or released by the Super Admin, is taken over as a fresh draft (security review №17)', async () => {
+    const s = await setup('co-abandon')
+    await s.inT(async () => {
+      const db = ctx.prisma.client
+      const squatter = await s.representative()
+      const first = await service.create(s.tenantId, squatter, { stir: '305555555', name: 'Begona' })
+      await service.update(s.tenantId, squatter, { about: 'Squatter text', industryIds: [s.furniture.id] })
+      const real = await s.representative()
+      await expect(service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })).rejects.toMatchObject({ code: 'company_registered' })
+      // Abandoned counts from the latest of creation, claim and review (№83): the squatter's own claim aged too.
+      await db.company.update({ where: { id: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000), claimedAt: new Date(Date.now() - 15 * 86_400_000) } })
+      sent.length = 0
+      const taken = await service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })
+      expect(taken).toMatchObject({ id: first.id, name: 'Haqiqiy', status: 'DRAFT', about: null, industries: [] })
+      expect((await db.user.findUniqueOrThrow({ where: { id: squatter.id } })).companyId).toBeNull()
+      expect(sent).toEqual([expect.objectContaining({ type: 'registry.released', userIds: [squatter.id] })])
+
+      // The Super Admin releases the new holder; the STIR is free for the next one. A company is never handed over
+      // (decision 11.11): what students opened to it closes — the next claimant gets none of it.
+      const student = await ctx.makeStudent(s.tenantId)
+      const opened = await db.contactRequest.create({ data: { tenantId: s.tenantId, companyId: first.id, userId: student.id, source: 'GRADUATE', status: 'ACCEPTED', decidedAt: new Date(), sharedName: 'Aziz', sharedPhone: '+998900000000' } })
+      await db.studentConsent.create({ data: { tenantId: s.tenantId, userId: student.id, kind: 'COMPANY_CONTACTS', companyId: first.id, textVersion: 'contact-request', givenAt: new Date() } })
+      await review.release(s.tenantId, first.id, 'Not the company representative')
+      expect(await db.contactRequest.findUniqueOrThrow({ where: { id: opened.id } })).toMatchObject({ status: 'WITHDRAWN', sharedName: null, sharedPhone: null })
+      expect(await db.studentConsent.count({ where: { companyId: first.id, revokedAt: null } })).toBe(0)
+      expect((await db.user.findUniqueOrThrow({ where: { id: real.id } })).companyId).toBeNull()
+      await expect(review.release(s.tenantId, first.id, 'Again, nobody')).rejects.toMatchObject({ code: 'not_claimed' })
+      expect(await service.create(s.tenantId, await s.representative(), { stir: '305555555', name: 'Uçinçi' })).toMatchObject({ id: first.id, name: 'Uçinçi' })
+    })
+  })
+
   it('saves industries, directions (alias → main), region by slug and the contact; refuses unknown industries', async () => {
     const s = await setup('co-patch')
     await s.inT(async () => {
@@ -159,7 +214,7 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       const rep = await s.representative()
       const { id } = await service.create(s.tenantId, rep, { stir: '304444444', name: 'Doc Test' })
       const { uploadUrl, key } = await service.certificateUploadUrl(s.tenantId, rep, { contentType: 'application/pdf', fileSize: 5000 })
-      expect(key).toMatch(new RegExp(`^company-certs/${s.tenantId}/${id}/\\d+-[0-9a-f]{16}\\.pdf$`))
+      expect(key).toMatch(new RegExp(`^incoming/company-certs/${s.tenantId}/${id}/\\d+-[0-9a-f]{16}\\.pdf$`))
       expect(uploadUrl).toContain(key)
       await expect(service.confirmCertificate(s.tenantId, rep, { key })).rejects.toMatchObject({ code: 'file_not_uploaded' })
       await expect(service.confirmCertificate(s.tenantId, rep, { key: `company-certs/${s.tenantId}/someone-else/1.pdf` })).rejects.toMatchObject({ code: 'invalid_file' })
@@ -171,9 +226,15 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       const first = await s.upload(rep, PDF)
       expect(first.profile.certificateUploaded).toBe(true)
       const second = await s.upload(rep, PNG, 'image/png')
-      expect(removed).toContain(first.key)
-      expect((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id } })).certificateFileKey).toBe(second.key)
-      expect((await service.certificateLink(rep)).url).toContain(second.key)
+      // The checked file moves out of the upload area; the upload is deleted, the replaced certificate too.
+      const kept = finalKeyOf(second.key)
+      expect(kept).toMatch(new RegExp(`^company-certs/${s.tenantId}/${id}/`))
+      expect(removed).toEqual(expect.arrayContaining([first.key, finalKeyOf(first.key), second.key]))
+      expect((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id } })).certificateFileKey).toBe(kept)
+      expect((await service.certificateLink(rep)).url).toContain(kept)
+      // The 10-minute upload link used again after the check cannot replace the kept file (security review №51).
+      objects.set(second.key, Buffer.from('<html><script>x</script>'))
+      expect(objects.get(kept)).toEqual(PNG)
     })
   })
 
@@ -216,11 +277,50 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       expect(detail.history.map((h) => h.action)).toEqual(['company.create', 'company.submit', 'company.approve'])
       expect(await ctx.prisma.client.auditEvent.count({ where: { action: 'company.certificate.download', entityId: item.id } })).toBe(1)
 
-      // After approval a new name — or a new certificate — goes back to review; the workspace stays open.
-      expect(await service.update(s.tenantId, rep, { about: 'Mebel işlab çiqariş' })).toMatchObject({ status: 'APPROVED' })
-      expect(await service.update(s.tenantId, rep, { name: 'Mebel Plus Group' })).toMatchObject({ status: 'PENDING', workspaceOpen: true })
-      await review.approve(s.tenantId, s.admin, item.id)
+      // After approval a new name or new industries wait for review; the record keeps the approved ones (security review №13, №46).
+      expect(await service.update(s.tenantId, rep, { about: 'Mebel işlab çiqariş' })).toMatchObject({ status: 'APPROVED', pendingChanges: null })
+      const changed = await service.update(s.tenantId, rep, { name: 'Mebel Plus Group', industryIds: [s.furniture.id, s.it.id] })
+      expect(changed).toMatchObject({ status: 'APPROVED', workspaceOpen: true, name: 'Mebel Plus', industries: [expect.objectContaining({ id: s.furniture.id })], pendingChanges: { name: 'Mebel Plus Group', industryIds: [s.furniture.id, s.it.id].sort() } })
+      expect(changed.industries).toHaveLength(1)
+      expect((await review.queue())[0]).toMatchObject({ id: item.id, reReview: true, pendingChanges: { name: 'Mebel Plus Group' } })
+      const approved = await review.approve(s.tenantId, s.admin, item.id)
+      expect(approved).toMatchObject({ name: 'Mebel Plus Group', status: 'APPROVED', pendingChanges: null })
+      expect(approved.industries.map((i) => i.id).sort()).toEqual([s.furniture.id, s.it.id].sort())
+      // Blocked: the workspace closes (guard by database), the status stays.
+      expect(await review.setBlocked(s.tenantId, s.admin, item.id, true, 'Fake company')).toMatchObject({ status: 'APPROVED', workspaceOpen: false })
+      await expect(guard.canActivate(ctxFor)).rejects.toMatchObject({ code: 'not_approved' })
+      await review.setBlocked(s.tenantId, s.admin, item.id, false)
+      await expect(guard.canActivate(ctxFor)).resolves.toBe(true)
+      // A new certificate goes back to the first-review path; the workspace stays open.
       expect((await s.upload(rep, PNG, 'image/png')).profile).toMatchObject({ status: 'PENDING', workspaceOpen: true })
+
+      // Review 11.11: a rejection of the re-review with a waiting change does not approve the waiting certificate.
+      await service.update(s.tenantId, rep, { name: 'Mebel Plus Pro' })
+      expect(await review.reject(s.tenantId, s.admin, item.id, 'The certificate is not readable')).toMatchObject({ status: 'REJECTED', name: 'Mebel Plus Group', pendingChanges: null })
+
+      // A change saved after the reviewer opened it is not approved blindly: the decision carries what was seen.
+      await s.upload(rep, PDF)
+      await service.update(s.tenantId, rep, { name: 'Mebel A' })
+      const seen = (await review.detail(item.id)).profile.submittedAt!
+      await new Promise((r) => setTimeout(r, 5))
+      await service.update(s.tenantId, rep, { name: 'Mebel B' })
+      await expect(review.approve(s.tenantId, s.admin, item.id, seen)).rejects.toMatchObject({ code: 'review_changed' })
+      const fresh = (await review.detail(item.id)).profile.submittedAt!
+      expect(await review.approve(s.tenantId, s.admin, item.id, fresh)).toMatchObject({ name: 'Mebel B', status: 'APPROVED' })
+    })
+  })
+
+  it('the Super Admin finds any company by STIR, name, status — not only the queue (issue #50)', async () => {
+    const s = await setup('co-search')
+    await s.inT(async () => {
+      const rep = await s.representative()
+      await s.complete(rep, '307777777')
+      const { id } = await service.profile(rep)
+      expect(await review.search({ page: 1 })).toMatchObject({ total: 1, items: [{ id, stir: '307777777', status: 'DRAFT', approvedAt: null, blocked: false, certificateUploaded: true }] })
+      expect((await review.search({ stir: '307777777', page: 1 })).total).toBe(1)
+      expect((await review.search({ q: 'mebel plus', page: 1 })).items.map((i) => i.id)).toEqual([id])
+      expect((await review.search({ status: 'APPROVED', page: 1 })).total).toBe(0)
+      expect((await review.search({ stir: '300000000', page: 1 })).total).toBe(0)
     })
   })
 

@@ -1,15 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createHash } from 'node:crypto'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
-import { ClickService } from '../src/modules/payments/click/click.service'
 import { PAYME, PaymeError, PaymeService } from '../src/modules/payments/payme/payme.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 
-describe.skipIf(!DB_AVAILABLE)('payments: Payme & Click settlement', () => {
+describe.skipIf(!DB_AVAILABLE)('payments: Payme settlement', () => {
   const ctx = new TestContext()
-  const env = testEnv({ PAYME_MERCHANT_ID: 'm1', PAYME_KEY: 'live-key-123456789012345678901234567', PAYME_TEST_KEY: 'test-key-12345678901234567890123456', CLICK_SERVICE_ID: '77', CLICK_MERCHANT_ID: '1', CLICK_SECRET_KEY: 'click-secret' })
+  const env = testEnv({ PAYME_MERCHANT_ID: 'm1', PAYME_KEY: 'live-key-123456789012345678901234567', PAYME_TEST_KEY: 'test-key-12345678901234567890123456' })
   const payme = new PaymeService(ctx.prisma, ctx.payments, env)
-  const click = new ClickService(ctx.prisma, ctx.payments, env)
 
   beforeAll(() => ctx.connect())
   afterAll(() => ctx.close())
@@ -77,33 +74,6 @@ describe.skipIf(!DB_AVAILABLE)('payments: Payme & Click settlement', () => {
     expect(payme.authenticate(`Basic ${ok}`)).toEqual({ sandbox: false })
     expect(() => payme.authenticate(`Basic ${Buffer.from('Paycom:wrong').toString('base64')}`)).toThrow(PaymeError)
     expect(() => payme.authenticate(undefined)).toThrow(PaymeError)
-  })
-
-  it('Click prepare/complete settle once; repeated complete answers "already paid"', async () => {
-    const t = await ctx.makeTenant('clk')
-    const student = await ctx.makeStudent(t.tenantId)
-    const { payment } = await ctx.checkout(t.tenantId, student.id, t.pkg.id, [t.group.id, t.group2.id])
-    const run = <T>(fn: () => Promise<T>) => TenantContext.system(fn, { tenantId: t.tenantId })
-    const amount = (Number(payment.amountMinor) / 100).toFixed(2)
-    const signTime = '2026-10-18 12:00:00'
-    const md5 = (s: string) => createHash('md5').update(s).digest('hex')
-    const clickId = String(Date.now() % 1_000_000_000)
-    const prepareForm = { click_trans_id: clickId, service_id: '77', click_paydoc_id: '1', merchant_trans_id: payment.id, amount, action: '0', error: '0', error_note: 'Success', sign_time: signTime }
-    const badSign = await run(() => click.prepare({ ...prepareForm, sign_string: 'deadbeef' }))
-    expect(badSign.error).toBe(-1)
-    const prepared = await run(() => click.prepare({ ...prepareForm, sign_string: md5(`${clickId}${'77'}click-secret${payment.id}${amount}0${signTime}`) }))
-    expect(prepared.error).toBe(0)
-    const prepareId = String(prepared.merchant_prepare_id)
-    const completeForm = { ...prepareForm, action: '1', merchant_prepare_id: prepareId }
-    const sign = md5(`${clickId}${'77'}click-secret${payment.id}${prepareId}${amount}1${signTime}`)
-    const [a, b] = await Promise.all([run(() => click.complete({ ...completeForm, sign_string: sign })), run(() => click.complete({ ...completeForm, sign_string: sign }))])
-    expect([a.error, b.error].sort()).toEqual([-4, 0])
-    await run(async () => {
-      expect((await ctx.prisma.client.payment.findFirst({ where: { id: payment.id } }))?.state).toBe('PAID')
-      expect(await ctx.prisma.client.ledgerJournal.count({ where: { referenceId: payment.id, kind: 'PAYMENT_SETTLED' } })).toBe(1)
-    })
-    const third = await run(() => click.complete({ ...completeForm, sign_string: sign }))
-    expect(third.error).toBe(-4)
   })
 
   it('capacity: the last seat cannot be sold twice under concurrent checkouts', async () => {

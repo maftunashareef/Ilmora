@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common'
 import { ThrottlerModule } from '@nestjs/throttler'
 import { randomUUID } from 'node:crypto'
 import { LoggerModule } from 'nestjs-pino'
-import { isAuthThrottled } from './common/decorators'
+import { throttlers } from './common/throttlers'
 import { AppConfigModule } from './config/config.module'
 import { ENV, type Env } from './config/env'
 import { PrismaModule } from './infra/prisma/prisma.module'
@@ -49,7 +49,9 @@ const REDACT_PATHS = [
           },
           autoLogging: { ignore: (req) => (req.url ?? '').startsWith('/health') },
           serializers: {
-            req: (req: { id: string; method: string; url: string; remoteAddress?: string }) => ({ id: req.id, method: req.method, url: (req.url ?? '').split('?')[0], ip: req.remoteAddress }),
+            // `ip` is the client's address as Express resolves it through the trusted proxy (TRUST_PROXY: Caddy's
+            // X-Forwarded-For), not the proxy's own address — the log now shows who called (security review 10.11 №71).
+            req: (req: { id: string; method: string; url: string; remoteAddress?: string; raw?: { ip?: string } }) => ({ id: req.id, method: req.method, url: (req.url ?? '').split('?')[0], ip: req.raw?.ip ?? req.remoteAddress, peer: req.remoteAddress }),
             res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
           },
           customProps: (req) => {
@@ -66,11 +68,7 @@ const REDACT_PATHS = [
       inject: [ENV, RedisThrottlerStorage],
       useFactory: (env: Env, storage: RedisThrottlerStorage) => ({
         storage,
-        throttlers: [
-          { name: 'default', ttl: 60_000, limit: env.RATE_LIMIT_DEFAULT_PER_MINUTE },
-          // Strict limit only for routes marked @AuthThrottle(); without skipIf it would count every request in the API.
-          { name: 'auth', ttl: 60_000, limit: env.RATE_LIMIT_AUTH_PER_MINUTE, blockDuration: 5 * 60_000, skipIf: (ctx) => !isAuthThrottled(ctx) },
-        ],
+        throttlers: throttlers(env),
         skipIf: (ctx) => (ctx.switchToHttp().getRequest<{ url?: string }>().url ?? '').startsWith('/health'),
       }),
     }),

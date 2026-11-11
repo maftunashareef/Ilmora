@@ -9,6 +9,10 @@ export const IS_PUBLIC_KEY = 'ilmora:public'
 /** Marks a route as reachable without an access token (tenant still resolved from header/default). */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true)
 
+export const WITH_ISSUED_PASSWORD_KEY = 'ilmora:with-issued-password'
+/** Open while the password issued by the Super Admin is not changed yet: the change itself and «who am I». */
+export const AllowWithIssuedPassword = () => SetMetadata(WITH_ISSUED_PASSWORD_KEY, true)
+
 export const ROLES_KEY = 'ilmora:roles'
 /** Any of the listed roles grants access (PLATFORM_ADMIN always passes). */
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles)
@@ -48,6 +52,37 @@ export const AUTH_THROTTLE_KEY = 'ilmora:auth-throttle'
  * counted by it — every other route is governed by the "default" throttler alone. Requests are counted per client IP.
  */
 export const AuthThrottle = (limit: number, ttl = 60_000) => applyDecorators(SetMetadata(AUTH_THROTTLE_KEY, true), Throttle({ auth: { limit, ttl } }))
+
+export const LOGIN_THROTTLE_KEY = 'ilmora:login-throttle'
+/**
+ * Sign-in with a password (security review 11.11, №75): like @AuthThrottle(limit), but counted per address and login
+ * together — students of one center share one Wi-Fi address and used to share one counter (10 a minute, then 5 minutes
+ * shut). Per address only the wide `loginIp` limit (RATE_LIMIT_LOGIN_PER_IP_MINUTE), without a block; the account's
+ * own failure lock (LOGIN_MAX_FAILURES) still stops guessing one login.
+ */
+export const LoginThrottle = (limit: number, ttl = 60_000) => applyDecorators(AuthThrottle(limit, ttl), SetMetadata(LOGIN_THROTTLE_KEY, true))
+export const isLoginThrottled = (ctx: ExecutionContext): boolean =>
+  reflector.getAllAndOverride<boolean | undefined>(LOGIN_THROTTLE_KEY, [ctx.getHandler(), ctx.getClass()]) === true
+
+export const REGISTER_THROTTLE_KEY = 'ilmora:register-throttle'
+/**
+ * New accounts per address over an hour and a day (cybersecurity check 9.4, Н-4), on top of @AuthThrottle's minute. Wide
+ * on purpose: a whole technikum signs up from one Wi-Fi in a lesson (the lesson of №19); the SMS code and the per-phone
+ * limits stop the rest. Limits — RATE_LIMIT_REGISTER_PER_IP_HOUR / _DAY.
+ */
+export const RegisterThrottle = () => SetMetadata(REGISTER_THROTTLE_KEY, true)
+export const isRegisterThrottled = (ctx: ExecutionContext): boolean =>
+  reflector.getAllAndOverride<boolean | undefined>(REGISTER_THROTTLE_KEY, [ctx.getHandler(), ctx.getClass()]) === true
+
+export const SESSION_THROTTLE_KEY = 'ilmora:session-throttle'
+/**
+ * The session refresh (security review 10.11 №19): like @AuthThrottle(limit), but counted per refresh cookie, not per
+ * address — a classroom on one Wi-Fi renews many sessions at the start of a lesson. Per address only the wide
+ * `refreshIp` limit (RATE_LIMIT_REFRESH_PER_IP_MINUTE) applies, against someone trying values in bulk.
+ */
+export const SessionThrottle = (limit: number, ttl = 60_000) => applyDecorators(AuthThrottle(limit, ttl), SetMetadata(SESSION_THROTTLE_KEY, true))
+export const isSessionThrottled = (ctx: ExecutionContext): boolean =>
+  reflector.getAllAndOverride<boolean | undefined>(SESSION_THROTTLE_KEY, [ctx.getHandler(), ctx.getClass()]) === true
 
 /** True when the handler (or its controller) opted into the "auth" throttler via @AuthThrottle(). */
 const reflector = new Reflector()

@@ -6,6 +6,9 @@ import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import { QUEUES } from '../../infra/queue/queues'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
+
+/** A page number from the query string; anything that is not a positive integer is ignored (it used to answer 500 — №34). */
+const num = (v?: string) => { const n = Number(v); return v !== undefined && Number.isInteger(n) && n > 0 ? n : undefined }
 import { SiteService } from '../site/site.service'
 import {
   AvatarUploadUrlInput, CategoryInput, CenterInput, CenterNameReviewInput, CenterStatusInput, CourseDiscountBody, CourseInput, CoursePatch, DeleteUserInput, GroupInput, GroupPatch, PackageInput, PackagePatch, PlaylistInput, PlaylistPatch, ResourceInput, ResourcePatch, StudentAdminInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput, VideoPatch,
@@ -14,7 +17,8 @@ import { ManageService } from './manage.service'
 
 const body = <T>(schema: z.ZodType<T>) => new ZodValidationPipe(schema)
 const GenerateDto = z.object({ days: z.number().int().min(1).max(90).default(28) }).strict()
-const SiteDto = z.object({ data: z.unknown(), version: z.number().int().optional() }).strict()
+/** `version`: the one the admin loaded — required, so a save never overwrites changes it has not seen (Н18). */
+const SiteDto = z.object({ data: z.unknown(), version: z.number().int().positive() }).strict()
 const QueueParam = z.enum([QUEUES.sms, QUEUES.notifications, QUEUES.sessions, QUEUES.outbox, QUEUES.maintenance])
 
 /** Teacher Studio and Super Admin write API. */
@@ -84,12 +88,12 @@ export class ManageController {
   @Roles('PLATFORM_ADMIN') @Post('admin/packages') createPackage(@CurrentTenantId() t: string, @Body(body(PackageInput)) dto: z.infer<typeof PackageInput>) { return this.manage.upsertPackage(t, dto) }
   @Roles('PLATFORM_ADMIN') @Patch('admin/packages/:id') updatePackage(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(PackagePatch)) dto: z.infer<typeof PackagePatch>) { return this.manage.upsertPackage(t, dto, id) }
   @Roles('PLATFORM_ADMIN') @Get('admin/stats') adminStats(@CurrentTenantId() t: string) { return this.manage.adminStats(t) }
-  @Roles('PLATFORM_ADMIN') @Get('admin/users') users(@CurrentTenantId() t: string, @Query('role') role?: string, @Query('search') search?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.listUsers(t, { role, search, page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined }) }
+  @Roles('PLATFORM_ADMIN') @Get('admin/users') users(@CurrentTenantId() t: string, @Query('role') role?: string, @Query('search') search?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.listUsers(t, { role, search, page: num(page), pageSize: num(pageSize) }) }
   @Roles('PLATFORM_ADMIN') @Put('admin/users/:id/roles') roles(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(body(UserRolesInput)) dto: z.infer<typeof UserRolesInput>) { return this.manage.setRoles(t, a, id, dto) }
   @Roles('PLATFORM_ADMIN') @Patch('admin/users/:id') updateStudent(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(StudentAdminInput)) dto: z.infer<typeof StudentAdminInput>) { return this.manage.updateStudent(t, id, dto) }
   @Roles('PLATFORM_ADMIN') @Get('admin/review-queue') reviewQueue(@CurrentTenantId() t: string) { return this.manage.reviewQueue(t) }
-  @Roles('PLATFORM_ADMIN', 'FINANCE_ADMIN') @Get('admin/audit') audit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Query('entityType') entityType?: string, @Query('entityId') entityId?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.audits(t, a, { entityType, entityId, page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined }) }
-  @Roles('PLATFORM_ADMIN') @Get('admin/inquiries') inquiries(@CurrentTenantId() t: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.listInquiries(t, { page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined }) }
+  @Roles('PLATFORM_ADMIN', 'FINANCE_ADMIN') @Get('admin/audit') audit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Query('entityType') entityType?: string, @Query('entityId') entityId?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.audits(t, a, { entityType, entityId, page: num(page), pageSize: num(pageSize) }) }
+  @Roles('PLATFORM_ADMIN') @Get('admin/inquiries') inquiries(@CurrentTenantId() t: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.listInquiries(t, { page: num(page), pageSize: num(pageSize) }) }
   @Roles('PLATFORM_ADMIN') @Patch('admin/inquiries/:id/handle') handleInquiry(@CurrentTenantId() t: string, @Param('id') id: string) { return this.manage.toggleInquiryHandled(t, id) }
 
   /** Failed-job visibility: counts per queue and the most recent failures with their reasons. */

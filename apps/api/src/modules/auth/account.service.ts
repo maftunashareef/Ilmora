@@ -7,6 +7,7 @@ import { ENV, type Env } from '../../config/env'
 import type { Role } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { RedisService } from '../../infra/redis/redis.service'
+import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { MfaService } from './mfa.service'
@@ -28,7 +29,15 @@ export interface PublicUser {
   offerVersion: string | null
   consentAt: string | null
   marketing: boolean
+  /**
+   * The password was given by the Super Admin (a new ministry account or a reset) and not changed since: the web asks
+   * for a new one first (POST /v1/auth/password).
+   */
+  passwordChangeRequired: boolean
 }
+
+/** Audit actions after which the password is the Super Admin's, not the owner's. */
+const ADMIN_ISSUED_PASSWORD = ['ministry.account.create', 'ministry.account.reset_password'] as const
 
 export interface LoginResult {
   accessToken: string
@@ -114,6 +123,7 @@ export class AccountService {
     tenantId: string,
     input: { role: SelfServiceRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; jobTitle?: string; lang?: 'uz' | 'ru' | 'en' },
     meta: SessionMeta,
+    attempt = 1,
   ): Promise<LoginResult> {
     const roles = SELF_SERVICE_ROLES[input.role]
     if (!roles) throw AppError.invalid('invalid_role', 'Choose Student, Teacher, Educational Center, Institution or Company')
@@ -181,6 +191,10 @@ export class AccountService {
         return created
       })
     } catch (err) {
+      const target = String((err as { meta?: { target?: unknown } }).meta?.target ?? '')
+      // Two centers (or teachers) of one name registered at once collide on the slug, not the login: try once more,
+      // the free-slug lookup then sees the other one (security review №35).
+      if ((err as { code?: string }).code === 'P2002' && target.includes('slug') && attempt < 3) return this.register(tenantId, input, meta, attempt + 1)
       if ((err as { code?: string }).code === 'P2002') throw AppError.conflict('login_taken', 'This login is already in use')
       throw err
     }
@@ -205,28 +219,27 @@ export class AccountService {
   async loginWithPassword(tenantId: string, input: { login: string; password: string }, meta: SessionMeta): Promise<LoginResult | MfaChallengeDto> {
     const raw = input.login.trim()
     const login = raw.normalize('NFKC').toLowerCase()
-    // The failure counter follows the account, not the spelling: every way of writing a phone shares one lock.
     const phoneParsed = normalizeUzPhone(raw)
-    const key = `login:fail:${tenantId}:${phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
-    await this.assertNotLocked(key)
 
     // Lookup user by normalized phone number or by unique login username
     let user: UserRow | null = null
     if (phoneParsed.ok) {
       user = await this.prisma.client.user.findFirst({ where: { tenantId, phoneE164: phoneParsed.e164 }, include: USER_INCLUDE })
     }
-    if (!user && LOGIN_RE.test(login)) {
-      user = await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: USER_INCLUDE })
+    // A login made of digits stays a login when an account opened by SMS has the same number but no password (№33).
+    if ((!user || !user.passwordHash) && LOGIN_RE.test(login)) {
+      user = (await this.prisma.client.user.findUnique({ where: { tenantId_login: { tenantId, login } }, include: USER_INCLUDE })) ?? user
     }
+    // The failure counter follows the account — its login and its phone share one lock — and is counted before the
+    // password is checked: attempts sent at once cannot all slip under the limit (security review 10.11 №3).
+    const key = `login:fail:${tenantId}:${user ? `user:${user.id}` : phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
+    await this.countAttempt(key)
 
     // Verify against a dummy hash when the login is unknown so response time does not reveal which logins exist.
     let ok = false
     if (user?.passwordHash) ok = await argon2.verify(user.passwordHash, input.password)
     else await argon2.verify(await this.dummyHash, input.password)
-    if (!user || !ok) {
-      await this.recordFailure(key)
-      throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
-    }
+    if (!user || !ok) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     // Do not reveal that the password was correct for a disabled account: answer exactly as for a wrong password (Ж15).
     if (!user.isActive) throw AppError.unauthorized('Invalid login or password', 'invalid_credentials')
     await this.clearFailures(key)
@@ -331,7 +344,50 @@ export class AccountService {
       include: USER_INCLUDE,
     })
     await this.audit.record({ action: 'auth.consent', entityType: 'User', entityId: user.id, after: { offerVersion: OFFER_VERSION } })
-    return this.toPublic(user, await this.effectiveRoles(user))
+    return this.publicUser(user)
+  }
+
+  /** The account as the web sees it, with the roles of the token and whether a new password is due. */
+  async publicUser(user: UserRow, roles?: Role[]): Promise<PublicUser> {
+    const effective = roles ?? (await this.effectiveRoles(user))
+    return this.toPublic(user, effective, await this.passwordChangeRequired(user, effective))
+  }
+
+  /**
+   * A password the Super Admin issued (ministry account created or reset) and not changed by its owner since:
+   * `User.passwordIssuedAt`; for accounts from before that column, the audit log, which records both.
+   */
+  async passwordChangeRequired(user: { id: string; tenantId: string; passwordIssuedAt?: Date | null }, roles: Role[]): Promise<boolean> {
+    // Any account the Super Admin reset; ministry accounts from before the column — through the journal.
+    if (user.passwordIssuedAt) return true
+    if (!roles.includes('MINISTRY')) return false
+    // The account's own tenant: a refresh runs before any tenant is known.
+    return TenantContext.forTenant(user.tenantId, async () => {
+      const issued = await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'User', entityId: user.id, action: { in: [...ADMIN_ISSUED_PASSWORD] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
+      if (!issued) return false
+      const changed = await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'User', entityId: user.id, action: 'auth.password.change', createdAt: { gt: issued.createdAt } }, select: { id: true } })
+      return !changed
+    })
+  }
+
+  /**
+   * «Сменить пароль» (security review 10.11 №4): the current password, then a new one (8–128, not the same). Every
+   * session of the account ends — a stolen password stops working everywhere — and this browser gets a fresh one.
+   */
+  async changePassword(user: { id: string; tenantId: string }, input: { currentPassword: string; newPassword: string }, meta: SessionMeta): Promise<LoginResult> {
+    const row = await this.prisma.client.user.findFirst({ where: { id: user.id }, include: USER_INCLUDE })
+    if (!row?.isActive) throw AppError.unauthorized('Authentication required')
+    if (!row.passwordHash) throw AppError.invalid('no_password', 'This account signs in without a password')
+    if (!(await argon2.verify(row.passwordHash, input.currentPassword))) throw AppError.invalid('wrong_password', 'The current password is wrong')
+    if (input.newPassword === input.currentPassword) throw AppError.invalid('same_password', 'Choose a password different from the current one')
+    if (row.login && input.newPassword.toLowerCase() === row.login) throw AppError.invalid('password_is_login', 'The password must not be the login')
+    // An account that signs in with the authenticator code keeps the time of that sign-in: changing the password does
+    // not restart its 12 hours. With no live session to continue, the new one cannot be renewed — sign in with the code.
+    const startedAt = this.mfa.enforced(row) ? await this.mfaSessionStart(row.id) : undefined
+    const updated = await this.prisma.client.user.update({ where: { id: row.id }, data: { passwordHash: await argon2.hash(input.newPassword, PASSWORD_HASH), passwordIssuedAt: null }, include: USER_INCLUDE })
+    await this.tokens.revokeAllForUser(row.tenantId, row.id, 'password-changed')
+    await this.audit.record({ tenantId: row.tenantId, action: 'auth.password.change', entityType: 'User', entityId: row.id })
+    return this.openSession(updated, meta, startedAt)
   }
 
   /**
@@ -345,14 +401,23 @@ export class AccountService {
     return roles
   }
 
-  async openSession(user: UserRow, meta: SessionMeta): Promise<LoginResult> {
-    const roles = await this.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
-    const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta)
-    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: this.toPublic(user, roles) }
+  /** When the newest live session of the account began (its family's first row); epoch when there is none. */
+  private async mfaSessionStart(userId: string): Promise<Date> {
+    const last = await this.prisma.client.refreshSession.findFirst({ where: { userId, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' }, select: { familyId: true } })
+    if (!last) return new Date(0)
+    const first = await this.prisma.client.refreshSession.findFirst({ where: { userId, familyId: last.familyId }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
+    return first?.createdAt ?? new Date(0)
   }
 
-  toPublic(user: UserRow, roles: Role[]): PublicUser {
+  async openSession(user: UserRow, meta: SessionMeta, startedAt?: Date): Promise<LoginResult> {
+    const roles = await this.effectiveRoles(user)
+    const pub = await this.publicUser(user, roles)
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
+    const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta, undefined, startedAt)
+    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: pub }
+  }
+
+  private toPublic(user: UserRow, roles: Role[], passwordChangeRequired: boolean): PublicUser {
     return {
       id: user.id,
       login: user.login,
@@ -368,6 +433,7 @@ export class AccountService {
       offerVersion: user.offerVersion,
       consentAt: user.consentAt?.toISOString() ?? null,
       marketing: !!user.marketingAt,
+      passwordChangeRequired,
     }
   }
 
@@ -391,44 +457,35 @@ export class AccountService {
   }
 
   // ── failed-attempt lock per login (shared across replicas through Redis; per process when REDIS_MODE=off) ──
-  private async assertNotLocked(key: string) {
-    const { count, ttl } = await this.failures(key)
-    if (count >= this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many failed sign-in attempts; try again later', ttl)
-  }
-
-  private async recordFailure(key: string) {
+  /**
+   * One attempt, counted atomically before the password is checked; past LOGIN_MAX_FAILURES attempts in the window
+   * the account is locked (429) whatever the password. A successful sign-in clears the count.
+   */
+  private async countAttempt(key: string) {
+    let count: number
+    let ttl = this.env.LOGIN_LOCK_SECONDS
     if (this.redis.off) {
       const now = Date.now()
       const rec = this.memoryFailures.get(key)
       const cur = rec && rec.expires > now ? rec : { count: 0, expires: now + this.env.LOGIN_LOCK_SECONDS * 1000 }
       cur.count += 1
       this.memoryFailures.set(key, cur)
-      return
+      count = cur.count
+      ttl = Math.ceil((cur.expires - now) / 1000)
+    } else {
+      try {
+        count = await this.redis.cache.incr(key)
+        if (count === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
+        else ttl = Math.max(1, await this.redis.cache.ttl(key))
+      } catch {
+        throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
+      }
     }
-    try {
-      const count = await this.redis.cache.incr(key)
-      if (count === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
-    } catch {
-      /* counting failures must never turn a bad password into a 500; the IP throttle still applies */
-    }
+    if (count > this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many failed sign-in attempts; try again later', ttl)
   }
 
   private async clearFailures(key: string) {
     if (this.redis.off) { this.memoryFailures.delete(key); return }
     await this.redis.cache.del(key).catch(() => undefined)
-  }
-
-  private async failures(key: string): Promise<{ count: number; ttl: number }> {
-    if (this.redis.off) {
-      const rec = this.memoryFailures.get(key)
-      if (!rec || rec.expires <= Date.now()) return { count: 0, ttl: 0 }
-      return { count: rec.count, ttl: Math.ceil((rec.expires - Date.now()) / 1000) }
-    }
-    try {
-      const [count, ttl] = await Promise.all([this.redis.cache.get(key), this.redis.cache.ttl(key)])
-      return { count: Number(count ?? 0), ttl: ttl > 0 ? ttl : this.env.LOGIN_LOCK_SECONDS }
-    } catch {
-      throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
-    }
   }
 }

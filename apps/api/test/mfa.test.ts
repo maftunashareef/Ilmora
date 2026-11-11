@@ -5,7 +5,7 @@ import { RedisService } from '../src/infra/redis/redis.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { AccountService, PASSWORD_HASH } from '../src/modules/auth/account.service'
 import { AuthService } from '../src/modules/auth/auth.service'
-import { MfaService } from '../src/modules/auth/mfa.service'
+import { MFA_LOCK_FIRST_SECONDS, MFA_MAX_FAILURES, MfaService } from '../src/modules/auth/mfa.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 import { notificationsStub } from './stubs'
 
@@ -126,13 +126,28 @@ describe.skipIf(!DB_AVAILABLE)('Second factor for the ministry and the Super Adm
     await expect(s.inT(() => withKey.auth.mfaSetup(next.challenge))).rejects.toMatchObject({ code: 'invalid_challenge' })
   })
 
-  it('locks the step after too many wrong codes', async () => {
+  it('Н-5: 5 wrong codes lock the step for 15 minutes, the next lock that day for 30; a right code clears both', async () => {
     const s = await setup('mfa-lock')
-    await enroll(s, 'min.user')
+    const { secret } = await enroll(s, 'min.user')
     const next = await s.login(withKey, 'min.user')
     if (!('mfaRequired' in next)) throw new Error('expected a challenge')
-    for (let i = 0; i < env.LOGIN_MAX_FAILURES; i++) await expect(s.inT(() => withKey.auth.mfaVerify(next.challenge, '000001', meta))).rejects.toMatchObject({ code: 'invalid_code' })
-    await expect(s.inT(() => withKey.auth.mfaVerify(next.challenge, '000001', meta))).rejects.toMatchObject({ code: 'rate_limited' })
+    const userId = (await s.inT(() => ctx.prisma.client.user.findFirstOrThrow({ where: { login: 'min.user' } }))).id
+    const memory = (withKey.mfa as unknown as { memory: Map<string, { value: number; expires: number }> }).memory
+    const wrong = () => s.inT(() => withKey.auth.mfaVerify(next.challenge, '000001', meta))
+    const series = async (retryAfterSeconds: number) => {
+      for (let i = 0; i < MFA_MAX_FAILURES; i++) await expect(wrong()).rejects.toMatchObject({ code: 'invalid_code' })
+      await expect(wrong()).rejects.toMatchObject({ code: 'rate_limited', details: { retryAfterSeconds } })
+      // While locked even a right code is refused.
+      await expect(s.inT(() => withKey.auth.mfaVerify(next.challenge, totpAt(secret, stepOf(new Date()) + 1), meta))).rejects.toMatchObject({ code: 'rate_limited' })
+    }
+    const unlock = () => memory.set(`mfa:lock:${userId}`, { value: 1, expires: Date.now() - 1 })
+    await series(MFA_LOCK_FIRST_SECONDS)
+    unlock()
+    await series(MFA_LOCK_FIRST_SECONDS * 2)
+    unlock()
+    await expect(s.inT(() => withKey.auth.mfaVerify(next.challenge, totpAt(secret, stepOf(new Date()) + 1), meta))).resolves.toMatchObject({ accessToken: expect.any(String) })
+    expect(memory.has(`mfa:locks:${userId}`)).toBe(false)
+    expect(await s.inT(() => ctx.prisma.client.auditEvent.count({ where: { action: 'auth.mfa.locked', entityId: userId } }))).toBe(2)
   })
 
   it('refuses the SMS code and Google for such accounts, and refreshes only sessions opened with the code', async () => {
@@ -141,6 +156,10 @@ describe.skipIf(!DB_AVAILABLE)('Second factor for the ministry and the Super Adm
     expect(() => withKey.mfa.refuseOtherSignIn(ministry)).toThrow(expect.objectContaining({ code: 'mfa_password_login' }))
     const student = await s.inT(() => ctx.prisma.client.user.findFirstOrThrow({ where: { login: 'a.student' } }))
     expect(() => withKey.mfa.refuseOtherSignIn(student)).not.toThrow()
+    // The finance admin settles payments by hand: the app code too, once the key is set (security review №1).
+    expect(withKey.mfa.enforced({ roles: ['FINANCE_ADMIN'], isOwner: false })).toBe(true)
+    expect(withoutKey.mfa.enforced({ roles: ['FINANCE_ADMIN'], isOwner: false })).toBe(false)
+    expect(withKey.mfa.enforced({ roles: ['CENTER_ADMIN', 'TEACHER'], isOwner: false })).toBe(false)
 
     // A session opened before the app was linked does not survive a refresh.
     const old = await s.inT(() => ctx.tokens.issueRefresh(ministry.id, s.tenantId, meta))

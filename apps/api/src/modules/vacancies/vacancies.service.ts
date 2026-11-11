@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import type { ApplicationStatus, CompanyVacancyDto, DocumentLinkDto, L, StudentApplicationDto, VacancyApplicationDto, VacancyDto } from '@ilmora/shared'
+import type { ApplicationStatus, CompanyVacancyDto, DocumentLinkDto, ExperienceLevel, L, StudentApplicationDto, VacancyApplicationDto, VacancyDto, WorkSchedule } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
@@ -10,15 +10,27 @@ import { ContactsService } from '../contacts/contacts.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, regionIdByRef, toIndustry } from '../registry/registry.mappers'
 import { StudentsService } from '../students/students.service'
-import type { ApplyInput, VacanciesQuery, VacancyInput, VacancyPatch } from './vacancies.schemas'
+import { payIssue, type ApplyInput, type VacanciesQuery, type VacancyInput, type VacancyPatch } from './vacancies.schemas'
+import { dateColumnToIso, isoToDateColumn, todayLocal } from '../../common/time'
 
 const place = (r: { id: string; name: unknown } | null) => (r ? { id: r.id, name: r.name as L } : null)
-const todayUtc = () => new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`)
+/** Today in Tashkent as the DATE column stores it (UTC midnight of that day): a vacancy is open through its last day. */
+const todayUtc = () => isoToDateColumn(todayLocal())
 const dateOf = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null)
 const STATUSES: ApplicationStatus[] = ['NEW', 'VIEWED', 'INVITED', 'REJECTED']
+const minor = (som: number | null | undefined) => (som ? BigInt(som) * 100n : null)
+/** The pay columns of a vacancy that passed `payIssue`: a stipend only when paid, a salary only on a JOB. */
+const payColumns = (p: { kind: string; paid: boolean; stipend: number | null; salaryFrom: number | null; salaryTo: number | null; schedule?: WorkSchedule | null; experience?: ExperienceLevel | null }) => ({
+  paid: p.paid,
+  stipendMinor: p.kind !== 'JOB' && p.paid ? minor(p.stipend) : null,
+  salaryFromMinor: p.kind === 'JOB' ? minor(p.salaryFrom) : null,
+  salaryToMinor: p.kind === 'JOB' ? minor(p.salaryTo) : null,
+  schedule: p.kind === 'JOB' ? (p.schedule ?? null) : null,
+  experience: p.kind === 'JOB' ? (p.experience ?? null) : null,
+})
 
-const VACANCY_SELECT = {
-  id: true, kind: true, title: true, address: true, format: true, paid: true, stipendMinor: true, duration: true, seats: true, requirements: true,
+export const VACANCY_SELECT = {
+  id: true, kind: true, title: true, address: true, format: true, paid: true, stipendMinor: true, salaryFromMinor: true, salaryToMinor: true, schedule: true, experience: true, duration: true, seats: true, requirements: true,
   deadline: true, status: true, closedAt: true, createdAt: true,
   region: { select: { id: true, name: true } }, district: { select: { id: true, name: true } },
   company: { select: { id: true, name: true, industries: { select: { industry: { select: { ...INDUSTRY_SELECT, sortOrder: true } } } } } },
@@ -26,15 +38,21 @@ const VACANCY_SELECT = {
 } as const satisfies Prisma.VacancySelect
 type VacancyRow = Prisma.VacancyGetPayload<{ select: typeof VACANCY_SELECT }>
 
-const toVacancy = (v: VacancyRow): Omit<VacancyDto, 'myApplication'> => ({
+export const toVacancy = (v: VacancyRow): Omit<VacancyDto, 'myApplication'> => ({
   id: v.id, kind: v.kind, title: v.title,
   company: { id: v.company.id, name: v.company.name, industries: v.company.industries.map((i) => i.industry).sort((a, b) => a.sortOrder - b.sortOrder).map(toIndustry) },
   directions: v.directions.map((d) => mainOf(d.direction)),
   region: place(v.region)!, district: place(v.district), address: v.address, format: v.format, paid: v.paid,
   stipend: v.stipendMinor !== null ? Number(v.stipendMinor / 100n) : null,
+  salaryFrom: v.salaryFromMinor !== null ? Number(v.salaryFromMinor / 100n) : null,
+  salaryTo: v.salaryToMinor !== null ? Number(v.salaryToMinor / 100n) : null,
+  schedule: v.schedule, experience: v.experience,
   duration: v.duration, seats: v.seats, requirements: v.requirements,
-  deadline: v.deadline?.toISOString().slice(0, 10) ?? null, status: v.status, createdAt: v.createdAt.toISOString(),
+  deadline: v.deadline ? dateColumnToIso(v.deadline) : null, status: v.status, createdAt: v.createdAt.toISOString(),
 })
+
+/** What students (and institutions, ТЗ «Студенты у компании», 3.1) see: open, of an approved unblocked company, deadline not passed. */
+export const visibleVacancy = (): Prisma.VacancyWhereInput => ({ status: 'OPEN', company: { approvedAt: { not: null }, blockedAt: null }, OR: [{ deadline: null }, { deadline: { gte: todayUtc() } }] })
 
 /**
  * Practice and internships (ТЗ 5.4). An approved company publishes a vacancy at once (it was checked itself):
@@ -74,8 +92,9 @@ export class VacanciesService {
     const where = await this.place(input.region, input.districtId ?? null)
     const row = await this.prisma.client.vacancy.create({
       data: {
-        tenantId, companyId: company.id, kind: input.kind, title: input.title, ...where, address: input.address ?? null, format: input.format, paid: input.paid,
-        stipendMinor: input.paid && input.stipend ? BigInt(input.stipend) * 100n : null, duration: input.duration ?? null, seats: input.seats,
+        tenantId, companyId: company.id, kind: input.kind, title: input.title, ...where, address: input.address ?? null, format: input.format,
+        ...payColumns({ kind: input.kind, paid: input.paid, stipend: input.stipend ?? null, salaryFrom: input.salaryFrom ?? null, salaryTo: input.salaryTo ?? null, schedule: input.schedule ?? null, experience: input.experience ?? null }),
+        duration: input.duration ?? null, seats: input.seats,
         requirements: input.requirements ?? null, deadline: dateOf(input.deadline), directions: { create: directionIds.map((directionId) => ({ directionId })) },
       },
       select: { id: true },
@@ -84,21 +103,32 @@ export class VacanciesService {
     return this.companyGet(actor, row.id)
   }
 
-  /** While open; the directions are replaced when given; unpaid clears the stipend. */
+  /**
+   * While open; the directions are replaced when given. The pay is checked as a whole after the change (a JOB turned
+   * into practice loses its salary only if the patch says so — otherwise it is refused, not silently cleared), except
+   * that «unpaid» clears the stipend, as before.
+   */
   async update(actor: RequestActor, id: string, input: VacancyPatch): Promise<CompanyVacancyDto> {
     const company = await this.ownCompany(actor)
     const v = await this.ownVacancy(company.id, id)
     if (v.status !== 'OPEN') throw AppError.conflict('vacancy_closed', 'The vacancy is closed')
+    const kind = input.kind ?? v.kind
     const paid = input.paid ?? v.paid
-    const stipend = input.stipend !== undefined ? input.stipend : v.stipendMinor !== null ? Number(v.stipendMinor / 100n) : null
-    if (!paid && input.stipend) throw AppError.invalid('validation_failed', 'Validation failed', { issues: [{ path: 'stipend', message: 'A stipend needs paid' }] })
+    const was = toVacancy(v)
+    const stipend = input.stipend !== undefined ? input.stipend : paid ? was.stipend : null
+    const pay = {
+      kind, paid, stipend, salaryFrom: input.salaryFrom !== undefined ? input.salaryFrom : was.salaryFrom, salaryTo: input.salaryTo !== undefined ? input.salaryTo : was.salaryTo,
+      schedule: input.schedule !== undefined ? input.schedule : was.schedule, experience: input.experience !== undefined ? input.experience : was.experience,
+    }
+    const issue = payIssue(pay)
+    if (issue) throw AppError.invalid('validation_failed', 'Validation failed', { issues: [issue] })
     const directionIds = input.directionIds ? await this.mainDirections(input.directionIds) : null
     const where = input.region !== undefined || input.districtId !== undefined ? await this.place(input.region ?? v.region.id, input.districtId !== undefined ? input.districtId : v.district?.id ?? null) : {}
     const data: Prisma.VacancyUncheckedUpdateInput = {
       ...where,
       ...(input.kind !== undefined ? { kind: input.kind } : {}), ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.address !== undefined ? { address: input.address } : {}), ...(input.format !== undefined ? { format: input.format } : {}),
-      paid, stipendMinor: paid && stipend ? BigInt(stipend) * 100n : null,
+      ...payColumns(pay),
       ...(input.duration !== undefined ? { duration: input.duration } : {}), ...(input.seats !== undefined ? { seats: input.seats } : {}),
       ...(input.requirements !== undefined ? { requirements: input.requirements } : {}), ...(input.deadline !== undefined ? { deadline: dateOf(input.deadline) } : {}),
     }
@@ -134,10 +164,10 @@ export class VacanciesService {
       await this.prisma.client.vacancyApplication.updateMany({ where: { id: { in: fresh.map((a) => a.id) }, status: 'NEW' }, data: { status: 'VIEWED', statusChangedAt: new Date() } })
       for (const a of fresh) await this.tellStudent(tenantId, a, 'VIEWED', company.name, v.title)
     }
-    const rows = await this.prisma.client.vacancyApplication.findMany({ where: { vacancyId: id }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true } })
+    const rows = await this.prisma.client.vacancyApplication.findMany({ where: { vacancyId: id }, orderBy: { createdAt: 'asc' }, take: 1000, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true, sharedName: true, sharedPhone: true, sharedEmail: true } })
     // The cards in two queries and the audit rows in one insert, however many applied.
     // Certificates the student had when applying — the application is the consent (ТЗ 5.4, 8).
-    const cards = await this.contacts.fullCards(rows.map((r) => r.userId), new Map(rows.map((r) => [r.userId, r.createdAt])))
+    const cards = await this.contacts.fullCards(rows.map((r) => r.userId), new Map(rows.map((r) => [r.userId, r.createdAt])), new Map(rows.map((r) => [r.userId, r])))
     await this.audit.recordMany(rows.map((r) => ({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, vacancyId: id, applicationId: r.id } })))
     return rows.filter((r) => cards.has(r.userId)).map((r) => ({
       id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...cards.get(r.userId)! },
@@ -151,9 +181,9 @@ export class VacanciesService {
     if (!a) throw AppError.notFound('Application')
     const moved = await this.prisma.client.vacancyApplication.updateMany({ where: { id: applicationId, status: 'NEW' }, data: { status: 'VIEWED', statusChangedAt: new Date() } })
     if (moved.count === 1) await this.tellStudent(tenantId, a, 'VIEWED', company.name, a.vacancy.title)
-    const r = await this.prisma.client.vacancyApplication.findUniqueOrThrow({ where: { id: applicationId }, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true } })
+    const r = await this.prisma.client.vacancyApplication.findUniqueOrThrow({ where: { id: applicationId }, select: { id: true, userId: true, status: true, note: true, createdAt: true, statusChangedAt: true, sharedName: true, sharedPhone: true, sharedEmail: true } })
     await this.audit.record({ action: 'vacancy.application.view', entityType: 'User', entityId: r.userId, after: { companyId: company.id, applicationId } })
-    return { id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId, r.createdAt)) } }
+    return { id: r.id, status: r.status, note: r.note, createdAt: r.createdAt.toISOString(), statusChangedAt: r.statusChangedAt?.toISOString() ?? null, student: { id: r.userId, ...(await this.contacts.fullCard(r.userId, r.createdAt, r)) } }
   }
 
   /** «Пригласить» / «Отказать»: from new or viewed only; the student is told. */
@@ -171,7 +201,8 @@ export class VacanciesService {
   /** A certificate file of an applicant — a 5-minute link, audited (ТЗ 8 «скачал файл»). */
   async certificateLink(actor: RequestActor, applicationId: string, certificateId: string): Promise<DocumentLinkDto> {
     const company = await this.ownCompany(actor)
-    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, vacancy: { companyId: company.id } }, select: { userId: true, createdAt: true } })
+    // A disabled or deleted student's files go to no company (cybersecurity check 9.4, 11.11).
+    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, vacancy: { companyId: company.id }, user: { isActive: true, deletedAt: null } }, select: { userId: true, createdAt: true } })
     const cert = a ? await this.prisma.client.studentCertificate.findFirst({ where: { id: certificateId, userId: a.userId, createdAt: { lte: a.createdAt } }, select: { fileKey: true } }) : null
     if (!a || !cert) throw AppError.notFound('Certificate')
     await this.audit.record({ action: 'vacancy.certificate.download', entityType: 'StudentCertificate', entityId: certificateId, after: { companyId: company.id, userId: a.userId, applicationId } })
@@ -195,6 +226,8 @@ export class VacanciesService {
     }
     if (q.kind) where.kind = q.kind
     if (q.format) where.format = q.format
+    if (q.schedule) where.schedule = q.schedule
+    if (q.experience) where.experience = q.experience
     const rows = await this.prisma.client.vacancy.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200, select: VACANCY_SELECT })
     return this.withMine(actor, rows)
   }
@@ -213,7 +246,8 @@ export class VacanciesService {
     if (!(await this.students.questionnaire(actor)).complete) throw AppError.invalid('questionnaire_incomplete', 'Fill in the questionnaire first')
     let applicationId: string
     try {
-      applicationId = (await this.prisma.client.vacancyApplication.create({ data: { tenantId, vacancyId: id, userId: actor.id, note: input.note ?? null }, select: { id: true } })).id
+      // Applying is the consent: the company keeps the contacts the student had now (security review №15).
+      applicationId = (await this.prisma.client.vacancyApplication.create({ data: { tenantId, vacancyId: id, userId: actor.id, note: input.note ?? null, ...(await this.contacts.snapshotOf(actor.id)) }, select: { id: true } })).id
     } catch (err) {
       if (isUniqueViolation(err)) throw AppError.conflict('application_exists', 'You have already applied')
       throw err
@@ -246,7 +280,7 @@ export class VacanciesService {
   // ───────────── helpers ─────────────
 
   private visible(): Prisma.VacancyWhereInput {
-    return { status: 'OPEN', company: { approvedAt: { not: null } }, OR: [{ deadline: null }, { deadline: { gte: todayUtc() } }] }
+    return visibleVacancy()
   }
 
   private async withMine(actor: RequestActor, rows: VacancyRow[]): Promise<VacancyDto[]> {

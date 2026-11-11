@@ -18,6 +18,8 @@ export interface AccessClaims {
   /** Registry: institution and company of the account (INSTITUTION_ADMIN / COMPANY_ADMIN). */
   iid?: string | null
   coid?: string | null
+  /** The password was issued by the Super Admin and not changed yet: everything but the change answers 403. */
+  pwc?: boolean
   iat: number
   exp: number
 }
@@ -32,13 +34,16 @@ export const REFRESH_COOKIE = 'ilmora_refresh'
 export const SESSION_FLAG = 'ilmora_session'
 
 /** Access JWTs (short-lived) and refresh sessions (opaque values stored as SHA-256 hashes, rotated on every use). */
+
+/** How long after a rotation the old refresh value still renews the session (two tabs at once, Н5). */
+export const REFRESH_RACE_MS = 30_000
 @Injectable()
 export class TokenService {
   constructor(private readonly jwt: JwtService, @Inject(ENV) private readonly env: Env, private readonly prisma: PrismaService) {}
 
-  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null }): Promise<string> {
+  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null; passwordChangeRequired?: boolean }): Promise<string> {
     return this.jwt.signAsync(
-      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined },
+      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined, pwc: user.passwordChangeRequired || undefined },
       { subject: user.id, expiresIn: this.env.JWT_ACCESS_TTL_SECONDS },
     )
   }
@@ -73,12 +78,16 @@ export class TokenService {
     }
   }
 
-  async issueRefresh(userId: string, tenantId: string, meta: SessionMeta, familyId = randomUUID()): Promise<{ raw: string; expiresAt: Date; familyId: string }> {
+  /**
+   * `startedAt`: when the sign-in this session continues happened — a session reopened after a change of password keeps
+   * the time of the sign-in with the authenticator code, so the 12-hour limit is not restarted by it (review 11.11).
+   */
+  async issueRefresh(userId: string, tenantId: string, meta: SessionMeta, familyId = randomUUID(), startedAt?: Date): Promise<{ raw: string; expiresAt: Date; familyId: string }> {
     const raw = randomToken(48)
     const expiresAt = new Date(Date.now() + this.env.REFRESH_TOKEN_TTL_DAYS * 86_400_000)
     await TenantContext.forTenant(tenantId, () =>
       this.prisma.client.refreshSession.create({
-        data: { tenantId, userId, familyId, tokenHash: sha256(raw), expiresAt, ip: meta.ip, userAgent: meta.userAgent },
+        data: { tenantId, userId, familyId, tokenHash: sha256(raw), expiresAt, ip: meta.ip, userAgent: meta.userAgent, ...(startedAt ? { createdAt: startedAt } : {}) },
       }),
     )
     return { raw, expiresAt, familyId }
@@ -95,17 +104,30 @@ export class TokenService {
     const session = await TenantContext.crossTenant(() => this.prisma.client.refreshSession.findUnique({ where: { tokenHash: hash } }))
     if (!session) throw AppError.unauthorized('Refresh session not found', 'invalid_refresh')
     const now = new Date()
-    if (session.revokedAt || session.rotatedAt) {
+    // Two tabs renew the session at once with the same cookie: the one that loses the race comes within seconds of the
+    // rotation and gets its own new value in the same family instead of being taken for a thief (Н5). Later reuse, or
+    // reuse of a revoked value, is still treated as theft.
+    const raced = !session.revokedAt && session.rotatedAt && now.getTime() - session.rotatedAt.getTime() <= REFRESH_RACE_MS
+    if (session.revokedAt || (session.rotatedAt && !raced)) {
       await this.revokeFamily(session.tenantId, session.familyId, 'reuse-detected')
       throw AppError.unauthorized('Refresh session is no longer valid', 'invalid_refresh')
     }
     if (session.expiresAt <= now) throw AppError.unauthorized('Refresh session expired', 'invalid_refresh')
+    const sibling = async () => {
+      const nextRaw = randomToken(48)
+      const expiresAt = new Date(Date.now() + this.env.REFRESH_TOKEN_TTL_DAYS * 86_400_000)
+      await TenantContext.forTenant(session.tenantId, () => this.prisma.client.refreshSession.create({
+        data: { tenantId: session.tenantId, userId: session.userId, familyId: session.familyId, tokenHash: sha256(nextRaw), expiresAt, ip: meta.ip, userAgent: meta.userAgent },
+      }))
+      return { userId: session.userId, tenantId: session.tenantId, familyId: session.familyId, raw: nextRaw, expiresAt }
+    }
+    if (raced) return sibling()
 
     const next = await TenantContext.forTenant(session.tenantId, () =>
       this.prisma.tx(async (tx) => {
         // Only one concurrent request may rotate this session: the conditional update is the lock.
         const claimed = await tx.refreshSession.updateMany({ where: { id: session.id, rotatedAt: null, revokedAt: null }, data: { rotatedAt: now } })
-        if (claimed.count !== 1) throw AppError.unauthorized('Refresh session is no longer valid', 'invalid_refresh')
+        if (claimed.count !== 1) return null
         const nextRaw = randomToken(48)
         const expiresAt = new Date(Date.now() + this.env.REFRESH_TOKEN_TTL_DAYS * 86_400_000)
         const created = await tx.refreshSession.create({
@@ -115,6 +137,12 @@ export class TokenService {
         return { raw: nextRaw, expiresAt }
       }),
     )
+    if (!next) {
+      // Another request rotated it a moment ago (two tabs at once): a sibling, unless it was revoked meanwhile.
+      const now2 = await TenantContext.crossTenant(() => this.prisma.client.refreshSession.findUnique({ where: { id: session.id }, select: { revokedAt: true } }))
+      if (!now2 || now2.revokedAt) throw AppError.unauthorized('Refresh session is no longer valid', 'invalid_refresh')
+      return sibling()
+    }
     return { userId: session.userId, tenantId: session.tenantId, familyId: session.familyId, ...next }
   }
 

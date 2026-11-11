@@ -53,7 +53,9 @@ services:
     ports:
       - "${ADMIN_PRIVATE_IP}:6379:6379"
     volumes:
-      - ../../redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      # The folder, not the file: a file mount keeps showing the old redis.conf after a release, even across restarts
+      # (security review 11.11, №123). deploy.sh admin recreates Redis when redis.conf changes.
+      - ../../redis:/usr/local/etc/redis:ro
       - redisdata:/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
@@ -142,8 +144,7 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-90}
       BACKUP_AT_UTC: ${BACKUP_AT_UTC:-22:40}
       BACKUP_PING_URL: ${BACKUP_PING_URL:-}
-    volumes:
-      - ./backup.sh:/usr/local/bin/backup.sh:ro
+    # backup.sh is copied into the image (backup.Dockerfile), not mounted (security review 10.11, №24).
     entrypoint: ["/usr/local/bin/backup.sh", "--schedule"]
     depends_on:
       postgres:

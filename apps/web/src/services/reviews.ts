@@ -1,0 +1,77 @@
+import type {
+  AdminCompanyItemDto, AdminInstitutionItemDto, AdminPage, CompanyPendingChanges, CompanyProfileDto, CompanyReviewDto, CompanyReviewItemDto, DocumentLinkDto, InstitutionPassportDto,
+  InstitutionPendingChanges, InstitutionReviewDto, InstitutionReviewItemDto, RegistryInstitutionStatus,
+} from '@ilmora/shared'
+import { api } from '../lib/api'
+
+/** The API's rule for a reason (reject, release): 5–1000 characters, no < or >; the reason is shown to the representative. */
+export const REASON_MIN = 5
+export const REASON_MAX = 1000
+export const cleanReason = (s: string) => s.normalize('NFC').trim()
+export const reasonOk = (s: string) => { const r = cleanReason(s); return r.length >= REASON_MIN && r.length <= REASON_MAX && !/[<>]/.test(r) }
+
+/** The official name differs from the one the representative entered (case and spaces aside). */
+export const nameDiffers = (entered: string, official: string | null) =>
+  !!official && official.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase() !== entered.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()
+
+const id = (s: string) => encodeURIComponent(s)
+
+/** The reviewed fields a change after approval may touch (security review №13, PR #51), in the order shown. */
+export const CHANGE_KEYS = ['name', 'stir', 'type', 'ownership', 'regionId', 'districtId', 'industryIds'] as const
+export type ChangeKey = (typeof CHANGE_KEYS)[number]
+/** Which fields wait for a decision: the keys present in `pendingChanges` (a cleared district is a change too). */
+export const changedKeys = (c: InstitutionPendingChanges | CompanyPendingChanges | null | undefined): ChangeKey[] =>
+  c ? CHANGE_KEYS.filter((k) => Object.prototype.hasOwnProperty.call(c, k)) : []
+
+/** What the Super Admin typed in «Все записи»: 9 digits are a STIR (exact), anything else a name. */
+export interface RecordSearch { text: string; status: RegistryInstitutionStatus | ''; page: number }
+export const STIR_RE = /^\d{9}$/
+/** The query string of GET /admin/institutions|companies (issue #50): `stir` or `q`, `status`, `page`. */
+export function searchQuery({ text, status, page }: RecordSearch): string {
+  const t = text.trim()
+  const digits = t.replace(/\s/g, '')
+  const qs = new URLSearchParams()
+  if (STIR_RE.test(digits)) qs.set('stir', digits)
+  else if (t) qs.set('q', t)
+  if (status) qs.set('status', status)
+  if (page > 1) qs.set('page', String(page))
+  const s = qs.toString()
+  return s ? `?${s}` : ''
+}
+
+/** The version of the profile the reviewer looked at: its `submittedAt` from the card. */
+export type Seen = { submittedAt: string | null | undefined }
+
+/**
+ * «Одобряю то, что видел» (review 11.11): approve and reject carry the card's `submittedAt`; if the representative sent
+ * another version since, the API answers 409 `review_changed` instead of deciding on values nobody has seen.
+ */
+export const decideBody = (seen?: Seen) => ({ submittedAt: seen?.submittedAt ?? undefined })
+
+/**
+ * Super Admin review of institution and company profiles (decision of 10.11: the Super Admin decides, not the ministry).
+ * `release` — «Отвязать представителя» (security review №17): the record is freed for the next representative of the
+ * same STIR, the previous one is notified; a company starts again as a clean draft.
+ */
+export const reviews = {
+  institutions: {
+    queue: () => api<InstitutionReviewItemDto[]>('/admin/institutions/reviews'),
+    /** Any status (without one — every record with a representative), 50 per page. */
+    search: (s: RecordSearch) => api<AdminPage<AdminInstitutionItemDto>>(`/admin/institutions${searchQuery(s)}`),
+    detail: (i: string) => api<InstitutionReviewDto>(`/admin/institutions/${id(i)}`),
+    approve: (i: string, seen?: Seen) => api<InstitutionPassportDto>(`/admin/institutions/${id(i)}/approve`, { method: 'POST', body: decideBody(seen) }),
+    reject: (i: string, reason: string, seen?: Seen) => api<InstitutionPassportDto>(`/admin/institutions/${id(i)}/reject`, { method: 'POST', body: { reason: cleanReason(reason), ...decideBody(seen) } }),
+    release: (i: string, reason: string) => api<InstitutionPassportDto>(`/admin/institutions/${id(i)}/release`, { method: 'POST', body: { reason: cleanReason(reason) } }),
+  },
+  companies: {
+    queue: () => api<CompanyReviewItemDto[]>('/admin/companies/reviews'),
+    /** Companies have no UNCLAIMED status; the page sends it only for institutions. */
+    search: (s: RecordSearch) => api<AdminPage<AdminCompanyItemDto>>(`/admin/companies${searchQuery(s)}`),
+    detail: (i: string) => api<CompanyReviewDto>(`/admin/companies/${id(i)}`),
+    /** A 5-minute link to the state-registration certificate (audited). */
+    certificate: (i: string) => api<DocumentLinkDto>(`/admin/companies/${id(i)}/certificate`),
+    approve: (i: string, seen?: Seen) => api<CompanyProfileDto>(`/admin/companies/${id(i)}/approve`, { method: 'POST', body: decideBody(seen) }),
+    reject: (i: string, reason: string, seen?: Seen) => api<CompanyProfileDto>(`/admin/companies/${id(i)}/reject`, { method: 'POST', body: { reason: cleanReason(reason), ...decideBody(seen) } }),
+    release: (i: string, reason: string) => api<CompanyProfileDto>(`/admin/companies/${id(i)}/release`, { method: 'POST', body: { reason: cleanReason(reason) } }),
+  },
+}

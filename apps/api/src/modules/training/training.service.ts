@@ -99,7 +99,7 @@ export class TrainingService {
     // ТЗ 5.2 step 2: approved institutions with a direction of this industry (and in this region, when one is set).
     await this.notifications.safely('training.request', async () => {
       const recipients = await this.prisma.client.user.findMany({
-        where: { isActive: true, institution: { is: { approvedAt: { not: null }, mergedIntoId: null, ...(regionId ? { regionId } : {}), directions: { some: { direction: inIndustries([main.industryId]) } } } } },
+        where: { isActive: true, institution: { is: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null, ...(regionId ? { regionId } : {}), directions: { some: { direction: inIndustries([main.industryId]) } } } } },
         select: { id: true },
       })
       await this.notifications.notify({ tenantId, userIds: recipients.map((u) => u.id), type: 'training.request', params: { companyName: company.name, directionName: main.name, count: input.count, byYear: input.byYear, requestId: row.id }, dedupeKey: `training-request:${row.id}` })
@@ -142,7 +142,8 @@ export class TrainingService {
     })
     if (!offer) throw AppError.notFound('Offer')
     const status = accept ? 'ACCEPTED' : 'DECLINED'
-    const moved = await this.prisma.client.trainingOffer.updateMany({ where: { id: offerId, status: 'PENDING' }, data: { status, decidedAt: new Date() } })
+    // Only on an open request: a closed one opens no contacts (cybersecurity check 9.4, 11.11).
+    const moved = await this.prisma.client.trainingOffer.updateMany({ where: { id: offerId, status: 'PENDING', request: { status: 'OPEN' } }, data: { status, decidedAt: new Date() } })
     if (moved.count !== 1) throw AppError.conflict('offer_decided', 'This offer is no longer waiting for a decision')
     await this.audit.record({ action: accept ? 'training.offer.accept' : 'training.offer.decline', entityType: 'TrainingOffer', entityId: offerId, after: { status, contactsOpened: accept } })
     const userId = offer.institution.representative?.id
@@ -230,7 +231,7 @@ export class TrainingService {
   private visibleTo(inst: { regionId: string | null }, industries: string[]): Prisma.TrainingRequestWhereInput {
     return {
       status: 'OPEN',
-      company: { approvedAt: { not: null } },
+      company: { approvedAt: { not: null }, blockedAt: null },
       direction: inIndustries(industries),
       OR: [{ regionId: null }, ...(inst.regionId ? [{ regionId: inst.regionId }] : [])],
     }

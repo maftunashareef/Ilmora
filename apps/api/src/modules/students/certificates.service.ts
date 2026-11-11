@@ -2,15 +2,16 @@ import { Injectable } from '@nestjs/common'
 import { type DocumentLinkDto, type DocumentUploadDto, type IlmoraCourseDto, type L, STUDENT_CERTIFICATES_MAX, type StudentCertificateDto } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { PrismaService } from '../../infra/prisma/prisma.service'
-import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
+import { DOC_LINK_SECONDS, finalKeyOf, PrivateDocsService } from '../../infra/storage/private-docs.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import type { CertificateInput, CertificatePatch, CertificateUploadInput } from './certificates.schemas'
+import { dateColumnToIso } from '../../common/time'
 
 const SELECT = { id: true, title: true, issuer: true, issuedAt: true, contentType: true, sizeBytes: true, createdAt: true } as const
 type Row = { id: string; title: string; issuer: string | null; issuedAt: Date | null; contentType: string; sizeBytes: number; createdAt: Date }
 const toDto = (r: Row): StudentCertificateDto => ({
-  id: r.id, title: r.title, issuer: r.issuer, issuedAt: r.issuedAt?.toISOString().slice(0, 10) ?? null, contentType: r.contentType, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(),
+  id: r.id, title: r.title, issuer: r.issuer, issuedAt: r.issuedAt ? dateColumnToIso(r.issuedAt) : null, contentType: r.contentType, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(),
 })
 const prefixOf = (tenantId: string, userId: string) => `student-certs/${tenantId}/${userId}/`
 const dateOf = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null)
@@ -40,11 +41,19 @@ export class CertificatesService {
   /** Step 2: the server checks the upload (prefix, size, real type) and only then records the certificate. */
   async add(tenantId: string, actor: RequestActor, input: CertificateInput): Promise<StudentCertificateDto> {
     await this.assertRoom(actor)
-    if (await this.prisma.client.studentCertificate.findFirst({ where: { userId: actor.id, fileKey: input.key }, select: { id: true } })) throw AppError.conflict('certificate_exists', 'This file is already added')
-    const { type, size } = await this.docs.verifyUpload(input.key, prefixOf(tenantId, actor.id))
-    const row = await this.prisma.client.studentCertificate.create({
-      data: { tenantId, userId: actor.id, title: input.title, issuer: input.issuer ?? null, issuedAt: dateOf(input.issuedAt), fileKey: input.key, contentType: type, sizeBytes: size },
-      select: SELECT,
+    // One upload key is checked and recorded once: two «add» at once with the same file would both copy it and leave two
+    // rows on one file, and deleting one would take the other's file (review 11.11). Serialized per file key.
+    // The check of the file (a copy in the bucket) stays outside the transaction; copying one upload twice writes the
+    // same final key with the same bytes, so only the row decides.
+    if (await this.prisma.client.studentCertificate.findFirst({ where: { userId: actor.id, fileKey: finalKeyOf(input.key) }, select: { id: true } })) throw AppError.conflict('certificate_exists', 'This file is already added')
+    const { type, size, key } = await this.docs.verifyUpload(input.key, prefixOf(tenantId, actor.id))
+    const row = await this.prisma.tx(async (tx) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `certificate:${key}`)
+      if (await tx.studentCertificate.findFirst({ where: { fileKey: key }, select: { id: true } })) throw AppError.conflict('certificate_exists', 'This file is already added')
+      return tx.studentCertificate.create({
+        data: { tenantId, userId: actor.id, title: input.title, issuer: input.issuer ?? null, issuedAt: dateOf(input.issuedAt), fileKey: key, contentType: type, sizeBytes: size },
+        select: SELECT,
+      })
     })
     await this.audit.record({ action: 'student.certificate.add', entityType: 'StudentCertificate', entityId: row.id, after: { title: row.title, type, size } })
     return toDto(row)

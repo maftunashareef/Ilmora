@@ -2,7 +2,7 @@
 
 One monthly subscription across education centers in Tashkent: students pick a Duo (2 courses) or Trio (3 courses) package, join specific groups without schedule conflicts, pay once, and check in to every lesson with a per-session QR code. Three workspaces: Super Admin (site template, catalog, people, finance), Teacher Studio (courses, groups, content, attendance) and the Student workspace.
 
-> The repository started as a React/Vite prototype with all state in `localStorage`. It is now a production architecture: **Next.js 16** web app, **NestJS 12** API, **Prisma 7 / PostgreSQL**, **Redis + BullMQ**, Payme and Click adapters, Docker deployment on UzCloud (Caddy) and GitHub Actions CI/CD. The sample catalog (fictional centers, teachers, courses) is kept as seed data.
+> The repository started as a React/Vite prototype with all state in `localStorage`. It is now a production architecture: **Next.js 16** web app, **NestJS 12** API, **Prisma 7 / PostgreSQL**, **Redis + BullMQ**, the Payme adapter, Docker deployment on UzCloud (Caddy) and GitHub Actions CI/CD. The sample catalog (fictional centers, teachers, courses) is kept as seed data.
 
 ## Repository layout
 
@@ -55,14 +55,14 @@ npm run lint          # oxlint
 npm test              # shared unit tests + API tests (database-backed suites need TEST_DATABASE_URL)
 ```
 
-API test suites (`apps/api/test`) cover: Payme create/perform/cancel with concurrent `PerformTransaction` calls settling exactly once, Click prepare/complete idempotency, capacity races on the last seat, tenant isolation of the Prisma extension, refresh-token rotation with reuse detection, attendance tokens/enrollment/open-window/idempotency rules, concurrent QR scans, and exclusive daily job runs.
+API test suites (`apps/api/test`) cover: Payme create/perform/cancel with concurrent `PerformTransaction` calls settling exactly once, capacity races on the last seat, tenant isolation of the Prisma extension, refresh-token rotation with reuse detection, attendance tokens/enrollment/open-window/idempotency rules, concurrent QR scans, and exclusive daily job runs.
 
 ## Key behaviours
 
 * **Tenant isolation** — every tenant-scoped Prisma query is filtered by the request's tenant through a client extension (fails closed without a context); provider callbacks resolve the tenant from the payment they reference.
 * **Authentication** — phone + OTP (argon2-hashed, attempt-limited, per-phone window), 15-minute JWT access tokens, rotating refresh sessions stored as hashes in an HTTP-only `SameSite=Lax` cookie scoped to `/v1/auth`; reuse of a rotated token revokes the family; CSRF defence through the `X-Requested-With` header + Origin allow-list.
 * **Enrollment** — the builder enforces package limits, duplicates, schedule conflicts and capacity client-side for immediate feedback; the API re-validates and, at checkout, holds seats (`PENDING` enrollments) inside a row-locked transaction, so the last seat cannot be sold twice. Holds expire with the payment (24 h).
-* **Payments** — Payme JSON-RPC and Click SHOP API adapters implement the official protocols (`docs/payments/`), settle through one row-locked path that activates the subscription, posts a balanced ledger journal and writes an outbox event for the receipt. Repeated/concurrent callbacks are idempotent. Reconciliation (finance admin) shows provider vs. payment vs. ledger state and can query Click independently; Payme has no pull endpoint (it calls our `GetStatement`).
+* **Payments** — the Payme JSON-RPC adapter implements the official protocol (`docs/payments/`) and settles through one row-locked path that activates the subscription, posts a balanced ledger journal and writes an outbox event for the receipt. Repeated/concurrent callbacks are idempotent. Reconciliation (finance admin) shows provider vs. payment vs. ledger state and can query Click independently; Payme has no pull endpoint (it calls our `GetStatement`).
 * **Lessons & attendance** — sessions are materialised daily (00:30 Asia/Tashkent, idempotent, never marks anyone present). Teachers open attendance → a per-session token (hashed at rest, rotated on each QR view, void on close) is encoded in the QR URL `/attend/<sessionId>?t=…`. The student's phone opens ILMORA, signs in if needed, and the page performs an authenticated `POST /v1/attendance/check-in`; duplicates return the original record. Teachers see check-ins live (SSE over Redis pub/sub) and can correct records with a mandatory reason; everything is audited. Scanning proves the account, not physical presence.
 * **Content access** — courses, videos, playlists and resources carry status/visibility/audience; the server enforces the same rule the UI shows.
 * **Localisation & SEO** — `/uz`, `/ru`, `/en` routes with hreflang alternates, canonical URLs, Open Graph, sitemap, robots (private areas disallowed), JSON-LD (Course, Person, Organization — factual data only). Private dashboards are `noindex`.

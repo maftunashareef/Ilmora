@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { QrCode } from '../../components/QrCode'
 import { Button, Card, Eyebrow, Field, Icon, Input, LField, Notice, PageTitle } from '../../components/ui'
+import { PasswordCard } from '../../components/PasswordChange'
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
@@ -32,7 +33,7 @@ export function CenterSettings() {
   useEffect(() => {
     api<CenterOverview>(`${scope.base}/overview`).then((o) => { setCenter(o.center); setDraft(toDraft(o.center)) }).catch(() => { setFailed(true); notify(t('center.loadError'), 'warn') })
     api<CenterQr>(`${scope.base}/qr`).then(setQr).catch(() => undefined)
-  }, [notify, t])
+  }, [scope.base, notify, t])
 
   const fail = (err: unknown) => notify(isApiError(err) ? apiErrorText(err, lang) : t('center.loadError'), 'warn')
   const save = async () => {
@@ -92,6 +93,8 @@ export function CenterSettings() {
             <Notice tone="info" className="text-[12px]">{t('attend.honest')}</Notice>
             <div className="flex justify-end"><Button disabled={busy || locked} onClick={() => void save()}><Icon name="check" className="h-4 w-4" />{t('common.save')}</Button></div>
           </Card>
+          {/* The center administrator's own account password (not the center's). */}
+          <PasswordCard />
         </div>
         <Card className="flex flex-col items-center gap-4 p-6 text-center">
           <Eyebrow>{t('center.qrTitle')}</Eyebrow>

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
-import { IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator'
+import { IsDateString, IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator'
 import { Type } from 'class-transformer'
 import { CurrentActor, CurrentTenantId, Public, Roles } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -7,10 +7,11 @@ import { PaymentsService } from './payments.service'
 import { ReconciliationService } from './reconciliation.service'
 
 class ReconQuery {
-  @IsOptional() @IsIn(['PAYME', 'CLICK', 'MANUAL']) provider?: 'PAYME' | 'CLICK' | 'MANUAL'
+  @IsOptional() @IsIn(['PAYME', 'MANUAL']) provider?: 'PAYME' | 'MANUAL'
   @IsOptional() @IsIn(['CREATED', 'PERFORMED', 'CANCELLED', 'FAILED']) status?: 'CREATED' | 'PERFORMED' | 'CANCELLED' | 'FAILED'
-  @IsOptional() @IsString() from?: string
-  @IsOptional() @IsString() to?: string
+  // A date that does not parse is a 400, not a 500 from the database (security review 10.11 №43).
+  @IsOptional() @IsDateString({ strict: true }) from?: string
+  @IsOptional() @IsDateString({ strict: true }) to?: string
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number
   @IsOptional() @Type(() => Number) @IsInt() @Min(10) @Max(200) pageSize?: number
 }

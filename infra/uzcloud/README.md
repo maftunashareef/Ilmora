@@ -20,7 +20,7 @@
 
 | Файл | Где | Что внутри |
 |---|---|---|
-| `api.env` | **на обеих машинах, одинаковый** | пароли базы и Redis, JWT/OTP-ключи, SMS, Payme/Click, `SEED_CATALOG` |
+| `api.env` | **на обеих машинах, одинаковый** | пароли базы и Redis, JWT/OTP-ключи, SMS, Payme, `SEED_CATALOG` |
 | `web/.env` | ilmora-web | адреса, домены, почта для сертификатов, кто видит админку, образы |
 | `admin/.env` | ilmora-admin | адреса, образы, ключи S3 для копий, ключ шифрования копий |
 
@@ -143,7 +143,7 @@ nano api.env
 `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `JWT_ACCESS_SECRET`, `OTP_JOB_ENCRYPTION_KEY` и `TOTP_ENCRYPTION_KEY`
 (ключ для кодов из приложения у министерства и Super Admin; без него министерство не войдёт, а Super Admin входят
 только по паролю; после установки не менять — подключённые приложения перестанут подходить). Остальное уже заполнено для
-запуска: домен `ilmoraa.uz`, пустой каталог (`SEED_CATALOG=false`), SMS без Eskiz (только в журнал), Payme/Click пусто.
+запуска: домен `ilmoraa.uz`, пустой каталог (`SEED_CATALOG=false`), SMS без Eskiz (только в журнал), Payme пусто.
 Сохранить: `Ctrl+O`, Enter, `Ctrl+X`.
 
 ```bash
@@ -225,10 +225,9 @@ sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate
 - **Ключ кодов из приложения** (`TOTP_ENCRYPTION_KEY`, нужен с релиза, где министерство и Super Admin входят с кодом):
   на ilmora-admin `openssl rand -hex 32`, строку — в `api.env` как `TOTP_ENCRYPTION_KEY=…`, дальше как в пункте ниже.
   Ключ — только на серверах (и в менеджере паролей), не в чатах и не в GitHub; поставленный ключ не менять.
-- **Поменять `api.env`** (ключи Payme, Click, Eskiz): правка на ilmora-admin, копия на ilmora-web (`scp -3`, как в
+- **Поменять `api.env`** (ключи Payme, Eskiz): правка на ilmora-admin, копия на ilmora-web (`scp -3`, как в
   шаге 7), затем на admin `… compose.sh admin up -d worker`, на web `… compose.sh web up -d api`.
-  Адреса для кабинетов Payme / Click: `https://ilmoraa.uz/payments/payme`,
-  `https://ilmoraa.uz/payments/click/prepare` и `https://ilmoraa.uz/payments/click/complete`.
+  Адрес для кабинета Payme: `https://ilmoraa.uz/payments/payme` (Click убран 10.11.2026).
 - **Закрыть админку по IP:** `ADMIN_ALLOW_IPS` в `web/.env`, затем `… compose.sh web up -d caddy`.
 
 ## Индексация в поисковиках
@@ -279,6 +278,18 @@ $C admin --profile migrate run --rm -e ALLOW_DATA_PURGE=1 migrate node dist/cli/
 
 ## Откат
 
+**Не ниже релиза 51** (проверка 11.11, №121). С миграции `20261117000000` (релиз 51) база принимает `REFUNDED` у
+платежа, только когда возвращено всё (`refundedMinor`). Код до релиза 51 ставит `REFUNDED` без этого поля: база его
+отклонит, и отмена оплаты из кабинета Payme сломается. В образах самого релиза 51 не запускаются фоновые задачи
+(исправлено в #68), поэтому на деле — на релиз с #68 и новее. Миграция, которая ломает старый код, поднимает эту
+границу: дописать сюда.
+
+**Новые значения в базе — граница поднимется с кодом, который их пишет.** Миграция `20261121000000` (ТЗ «Студенты у
+компании») добавила вид согласия `INDUSTRY_CARD`, источник запроса `STUDENTS` и тип вакансии `JOB`. Сами по себе они
+старому коду не мешают. Но как только выйдет релиз, который создаёт такие строки, код до него на них упадёт (Prisma не
+читает незнакомое значение enum): список вакансий, согласия, запросы контакта. С этого релиза откат — не ниже него;
+номер релиза дописать сюда.
+
 Релиз сохраняет прежние образы в `.env.previous`. Сначала web, потом admin:
 
 ```bash
@@ -289,7 +300,7 @@ cd /opt/ilmora/infra/uzcloud/admin && cp .env.previous .env && sh ../deploy.sh a
 ```
 
 Миграции совместимы с предыдущей версией (ничего не удаляется в том же релизе), поэтому прежние образы работают с
-новой схемой. Образы хранятся на машинах две недели — откат на более старый релиз требует входа в GHCR, проще выпустить
+новой схемой. Caddyfile при откате не меняется: `deploy.sh web` проверяет тот, что уже стоит в `web/caddy/`. Образы хранятся на машинах две недели — откат на более старый релиз требует входа в GHCR, проще выпустить
 исправление новым релизом.
 
 ## Диск
@@ -310,7 +321,13 @@ du -sh /var/lib/docker/containers/* | sort -h | tail         # логи конт
 
 Если этого мало — расширить диск в панели UzCloud (затем `growpart` и `resize2fs` по инструкции провайдера).
 Сервис резервных копий запускается только при заполненном `BACKUP_PASSPHRASE` в `admin/.env`; без него его образ не
-собирается и копий нет (шаги 6 и 7 первой установки выше).
+собирается и копий нет (шаги 6 и 7 первой установки выше). Без копии релиз останавливается перед миграциями; выпустить
+без неё — галочка **no_backup** (первая установка до настройки копий или авария).
+
+**Caddyfile при релизе** приезжает в `web/caddy.next/`, `deploy.sh web` проверяет его (`caddy validate` с настоящими
+значениями из `web/.env`) и только потом переносит в `web/caddy/`, откуда его читает Caddy. Сломанный файл туда не
+попадает: он остаётся в `web/caddy.rejected/`, релиз красный, сайт работает на прежнем. Тот же Caddyfile проверяет CI на
+каждом PR. **redis.conf** подключён папкой; поменялся — `deploy.sh admin` пересоздаёт Redis (на несколько секунд).
 
 ## Восстановление
 
@@ -339,6 +356,36 @@ ssh ilmora-web 'sh /opt/ilmora/infra/uzcloud/compose.sh web start api'    # и �
 Прежняя база остаётся как `ilmora_old_<дата>`; удалить её через несколько дней, когда всё проверено:
 `$C admin exec postgres psql -U ilmora -d postgres -c 'DROP DATABASE ilmora_old_<дата>;'`.
 (`-U ilmora` и имя `ilmora` — значения `POSTGRES_USER` / `POSTGRES_DB` из `api.env`.)
+
+## Миграция упала (P3018, затем P3009)
+
+Релиз красный на шаге «Roll out ilmora-admin», в журнале `Error: P3018` или `current transaction is aborted` — это не
+причина, а след. Сайт работает на прежней версии: код не меняется, пока миграции не прошли. Но Prisma записала
+миграцию как неудачную, и следующий релиз встанет на `P3009 migrate found failed migrations`, пока её не разобрать.
+Не удалять строки из `_prisma_migrations` руками и не править уже применённые миграции.
+
+```bash
+C="sh /opt/ilmora/infra/uzcloud/compose.sh"
+# 1. Какая миграция
+$C admin exec postgres psql -U ilmora -d ilmora -c 'SELECT migration_name, started_at FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL;'
+# 2. Почему: настоящая ошибка — в журнале PostgreSQL (Prisma её не сохраняет)
+$C admin logs --since 2h postgres | grep -A2 ERROR
+```
+
+- **`canceling statement due to lock timeout`** — таблицу держала ночная копия (03:40) или долгий запрос. Миграция
+  ничего не изменила. Шаг 3, потом релиз заново, не около 03:40.
+- **Другая ошибка** — ошибка в самой миграции. Шаг 3, затем исправленная миграция новым PR (файл неудачной миграции
+  можно исправить: в базе её нет) и релиз.
+
+```bash
+# 3. Отметить миграцию откатившейся — база её не содержит (все новые миграции — в BEGIN; … COMMIT;, docs/migrations.md)
+$C admin --profile migrate run --rm migrate npx prisma migrate resolve --rolled-back <имя миграции>
+```
+
+После этого `migrate deploy` применит её заново (проверено на копии). Исключение — миграция без транзакции
+(`-- no-transaction`, для `CREATE INDEX CONCURRENTLY`): упав, она оставляет недостроенный индекс (`INVALID` в `\d
+"Таблица"`). Его удалить (`DROP INDEX CONCURRENTLY "имя";`), затем шаг 3. Если неясно, что успело измениться, —
+восстановить копию, которую релиз снял перед миграциями (раздел «Восстановление»).
 
 ## Доступ для команды
 
@@ -371,6 +418,14 @@ aws s3api put-bucket-policy --bucket ilmora-media --policy file://media-policy.j
 ```
 
 Проверка: файл в `ilmora-media` открывается без ключа (200), в `ilmora-docs` — нет (403), список `ilmora-media/` — 403.
+
+Загрузки в `ilmora-docs` сначала попадают в `incoming/`; API после проверки переносит файл и удаляет загрузку.
+Неподтверждённое в `incoming/` удаляется через сутки — правило `docs-lifecycle.json` (и, на случай если UzCloud
+правила не поддерживает, задача воркера раз в 6 часов):
+
+```powershell
+aws s3api put-bucket-lifecycle-configuration --bucket ilmora-docs --lifecycle-configuration file://docs-lifecycle.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
+```
 
 Ключи — в `api.env` на обеих машинах (`S3_ENDPOINT`, `S3_BUCKET=ilmora-media`, `S3_DOCS_BUCKET=ilmora-docs`,
 `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`), затем `… compose.sh admin up -d worker` и `… compose.sh web up -d api`.

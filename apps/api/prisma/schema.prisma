@@ -171,6 +171,40 @@ enum JournalKind {
   REVERSAL
 }
 
+/// A refund request (offer 6.3–6.6): waits for the finance admin → approved / rejected → the money is sent; the
+/// student can withdraw it before the decision.
+enum RefundRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+  WITHDRAWN
+}
+
+/// The reason, from the offer's appendix 2 and 6.5 (the center's or the operator's fault: refunded without a deduction
+/// for the lessons held).
+enum RefundReason {
+  /// The student's refusal (6.3, 6.4)
+  REFUSAL
+  /// The schedule or the teacher changed (6.5 c)
+  SCHEDULE_CHANGED
+  /// The group was not formed, closed, did not start (6.5 a)
+  GROUP_CLOSED
+  /// The center cancelled lessons and did not hold them (6.5 b)
+  LESSONS_NOT_HELD
+  /// The course is not as described (6.5 d)
+  NOT_AS_DESCRIBED
+  /// No access through the operator's fault (6.5 e)
+  PLATFORM_FAULT
+  OTHER
+}
+
+/// Where the request came from: the student's cabinet, or a finance admin entered a letter sent by e-mail (6.6).
+enum RefundSource {
+  CABINET
+  EMAIL
+}
+
 enum OtpPurpose {
   LOGIN
   PHONE_CHANGE
@@ -234,6 +268,9 @@ model Tenant {
   sessions        LessonSession[]
   attendance      AttendanceRecord[]
   payments        Payment[]
+  paymentLines    PaymentLine[]
+  refundRequests  RefundRequest[]
+  refundRequestLines RefundRequestLine[]
   transactions    PaymentTransaction[]
   journals        LedgerJournal[]
   ledgerEntries   LedgerEntry[]
@@ -267,6 +304,8 @@ model Tenant {
   contactRequests        ContactRequest[]
   vacancies              Vacancy[]
   vacancyApplications    VacancyApplication[]
+  vacancyBroadcasts      VacancyBroadcast[]
+  vacancyRecipients      VacancyBroadcastRecipient[]
   totpRecoveryCodes      TotpRecoveryCode[]
 }
 
@@ -292,6 +331,8 @@ model User {
   login           String?
   /** argon2id hash. Null for accounts that have only ever signed in with a one-time code. */
   passwordHash    String?
+  /** The Super Admin issued this password (ministry account created, password reset) and the owner has not changed it yet. */
+  passwordIssuedAt DateTime?
   /** Google account id (ID token "sub"); the only key Google Sign-In may match an account by. Unique per tenant. */
   googleId        String?
   displayName     String
@@ -334,6 +375,7 @@ model User {
   attendance      AttendanceRecord[]  @relation("AttendanceStudent")
   recordedAttend  AttendanceRecord[]  @relation("AttendanceRecordedBy")
   payments        Payment[]
+  refundRequests  RefundRequest[]     @relation("RefundRequestStudent")
   refreshSessions RefreshSession[]
   savedItems      SavedItem[]
   auditEvents     AuditEvent[]
@@ -348,6 +390,7 @@ model User {
   contractHelpRequests   ContractHelpRequest[]
   contactRequests        ContactRequest[]
   vacancyApplications    VacancyApplication[]
+  vacancyBroadcasts      VacancyBroadcastRecipient[]
 
   @@unique([tenantId, phoneE164])
   @@unique([tenantId, login])
@@ -580,6 +623,8 @@ model Course {
   sessions    LessonSession[]
   videos      Video[]
   resources   Resource[]
+  paymentLines PaymentLine[]
+  refundLines  RefundRequestLine[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, status, visibility, deletedAt])
@@ -791,6 +836,7 @@ model Subscription {
 
   enrollments Enrollment[]
   payments    Payment[]
+  refundRequests RefundRequest[]
 
   @@index([tenantId, studentId, status])
   @@index([tenantId, status, currentPeriodEnd])
@@ -814,6 +860,9 @@ model Enrollment {
   cancelledAt    DateTime?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+
+  paymentLines PaymentLine[]
+  refundLines  RefundRequestLine[]
 
   @@unique([subscriptionId, groupId])
   @@index([tenantId, groupId, status])
@@ -916,17 +965,46 @@ model Payment {
   paidAt         DateTime?
   cancelledAt    DateTime?
   refundedAt     DateTime?
+  /// Returned so far (partial refunds by RefundRequest add up here). Checked by the database: 0 <= refundedMinor <=
+  /// amountMinor, and state = REFUNDED only with refundedMinor = amountMinor (everything returned).
+  refundedMinor  BigInt          @default(0)
   expiresAt      DateTime
   createdById    String?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  transactions PaymentTransaction[]
-  receipt      Receipt?
+  transactions   PaymentTransaction[]
+  receipt        Receipt?
+  lines          PaymentLine[]
+  refundRequests RefundRequest[]
 
   @@index([tenantId, studentId, state])
   @@index([tenantId, state, createdAt])
   @@index([tenantId, subscriptionId])
+}
+
+/// What one payment paid for each course, written with the payment (checkout, renewal). A course's refund (offer 6.4)
+/// is counted from these amounts: the price and the discount of the course may have changed since. The lines of a
+/// payment add up to its amountMinor.
+model PaymentLine {
+  id             String      @id @default(cuid())
+  tenantId       String
+  tenant         Tenant      @relation(fields: [tenantId], references: [id])
+  paymentId      String
+  payment        Payment     @relation(fields: [paymentId], references: [id])
+  /// Null once a seat hold of an unpaid checkout is deleted (a new checkout of the same draft replaces the holds).
+  enrollmentId   String?
+  enrollment     Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  courseId       String
+  course         Course      @relation(fields: [courseId], references: [id])
+  /// The course's price for the period, without the discount.
+  listPriceMinor BigInt
+  /// Paid for this course: the price less the discount active at the payment.
+  amountMinor    BigInt
+
+  @@unique([paymentId, enrollmentId])
+  @@index([tenantId, courseId])
+  @@index([enrollmentId])
 }
 
 model PaymentTransaction {
@@ -1034,6 +1112,83 @@ model Receipt {
   channel     String?
 
   @@unique([tenantId, number])
+}
+
+/// A refund request for one payment (offer 6.3–6.6, appendix 2): from the cabinet, or entered by a finance admin from a
+/// letter. A cancellation with the next period already paid makes two requests: one per payment.
+model RefundRequest {
+  id             String              @id @default(cuid())
+  tenantId       String
+  tenant         Tenant              @relation(fields: [tenantId], references: [id])
+  studentId      String
+  student        User                @relation("RefundRequestStudent", fields: [studentId], references: [id])
+  subscriptionId String
+  subscription   Subscription        @relation(fields: [subscriptionId], references: [id])
+  /// The payment the money is returned from (its subscription is subscriptionId).
+  paymentId      String
+  payment        Payment             @relation(fields: [paymentId], references: [id])
+  status         RefundRequestStatus @default(PENDING)
+  reason         RefundReason
+  /// «Another reason»: up to 1000 characters (checked by the API).
+  reasonText     String?
+  source         RefundSource
+  /// «Return to another account». The account details are not stored (personal data): the finance admin contacts the student.
+  toOtherAccount Boolean             @default(false)
+  /// Counted by the formula of 6.4: the sum of the lines.
+  requestedMinor BigInt
+  /// The finance admin's decision (may differ from the count, explained in decisionNote).
+  approvedMinor  BigInt?
+  currency       String              @default("UZS")
+  /// The decision is due by createdAt + 10 calendar days (6.6).
+  decisionDueAt  DateTime
+  decidedAt      DateTime?
+  decidedById    String?
+  decisionNote   String?
+  /// The money was sent to the student.
+  paidAt         DateTime?
+  paidById       String?
+  /// The bank transfer's or Payme's reference.
+  providerRef    String?
+  /// = paymentId while the request is open (PENDING or APPROVED), null once it is closed: one open request per payment
+  /// (the openKey pattern of ContractHelpRequest).
+  openKey        String?             @unique
+  createdById    String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  lines RefundRequestLine[]
+
+  /// The finance admins' queue and the requests past their 10 days.
+  @@index([tenantId, status, decisionDueAt])
+  @@index([tenantId, studentId])
+  @@index([tenantId, paymentId])
+  @@index([subscriptionId])
+}
+
+/// One course of a refund request, with the numbers of its count, so the finance admin and an audit see where the amount
+/// came from even after the schedule changes.
+model RefundRequestLine {
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  refundRequestId String
+  refundRequest   RefundRequest @relation(fields: [refundRequestId], references: [id], onDelete: Cascade)
+  enrollmentId    String
+  enrollment      Enrollment    @relation(fields: [enrollmentId], references: [id])
+  courseId        String
+  course          Course        @relation(fields: [courseId], references: [id])
+  /// What the payment paid for this course (PaymentLine.amountMinor).
+  priceMinor      BigInt
+  /// The course's lessons in the period by the schedule.
+  lessonsTotal    Int
+  /// Held or due to be held, the student's absences included (6.4); 0 when the center is at fault (6.5).
+  lessonsHeld     Int
+  /// To return for this course.
+  amountMinor     BigInt
+
+  @@unique([refundRequestId, enrollmentId])
+  @@index([tenantId, courseId])
+  @@index([enrollmentId])
 }
 
 /// Transactional outbox: durable notification/side-effect intents written in the same DB transaction as the state change.
@@ -1244,12 +1399,14 @@ enum StudyConfirmation {
 
 /// GRADUATE_CARD: show my card in my institution's graduation announcements. CONTRACT_HELP_CARD: send my anonymised
 /// card to companies. COMPANY_CONTACTS: open my contacts to one company (StudentConsent.companyId). PARENT_CONSENT:
-/// the parent or legal representative of a minor agreed.
+/// the parent or legal representative of a minor agreed. INDUSTRY_CARD: show my card to companies of my industry in
+/// their «Студенты» section (ТЗ «Студенты у компании», 4) — a purpose of its own, never implied by the other kinds.
 enum ConsentKind {
   GRADUATE_CARD
   CONTRACT_HELP_CARD
   COMPANY_CONTACTS
   PARENT_CONSENT
+  INDUSTRY_CARD
 }
 
 enum AnnouncementStatus {
@@ -1278,20 +1435,43 @@ enum ContractHelpStatus {
   WITHDRAWN
 }
 
+/// Where a company asked for a student's contacts. GRADUATE: a graduation announcement. CONTRACT_HELP: an anonymous
+/// contract-help card. STUDENTS: the company's «Студенты» section (ТЗ «Студенты у компании», 2.4).
 enum ContactSource {
   GRADUATE
   CONTRACT_HELP
+  STUDENTS
 }
 
+/// JOB: a job (ТЗ «Студенты у компании», 5); always paid, with a salary (`Vacancy.salaryFromMinor`/`salaryToMinor`)
+/// instead of a stipend.
 enum VacancyKind {
   PRACTICE
   INTERNSHIP
+  JOB
 }
 
 enum WorkFormat {
   ONSITE
   REMOTE
   HYBRID
+}
+
+/// Work schedule of a JOB (ТЗ «Студенты у компании», 5): full day, part day, shifts, flexible. Onsite or remote is
+/// `WorkFormat`, not this.
+enum WorkSchedule {
+  FULL_TIME
+  PART_TIME
+  SHIFT
+  FLEXIBLE
+}
+
+/// Experience a JOB asks for: none, up to a year, one to three years, over three years.
+enum ExperienceLevel {
+  NONE
+  UP_TO_1
+  ONE_TO_3
+  OVER_3
 }
 
 enum VacancyStatus {
@@ -1413,6 +1593,7 @@ model Direction {
   announcementLines     AnnouncementLine[]
   trainingRequests      TrainingRequest[]
   vacancies             VacancyDirection[]
+  vacancyBroadcasts     VacancyBroadcastDirection[]
 
   @@unique([tenantId, searchKey])
   @@index([tenantId, industryId])
@@ -1461,6 +1642,20 @@ model Institution {
   reviewedAt   DateTime?
   reviewedById String?
   rejectReason String?
+  /**
+   * A change to the reviewed fields after approval, waiting for the Super Admin: { name?, stir?, type?, ownership?,
+   * regionId?, districtId? }. The live fields keep the approved values meanwhile; approval moves the change into them
+   * (the API checks the STIR is still free), rejection clears it.
+   */
+  pendingChanges Json?
+  /** Blocked by the Super Admin: cabinet closed, left out of the ministry's figures and of search. Not a review status. */
+  blockedAt    DateTime?
+  blockReason  String?
+  blockedById  String?
+  /** When the representative took the record. An unsubmitted draft is released after N days counted from here. */
+  claimedAt    DateTime?
+  /** Name in the ministry's official list (set by the import); the representative cannot change it. */
+  officialName String?
   /** The learning center that already works in ILMORA, when the Super Admin links one. */
   centerId     String?           @unique
   center       Center?           @relation(fields: [centerId], references: [id])
@@ -1475,8 +1670,9 @@ model Institution {
   representative User?
   directions     InstitutionDirection[]
   students       StudentProfile[]
-  announcements  GraduationAnnouncement[]
-  trainingOffers TrainingOffer[]
+  announcements     GraduationAnnouncement[]
+  trainingOffers    TrainingOffer[]
+  vacancyBroadcasts VacancyBroadcast[]
 
   @@unique([tenantId, stir])
   @@index([tenantId, status])
@@ -1529,6 +1725,18 @@ model Company {
   reviewedAt         DateTime?
   reviewedById       String?
   rejectReason       String?
+  /** A change after approval waiting for the Super Admin: { name?, stir?, industryIds? } (as on Institution). */
+  pendingChanges     Json?
+  /** Blocked by the Super Admin: cabinet closed, no requests or responses. Not a review status. */
+  blockedAt          DateTime?
+  blockReason        String?
+  blockedById        String?
+  /**
+   * When the current representative took the record (as on Institution, №83): an unsubmitted draft is released after
+   * REGISTRY_DRAFT_HOLD_DAYS counted from the latest of this, creation and review — so a record taken back from a
+   * squatter is not «abandoned» the moment it is claimed. Cleared when the representative is unlinked.
+   */
+  claimedAt          DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -1624,7 +1832,9 @@ model StudentConsent {
   tenantId    String
   tenant      Tenant      @relation(fields: [tenantId], references: [id])
   userId      String
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Restrict, not Cascade: the journal outlives the account (ТЗ 8 — the history of consents and revocations is kept by
+  /// law). Accounts are soft-deleted; a hard delete of a user who has consents is refused (demo purge deletes them first).
+  user        User        @relation(fields: [userId], references: [id], onDelete: Restrict)
   kind        ConsentKind
   /** COMPANY_CONTACTS only: the company the contacts were opened to. */
   companyId   String?
@@ -1635,6 +1845,9 @@ model StudentConsent {
   revokedAt   DateTime?
   ip          String?
 
+  // One active consent per kind (not COMPANY_CONTACTS, which is per company): partial unique index
+  // "StudentConsent_one_active_per_kind" (userId, kind) WHERE revokedAt IS NULL AND companyId IS NULL, migration
+  // 20261120000000; Prisma does not describe partial indexes.
   @@index([tenantId, userId, kind])
   @@index([tenantId, kind, revokedAt])
 }
@@ -1817,9 +2030,11 @@ model ContractHelpRequest {
   @@index([tenantId, userId])
 }
 
-/// A company asks a student to open their contacts. One request per company and student, whatever the source. When
-/// the student accepts, the company sees the full card (name, phone, e-mail, certificate files) and a COMPANY_CONTACTS
-/// consent row is written.
+/// A company asks a student to open their contacts. Named cards (graduation announcements and the «Студенты» section)
+/// share one request per company and student; an anonymous contract-help card has its own, once per company and card —
+/// so asking on one channel never reveals, by «already asked», that the anonymous card is that person (security review
+/// 11.11, №126). When the student accepts, the
+/// company sees the full card (name, phone, e-mail, certificate files) and a COMPANY_CONTACTS consent row is written.
 model ContactRequest {
   id             String                  @id @default(cuid())
   tenantId       String
@@ -1835,15 +2050,29 @@ model ContactRequest {
   announcement   GraduationAnnouncement? @relation(fields: [announcementId], references: [id])
   status         MatchStatus             @default(PENDING)
   decidedAt      DateTime?
+  /**
+   * Contacts the student agreed to show, copied when accepting: the company keeps seeing these, not later ones.
+   * Personal data: cleared when the student withdraws; empty on older rows (the API then shows the current ones).
+   */
+  sharedName     String?
+  /** E.164. */
+  sharedPhone    String?
+  sharedEmail    String?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
-  @@unique([companyId, userId])
+  // One request per channel, not per company and student (security review 11.11, №126): partial unique indexes
+  // "ContactRequest_named_once" (companyId, userId) for GRADUATE and STUDENTS (migration 20261121000100, it replaced
+  // "ContactRequest_graduate_once") and "ContactRequest_contract_help_once" (companyId, contractHelpId) for
+  // CONTRACT_HELP (20261119000000); Prisma does not describe partial indexes.
   @@index([tenantId, userId, status])
   @@index([tenantId, companyId, status])
 }
 
-/// Practice or internship offered by an approved company (published without a separate review).
+/// Practice, internship or job offered by an approved company (published without a separate review). Checks (migration
+/// 20261121000100): a JOB is always paid ("Vacancy_job_paid_check"); a salary only on a JOB, a stipend never on one
+/// ("Vacancy_pay_by_kind_check"); a salary is positive and «to» is not below «from» ("Vacancy_salary_check"); a schedule
+/// and an experience level only on a JOB ("Vacancy_job_terms_check", migration 20261122000000).
 model Vacancy {
   id           String        @id @default(cuid())
   tenantId     String
@@ -1859,8 +2088,14 @@ model Vacancy {
   address      String?
   format       WorkFormat
   paid         Boolean       @default(false)
-  /** Monthly stipend in tiyin, when paid and stated. */
+  /** Monthly stipend in tiyin of a practice or internship, when paid and stated. */
   stipendMinor BigInt?
+  /** JOB: monthly salary in tiyin, «from–to»; a single amount is «from» alone. Both optional. */
+  salaryFromMinor BigInt?
+  salaryToMinor   BigInt?
+  /** JOB only: the work schedule and the experience asked for. The API requires both for a JOB. */
+  schedule     WorkSchedule?
+  experience   ExperienceLevel?
   /** Free text, e.g. «2 месяца». */
   duration     String?
   seats        Int
@@ -1873,6 +2108,7 @@ model Vacancy {
 
   directions   VacancyDirection[]
   applications VacancyApplication[]
+  broadcasts   VacancyBroadcast[]
 
   @@index([tenantId, status, regionId])
   @@index([tenantId, companyId])
@@ -1900,10 +2136,73 @@ model VacancyApplication {
   note            String?
   status          ApplicationStatus @default(NEW)
   statusChangedAt DateTime?
+  /** Contacts at the moment of applying (as on ContactRequest); cleared when the student withdraws. */
+  sharedName      String?
+  sharedPhone     String?
+  sharedEmail     String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   @@unique([vacancyId, userId])
   @@index([tenantId, userId])
   @@index([tenantId, vacancyId, status])
+}
+
+/// An institution sent a company's vacancy to its own students (ТЗ «Студенты у компании», 3.2): by hand, only to students
+/// whose study it confirmed, on the chosen directions and courses. A row is the journal entry of one send; the queue
+/// delivers it in batches and sets `finishedAt`. The daily limit counts rows by (institutionId, createdAt).
+model VacancyBroadcast {
+  id              String      @id @default(cuid())
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  vacancyId       String
+  vacancy         Vacancy     @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  institutionId   String
+  institution     Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  /** Years of study chosen (1–11, at least one): CHECK "VacancyBroadcast_courses_check". */
+  courses         Int[]
+  /** The institution's representative who sent it. */
+  createdById     String
+  /** Students it was addressed to when sent (the number the sender confirmed); never negative. */
+  recipientsCount Int
+  /** Set when the queue has delivered the last batch. */
+  finishedAt      DateTime?
+  createdAt       DateTime    @default(now())
+
+  directions VacancyBroadcastDirection[]
+  recipients VacancyBroadcastRecipient[]
+
+  // (id, vacancyId) lets a recipient row point at the broadcast and its vacancy together, so they always match.
+  @@unique([id, vacancyId])
+  @@index([tenantId, institutionId, createdAt])
+  @@index([vacancyId])
+}
+
+/// The directions a send was limited to (the institution's own, matching the vacancy).
+model VacancyBroadcastDirection {
+  broadcastId String
+  broadcast   VacancyBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  directionId String
+  direction   Direction        @relation(fields: [directionId], references: [id])
+
+  @@id([broadcastId, directionId])
+  @@index([directionId])
+}
+
+/// A student who got a vacancy from their institution. One vacancy reaches a student once (3.2, п. 5): the unique pair
+/// also makes a retried batch harmless. Only a delivery marker: no personal data beyond the account id.
+model VacancyBroadcastRecipient {
+  id          String           @id @default(cuid())
+  tenantId    String
+  tenant      Tenant           @relation(fields: [tenantId], references: [id])
+  broadcastId String
+  vacancyId   String
+  broadcast   VacancyBroadcast @relation(fields: [broadcastId, vacancyId], references: [id, vacancyId], onDelete: Cascade)
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime         @default(now())
+
+  @@unique([vacancyId, userId])
+  @@index([broadcastId])
+  @@index([tenantId, userId])
 }

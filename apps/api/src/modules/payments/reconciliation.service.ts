@@ -1,20 +1,19 @@
 import { Injectable } from '@nestjs/common'
 import type { PaymentProvider } from '../../generated/prisma/enums'
 import { PrismaService } from '../../infra/prisma/prisma.service'
-import { ClickService } from './click/click.service'
 
 export interface ReconciliationFilter { provider?: PaymentProvider; from?: Date; to?: Date; status?: string; page?: number; pageSize?: number }
 
 /**
  * Two layers, reported separately:
  *  1. internal consistency — provider callback state vs. payment state vs. ledger posting (always available);
- *  2. provider verification — Click Merchant API `payment/status` where configured. Payme's Merchant API has no
- *     pull endpoint (GetStatement is Payme calling us), so Payme rows are marked "provider check unavailable".
+ *  2. provider verification — none: Payme's Merchant API has no pull endpoint (GetStatement is Payme calling us), so
+ *     rows are marked "provider check unavailable". (Click, the provider that had one, was removed on 10.11.)
  * Reconciliation never changes balances; discrepancies are surfaced for a human decision.
  */
 @Injectable()
 export class ReconciliationService {
-  constructor(private readonly prisma: PrismaService, private readonly click: ClickService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async list(tenantId: string, f: ReconciliationFilter) {
     const page = Math.max(1, f.page ?? 1)
@@ -26,7 +25,7 @@ export class ReconciliationService {
       ...(f.from || f.to ? { createdAt: { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lte: f.to } : {}) } } : {}),
     }
     const [rows, total] = await Promise.all([
-      this.prisma.client.paymentTransaction.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { payment: { select: { id: true, state: true, amountMinor: true, currency: true, paidAt: true, studentId: true } } } }),
+      this.prisma.client.paymentTransaction.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { payment: { select: { id: true, state: true, amountMinor: true, refundedMinor: true, currency: true, paidAt: true, studentId: true } } } }),
       this.prisma.client.paymentTransaction.count({ where }),
     ])
     const paymentIds = rows.map((r) => r.paymentId)
@@ -34,12 +33,18 @@ export class ReconciliationService {
     // journal it reverses and filed under that payment; matching on referenceId alone made every refund look unposted.
     const journals = await this.prisma.client.ledgerJournal.findMany({
       where: { tenantId, referenceType: 'Payment', kind: { in: ['PAYMENT_SETTLED', 'PAYMENT_REFUNDED', 'REVERSAL'] }, OR: [{ referenceId: { in: paymentIds } }, { reversalOf: { referenceId: { in: paymentIds } } }] },
-      select: { id: true, referenceId: true, kind: true, createdAt: true, reversalOf: { select: { referenceId: true } } },
+      select: { id: true, referenceId: true, kind: true, createdAt: true, reversalOf: { select: { referenceId: true } }, entries: { select: { direction: true, amountMinor: true } } },
     })
-    const byPayment = new Map<string, typeof journals>()
-    for (const j of journals) {
-      const paymentId = j.reversalOf?.referenceId ?? j.referenceId
-      byPayment.set(paymentId, [...(byPayment.get(paymentId) ?? []), j])
+    const byPayment = new Map<string, { id: string; kind: string; refundMinor: bigint }[]>()
+    const file = (paymentId: string, j: { id: string; kind: string; refundMinor: bigint }) => byPayment.set(paymentId, [...(byPayment.get(paymentId) ?? []), j])
+    const debit = (entries: { direction: string; amountMinor: bigint }[]) => entries.filter((e) => e.direction === 'DEBIT').reduce((s, e) => s + e.amountMinor, 0n)
+    for (const j of journals) file(j.reversalOf?.referenceId ?? j.referenceId, { id: j.id, kind: j.kind, refundMinor: j.kind === 'PAYMENT_SETTLED' ? 0n : debit(j.entries) })
+    // Partial refunds are posted under their refund request (security review 10.11 №42): filed under its payment.
+    const requests = await this.prisma.client.refundRequest.findMany({ where: { tenantId, paymentId: { in: paymentIds }, status: 'PAID' }, select: { id: true, paymentId: true } })
+    if (requests.length) {
+      const paymentOf = new Map(requests.map((r) => [r.id, r.paymentId]))
+      const refundJournals = await this.prisma.client.ledgerJournal.findMany({ where: { tenantId, referenceType: 'RefundRequest', kind: 'PAYMENT_REFUNDED', referenceId: { in: [...paymentOf.keys()] } }, select: { id: true, kind: true, referenceId: true, entries: { select: { direction: true, amountMinor: true } } } })
+      for (const j of refundJournals) file(paymentOf.get(j.referenceId)!, { id: j.id, kind: j.kind, refundMinor: debit(j.entries) })
     }
 
     return {
@@ -50,6 +55,7 @@ export class ReconciliationService {
         const js = byPayment.get(r.paymentId) ?? []
         const settled = js.some((j) => j.kind === 'PAYMENT_SETTLED')
         const refunded = js.some((j) => j.kind === 'PAYMENT_REFUNDED')
+        const refundedLedgerMinor = js.reduce((sum, j) => sum + j.refundMinor, 0n)
         return {
           transactionId: r.id,
           seq: r.seq,
@@ -61,12 +67,13 @@ export class ReconciliationService {
           paymentState: r.payment.state,
           amountMinor: r.amountMinor.toString(),
           paymentAmountMinor: r.payment.amountMinor.toString(),
+          paymentRefundedMinor: r.payment.refundedMinor.toString(),
           currency: r.currency,
           createdAt: r.createdAt,
           performedAt: r.performedAt,
           cancelledAt: r.cancelledAt,
           ledger: { settled, refunded, journalIds: js.map((j) => j.id) },
-          discrepancy: this.discrepancy(r, r.payment, settled, refunded),
+          discrepancy: this.discrepancy(r, r.payment, settled, refunded) ?? (!r.sandbox && r.payment.refundedMinor !== refundedLedgerMinor ? 'refund_amount_mismatch' : null),
           sandbox: r.sandbox,
         }
       }),
@@ -84,14 +91,14 @@ export class ReconciliationService {
     return null
   }
 
-  /** Independent provider check for one transaction (Click only). Result is returned, never applied. */
+  /**
+   * Independent provider check for one transaction: not available — Payme has no status endpoint to ask. Kept so the
+   * finance screen's «Check» button keeps working; it answers the same for every row.
+   */
   async verifyWithProvider(tenantId: string, transactionId: string) {
     const row = await this.prisma.client.paymentTransaction.findFirst({ where: { tenantId, id: transactionId } })
     if (!row) return { available: false, reason: 'not_found' }
-    if (row.provider !== 'CLICK') return { available: false, reason: 'provider_check_unavailable', note: 'Payme Merchant API has no status pull endpoint; reconcile against the cabinet statement (GetStatement is served by this API).' }
-    const status = await this.click.fetchProviderStatus(row.providerTransactionId)
-    if (!status) return { available: false, reason: 'click_not_configured' }
-    return { available: true, provider: 'CLICK', providerTransactionId: row.providerTransactionId, providerResponse: status, internalState: row.state }
+    return { available: false, reason: 'provider_check_unavailable', note: 'Payme Merchant API has no status pull endpoint; reconcile against the cabinet statement (GetStatement is served by this API).' }
   }
 
   /** Simple balances per ledger account for the finance dashboard header. */

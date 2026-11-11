@@ -126,12 +126,14 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       const [card] = await service.feed(s.softCo.actor, {})
       expect(card).toMatchObject({
         id: req.id, number: req.id.slice(-6).toUpperCase(), status: 'ACTIVE', age: 20, region: { id: s.tashkent.id },
-        institution: { name: 'Toşkent IT texnikumi', type: 'TECHNIKUM' }, direction: { id: s.dasturlash.id, industry: { id: s.it.id } },
-        mode: 'STUDYING', course: 2, studyForm: 'CONTRACT', contractAmount: 5_000_000, yearsToWork: 3, certificates: ['IELTS 7.0'], studyConfirmed: false, contactRequest: null,
+        institution: { type: 'TECHNIKUM', region: { id: s.tashkent.id } }, direction: { id: s.dasturlash.id, industry: { id: s.it.id } },
+        mode: 'STUDYING', course: 2, studyForm: 'CONTRACT', contractAmount: 5_000_000, yearsToWork: 3, certificates: 1, ilmoraCourses: 0, studyConfirmed: false, contactRequest: null,
       })
+      // The institution's name and id and the certificate titles are on the named graduate card too: not here (№126).
+      expect(Object.keys(card.institution!).sort()).toEqual(['region', 'type'])
       expect([...deepKeys(await service.feed(s.softCo.actor, {}))].filter((k) => PRIVATE_KEYS.includes(k))).toEqual([])
       const text = JSON.stringify(card)
-      for (const secret of ['Aziz', 'Karimov', 'aziz@mail.uz', '+998935554433', `${Y - 20}-05-01`, me.id, 'student-certs', 'Python']) expect(text).not.toContain(secret)
+      for (const secret of ['Aziz', 'Karimov', 'aziz@mail.uz', '+998935554433', `${Y - 20}-05-01`, me.id, 'student-certs', 'Python', 'IELTS', 'Toşkent IT texnikumi', s.inst.id]) expect(text).not.toContain(secret)
       expect(Object.keys(card)).not.toEqual(expect.arrayContaining(['userId', 'name', 'birthDate', 'phone', 'email']))
 
       expect(await service.feed(s.mebelCo.actor, {})).toEqual([])
@@ -152,6 +154,103 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       await service.withdraw(me)
       expect(await service.feed(s.softCo.actor, {})).toEqual([])
       await expect(service.card(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })
+    })
+  })
+
+  it('№126: a request sent from an announcement (by name) does not show on the anonymous card; the card shows only its own', async () => {
+    const s = await setup('ch-link')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      // Soft Co invited this student by name from a graduation announcement and the student accepted.
+      await ctx.prisma.client.contactRequest.create({ data: { tenantId: s.tenantId, companyId: s.softCo.row.id, userId: me.id, source: 'GRADUATE', status: 'ACCEPTED', decidedAt: new Date() } })
+      expect((await service.card(s.softCo.actor, req.id)).contactRequest).toBeNull()
+      expect((await service.feed(s.softCo.actor, {}))[0].contactRequest).toBeNull()
+      // Data Co clicked «Заинтересованы» on this card: its status shows here.
+      await service.interest(s.tenantId, s.otherIt.actor, req.id)
+      expect((await service.card(s.otherIt.actor, req.id)).contactRequest).toBe('PENDING')
+      // A request from the student's earlier, withdrawn card is not this card's either.
+      await service.withdraw(me)
+      const again = await service.create(s.tenantId, me, INPUT)
+      expect((await service.card(s.otherIt.actor, again.id)).contactRequest).toBeNull()
+    })
+  })
+
+  it('№126: asking by name and on the anonymous card are separate — neither answers «already asked» (either order)', async () => {
+    const s = await setup('ch-channels')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      // Soft Co invited the student by name from an announcement, then clicks «Заинтересованы» on the anonymous card.
+      await contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})
+      expect(await service.interest(s.tenantId, s.softCo.actor, req.id)).toMatchObject({ contactRequest: 'PENDING' })
+      // Data Co the other way round: the card first, the announcement second.
+      await service.interest(s.tenantId, s.otherIt.actor, req.id)
+      await contacts.request(s.tenantId, { id: s.otherIt.row.id, name: 'Data Co' }, me.id, 'GRADUATE', {})
+      expect((await contacts.studentList(me)).map((r) => r.source).sort()).toEqual(['CONTRACT_HELP', 'CONTRACT_HELP', 'GRADUATE', 'GRADUATE'])
+      // Within one channel the rule stays.
+      await expect(service.interest(s.tenantId, s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'contact_request_exists' })
+      await expect(contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})).rejects.toMatchObject({ code: 'contact_request_exists' })
+    })
+  })
+
+  it('cybersecurity 9.4: an invitation by name does not make «Заинтересованы» answer 409 — the anonymous card stays unlinked', async () => {
+    const s = await setup('ch-oracle')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const other = await s.student(s.studying({ fullName: 'Boshqa Talaba' }))
+      const mine = await service.create(s.tenantId, me, INPUT)
+      const theirs = await service.create(s.tenantId, other, INPUT)
+      // Soft Co invited `me` by name from an announcement (pending).
+      await contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})
+      // «Заинтересованы» answers the same on both cards: the student invited by name is not singled out.
+      const a = await service.interest(s.tenantId, s.softCo.actor, mine.id)
+      const b = await service.interest(s.tenantId, s.softCo.actor, theirs.id)
+      expect(a.contactRequest).toBe('PENDING')
+      expect(b.contactRequest).toBe('PENDING')
+      // The same card twice is still refused — that tells the company nothing new.
+      await expect(service.interest(s.tenantId, s.softCo.actor, mine.id)).rejects.toMatchObject({ code: 'contact_request_exists' })
+
+      // The student accepts both; taking the contacts back from the company closes both requests and the consent.
+      for (const r of await contacts.studentList(me)) await contacts.decide(s.tenantId, me, r.id, true)
+      const [first] = await contacts.studentList(me)
+      await contacts.revoke(me, first.id)
+      expect((await contacts.studentList(me)).map((r) => r.status)).toEqual(['WITHDRAWN', 'WITHDRAWN'])
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'COMPANY_CONTACTS', revokedAt: null } })).toBe(0)
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([])
+    })
+  })
+
+  it('cybersecurity 9.4: two saves at once write one consent row, and taking the tick off hides the card', async () => {
+    const s = await setup('ch-consent-race')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      const on = s.studying({ consents: { CONTRACT_HELP_CARD: true } })
+      await Promise.all(Array.from({ length: 4 }, () => students.save(s.tenantId, me, on as never)))
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(1)
+      await students.save(s.tenantId, me, s.studying({ consents: { CONTRACT_HELP_CARD: false } }) as never)
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(0)
+      expect(await service.feed(s.softCo.actor, {})).toEqual([])
+      await expect(service.card(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })
+    })
+  })
+
+  it('Н-2: «Пригласить» and «Заинтересованы» share one limit — 50 a day per company; older ones do not count', async () => {
+    const s = await setup('ch-daily')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      const db = ctx.prisma.client
+      // 49 requests today (from either channel) and many older ones.
+      const row = (createdAt: Date) => ({ tenantId: s.tenantId, companyId: s.softCo.row.id, userId: me.id, source: 'CONTRACT_HELP' as const, createdAt })
+      await db.contactRequest.createMany({ data: Array.from({ length: 49 }, () => row(new Date())) })
+      await db.contactRequest.createMany({ data: Array.from({ length: 30 }, () => row(new Date(Date.now() - 2 * 86_400_000))) })
+      // The 50th goes through by name; the 51st on the anonymous card is refused — the limit is the company's, not a route's.
+      await contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})
+      await expect(service.interest(s.tenantId, s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'rate_limited', status: 429 })
+      // Another company has its own 50.
+      expect(await service.interest(s.tenantId, s.otherIt.actor, req.id)).toMatchObject({ contactRequest: 'PENDING' })
     })
   })
 
@@ -186,7 +285,8 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       const [fromData, fromSoft] = await contacts.studentList(me)
       expect(fromSoft).toMatchObject({ source: 'CONTRACT_HELP', status: 'PENDING', company: { name: 'Soft Co' }, contacts: null })
       expect((await service.mine(me))!.interests.map((i) => i.company.name)).toEqual(['Soft Co', 'Data Co'])
-      expect((await contacts.companyContact(s.softCo.actor, fromSoft.id)).student.full).toBeNull()
+      // Before the student agrees the company does not learn who it is: not even the name (review 11.11).
+      await expect(contacts.companyContact(s.softCo.actor, fromSoft.id)).rejects.toMatchObject({ code: 'not_found' })
       // Only a company the student opened contacts to can be named in «договор заключён».
       await expect(service.signed(me, s.softCo.row.id)).rejects.toMatchObject({ code: 'not_found' })
 

@@ -66,6 +66,25 @@ export function Field({ label, hint, children, required, className }: { label: R
   )
 }
 
+/**
+ * `Field` for several controls — chips, a list of rows, the direction picker. Not a `<label>`: a click inside a label
+ * is passed on to its first control, so picking a suggestion or clicking the caption would press the first chip's
+ * remove button. `htmlFor` ties the caption to one control (it focuses it, as a label would).
+ */
+export function FieldGroup({ label, hint, children, required, className, htmlFor }: { label: ReactNode; hint?: ReactNode; children: ReactNode; required?: boolean; className?: string; htmlFor?: string }) {
+  const id = useId()
+  const caption = <>{label}{required && <span className="ml-0.5 text-champagne">*</span>}</>
+  return (
+    <div role="group" aria-labelledby={id} className={cx('block', className)}>
+      <span className="mb-1.5 flex items-baseline justify-between gap-3 text-xs font-medium text-charcoal/70">
+        {htmlFor ? <label id={id} htmlFor={htmlFor}>{caption}</label> : <span id={id}>{caption}</span>}
+        {hint && <span className="text-[11px] font-normal text-charcoal/45">{hint}</span>}
+      </span>
+      {children}
+    </div>
+  )
+}
+
 /** Three-language text field (UZ / RU / EN) editing a single L value. */
 export function LField({ label, value, onChange, multiline, required, hint }: { label: ReactNode; value: L; onChange: (v: L) => void; multiline?: boolean; required?: boolean; hint?: ReactNode }) {
   return (
@@ -430,6 +449,7 @@ export function Icon({ name, className = 'h-4 w-4' }: { name: string; className?
     warn: <><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></>,
     info: <><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v4h1" /></>,
     external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" /></>,
+    download: <path d="M12 4v11m-5-5 5 5 5-5M5 20h14" />,
     upload: <><path d="M12 16V4m0 0-4 4m4-4 4 4" /><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></>,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     bell: <><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2Z" /><path d="M10 20a2 2 0 0 0 4 0" /></>,

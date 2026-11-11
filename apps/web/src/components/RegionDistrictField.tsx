@@ -1,12 +1,13 @@
 'use client'
 import { useId, useMemo } from 'react'
-import { INSTITUTION_REGISTRY, UZ_REGIONS } from '@ilmora/shared'
+import { registryDistrictNames, UZ_REGIONS } from '@ilmora/shared'
 import { useT } from '@/i18n/useT'
 import { Field, Input, Select } from './ui'
 
 /**
- * Region and district (ТЗ 3.4). The official district list with SOATO codes comes with the ministry's directory; until
- * then the district is typed, with the districts already known for the region as suggestions.
+ * Region and district (ТЗ 3.4). The student's district is stored as text (the API takes it so); the suggestions are the
+ * region's districts from the official list of the Statistics Agency (SOATO, in @ilmora/shared — no request needed),
+ * in the reader's language, cities of district status included.
  */
 export function RegionDistrictField({ region, district, onRegion, onDistrict, regionError, districtError }: {
   region: string
@@ -18,10 +19,7 @@ export function RegionDistrictField({ region, district, onRegion, onDistrict, re
 }) {
   const { t, lang } = useT()
   const listId = useId()
-  const known = useMemo(
-    () => [...new Set(INSTITUTION_REGISTRY.filter((x) => x.region === region && x.district).map((x) => x.district!))].sort(),
-    [region],
-  )
+  const known = useMemo(() => registryDistrictNames(region, lang), [region, lang])
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <Field label={t('auth.org.region')} required>

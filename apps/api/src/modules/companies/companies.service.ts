@@ -1,18 +1,19 @@
 import { Injectable } from '@nestjs/common'
-import { COMPANY_REVIEW_FIELDS, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, registrySearchKey } from '@ilmora/shared'
+import { COMPANY_REVIEW_FIELDS, type CompanyPendingChanges, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
-import type { Prisma } from '../../generated/prisma/client'
-import { PrismaService } from '../../infra/prisma/prisma.service'
+import { Prisma } from '../../generated/prisma/client'
+import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, regionIdByRef, toIndustry } from '../registry/registry.mappers'
+import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, regionIdByRef, toIndustry, changedKey } from '../registry/registry.mappers'
 import type { CertificateConfirmInput, CertificateUploadInput, CompanyCreateInput, CompanyPatch } from './companies.schemas'
 
 export const PROFILE_SELECT = {
   id: true, stir: true, name: true, address: true, website: true, about: true, certificateFileKey: true,
   status: true, rejectReason: true, submittedAt: true, approvedAt: true, regionId: true, districtId: true,
+  pendingChanges: true, blockedAt: true, blockReason: true,
   region: { select: { id: true, slug: true, name: true } },
   district: { select: { id: true, name: true } },
   industries: { select: { industry: { select: { ...INDUSTRY_SELECT, sortOrder: true } } } },
@@ -23,6 +24,7 @@ export const PROFILE_SELECT = {
 type ProfileRow = Prisma.CompanyGetPayload<{ select: typeof PROFILE_SELECT }>
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
+const sortKeys = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))
 const isLocked = (r: { status: string; approvedAt: Date | null }) => r.status === 'PENDING' && !r.approvedAt
 const certPrefix = (tenantId: string, companyId: string) => `company-certs/${tenantId}/${companyId}/`
 
@@ -37,9 +39,11 @@ export function toProfile(r: ProfileRow): CompanyProfileDto {
     directions,
     certificateUploaded: r.certificateFileKey !== null,
     status: r.status, rejectReason: r.rejectReason, submittedAt: iso(r.submittedAt), approvedAt: iso(r.approvedAt),
-    workspaceOpen: r.approvedAt !== null,
+    workspaceOpen: r.approvedAt !== null && r.blockedAt === null,
     editable: !isLocked(r),
     representative: { name: r.representative?.displayName ?? '', jobTitle: r.representative?.jobTitle ?? null, email: r.representative?.email ?? null },
+    pendingChanges: (r.pendingChanges as CompanyPendingChanges | null) ?? null,
+    blocked: r.blockedAt ? { at: r.blockedAt.toISOString(), reason: r.blockReason } : null,
   }
 }
 
@@ -50,6 +54,35 @@ function missingFields(r: ProfileRow): CompanyRequiredField[] {
   need(r.industries.length > 0, 'industries'); need(r.certificateFileKey, 'certificate')
   need(r.representative?.displayName?.trim(), 'representativeName'); need(r.representative?.jobTitle?.trim(), 'representativeJobTitle')
   return missing
+}
+
+/**
+ * A company is never handed over (decision 11.11): whoever claims the record next gets none of the students' or the
+ * institutions' data — the consents end, opened contacts are taken back with their copies, the vacancies close and the
+ * applications to them (with the contacts the students sent) are removed; the training requests close and the offers
+ * and the responses to announcements (which open the institutions' contacts) are withdrawn (cybersecurity check 9.4).
+ */
+export async function closeCompanyData(tx: TransactionClient, id: string, now: Date) {
+  const consents = await tx.studentConsent.updateMany({ where: { kind: 'COMPANY_CONTACTS', companyId: id, revokedAt: null }, data: { revokedAt: now } })
+  const contacts = await tx.contactRequest.updateMany({ where: { companyId: id, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
+  await tx.vacancy.updateMany({ where: { companyId: id, status: 'OPEN' }, data: { status: 'CLOSED' } })
+  const applications = await tx.vacancyApplication.deleteMany({ where: { vacancy: { companyId: id } } })
+  const offers = await tx.trainingOffer.updateMany({ where: { request: { companyId: id }, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now } })
+  await tx.trainingRequest.updateMany({ where: { companyId: id, status: 'OPEN' }, data: { status: 'CLOSED', closedAt: now } })
+  const responses = await tx.announcementResponse.updateMany({ where: { companyId: id, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now } })
+  return { consents: consents.count, contacts: contacts.count, applications: applications.count, offers: offers.count, responses: responses.count }
+}
+
+/** The company goes back to a draft nobody holds, and none of its data stays (release, or the account deleted — №84). */
+export async function unclaimCompany(tx: TransactionClient, id: string, now: Date) {
+  await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull, claimedAt: null } })
+  return closeCompanyData(tx, id, now)
+}
+
+/** The account becomes the representative only if it represents nothing yet: two registrations at once roll one back (9.4). */
+const bindRepresentative = async (tx: TransactionClient, userId: string, companyId: string) => {
+  const bound = await tx.user.updateMany({ where: { id: userId, companyId: null }, data: { companyId } })
+  if (bound.count !== 1) throw AppError.conflict('already_has_company', 'This account already represents a company')
 }
 
 /**
@@ -71,19 +104,68 @@ export class CompaniesService {
     // RolesGuard lets the Super Admin through every route; a company is represented by its own account only.
     if (!actor.roles.includes('COMPANY_ADMIN')) throw AppError.forbidden('Only a company account can register a company')
     if (await this.representedId(actor)) throw AppError.conflict('already_has_company', 'This account already represents a company')
+    const registered = () => AppError.conflict('company_registered', 'A company with this STIR is already registered. Write to support if it is yours.')
+    // A record nobody represents (released by the Super Admin, or abandoned) is taken over as a fresh draft (security review №17).
+    const existing = await this.prisma.client.company.findFirst({ where: { stir: input.stir }, select: { id: true, representative: { select: { id: true } } } })
+    if (existing?.representative && (await this.isAbandoned(existing.id))) await this.release(tenantId, existing.id, 'abandoned-draft')
     let id: string
     try {
       id = await this.prisma.client.$transaction(async (tx) => {
-        const row = await tx.company.create({ data: { tenantId, stir: input.stir, name: input.name, searchKey: registrySearchKey(input.name) }, select: { id: true } })
-        await tx.user.update({ where: { id: actor.id }, data: { companyId: row.id } })
+        if (existing) {
+          const holder = await tx.user.findFirst({ where: { companyId: existing.id }, select: { id: true } })
+          if (holder) throw registered()
+          // Whatever the previous representative left (a record unlinked other than by `release`) is not handed over.
+          await closeCompanyData(tx, existing.id, new Date())
+          await tx.companyIndustry.deleteMany({ where: { companyId: existing.id } })
+          await tx.companyDirection.deleteMany({ where: { companyId: existing.id } })
+          await tx.company.update({ where: { id: existing.id }, data: { name: input.name, searchKey: registrySearchKey(input.name), status: 'DRAFT', approvedAt: null, submittedAt: null, reviewedAt: null, rejectReason: null, certificateFileKey: null, about: null, website: null, address: null, pendingChanges: Prisma.DbNull, claimedAt: new Date() } })
+          await bindRepresentative(tx, actor.id, existing.id)
+          return existing.id
+        }
+        const row = await tx.company.create({ data: { tenantId, stir: input.stir, name: input.name, searchKey: registrySearchKey(input.name), claimedAt: new Date() }, select: { id: true } })
+        await bindRepresentative(tx, actor.id, row.id)
         return row.id
       })
     } catch (err) {
-      if (isUniqueViolation(err)) throw AppError.conflict('company_registered', 'A company with this STIR is already registered. Write to support if it is yours.')
+      if (isUniqueViolation(err)) throw registered()
       throw err
     }
-    await this.audit.record({ action: 'company.create', entityType: 'Company', entityId: id, after: { stir: input.stir, name: input.name, representativeId: actor.id } })
+    await this.audit.record({ action: existing ? 'company.takeover' : 'company.create', entityType: 'Company', entityId: id, after: { stir: input.stir, name: input.name, representativeId: actor.id } })
     return this.profileOf(id)
+  }
+
+  /**
+   * Abandoned: never approved, a draft (or rejected) untouched for REGISTRY_DRAFT_HOLD_DAYS since it was created, claimed
+   * by its present representative or reviewed — the latest of the three. Counting from the creation only let a hijacker
+   * take an old record straight back from the company that claimed it after a release (security review 11.11, №83).
+   */
+  private async isAbandoned(id: string): Promise<boolean> {
+    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true, claimedAt: true } })
+    if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
+    const last = Math.max(row.createdAt.getTime(), row.claimedAt?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
+    return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
+  }
+
+  /**
+   * Releases the company from its representative (the Super Admin, or an abandoned draft): the account no longer
+   * represents it and the workspace closes; the next representative of the STIR starts it over as a draft.
+   */
+  async release(tenantId: string, id: string, reason: string): Promise<void> {
+    const found = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true } })
+    if (!found) throw AppError.notFound('Company')
+    // A deleted account still holding the company is found too (№84).
+    const representative = (await this.prisma.client.user.findFirst({ where: { companyId: id }, select: { id: true }, includeDeleted: true } as never)) as { id: string } | null
+    if (!representative) throw AppError.conflict('not_claimed', 'Nobody represents this company')
+    const row = { ...found, representative }
+    const now = new Date()
+    const closed = await this.prisma.client.$transaction(async (tx) => {
+      await tx.user.updateMany({ where: { id: representative.id }, data: { companyId: null }, includeDeleted: true } as never)
+      return unclaimCompany(tx, id, now)
+    })
+    await this.audit.record({ action: 'company.release', entityType: 'Company', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, after: { closed }, reason })
+    await this.notifications.safely('registry.released', () =>
+      this.notifications.notify({ tenantId, userIds: [row.representative!.id], type: 'registry.released', params: { name: row.name }, dedupeKey: `registry-released:${id}:${Date.now()}` }),
+    )
   }
 
   async profile(actor: RequestActor): Promise<CompanyProfileDto> {
@@ -91,11 +173,12 @@ export class CompaniesService {
   }
 
   /**
-   * Saves the profile in parts. Locked while the first review is pending. After approval a change of the STIR or the
-   * name sends the profile back to review (the workspace keeps working); the rest changes at once. Audited.
+   * Saves the profile in parts. Locked while the first review is pending. After approval a change of the STIR, the
+   * name or the industries waits in `pendingChanges` for the Super Admin (the workspace keeps working with the approved
+   * ones); the rest changes at once. Audited.
    */
   async update(tenantId: string, actor: RequestActor, input: CompanyPatch): Promise<CompanyProfileDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: PROFILE_SELECT })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
 
@@ -106,13 +189,41 @@ export class CompaniesService {
     if (input.website !== undefined) data.website = input.website || null
     if (input.about !== undefined) data.about = input.about || null
     if (input.regionId !== undefined || input.districtId !== undefined) Object.assign(data, await this.place(current, input))
-    const industryIds = input.industryIds !== undefined ? await this.checkedIndustries(input.industryIds) : undefined
+    let industryIds = input.industryIds !== undefined ? await this.checkedIndustries(input.industryIds) : undefined
     const directionIds = input.directionIds !== undefined ? await this.mainDirections(input.directionIds) : undefined
 
-    const changed = Object.keys(data).filter((k) => k !== 'searchKey' && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
-    const backToReview = current.approvedAt !== null && current.status !== 'PENDING' && COMPANY_REVIEW_FIELDS.some((f) => changed.includes(f))
+    // After approval the name, the STIR and the industries wait for the Super Admin in `pendingChanges`; the approved
+    // ones stay live — a company cannot open other industries' announcements by itself (security review №13, №46).
     const now = new Date()
-    if (backToReview) Object.assign(data, { status: 'PENDING', submittedAt: now, rejectReason: null })
+    let backToReview = false
+    let pending: Record<string, unknown> | null = null
+    if (current.approvedAt !== null) {
+      const was = (current.pendingChanges ?? {}) as Record<string, unknown>
+      const next: Record<string, unknown> = { ...was }
+      const d = data as Record<string, unknown>
+      for (const f of COMPANY_REVIEW_FIELDS) {
+        if (!(f in d)) continue
+        if (d[f] === (current as Record<string, unknown>)[f]) delete next[f]
+        else next[f] = d[f]
+        delete d[f]
+      }
+      if (!('name' in d)) delete d.searchKey
+      if (industryIds) {
+        const live = current.industries.map((i) => i.industry.id).sort()
+        if (JSON.stringify([...industryIds].sort()) === JSON.stringify(live)) delete next.industryIds
+        else next.industryIds = [...industryIds].sort()
+        industryIds = undefined
+      }
+      if (typeof next.stir === 'string' && next.stir !== was.stir && (await this.prisma.client.company.findFirst({ where: { stir: next.stir, id: { not: id } }, select: { id: true } }))) {
+        throw AppError.conflict('stir_taken', 'Another company is registered with this STIR')
+      }
+      backToReview = JSON.stringify(sortKeys(next)) !== JSON.stringify(sortKeys(was))
+      if (backToReview) {
+        pending = Object.keys(next).length ? next : null
+        Object.assign(data, { pendingChanges: pending ?? Prisma.DbNull, ...(pending ? { submittedAt: now, rejectReason: null } : {}) })
+      }
+    }
+    const changed = Object.keys(data).filter((k) => !['searchKey', 'pendingChanges', 'submittedAt', 'rejectReason'].includes(k) && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
     const rep = input.representative ?? {}
     const repData = {
       ...(rep.name !== undefined ? { displayName: rep.name } : {}),
@@ -139,20 +250,20 @@ export class CompaniesService {
     }
 
     const pick = (o: object, keys: string[]) => Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k]]))
-    if (changed.length || industryIds || directionIds || Object.keys(repData).length) {
+    if (changed.length || industryIds || directionIds || backToReview || Object.keys(repData).length) {
       await this.audit.record({
         action: backToReview ? 'company.update.review' : 'company.update', entityType: 'Company', entityId: id,
         before: { ...pick(current, changed), ...(industryIds ? { industryIds: current.industries.map((i) => i.industry.id) } : {}) },
-        after: { ...pick(data, changed), ...(industryIds ? { industryIds } : {}), ...(directionIds ? { directionIds } : {}), ...(Object.keys(repData).length ? { representative: repData } : {}) },
+        after: { ...pick(data, changed), ...(industryIds ? { industryIds } : {}), ...(directionIds ? { directionIds } : {}), ...(backToReview ? { pendingChanges: pending } : {}), ...(Object.keys(repData).length ? { representative: repData } : {}) },
       })
     }
-    if (backToReview) await this.notifyReviewers(tenantId, id, (data.name as string | undefined) ?? current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)
+    if (backToReview && pending) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', changedKey('company', id, now))
     return this.profileOf(id)
   }
 
   /** Step 1 of the certificate: a presigned PUT under the company's own prefix (the browser uploads to the private bucket). */
   async certificateUploadUrl(tenantId: string, actor: RequestActor, input: CertificateUploadInput): Promise<DocumentUploadDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { status: true, approvedAt: true } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
     const key = this.docs.newKey(certPrefix(tenantId, id), input.contentType)
@@ -164,16 +275,18 @@ export class CompaniesService {
    * first bytes — and only then attaches it; anything else is deleted. After approval a new certificate goes to review.
    */
   async confirmCertificate(tenantId: string, actor: RequestActor, input: CertificateConfirmInput): Promise<CompanyProfileDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { name: true, status: true, approvedAt: true, certificateFileKey: true } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
-    const { type, size } = await this.docs.verifyUpload(input.key, certPrefix(tenantId, id))
+    const { type, size, key } = await this.docs.verifyUpload(input.key, certPrefix(tenantId, id))
     const backToReview = current.approvedAt !== null && current.status !== 'PENDING'
     const now = new Date()
-    await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: input.key, ...(backToReview ? { status: 'PENDING', submittedAt: now, rejectReason: null } : {}) } })
-    if (current.certificateFileKey && current.certificateFileKey !== input.key) await this.docs.remove(current.certificateFileKey).catch(() => undefined)
+    // After approval every new certificate is a new version for the reviewer (submittedAt), even while one waits: the
+    // reviewer approves the file they looked at (review 11.11).
+    await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: key, ...(current.approvedAt !== null ? { status: 'PENDING', submittedAt: now, rejectReason: null } : {}) } })
+    if (current.certificateFileKey && current.certificateFileKey !== key) await this.docs.remove(current.certificateFileKey).catch(() => undefined)
     await this.audit.record({ action: backToReview ? 'company.certificate.review' : 'company.certificate', entityType: 'Company', entityId: id, after: { type, size } })
-    if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)
+    if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', changedKey('company', id, now))
     return this.profileOf(id)
   }
 
@@ -193,7 +306,7 @@ export class CompaniesService {
 
   /** DRAFT or REJECTED → PENDING when every required field is filled; the Super Admins are notified. */
   async submit(tenantId: string, actor: RequestActor): Promise<CompanyProfileDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: PROFILE_SELECT })
     if (current.status === 'PENDING') throw AppError.conflict('already_submitted', 'The profile is already under review')
     if (current.status === 'APPROVED') throw AppError.conflict('already_approved', 'The profile is approved; changes of key fields go to review by themselves')
@@ -216,6 +329,14 @@ export class CompaniesService {
   private async representedId(actor: RequestActor): Promise<string | null> {
     const user = await this.prisma.client.user.findFirst({ where: { id: actor.id }, select: { companyId: true } })
     return user?.companyId ?? null
+  }
+
+  /** Blocked: the workspace is closed, the profile too — no edits and no new submission (cybersecurity check 9.4, 11.11). */
+  private async editableId(actor: RequestActor): Promise<string> {
+    const id = await this.ownId(actor)
+    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { blockedAt: true } })
+    if (row?.blockedAt) throw AppError.forbidden('The company is blocked; write to support')
+    return id
   }
 
   private async ownId(actor: RequestActor): Promise<string> {

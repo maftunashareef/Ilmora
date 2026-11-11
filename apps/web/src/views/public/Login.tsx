@@ -14,6 +14,8 @@ import { canOpen, homeFor } from '../../lib/workspaceHome'
 import { startCompany } from '../../services/companies'
 import { claimInstitution } from '../../services/institutions'
 import { MfaSignIn } from '../../components/MfaSignIn'
+import { ForgotPassword } from '../../components/ForgotPassword'
+import { PasswordChangeForm } from '../../components/PasswordChange'
 import { isMfaChallenge, useStore, type AuthUser, type RegisterRole } from '../../store/useStore'
 
 type Mode = 'signin' | 'register'
@@ -105,17 +107,24 @@ export function LoginPage() {
     (roles: readonly string[]) => firstStop.current ?? (safeNext && canOpen(roles, safeNext) ? safeNext : homeFor(roles)),
     [safeNext],
   )
+  // A temporary password from the Super Admin (ministry) is changed here first; the page moves on once the new session
+  // comes back without the flag.
+  const mustChangePassword = auth.status === 'authenticated' && auth.user?.passwordChangeRequired === true
   useEffect(() => {
-    if (auth.status !== 'authenticated' || holdRedirect.current) return
+    if (auth.status !== 'authenticated' || holdRedirect.current || auth.user?.passwordChangeRequired) return
     nav(destination(auth.user?.roles ?? []), { replace: true })
   }, [auth.status, auth.user, nav, destination])
 
   /** The authenticator step after the password (ministry, Super Admins); the page waits for it before moving on. */
   const [mfa, setMfa] = useState<MfaChallengeDto | null>(null)
+  /** «Забыли пароль?»: the card shows the phone → SMS code → new password steps; success signs in and moves on. */
+  const [forgot, setForgot] = useState(false)
   const finishMfa = (user: AuthUser) => {
-    notify(t('auth.welcome', { name: user.displayName }))
     holdRedirect.current = false
     setMfa(null)
+    // Still on the temporary password: the card shows «Смените временный пароль» next, the rest (and the welcome) after.
+    if (user.passwordChangeRequired) return
+    notify(t('auth.welcome', { name: user.displayName }))
     nav(destination(user.roles), { replace: true })
   }
   const restartMfa = () => {
@@ -260,7 +269,8 @@ export function LoginPage() {
           // Hold the redirect: the first sign-in shows the recovery codes once the session is already open.
           holdRedirect.current = true
           setMfa(result)
-        } else {
+        } else if (!result.passwordChangeRequired) {
+          // A temporary password from the Super Admin: the card asks for a new one first, the welcome comes after.
           notify(t('auth.welcome', { name: result.displayName }))
         }
       }
@@ -291,11 +301,19 @@ export function LoginPage() {
         <Eyebrow className="mb-2">ILMORA</Eyebrow>
         <Card className="px-5 py-7 sm:px-7 sm:py-8 shadow-card border-charcoal/10 bg-white">
           <h1 className="font-display text-3xl text-charcoal">{t('auth.title')}</h1>
-          <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t('auth.subtitle')}</p>
+          <p className="mt-2 text-sm leading-relaxed text-charcoal/65">{t(mfa ? 'mfa.passwordAccepted' : mustChangePassword ? 'pwd.lastStep' : forgot ? 'forgot.subtitle' : 'auth.subtitle')}</p>
 
           {mfa ? (
             <div className="mt-6 border-t border-charcoal/10 pt-6">
               <MfaSignIn challenge={mfa} onSignedIn={finishMfa} onRestart={restartMfa} />
+            </div>
+          ) : mustChangePassword ? (
+            <div className="mt-6 border-t border-charcoal/10 pt-6">
+              <PasswordChangeForm required />
+            </div>
+          ) : forgot ? (
+            <div className="mt-6 border-t border-charcoal/10 pt-6">
+              <ForgotPassword onBack={() => setForgot(false)} onDone={() => setForgot(false)} />
             </div>
           ) : (<>
           <Tabs<Mode>
@@ -601,6 +619,9 @@ export function LoginPage() {
               {busy ? <Icon name="refresh" className="h-4 w-4 animate-spin" /> : <Icon name={mode === 'register' ? 'check' : 'arrowRight'} className="h-4 w-4" />}
               {mode === 'register' ? t('auth.createAccount') : t('auth.signIn')}
             </Button>
+            {mode === 'signin' && (
+              <button type="button" className="block w-full text-center text-xs font-medium text-forest underline hover:text-forest/80" onClick={() => { setError(null); setForgot(true) }}>{t('forgot.link')}</button>
+            )}
 
             {mode === 'register' && <p className="text-[11px] leading-relaxed text-charcoal/45">{t('auth.consent')}</p>}
 

@@ -23,13 +23,20 @@ export class CompaniesController {
   create(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(CompanyCreateInput)) dto: CompanyCreateInput) { return this.companies.create(t, a, dto) }
 
   @Get('me') me(@CurrentActor() a: RequestActor) { return this.companies.profile(a) }
-  @Patch('me') update(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(CompanyPatch)) dto: CompanyPatch) { return this.companies.update(t, a, dto) }
-  @Post('me/submit') submit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor) { return this.companies.submit(t, a) }
+  /** Limited too (cybersecurity check 9.4): a STIR typed here answers whether it is registered, like `create`. */
+  @Patch('me')
+  @Throttle({ default: { limit: 30, ttl: HOUR } })
+  update(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(CompanyPatch)) dto: CompanyPatch) { return this.companies.update(t, a, dto) }
+  @Post('me/submit')
+  @Throttle({ default: { limit: 10, ttl: HOUR } })
+  submit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor) { return this.companies.submit(t, a) }
 
   @Post('me/certificate/upload-url')
   @Throttle({ default: { limit: 20, ttl: HOUR } })
   certificateUploadUrl(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(CertificateUploadInput)) dto: CertificateUploadInput) { return this.companies.certificateUploadUrl(t, a, dto) }
 
-  @Post('me/certificate') confirmCertificate(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(CertificateConfirmInput)) dto: CertificateConfirmInput) { return this.companies.confirmCertificate(t, a, dto) }
+  @Post('me/certificate')
+  @Throttle({ default: { limit: 20, ttl: HOUR } })
+  confirmCertificate(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(CertificateConfirmInput)) dto: CertificateConfirmInput) { return this.companies.confirmCertificate(t, a, dto) }
   @Get('me/certificate') certificate(@CurrentActor() a: RequestActor) { return this.companies.certificateLink(a) }
 }

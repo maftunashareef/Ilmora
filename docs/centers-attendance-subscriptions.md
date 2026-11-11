@@ -56,10 +56,72 @@ Everything here is enforced on the server; the web app only reflects it.
   are used up (`lessons_exhausted`). Blocked students cannot check in and lose access to private course materials; their
   seats are kept for `SUBSCRIPTION_GRACE_DAYS` (default 7). After the grace period the subscription becomes `EXPIRED` and
   the enrollments are cancelled (seats released). The worker runs this every 10 minutes with the payment expiry job.
-- **Activation:** settlement of a payment (Payme, Click or a manual settlement) unblocks instantly: status `ACTIVE`,
+- **Activation:** settlement of a payment (Payme or a manual settlement) unblocks instantly: status `ACTIVE`,
   new period or a fresh lesson balance, reminders reset; the student is notified (`payment.confirmed`).
 - Reminders: `subscription.expiring` 3 days before the period ends (once per period), `subscription.lessonsLow` when 2
   lessons remain, `subscription.expired` on blocking, `subscription.ended` when the seats are released.
+- **What a payment paid per course** (`PaymentLine`, written with the payment at checkout and renewal): the enrollment,
+  the course's price for the period and what was paid for it after the discount; the lines add up to
+  `Payment.amountMinor`. A course's refund is counted from them, never from today's price. Payments made before
+  migration `20261117000000_refund_requests_payment_lines` have no lines (split their amount by the courses' prices).
+- **Refund requests** (offer 6.3–6.6, appendix 2; security review 10.11 №42): `RefundRequest` per payment (a
+  cancellation with the next period paid ahead makes two), with `RefundRequestLine` per course and the numbers of the
+  6.4 count (price, lessons in the period, lessons held, amount). Statuses `PENDING` → `APPROVED` / `REJECTED` → `PAID`,
+  or `WITHDRAWN` by the student; decision due in 10 days (`decisionDueAt`). Partial refunds add up in
+  `Payment.refundedMinor`; the payment becomes `REFUNDED` only once all of it is returned. Payme cancels a transaction
+  only in full, so partial refunds go by bank transfer (`providerRef`). Account details for «another account» are not
+  stored (`toOtherAccount` only).
+- The database enforces: `0 ≤ refundedMinor ≤ amountMinor` and `REFUNDED` only with all of it returned; non-negative
+  amounts, a line returns no more than was paid for its course and counts no more lessons held than in the period; a
+  request is open (`PENDING`, `APPROVED`) exactly while `openKey` = its `paymentId` — set it to null when closing the
+  request.
+- **One unpaid payment per subscription** (partial unique index `Payment_one_pending_per_subscription`, migration
+  `20261118000000`; «Доработки Ilmora» Н6, re-check 11.11 №80): a second `PENDING` payment of the same subscription fails
+  with P2002 (409), whatever path creates it. Cancelled, expired and paid payments do not count.
+- **Refund API.** Student (`/v1/student/subscription`):
+  - `POST refunds/quote` — what a request would return;
+  - `POST refunds` — files it. Body: `enrollmentIds?` (all courses when absent), `reason`, `reasonText?` (required for
+    `OTHER`), `toOtherAccount?`;
+  - `GET refunds` — the student's requests;
+  - `POST refunds/:id/withdraw` — takes back a `PENDING` request;
+  - `POST cancel` — refuses a paid subscription whole and files its requests.
+
+  Finance (`/v1/admin/finance/refunds`, `FINANCE_ADMIN`):
+  - `GET ?status=&overdue=true&page=` — the queue;
+  - `GET students?q=` — the student a letter is about, by name, login or phone (2–60 characters): only students
+    with a paid subscription that still has money to return, at most 20, the phone masked, with the courses and the
+    payments left to return; each search is audited. The Super Admin's `/admin/users` stays closed to the finance admins;
+  - `POST` — a request from a letter (`studentId` + the student's body);
+  - `POST :id/approve` with `{ approvedMinor, note? }` — up to what is left of the payment;
+  - `POST :id/reject` with `{ note }`;
+  - `POST :id/paid` with `{ providerRef }` — posts a `PAYMENT_REFUNDED` journal under the request and adds to
+    `refundedMinor`.
+
+  Amounts are tiyin, as strings of digits.
+- **How a request is counted** (`refund-count.ts`). Per course: what the payment paid for it × lessons not held ÷ all
+  lessons of the period.
+  - The lessons are the group's calendar plus its weekly schedule beyond it. A cancelled lesson that was not moved is
+    not held; a moved one counts once.
+  - A period paid ahead is returned whole.
+  - A reason that ends the course (refusal, other, the center's fault) frees the seats when it is filed, and with no
+    course left the subscription is cancelled.
+  - The center's fault (schedule changed, group closed, not as described — 6.5) returns the part whole
+    (`lessonsHeld = 0`).
+  - «Lessons not held» (6.5 b) keeps the course and returns the cancelled lessons.
+  - «Operator's fault» (6.5 e) keeps the course and leaves the amount to the finance admin.
+  - A lesson package is refused only whole: every course gets the share unused ÷ all lessons of the subscription, from
+    the latest payment.
+- A whole refund through Payme's cabinet closes the request waiting for that payment. A payment already partly refunded
+  refuses Payme's whole cancellation, so its money is not returned twice.
+- Reconciliation counts refunds posted under requests: `refund_amount_mismatch` when `refundedMinor` differs from the
+  refund journals.
+- Every new request notifies the finance admins on its own (`refund.requested`). The notification carries the
+  request's amount by 6.4 and a link to it in the queue (`/admin/finance?tab=refunds&request=<id>`). A cancellation
+  with two payments sends two notifications, each with its amount; there is no notice with the payments' total.
+- The finance admins are reminded daily (10:00 Tashkent) of requests due within 2 days or overdue (`refund.due`). Every
+  step of a request is in the audit log (`refund.requested`, `refund.approved`, `refund.rejected`, `refund.paid`,
+  `refund.withdrawn`), which the finance admins can read.
+
 
 ## 5. Notifications
 

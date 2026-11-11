@@ -1,3 +1,4 @@
+import { REGISTRY_DISTRICT_DATA } from './districts.data.js'
 import { foldForSearch } from './format.js'
 import type { L } from './types.js'
 
@@ -79,8 +80,8 @@ export const REGISTRY_INDUSTRIES: RegistryIndustry[] = [
 export type RegistryRegion = { code: string; slug: string; name: L }
 
 /**
- * The 14 regions with their SOATO codes. Check the codes against the ministry's registry file or stat.uz before the
- * launch; districts are loaded only from an official list, never typed in by hand.
+ * The 14 regions with their SOATO codes, checked against the open data of the Statistics Agency (SIAT, the same files
+ * as the districts). Districts are loaded only from an official list, never typed in by hand.
  */
 export const REGISTRY_REGIONS: RegistryRegion[] = [
   { code: '1735', slug: 'karakalpakstan', name: { uz: 'Qoraqalpoğiston Respublikasi', ru: 'Республика Каракалпакстан', en: 'Republic of Karakalpakstan' } },
@@ -98,6 +99,79 @@ export const REGISTRY_REGIONS: RegistryRegion[] = [
   { code: '1733', slug: 'khorezm', name: { uz: 'Xorazm viloyati', ru: 'Хорезмская область', en: 'Khorezm Region' } },
   { code: '1726', slug: 'tashkent-city', name: { uz: 'Toşkent şahri', ru: 'город Ташкент', en: 'Tashkent City' } },
 ]
+
+/** A district (tuman) or a city of district status. `code`: 7-digit SOATO; `region`: the region's 4-digit SOATO code. */
+export type RegistryDistrict = { code: string; region: string; name: L }
+
+/** The 206 districts and cities of district status with their SOATO codes; source and date are in districts.data.ts. */
+export const REGISTRY_DISTRICTS: readonly RegistryDistrict[] = REGISTRY_DISTRICT_DATA
+
+/**
+ * The official districts of a region (the web app's region slug), named in the reader's language and sorted by name —
+ * cities of district status included as their own entries. Empty for an unknown slug.
+ */
+export function registryDistrictNames(regionSlug: string, lang: 'uz' | 'ru' | 'en'): string[] {
+  const code = REGISTRY_REGIONS.find((r) => r.slug === regionSlug)?.code
+  if (!code) return []
+  return REGISTRY_DISTRICTS.filter((d) => d.region === code).map((d) => d.name[lang]).sort((a, b) => a.localeCompare(b, lang))
+}
+
+const CITY_WORDS = new Set(['shahri', 'shahar', 'shaxri', 'city', 'gorod'])
+const DISTRICT_WORDS = new Set(['tumani', 'tuman', 'district', 'rayon', 'r', 'n'])
+/** x/h, q/k and a final d/t are written either way in Latin district names (Shahrixon, Marhamat, Samarqand). */
+const loose = (s: string) => s.replace(/x/g, 'h').replace(/q/g, 'k').replace(/d$/, 't')
+
+interface DistrictKey {
+  /** «… shahri» / «город …» / «… city», «… tumani» / «… район» / «… district», or not said. */
+  kind: 'city' | 'district' | null
+  /** The name without the kind word, spaces and signs: «Mirzo Ulugʻbek tumani» → «mirzoulugbek». */
+  base: string
+  loose: string
+  /** Consonants only: catches a vowel written differently (Toyloq / Tayloq, Kukdala / Koʻkdala). */
+  consonants: string
+  words: string[]
+}
+
+function districtKey(name: string): DistrictKey {
+  let kind: DistrictKey['kind'] = null
+  const words: string[] = []
+  for (const w of registrySearchKey(name).replace(/shahri\b/g, ' shahri').split(' ')) {
+    if (!w) continue
+    if (CITY_WORDS.has(w)) kind = 'city'
+    else if (DISTRICT_WORDS.has(w)) kind = 'district'
+    else words.push(w)
+  }
+  const base = words.join('')
+  return { kind, base, loose: loose(base), consonants: loose(base).replace(/[aeiou]/g, ''), words }
+}
+
+/**
+ * The district a name written in a list or by a person refers to, among the districts of its region (`candidates`),
+ * or null when it is not certain. Compared by any of the district's names (uz, ru, en), with the kind words dropped
+ * (a city is never matched to a district of the same name, and the reverse). Tried in order, the first test that
+ * finds exactly one district wins and a test that finds several gives null:
+ * the same name; x/h, q/k, final d/t written differently; an initial for the first word («Sh.Rashidov» = «Sharof
+ * Rashidov», «M.Ulugbek», «Q-bozor» = «Qorovulbozor»); a vowel written differently (names of 5+ letters).
+ */
+export function matchDistrict<T extends { name: L }>(name: string, candidates: readonly T[]): T | null {
+  const p = districtKey(name)
+  if (!p.base) return null
+  const keyed = candidates.map((c) => ({ c, keys: [...new Set([c.name.uz, c.name.ru, c.name.en])].filter(Boolean).map(districtKey) }))
+  const initial = p.words.length > 1 && p.words[0].length <= 2 ? p.words[0] : null
+  const last = loose(p.words[p.words.length - 1])
+  const tests: ((k: DistrictKey) => boolean)[] = [
+    (k) => k.base === p.base,
+    (k) => k.loose === p.loose,
+    (k) => !!initial && k.base.startsWith(initial) && k.loose.endsWith(last) && k.loose.length > last.length,
+    (k) => p.base.length >= 5 && k.consonants === p.consonants,
+  ]
+  for (const test of tests) {
+    const hits = keyed.filter(({ keys }) => keys.some((k) => (!p.kind || !k.kind || k.kind === p.kind) && test(k)))
+    if (hits.length === 1) return hits[0].c
+    if (hits.length > 1) return null
+  }
+  return null
+}
 
 // ───────────── Registry API: rules and response contract (ТЗ 3, 9.2, 9.4) ─────────────
 
@@ -243,6 +317,30 @@ export interface InstitutionPassportDto {
   /** «Всего студентов» and «Всего направлений» are computed, not typed in. */
   totals: { students: number; directions: number }
   representative: { name: string; jobTitle: string | null }
+  /**
+   * A change of the reviewed fields after approval, waiting for the Super Admin (security review №13): the fields above
+   * keep the approved values meanwhile. Null — nothing waiting.
+   */
+  pendingChanges: InstitutionPendingChanges | null
+  /** Blocked by the Super Admin: the workspace is closed. */
+  blocked: { at: string; reason: string | null } | null
+}
+
+/** The reviewed fields an approved institution changed, as they wait for the Super Admin. */
+export interface InstitutionPendingChanges {
+  name?: string
+  stir?: string
+  type?: RegistryInstitutionType
+  ownership?: RegistryOwnership
+  regionId?: string
+  districtId?: string | null
+}
+
+/** The reviewed fields an approved company changed (industries included — security review №46). */
+export interface CompanyPendingChanges {
+  name?: string
+  stir?: string
+  industryIds?: string[]
 }
 
 export interface InstitutionClaimResult {
@@ -267,6 +365,10 @@ export interface InstitutionReviewItemDto {
   reReview: boolean
   /** The STIR came from the official registry (import) — otherwise the institution started the record itself. */
   inRegistry: boolean
+  /** The name in the ministry's list, to set against the name the representative entered (null — not from the list). */
+  officialName: string | null
+  /** A change of an approved institution waiting for a decision: the new values (the record keeps the approved ones). */
+  pendingChanges: InstitutionPendingChanges | null
   representative: { name: string; jobTitle: string | null; login: string | null } | null
 }
 
@@ -274,6 +376,7 @@ export interface InstitutionReviewItemDto {
 export interface InstitutionReviewDto {
   passport: InstitutionPassportDto
   inRegistry: boolean
+  officialName: string | null
   representative: { name: string; jobTitle: string | null; login: string | null } | null
   history: { action: string; reason: string | null; at: string; by: string | null }[]
 }
@@ -324,6 +427,13 @@ export type RegistryCompanyStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED
 /** After approval, changing one of these (or the certificate) sends the profile back to review; the workspace keeps working. */
 export const COMPANY_REVIEW_FIELDS = ['name', 'stir'] as const
 
+/**
+ * A claimed institution or a registered company that its representative never sent for review (or that was rejected
+ * and never approved) is held this many days; after that another representative of the same STIR takes it over
+ * (security review 10.11 №17: STIRs are public).
+ */
+export const REGISTRY_DRAFT_HOLD_DAYS = 14
+
 /** What must be filled in before «Отправить на проверку»; the API answers the missing ones in `details.missing`. */
 export const COMPANY_REQUIRED_FIELDS = ['stir', 'name', 'regionId', 'address', 'industries', 'certificate', 'representativeName', 'representativeJobTitle'] as const
 export type CompanyRequiredField = (typeof COMPANY_REQUIRED_FIELDS)[number]
@@ -357,6 +467,9 @@ export interface CompanyProfileDto {
   /** False only while the first review is pending. */
   editable: boolean
   representative: { name: string; jobTitle: string | null; email: string | null }
+  /** A change of the name, STIR or industries after approval, waiting for the Super Admin; the fields above stay approved. */
+  pendingChanges: CompanyPendingChanges | null
+  blocked: { at: string; reason: string | null } | null
 }
 
 /** Answer to «Загрузить свидетельство»: PUT the file to `uploadUrl` with this content type, then confirm `key`. */
@@ -382,8 +495,15 @@ export interface CompanyReviewItemDto {
   submittedAt: string | null
   reReview: boolean
   certificateUploaded: boolean
+  /** A change of an approved company waiting for a decision (name, STIR, industries). */
+  pendingChanges: CompanyPendingChanges | null
   representative: { name: string; jobTitle: string | null; login: string | null; email: string | null } | null
 }
+
+/** A record in the Super Admin's search (issue #50): the review item with its status — any status, not only the queue. */
+export type AdminInstitutionItemDto = InstitutionReviewItemDto & { status: RegistryInstitutionStatus; approvedAt: string | null; blocked: boolean }
+export type AdminCompanyItemDto = CompanyReviewItemDto & { status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED'; approvedAt: string | null; blocked: boolean }
+export interface AdminPage<T> { items: T[]; total: number; page: number; pageSize: number }
 
 export interface CompanyReviewDto {
   profile: CompanyProfileDto
@@ -545,7 +665,7 @@ export interface PageDto<T> {
  * announcements; send my anonymous card to companies (help with the contract). Contacts for one company are a
  * per-request decision, not a questionnaire mark.
  */
-export const STUDENT_CONSENT_KEYS = ['GRADUATE_CARD', 'CONTRACT_HELP_CARD'] as const
+export const STUDENT_CONSENT_KEYS = ['GRADUATE_CARD', 'CONTRACT_HELP_CARD', 'INDUSTRY_CARD'] as const
 export type StudentConsentKey = (typeof STUDENT_CONSENT_KEYS)[number]
 /** Edition of the consent texts the marks refer to; a new edition (after the lawyer's review) gets a new version. */
 export const STUDENT_CONSENT_TEXT_VERSION = '2026-11-10'
@@ -596,11 +716,16 @@ export interface IlmoraCourseDto {
 // ───────────── Graduation announcements and contact requests (ТЗ 5.1, 5.3 «запрос контакта», 8) ─────────────
 
 export type AnnouncementStatus = 'DRAFT' | 'PUBLISHED' | 'CLOSED'
-export type ContactSource = 'GRADUATE' | 'CONTRACT_HELP'
+/** STUDENTS: from the company's «Студенты» section (ТЗ «Студенты у компании», 2.4). */
+export type ContactSource = 'GRADUATE' | 'CONTRACT_HELP' | 'STUDENTS'
 
 /** A graduate as a company sees them in an announcement (ТЗ 5.1): no phone, e-mail or files until they accept a request. */
 export interface GraduateCardDto {
-  studentId: string
+  /**
+   * The card's id for «Пригласить»: the same within one announcement for this company, different for another company or
+   * announcement — not the student's account id, which would let companies match students (matrix check 11.11, №127).
+   */
+  cardId: string
   name: string
   institution: string
   direction: DirectionDto
@@ -613,7 +738,7 @@ export interface GraduateCardDto {
   ilmoraCourses: L[]
   /** Only students the institution confirmed are shown. */
   studyConfirmed: true
-  /** This company's contact request to the student, if any. */
+  /** This company's contact request to the student from an announcement, if any — not one from a contract-help card. */
   contactRequest: MatchStatus | null
 }
 
@@ -685,7 +810,8 @@ export interface CompanyContactDto {
 /** One row of the student's consent journal (ТЗ 8): given, and when taken back; nothing is overwritten. */
 export interface StudentConsentDto {
   id: string
-  kind: 'GRADUATE_CARD' | 'CONTRACT_HELP_CARD' | 'COMPANY_CONTACTS' | 'PARENT_CONSENT'
+  /** INDUSTRY_CARD: show my card to companies of my industry («Студенты», ТЗ «Студенты у компании», 4). */
+  kind: 'GRADUATE_CARD' | 'CONTRACT_HELP_CARD' | 'COMPANY_CONTACTS' | 'PARENT_CONSENT' | 'INDUSTRY_CARD'
   /** COMPANY_CONTACTS: the company the contacts were opened to. */
   company: { id: string; name: string } | null
   textVersion: string
@@ -754,7 +880,8 @@ export interface ContractHelpCardDto {
   status: 'ACTIVE' | 'INTERESTED'
   age: number | null
   region: PlaceRefDto | null
-  institution: InstitutionCardDto | null
+  /** The type and region only: the name would link the card to the named graduate card (director's decision 11.11). */
+  institution: { type: RegistryInstitutionType; region: PlaceRefDto | null } | null
   direction: DirectionDto | null
   mode: 'STUDYING' | 'APPLYING'
   /** Year of study (studying) or the year of admission (applying). */
@@ -766,23 +893,34 @@ export interface ContractHelpCardDto {
   motivation: string
   yearsToWork: number
   workRegion: PlaceRefDto | null
-  certificates: string[]
-  ilmoraCourses: L[]
+  /** How many certificates and «Курсы в ILMORA» — counts, not titles: titles would link the card to the named one. */
+  certificates: number
+  ilmoraCourses: number
   studyConfirmed: boolean
   createdAt: string
-  /** This company's contact request to the student, if any (from any source). */
+  /** This company's contact request sent from this card, if any — not one sent from an announcement. */
   contactRequest: MatchStatus | null
 }
 
 // ───────────── practice and internships (ТЗ 5.4) ─────────────
 
-export type VacancyKind = 'PRACTICE' | 'INTERNSHIP'
+/** JOB: «Работа» (ТЗ «Студенты у компании», 5) — always paid, with a salary (from–to) instead of a stipend. */
+export type VacancyKind = 'PRACTICE' | 'INTERNSHIP' | 'JOB'
 export type WorkFormat = 'ONSITE' | 'REMOTE' | 'HYBRID'
+/** «Работа» only: work schedule (onsite or remote is WorkFormat) and the experience asked for. */
+export type WorkSchedule = 'FULL_TIME' | 'PART_TIME' | 'SHIFT' | 'FLEXIBLE'
+export type ExperienceLevel = 'NONE' | 'UP_TO_1' | 'ONE_TO_3' | 'OVER_3'
 export type VacancyStatus = 'OPEN' | 'CLOSED'
 /** новый → просмотрен → приглашён / отказ. */
 export type ApplicationStatus = 'NEW' | 'VIEWED' | 'INVITED' | 'REJECTED'
 export const VACANCY_SEATS_MAX = 1000
 export const VACANCY_DIRECTIONS_MAX = 10
+/** «Разослать студентам»: broadcasts per institution in 24 hours (ТЗ «Студенты у компании, Вакансии у учреждения», 3.2). */
+export const VACANCY_BROADCASTS_PER_DAY = 20
+/** Years of study a broadcast can choose (a school class goes up to 11). */
+export const BROADCAST_COURSE_MAX = 11
+/** Cards per page in the company's «Студенты» section. */
+export const STUDENTS_PAGE_SIZE = 20
 
 /** A vacancy as a student sees it (approved companies, open, deadline not passed). */
 export interface VacancyDto {
@@ -796,8 +934,14 @@ export interface VacancyDto {
   address: string | null
   format: WorkFormat
   paid: boolean
-  /** Monthly stipend, so'm, when stated. */
+  /** Monthly stipend, so'm, when stated (practice, internship). */
   stipend: number | null
+  /** «Работа»: the monthly salary, so'm, from–to; one amount is `salaryFrom` alone. */
+  salaryFrom: number | null
+  salaryTo: number | null
+  /** «Работа»: the work schedule and the experience asked for; null on practice and internships. */
+  schedule: WorkSchedule | null
+  experience: ExperienceLevel | null
   duration: string | null
   seats: number
   requirements: string | null
@@ -823,6 +967,87 @@ export interface VacancyApplicationDto {
   createdAt: string
   statusChangedAt: string | null
   student: StudentFullCardDto & { id: string }
+}
+
+/**
+ * «Вакансии компаний» in the institution's workspace (ТЗ «Студенты у компании, Вакансии у учреждения», 3.1): open
+ * vacancies of approved companies in the industries of the institution's directions. `hasDirections` false — the
+ * passport has no directions yet, the list is empty and the web asks to add them.
+ */
+export interface InstitutionVacanciesDto {
+  hasDirections: boolean
+  items: InstitutionVacancyDto[]
+}
+
+/** A vacancy as an institution sees it: the vacancy and how many of its students it has sent it to. */
+export interface InstitutionVacancyDto extends Omit<VacancyDto, 'myApplication'> {
+  /** Students of this institution the vacancy was sent to. */
+  sentTo: number
+}
+
+/** «Разослать студентам» — before sending: how many students get it now (those who already got it are not counted). */
+export interface VacancyBroadcastPreviewDto {
+  recipients: number
+  /** Students on the chosen directions and years who already got this vacancy. */
+  alreadySent: number
+  /** Broadcasts left today (24 hours) for this institution. */
+  leftToday: number
+}
+
+/** One broadcast in the institution's journal (ТЗ «Студенты у компании», 3.2, п. 6: who, when, which vacancy, how many). */
+export interface VacancyBroadcastDto {
+  id: string
+  vacancyId: string
+  vacancyTitle: string
+  companyName: string
+  /** The institution's representative who sent it; null if that account is gone. */
+  sentBy: { name: string } | null
+  directions: DirectionDto[]
+  courses: number[]
+  recipientsCount: number
+  createdAt: string
+  /** Set by the queue after the last batch; null while it is being sent. */
+  finishedAt: string | null
+}
+
+/**
+ * The company's «Студенты» section (ТЗ «Студенты у компании», 2.2): an institution with the number of students who
+ * match — studying, confirmed, consented to «companies of my industry», of the company's industries.
+ */
+export interface StudentsBlockDto {
+  institution: { id: string; name: string; type: RegistryInstitutionType; region: PlaceRefDto | null }
+  students: number
+}
+
+/**
+ * A student's card in «Студенты» (2.3): the same as a graduate card in an announcement. `cardId` is this company's own id
+ * for the card, not the student's account id (as graduate cards, №127); «Запросить контакты» takes it.
+ */
+export interface CompanyStudentCardDto {
+  cardId: string
+  name: string
+  institution: { id: string; name: string; type: RegistryInstitutionType }
+  direction: DirectionDto | null
+  course: number | null
+  graduationYear: number | null
+  region: PlaceRefDto | null
+  about: string | null
+  /** Titles only; the files open after an accepted contact request. */
+  certificates: string[]
+  ilmoraCourses: L[]
+  studyConfirmed: true
+  /**
+   * This company's contact request to the student by name — from an announcement or from here; a request from an
+   * anonymous contract-help card is never shown (№126).
+   */
+  contactRequest: MatchStatus | null
+}
+
+export interface CompanyStudentsPageDto {
+  items: CompanyStudentCardDto[]
+  total: number
+  page: number
+  pageSize: number
 }
 
 /** The student's application with the vacancy. */

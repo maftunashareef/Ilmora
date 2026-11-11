@@ -28,6 +28,9 @@ export class PaymeError extends Error {
   }
 }
 
+/** How long a test order listed in PAYME_SANDBOX_PAYMENT_IDS stays open to the test key in production (№39). */
+export const SANDBOX_ORDER_DAYS = 7
+
 const msg = (ru: string, uz: string, en: string) => ({ ru, uz, en })
 const M = {
   unauthorized: msg('Недостаточно привилегий для выполнения метода', 'Metodni bajarish uchun huquq yetarli emas', 'Insufficient privileges to perform the method'),
@@ -89,6 +92,14 @@ export class PaymeService {
     return sandbox && this.env.NODE_ENV === 'production'
   }
 
+  /**
+   * In production a test order is open to the test key for SANDBOX_ORDER_DAYS after it was created: a forgotten
+   * PAYME_SANDBOX_PAYMENT_IDS does not keep the test key alive forever (security review 10.11 №39).
+   */
+  private assertSandboxFresh(payment: { createdAt: Date }, sandbox: boolean) {
+    if (this.fenced(sandbox) && Date.now() - payment.createdAt.getTime() > SANDBOX_ORDER_DAYS * 86_400_000) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
+  }
+
   private paymentIdFrom(params: Record<string, unknown>, sandbox: boolean): string {
     const account = params.account as Account | undefined
     const id = account?.payment_id
@@ -115,6 +126,7 @@ export class PaymeService {
     const amount = this.amountFrom(params)
     const payment = await this.prisma.client.payment.findFirst({ where: { id: paymentId } })
     if (!payment) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
+    this.assertSandboxFresh(payment, sandbox)
     if (!(await this.payable(this.prisma.client, payment))) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
     if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
     return {
@@ -123,7 +135,7 @@ export class PaymeService {
       detail: {
         receipt_type: 0,
         items: [{
-          title: 'ILMORA — подписка на занятия',
+          title: await this.receiptTitle(payment.subscriptionId),
           price: Number(payment.amountMinor),
           count: 1,
           code: this.env.PAYME_FISCAL_IKPU,
@@ -134,9 +146,12 @@ export class PaymeService {
     }
   }
 
-  /** The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. */
-  private async payable(db: TransactionClient | PrismaService['client'], payment: { state: PaymentState; subscriptionId: string; expiresAt: Date | null }): Promise<boolean> {
-    if (payment.expiresAt && payment.expiresAt < new Date()) return false
+  /**
+   * The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. A Payme test order
+   * (PAYME_SANDBOX_PAYMENT_IDS) has no hold: Payme's tests take days, and the hold is an hour for everybody else (№82).
+   */
+  private async payable(db: TransactionClient | PrismaService['client'], payment: { id: string; state: PaymentState; subscriptionId: string; periodStart: Date; periodEnd: Date; expiresAt: Date | null }): Promise<boolean> {
+    if (payment.expiresAt && payment.expiresAt < new Date() && !this.env.PAYME_SANDBOX_PAYMENT_IDS.includes(payment.id)) return false
     return (await this.payments.settleBlocker(db, payment)) === null
   }
 
@@ -150,6 +165,24 @@ export class PaymeService {
     return out
   }
 
+  /**
+   * The receipt line names what is bought (security review 10.11 №41): the package, or the courses of a selection —
+   * in Russian, as the fiscal receipt is printed; at most 128 characters.
+   */
+  private async receiptTitle(subscriptionId: string): Promise<string> {
+    const sub = await this.prisma.client.subscription.findFirst({
+      where: { id: subscriptionId },
+      select: { package: { select: { name: true } }, enrollments: { where: { status: { in: ['PENDING', 'ACTIVE'] } }, select: { group: { select: { course: { select: { title: true } } } } } } },
+    })
+    const ru = (v: unknown): string => {
+      const o = (v ?? {}) as Record<string, unknown>
+      return String(o.ru || o.uz || o.en || '').trim()
+    }
+    const what = ru(sub?.package?.name) || [...new Set((sub?.enrollments ?? []).map((e) => ru(e.group.course.title)).filter(Boolean))].join(', ')
+    const title = what ? `ILMORA — ${what}` : 'ILMORA — подписка на занятия'
+    return title.length > 128 ? `${title.slice(0, 127)}…` : title
+  }
+
   private async create(params: Record<string, unknown>, sandbox: boolean) {
     const providerTxId = String(params.id ?? '')
     const time = typeof params.time === 'number' ? params.time : NaN
@@ -160,6 +193,7 @@ export class PaymeService {
     return this.txRefusing(async (tx) => {
       const payment = await this.payments.lockPayment(tx, paymentId)
       if (!payment) throw new PaymeError(PAYME.ACCOUNT_NOT_FOUND, M.orderNotFound, 'payment_id')
+      this.assertSandboxFresh(payment, sandbox)
       const existing = await tx.paymentTransaction.findUnique({ where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: providerTxId } } })
       if (existing) {
         if (existing.paymentId !== payment.id) throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
@@ -205,7 +239,7 @@ export class PaymeService {
         return new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
       }
       const performedAt = new Date()
-      await this.payments.settle(tx, { paymentId: row.paymentId, provider: 'PAYME', providerTransactionId: providerTxId, performedAt })
+      await this.payments.settle(tx, { paymentId: row.paymentId, provider: 'PAYME', providerTransactionId: providerTxId, performedAt, sandbox: row.sandbox })
       await tx.paymentTransaction.update({ where: { id: row.id }, data: { state: 'PERFORMED', providerState: 2, performedAt } })
       return { transaction: String(row.seq), perform_time: performedAt.getTime(), state: 2 }
     })

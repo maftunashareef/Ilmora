@@ -11,7 +11,7 @@ import { LangSwitcher, RoleSwitcher } from './Switchers'
 
 export interface DashNavItem { id: string; to: string; label: string; icon: string; end?: boolean }
 
-export function DashboardShell({ title, subtitle, items, role, extra }: { title: string; subtitle?: string; items: DashNavItem[]; role: Role; extra?: ReactNode }) {
+export function DashboardShell({ title, subtitle, items, role, extra, notice }: { title: string; subtitle?: string; items: DashNavItem[]; role: Role; extra?: ReactNode; notice?: ReactNode }) {
   const { t, lang } = useT()
   const site = useStore((s) => s.site)
   // The admin workspace may live on its own host; "back to the site" then has to leave it.
@@ -19,6 +19,20 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
   const [open, setOpen] = useState(false)
   const loc = useLocation()
   useEffect(() => setOpen(false), [loc.pathname])
+  // The browser tab names the section (М17): «Цифры · Кабинет министерства — ILMORA». A page outside the menu (a card,
+  // a detail) takes the item it belongs to — the longest matching address.
+  const section = items
+    .filter((it) => loc.pathname === it.to || (!it.end && loc.pathname.startsWith(`${it.to}/`)))
+    .sort((a, b) => b.to.length - a.to.length)[0]?.label
+  const brand = site.brand.name || 'ILMORA'
+  const tabTitle = section ? `${section} · ${title} — ${brand}` : `${title} — ${brand}`
+  useEffect(() => {
+    document.title = tabTitle
+    // Next writes the layout's title back after a client navigation or a language switch: keep the section's.
+    const keep = new MutationObserver(() => { if (document.title !== tabTitle) document.title = tabTitle })
+    keep.observe(document.head, { subtree: true, childList: true, characterData: true })
+    return () => keep.disconnect()
+  }, [tabTitle])
 
   const sidebar = (
     <nav aria-label={title} className="flex flex-1 flex-col gap-0.5">
@@ -75,6 +89,7 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
         )}
         <main id="dash-main" className="flex-1 px-4 py-6 md:px-8 md:py-8">
           <div className="mx-auto w-full max-w-6xl animate-fade">
+            {notice && <div className="mb-6">{notice}</div>}
             <Outlet />
           </div>
         </main>

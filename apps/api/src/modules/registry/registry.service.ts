@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common'
+import { HttpStatus, Injectable } from '@nestjs/common'
 import {
   type DirectionAddResult, type DirectionDto, type DistrictDto, type IndustryDto, type InstitutionAddResult, type InstitutionSearchItemDto,
   type L, type RegionDto, type RegistryInstitutionType, registrySearchKey, registrySearchText, SUGGEST_LIMIT, SUGGEST_MIN_CHARS,
 } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import type { InstitutionType } from '../../generated/prisma/enums'
-import { PrismaService } from '../../infra/prisma/prisma.service'
+import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import type { Prisma } from '../../generated/prisma/client'
@@ -21,6 +21,9 @@ void typesMatch
 const SUGGEST_SCAN = 100
 
 /** Public fields of an institution only (ТЗ 9.4): no STIR, director, phone, e-mail or address. */
+/** New dictionary entries per account a day — the same numbers as the throttles of POST /registry/directions and /institutions. */
+const DAILY_DIRECTIONS = 20
+const DAILY_INSTITUTIONS = 3
 const INSTITUTION_PUBLIC = { id: true, name: true, nameRu: true, type: true, ownership: true, source: true, ...PLACE_SELECT } as const satisfies Prisma.InstitutionSelect
 type InstitutionRow = Prisma.InstitutionGetPayload<{ select: typeof INSTITUTION_PUBLIC }>
 
@@ -95,9 +98,12 @@ export class RegistryService {
     if (existing) return { direction: existing, created: false }
     let direction: DirectionDto
     try {
-      const row = await this.prisma.client.direction.create({
-        data: { tenantId, name: input.name, searchKey: key, industryId: industry.id, origin: 'USER', createdById: actor.id },
-        select: DIRECTION_SELECT,
+      const row = await this.prisma.tx(async (tx) => {
+        await this.assertDailyLimit(tx, 'direction', actor, DAILY_DIRECTIONS)
+        return tx.direction.create({
+          data: { tenantId, name: input.name, searchKey: key, industryId: industry.id, origin: 'USER', createdById: actor.id },
+          select: DIRECTION_SELECT,
+        })
       })
       direction = toDirection(row)
     } catch (err) {
@@ -125,7 +131,15 @@ export class RegistryService {
       regionId = found
     }
     const rows = await this.prisma.client.institution.findMany({
-      where: { OR: [{ searchText: { contains: key } }, { searchKey: { contains: key } }], mergedIntoId: null, ...(q.type ? { type: q.type } : {}), ...(regionId ? { regionId } : {}) },
+      where: {
+        AND: [
+          { OR: [{ searchText: { contains: key } }, { searchKey: { contains: key } }] },
+          // The ministry's list, the approved ones and the student-added (marked so); not a self-registered name nobody approved (security review №45).
+          { OR: [{ source: { in: ['IMPORT', 'STUDENT'] } }, { approvedAt: { not: null } }] },
+        ],
+        // A record the Super Admin blocked is not offered either.
+        mergedIntoId: null, blockedAt: null, ...(q.type ? { type: q.type } : {}), ...(regionId ? { regionId } : {}),
+      },
       select: INSTITUTION_PUBLIC,
       orderBy: { name: 'asc' },
       take: SUGGEST_SCAN,
@@ -155,15 +169,32 @@ export class RegistryService {
     // A record the Super Admin merged answers its target: the duplicate does not come back under the same name.
     const merged = await this.prisma.client.institution.findFirst({ where: { searchKey: key, regionId: region.id, mergedIntoId: { not: null } }, select: { mergedInto: { select: INSTITUTION_PUBLIC } } })
     if (merged?.mergedInto) return { institution: toInstitution(merged.mergedInto), created: false }
-    const row = await this.prisma.client.institution.create({
-      data: {
-        tenantId, type: input.type, name: input.name, searchKey: key, searchText: registrySearchText(input.name), regionId: region.id, districtId: input.districtId ?? null,
-        source: 'STUDENT', status: 'UNCLAIMED', createdById: actor.id,
-      },
-      select: INSTITUTION_PUBLIC,
+    const row = await this.prisma.tx(async (tx) => {
+      await this.assertDailyLimit(tx, 'institution', actor, DAILY_INSTITUTIONS)
+      return tx.institution.create({
+        data: {
+          tenantId, type: input.type, name: input.name, searchKey: key, searchText: registrySearchText(input.name), regionId: region.id, districtId: input.districtId ?? null,
+          source: 'STUDENT', status: 'UNCLAIMED', createdById: actor.id,
+        },
+        select: INSTITUTION_PUBLIC,
+      })
     })
     await this.audit.record({ action: 'registry.institution.create_by_student', entityType: 'Institution', entityId: row.id, after: { name: row.name, type: row.type, regionId: region.id } })
     return { institution: toInstitution(row), created: true }
+  }
+
+  /**
+   * New entries one account adds to the shared dictionary in 24 hours — counted in the database, so the questionnaire
+   * (which adds through this service, not the throttled routes) has the same limit (security review №44).
+   */
+  private async assertDailyLimit(tx: TransactionClient, kind: 'direction' | 'institution', actor: RequestActor, limit: number) {
+    // One account's additions are counted one at a time: saves sent at once cannot all see «under the limit» (review 11.11).
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `registry-limit:${kind}:${actor.id}`)
+    const since = new Date(Date.now() - 86_400_000)
+    const count = kind === 'direction'
+      ? await tx.direction.count({ where: { createdById: actor.id, createdAt: { gte: since } } })
+      : await tx.institution.count({ where: { createdById: actor.id, source: 'STUDENT', createdAt: { gte: since } } })
+    if (count >= limit) throw new AppError('rate_limited', `At most ${limit} new entries a day`, HttpStatus.TOO_MANY_REQUESTS, { retryAfterSeconds: 3600 })
   }
 
   /** The direction stored under this key — or, when it is a merged alias, its main direction. */

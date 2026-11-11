@@ -39,13 +39,13 @@ export function StudioVideos() {
         </ul>
       )}
       <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('studio.newVideo') : editing ? tr(editing.title) : ''}>
-        {editing && <VideoForm teacherId={teacher.id} initial={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSave={(v) => { upsertVideo(v); setEditing(null); notify(t('common.saved')) }} />}
+        {editing && <VideoForm teacherId={teacher.id} initial={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSave={async (v) => { await upsertVideo(v); setEditing(null); notify(t('common.saved')) }} />}
       </Modal>
     </div>
   )
 }
 
-function VideoForm({ initial, teacherId, onSave, onCancel }: { initial?: Video; teacherId: string; onSave: (v: Video) => void; onCancel: () => void }) {
+function VideoForm({ initial, teacherId, onSave, onCancel }: { initial?: Video; teacherId: string; onSave: (v: Video) => Promise<void>; onCancel: () => void }) {
   const { t, tr } = useT()
   const courses = useStore((s) => s.courses.filter((c) => c.teacherId === teacherId))
   const perms = useStore((s) => s.site.permissions.teacher)
@@ -53,14 +53,20 @@ function VideoForm({ initial, teacherId, onSave, onCancel }: { initial?: Video; 
   const [draft, setDraft] = useState<Video>(() => initial ?? { id: uid('v'), teacherId, title: emptyL(), description: emptyL(), source: { kind: 'link', url: '' }, durationSec: 600, coverSeed: Math.floor(Math.random() * 60), status: 'draft', visibility: 'public', audience: { studentIds: [], groupIds: [] }, featured: false, updatedAt: new Date().toISOString() })
   const [pub, setPub] = useState<PublishDraft>({ status: initial?.status ?? 'draft', visibility: initial ? initial.visibility : null, audience: initial?.audience ?? { studentIds: [], groupIds: [] } })
   const sourceKind = draft.source.kind
-  const save = () => {
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    if (saving) return
     if (!draft.title.uz && !draft.title.en && !draft.title.ru) { notify(`${t('common.title')}: ${t('common.required')}`, 'warn'); return }
     if (draft.source.kind === 'link' && !draft.source.url.trim()) { notify(`${t('studio.videoLink')}: ${t('common.required')}`, 'warn'); return }
     if (draft.source.kind === 'upload' && !draft.source.file) { notify(`${t('studio.videoUpload')}: ${t('common.required')}`, 'warn'); return }
     const r = finalizePublish(pub, 'teacher', perms)
     if (!r.ok) { notify(t(r.error), 'warn'); return }
-    onSave({ ...draft, ...r.patch })
-    if (r.note) notify(t(r.note), 'warn')
+    setSaving(true)
+    // «Сохранено» only after the server has kept it; on an error the store shows it and the form keeps what was typed (М11).
+    try {
+      await onSave({ ...draft, ...r.patch })
+      if (r.note) notify(t(r.note), 'warn')
+    } catch { /* shown by the store */ } finally { setSaving(false) }
   }
   return (
     <div className="space-y-6">
@@ -99,7 +105,7 @@ function VideoForm({ initial, teacherId, onSave, onCancel }: { initial?: Video; 
       </div>
       <PublishFields value={pub} onChange={setPub} teacherId={teacherId} mode="teacher" />
       {!perms.publishDirectly && <Notice tone="info" className="text-xs">{t('studio.reviewNote')}</Notice>}
-      <div className="flex justify-end gap-2 border-t border-charcoal/10 pt-4"><Button variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button><Button onClick={save}>{t('common.save')}</Button></div>
+      <div className="flex justify-end gap-2 border-t border-charcoal/10 pt-4"><Button variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button><Button disabled={saving} onClick={() => void save()}>{t('common.save')}</Button></div>
     </div>
   )
 }

@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import { Logger } from 'nestjs-pino'
 import { AppModule } from './app.module'
-import { useBodyParsing } from './body-parsing'
+import { configureBodyParsing } from './body-parsing'
 import { ENV, type Env } from './config/env'
 
 // BigInt (tiyin amounts, provider timestamps) serialises as a decimal string to stay exact in JSON.
@@ -33,7 +33,8 @@ async function bootstrap() {
     }),
   )
   app.use(cookieParser())
-  useBodyParsing(app)
+  // JSON up to 1 MB, also as text/json (Payme): see body-parsing.ts.
+  configureBodyParsing(app)
   app.enableCors({
     origin: env.CORS_ORIGINS.length ? env.CORS_ORIGINS : env.NODE_ENV === 'production' ? false : true,
     credentials: true,
@@ -53,7 +54,7 @@ async function bootstrap() {
     }),
   )
   app.setGlobalPrefix(env.API_GLOBAL_PREFIX, {
-    exclude: ['health', 'health/live', 'health/ready', 'payments/payme', 'payments/click/prepare', 'payments/click/complete'],
+    exclude: ['health', 'health/live', 'health/ready', 'payments/payme'],
   })
   app.enableShutdownHooks()
 

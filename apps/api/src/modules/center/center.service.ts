@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { normalizeUzPhone, subscriptionAccess } from '@ilmora/shared'
 import { randomToken } from '../../common/crypto'
 import { AppError } from '../../common/errors'
-import { isoToDateColumn, localDate } from '../../common/time'
+import { isCalendarDate, isoToDateColumn, localDate } from '../../common/time'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -101,7 +101,8 @@ export class CenterService {
 
   async attendanceDay(tenantId: string, actor: RequestActor, date?: string) {
     const center = await this.own(tenantId, actor)
-    const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : localDate(new Date(), DEFAULT_TZ)
+    if (date && !isCalendarDate(date)) throw AppError.invalid('validation_failed', 'Not a date')
+    const day = date ?? localDate(new Date(), DEFAULT_TZ)
     return { date: day, sessions: await this.todaySessions(tenantId, center.id, day) }
   }
 
@@ -229,7 +230,7 @@ export class CenterService {
     if (!user.isActive) throw AppError.invalid('account_disabled', 'This account is disabled')
     if (user.teacherProfile?.centerId && user.teacherProfile.centerId !== center.id) throw AppError.conflict('teacher_elsewhere', 'This teacher already belongs to another center')
     const profile = user.teacherProfile
-      ? await this.prisma.client.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { centerId: center.id, ...(input.title ? { title: input.title as Json } : {}), ...(input.expertise ? { expertise: input.expertise } : {}) } })
+      ? await this.prisma.client.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { centerId: center.id, ...(input.title ? { title: input.title as Json } : {}), ...(input.expertise ? { expertise: input.expertise } : {}) }, includeDeleted: true } as never) as Awaited<ReturnType<typeof this.prisma.client.teacherProfile.update>>
       : await this.prisma.client.teacherProfile.create({ data: { tenantId, userId: user.id, centerId: center.id, slug: await this.freeSlug(tenantId, login), ...base } })
     await this.prisma.client.user.update({ where: { id: user.id }, data: { centerId: user.centerId ?? center.id } })
     await this.audit.record({ action: 'center.teacher_link', entityType: 'TeacherProfile', entityId: profile.id, after: { centerId: center.id, userId: user.id } })
@@ -265,7 +266,7 @@ export class CenterService {
     if (!user || !user.isActive || !user.roles.includes('TEACHER')) throw AppError.forbidden('Only a teacher account can accept an invitation')
     if (user.teacherProfile?.centerId && user.teacherProfile.centerId !== center.id) throw AppError.conflict('teacher_elsewhere', 'You already belong to another center')
     const profile = user.teacherProfile
-      ? await this.prisma.client.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { centerId: center.id } })
+      ? await this.prisma.client.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { centerId: center.id }, includeDeleted: true } as never) as Awaited<ReturnType<typeof this.prisma.client.teacherProfile.update>>
       : await this.prisma.client.teacherProfile.create({ data: { tenantId, userId: user.id, centerId: center.id, slug: await this.freeSlug(tenantId, user.login ?? user.displayName), name: user.displayName, title: {}, bio: {}, tagline: {}, expertise: [] } })
     await this.prisma.client.user.update({ where: { id: user.id }, data: { centerId: user.centerId ?? center.id } })
     await this.prisma.client.teacherInvite.update({ where: { id }, data: { status: 'ACCEPTED', respondedAt: now } })

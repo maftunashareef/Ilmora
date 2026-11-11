@@ -8,8 +8,9 @@ import { AuditService } from '../audit/audit.service'
 import { ContactsService } from '../contacts/contacts.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, isUniqueViolation, mainOf, regionIdByRef } from '../registry/registry.mappers'
-import { StudentsService } from '../students/students.service'
+import { lockConsents, StudentsService } from '../students/students.service'
 import type { ContractHelpInput, ContractHelpQuery } from './contract-help.schemas'
+import { dateColumnToIso } from '../../common/time'
 
 const OPEN = ['ACTIVE', 'INTERESTED'] as const
 const place = (r: { id: string; name: unknown } | null) => (r ? { id: r.id, name: r.name as L } : null)
@@ -28,7 +29,7 @@ const CARD_SELECT = {
         select: {
           mode: true, course: true, enrollYear: true, studyForm: true, contractAmountMinor: true, birthDate: true, studyConfirmation: true,
           region: { select: { id: true, name: true } },
-          institution: { select: { id: true, name: true, type: true, region: { select: { id: true, name: true } } } },
+          institution: { select: { type: true, region: { select: { id: true, name: true } } } },
           direction: { select: DIRECTION_WITH_MAIN },
         },
       },
@@ -89,7 +90,8 @@ export class ContractHelpService {
     let id: string
     try {
       id = await this.prisma.client.$transaction(async (tx) => {
-        // Consent 2 is the tick on this form: a new journal row unless one is in force.
+        // Consent 2 is the tick on this form: a new journal row unless one is in force (serialized with the questionnaire).
+        await lockConsents(tx, actor.id)
         if (!(await tx.studentConsent.findFirst({ where: { userId: actor.id, ...active('CONTRACT_HELP_CARD') }, select: { id: true } }))) {
           await tx.studentConsent.create({ data: { tenantId, userId: actor.id, kind: 'CONTRACT_HELP_CARD', textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now } })
         }
@@ -106,7 +108,7 @@ export class ContractHelpService {
     await this.audit.record({ action: 'contract-help.create', entityType: 'ContractHelpRequest', entityId: id, after: { yearsToWork: input.yearsToWork, workRegion: input.workRegion } })
     const main = mainOf(profile.direction!)
     await this.notifications.safely('contractHelp.new', async () => {
-      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, industries: { some: { industryId: main.industry.id } } } } }, select: { id: true } })
+      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, blockedAt: null, industries: { some: { industryId: main.industry.id } } } } }, select: { id: true } })
       await this.notifications.notify({ tenantId, userIds: recipients.map((u) => u.id), type: 'contractHelp.new', params: { directionName: main.name, requestId: id }, dedupeKey: `contract-help:${id}` })
     })
     return this.ownDto(actor, id)
@@ -178,7 +180,7 @@ export class ContractHelpService {
   }
 
   private isMinor(birthDate: Date | null, now: Date) {
-    const age = birthDate ? ageOn(birthDate.toISOString().slice(0, 10), now) : null
+    const age = birthDate ? ageOn(dateColumnToIso(birthDate), now) : null
     return age !== null && age < 18
   }
 
@@ -191,25 +193,29 @@ export class ContractHelpService {
 
   private async cards(companyId: string, rows: CardRow[]): Promise<ContractHelpCardDto[]> {
     const shown = rows.filter((r) => this.shown(r))
-    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, userId: { in: shown.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
+    // Only the request sent from this very card: a request from an announcement (by name) must not show here, or the
+    // company links the anonymous card to the named graduate (matrix check 11.11, №126).
+    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, source: 'CONTRACT_HELP', contractHelpId: { in: shown.map((r) => r.id) } }, select: { contractHelpId: true, status: true } })).map((c) => [c.contractHelpId, c.status as MatchStatus]))
     const now = new Date()
     return shown.map((r) => {
       const p = r.user.studentProfile!
       const inst = p.institution
       return {
         id: r.id, number: r.id.slice(-6).toUpperCase(), status: r.status as ContractHelpCardDto['status'],
-        age: p.birthDate ? ageOn(p.birthDate.toISOString().slice(0, 10), now) : null,
+        age: p.birthDate ? ageOn(dateColumnToIso(p.birthDate), now) : null,
         region: place(p.region),
-        institution: inst ? { id: inst.id, name: inst.name, type: inst.type, region: place(inst.region) } : null,
+        // The type and region only, and counts instead of titles (director's decision 11.11): the name of the institution and
+        // the titles of certificates and courses are on the named graduate card too, and would link the two.
+        institution: inst ? { type: inst.type, region: place(inst.region) } : null,
         direction: p.direction ? mainOf(p.direction) : null,
         mode: p.mode, course: p.course, enrollYear: p.enrollYear, studyForm: p.studyForm,
         contractAmount: p.contractAmountMinor !== null ? Number(p.contractAmountMinor / 100n) : null,
         motivation: r.motivation, yearsToWork: r.yearsToWork, workRegion: place(r.workRegion),
-        certificates: r.user.studentCertificates.map((c) => c.title),
-        ilmoraCourses: [...new Map(r.user.enrollments.map((e) => [JSON.stringify(e.course.title), e.course.title as L])).values()],
+        certificates: r.user.studentCertificates.length,
+        ilmoraCourses: new Set(r.user.enrollments.map((e) => JSON.stringify(e.course.title))).size,
         studyConfirmed: p.studyConfirmation === 'CONFIRMED',
         createdAt: r.createdAt.toISOString(),
-        contactRequest: requests.get(r.userId) ?? null,
+        contactRequest: requests.get(r.id) ?? null,
       }
     })
   }

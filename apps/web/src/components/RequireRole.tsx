@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from '@/lib/router'
 import { useStore } from '@/store/useStore'
 import type { Role } from '@/types'
 import { ConsentGate, needsConsent } from './ConsentGate'
+import { PasswordChangeGate } from './PasswordChange'
 import { Card, Icon, LinkButton } from './ui'
 
 /**
@@ -21,7 +22,7 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const wanted = useMemo(() => (Array.isArray(role) ? role : [role]), [role])
-  const allowed = wanted.includes(current) || roles.includes('PLATFORM_ADMIN') || (wanted.includes('teacher') && roles.includes('TEACHER')) || (wanted.includes('student') && roles.includes('STUDENT')) || (wanted.includes('center') && roles.includes('CENTER_ADMIN')) || (wanted.includes('admin') && roles.includes('FINANCE_ADMIN'))
+  const allowed = wanted.includes(current) || roles.includes('PLATFORM_ADMIN') || (wanted.includes('teacher') && roles.includes('TEACHER')) || (wanted.includes('student') && roles.includes('STUDENT')) || (wanted.includes('center') && roles.includes('CENTER_ADMIN')) || (wanted.includes('admin') && roles.includes('FINANCE_ADMIN')) || (wanted.includes('ministry') && roles.includes('MINISTRY')) || (wanted.includes('institution') && roles.includes('INSTITUTION_ADMIN')) || (wanted.includes('company') && roles.includes('COMPANY_ADMIN'))
 
   useEffect(() => {
     if (status === 'anonymous') navigate(`/login?next=${encodeURIComponent(pathname)}`, { replace: true })
@@ -49,6 +50,8 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
       </div>
     )
   }
+  // A temporary password from the Super Admin is changed first (the ministry), then the rest.
+  if (user?.passwordChangeRequired) return <PasswordChangeGate />
   // Every account confirms the current offer edition and personal-data consent before using a workspace.
   if (needsConsent(user)) return <ConsentGate />
   return <>{children}</>

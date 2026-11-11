@@ -216,7 +216,8 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
               {err('email')}
             </Field>
             <Field label={t('q.about')} hint={t('q.count', { n: q.about.length, max: ABOUT_MAX })}>
-              <Textarea rows={4} maxLength={ABOUT_MAX} placeholder={t('q.aboutPlaceholder')} value={q.about} onChange={(e) => set('about', e.target.value)} aria-invalid={!!errors.about} />
+              <Textarea rows={4} maxLength={ABOUT_MAX} placeholder={t('q.aboutPlaceholder')} value={q.about} onChange={(e) => set('about', e.target.value)} aria-invalid={!!errors.about} aria-describedby="q-about-privacy" />
+              <p id="q-about-privacy" className="mt-1.5 flex items-start gap-1.5 text-xs text-charcoal/60"><Icon name="shield" className="mt-px h-3.5 w-3.5 shrink-0 text-champagne" />{t('q.aboutPrivacy')}</p>
               {err('about')}
             </Field>
             {minor && (

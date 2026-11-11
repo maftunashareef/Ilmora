@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { formatUzPhone, maskPhone, normalizeUzPhone } from './phone.js'
-import { somToTiyin, tiyinToClickAmount, tiyinToSom } from './money.js'
+import { somToTiyin, tiyinToSom } from './money.js'
 
 describe('normalizeUzPhone', () => {
   it('accepts the common Uzbek input forms and returns E.164', () => {
@@ -31,9 +31,7 @@ describe('money', () => {
     expect(() => somToTiyin('12.345')).toThrow()
     expect(() => somToTiyin('-1')).toThrow()
   })
-  it('renders Click amounts with two decimals and converts back', () => {
-    expect(tiyinToClickAmount(172500000n)).toBe('1725000.00')
-    expect(tiyinToClickAmount(5n)).toBe('0.05')
+  it('converts tiyin back to so\'m', () => {
     expect(tiyinToSom(172500050n)).toBe(1725000.5)
   })
 })

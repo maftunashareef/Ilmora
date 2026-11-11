@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, Field, Input, Notice, PageTitle, Select, Toggle } from '../../components/ui'
+import { PasswordCard } from '../../components/PasswordChange'
 import { LANGS } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { useCurrentStudent } from '../../store/selectors'
@@ -27,6 +28,7 @@ export function StudentProfile() {
           <Button disabled={!dirty || !draft.displayName.trim()} onClick={() => { void updateProfile(student.id, draft).then(() => { setLang(draft.preferredLang); notify(t('common.saved')) }).catch(() => undefined) }}>{t('common.saveChanges')}</Button>
         </div>
       </Card>
+      <PasswordCard className="mt-6 max-w-xl" />
       <Notice tone="info" className="mt-6 max-w-xl text-xs">{t('dash.demoNotice')}</Notice>
     </div>
   )

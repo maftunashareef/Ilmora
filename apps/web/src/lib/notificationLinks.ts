@@ -43,6 +43,16 @@ export function notificationHref(n: Pick<AppNotification, 'type' | 'params'>, ro
       if (role === 'center') return '/center/students'
       if (role === 'student') return '/student/courses'
       return '/admin/people'
+    case 'refund':
+      // A finance admin opens the request in the refunds queue (security review 10.11 №42); the student their subscription.
+      if (role === 'admin') return str(p.queuePath)?.startsWith('/admin/finance') ? str(p.queuePath)! : '/admin/finance'
+      return role === 'student' ? '/student/subscription' : notificationsPath(role)
+    case 'vacancy':
+      // An institution sent its students a vacancy (ТЗ «Вакансии у учреждения», 3.2).
+      return role === 'student' ? '/student/vacancies' : notificationsPath(role)
+    case 'contact':
+      // A company asks for the student's contacts (ТЗ 5.1, 5.3): the student answers in «Запросы от компаний».
+      return role === 'student' ? '/student/requests' : notificationsPath(role)
     case 'subscription':
     case 'payment':
       return role === 'student' ? '/student/subscription' : role === 'admin' ? '/admin/finance' : notificationsPath(role)

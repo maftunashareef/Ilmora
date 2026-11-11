@@ -1,33 +1,19 @@
-import { inflateRawSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { StatsTableDto } from '@ilmora/shared'
 import { registrySearchKey } from '@ilmora/shared'
 import { seedRegistryReference } from '../prisma/registry-reference'
 import { ROLES_KEY } from '../src/common/decorators'
 import { buildXlsx, crc32 } from '../src/common/xlsx'
+import { unzip } from './support/xlsx'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { InstitutionsService } from '../src/modules/institutions/institutions.service'
 import { MinistryRegistryService } from '../src/modules/ministry/ministry-registry.service'
-import { MinistryStatsService } from '../src/modules/ministry/ministry-stats.service'
+import { MinistryStatsService, protectCount } from '../src/modules/ministry/ministry-stats.service'
 import { MinistryController } from '../src/modules/ministry/ministry.controller'
 import { DB_AVAILABLE, TestContext } from './helpers'
 import { notificationsStub } from './stubs'
 
 /** Reads the files of a zip (enough for the xlsx we write: deflate, sizes in the local headers). */
-function unzip(buf: Buffer): Map<string, string> {
-  const out = new Map<string, string>()
-  let p = 0
-  while (buf.readUInt32LE(p) === 0x04034b50) {
-    const size = buf.readUInt32LE(p + 18)
-    const nameLen = buf.readUInt16LE(p + 26)
-    const extra = buf.readUInt16LE(p + 28)
-    const name = buf.subarray(p + 30, p + 30 + nameLen).toString('utf8')
-    const data = buf.subarray(p + 30 + nameLen + extra, p + 30 + nameLen + extra + size)
-    out.set(name, inflateRawSync(data).toString('utf8'))
-    p += 30 + nameLen + extra + size
-  }
-  return out
-}
 
 describe('Excel export', () => {
   it('writes a valid workbook: header, numbers, text — and user text never becomes a formula', () => {
@@ -137,6 +123,10 @@ describe.skipIf(!DB_AVAILABLE)('Ministry figures match a hand-counted data set (
       const { tables } = await stats.all({ year: Y })
       expect(table(tables, 'graduates_by_year').rows.map((r) => [r.year, (r.industry as { ru: string }).ru, r.graduates])).toEqual([[Y, 'IT и связь', 40], [Y, 'Мебель и деревообработка', 10]])
       expect(row(table(tables, 'demand_supply'), 'industry', 'IT и связь')).toMatchObject({ companies: 1, graduates: 40 })
+      // Blocked by the Super Admin: out of the official figures, whatever its status.
+      await ctx.prisma.client.institution.update({ where: { id: s.A.id }, data: { blockedAt: new Date() } })
+      const after = (await stats.all({ year: Y })).tables
+      expect(row(table(after, 'demand_supply'), 'industry', 'IT и связь')).toMatchObject({ students: 30, graduates: 0 })
     })
   })
 
@@ -170,14 +160,22 @@ describe.skipIf(!DB_AVAILABLE)('Ministry figures match a hand-counted data set (
     })
   })
 
-  it('students and applicants in ILMORA, without any personal data', async () => {
+  it('Н-3: a count of people — 0 stays, 1–4 is «<5», the rest is rounded to 5', () => {
+    expect([0, 1, 4, 5, 7, 8, 12, 13, 127].map(protectCount)).toEqual([0, '<5', '<5', 5, 5, 10, 10, 15, 125])
+  })
+
+  it('students and applicants in ILMORA, without any personal data; small counts hidden (Н-3)', async () => {
     const s = await setup('st-students')
     await TenantContext.forTenant(s.tenantId, async () => {
       const { tables } = await stats.all({})
       const st = table(tables, 'ilmora_students')
-      expect(row(st, 'type', 'Техникум')).toMatchObject({ studying: 2, applying: 0, total: 2 })
-      expect(row(st, 'type', 'Вуз')).toMatchObject({ studying: 0, applying: 1, total: 1 })
-      expect(table(tables, 'applicants').rows).toEqual([expect.objectContaining({ year: Y, applicants: 1, industry: expect.objectContaining({ ru: 'IT и связь' }) })])
+      expect(row(st, 'type', 'Техникум')).toMatchObject({ studying: '<5', applying: 0, total: '<5' })
+      expect(row(st, 'type', 'Вуз')).toMatchObject({ studying: 0, applying: '<5', total: '<5' })
+      expect(table(tables, 'applicants').rows).toEqual([expect.objectContaining({ year: Y, applicants: '<5', industry: expect.objectContaining({ ru: 'IT и связь' }) })])
+      // The contract-help figures are about students' money: a total next to its parts would give a hidden part away.
+      expect(table(tables, 'contract_help').rows[0]).toEqual({ total: 0, active: 0, interested: 0, signed: 0, withdrawn: 0 })
+      // Institutions' own figures are not people's records: left exact.
+      expect(row(table(tables, 'students_by_industry'), 'industry', 'IT и связь').students).toEqual(expect.any(Number))
       const json = JSON.stringify(tables)
       expect(json).not.toMatch(/Student \d+|\+9989/)
     })

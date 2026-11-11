@@ -1,20 +1,21 @@
 import { Injectable } from '@nestjs/common'
 import {
-  INSTITUTION_REVIEW_FIELDS, type InstitutionClaimResult, type InstitutionPassportDto, type InstitutionRequiredField,
-  normalizeUzPhone, registrySearchKey, registrySearchText,
+  INSTITUTION_REVIEW_FIELDS, type InstitutionClaimResult, type InstitutionPassportDto, type InstitutionPendingChanges, type InstitutionRequiredField,
+  normalizeUzPhone, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey, registrySearchText,
 } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
-import type { Prisma } from '../../generated/prisma/client'
-import { PrismaService } from '../../infra/prisma/prisma.service'
+import { Prisma } from '../../generated/prisma/client'
+import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { DIRECTION_WITH_MAIN, isUniqueViolation, mainOf, PLACE_SELECT, regionIdByRef, toPlace } from '../registry/registry.mappers'
+import { DIRECTION_WITH_MAIN, isUniqueViolation, mainOf, PLACE_SELECT, regionIdByRef, toPlace, changedKey } from '../registry/registry.mappers'
 import type { ClaimInput, DirectionsInput, InstitutionPatch } from './institutions.schemas'
 
 const PASSPORT_SELECT = {
   id: true, type: true, ownership: true, name: true, nameRu: true, formerName: true, stir: true, address: true, phone: true, email: true, website: true, directorName: true,
   status: true, rejectReason: true, submittedAt: true, approvedAt: true, regionId: true, districtId: true,
+  pendingChanges: true, blockedAt: true, blockReason: true,
   ...PLACE_SELECT,
   directions: { select: { id: true, department: true, studentsCount: true, direction: { select: DIRECTION_WITH_MAIN } }, orderBy: { createdAt: 'asc' } },
   representative: { select: { displayName: true, jobTitle: true } },
@@ -23,6 +24,7 @@ const PASSPORT_SELECT = {
 type PassportRow = Prisma.InstitutionGetPayload<{ select: typeof PASSPORT_SELECT }>
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
+const sortKeys = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))
 /** While the first review is pending the reviewer looks at exactly this version: nothing changes under it. */
 const isLocked = (r: { status: string; approvedAt: Date | null }) => r.status === 'PENDING' && !r.approvedAt
 
@@ -33,11 +35,13 @@ function toPassport(r: PassportRow): InstitutionPassportDto {
     ...toPlace(r),
     address: r.address, phone: r.phone, email: r.email, website: r.website, directorName: r.directorName,
     status: r.status, rejectReason: r.rejectReason, submittedAt: iso(r.submittedAt), approvedAt: iso(r.approvedAt),
-    workspaceOpen: r.approvedAt !== null,
+    workspaceOpen: r.approvedAt !== null && r.blockedAt === null,
     editable: !isLocked(r),
     directions,
     totals: { students: directions.reduce((n, d) => n + d.studentsCount, 0), directions: directions.length },
     representative: { name: r.representative?.displayName ?? '', jobTitle: r.representative?.jobTitle ?? null },
+    pendingChanges: (r.pendingChanges as InstitutionPendingChanges | null) ?? null,
+    blocked: r.blockedAt ? { at: r.blockedAt.toISOString(), reason: r.blockReason } : null,
   }
 }
 
@@ -54,6 +58,21 @@ function missingFields(r: PassportRow, regionHasDistricts: boolean): Institution
   need(r.directions.length > 0, 'directions')
   need(r.representative?.displayName?.trim(), 'representativeName'); need(r.representative?.jobTitle?.trim(), 'representativeJobTitle')
   return missing
+}
+
+/**
+ * The account becomes the representative only if it represents nothing yet (cybersecurity check 9.4, 11.11): two claims
+ * of different STIRs at once both passed the check before the transaction, the second overwrote the link, and the first
+ * institution stayed a DRAFT without a representative — its STIR could be claimed by no one, nor released. The losing
+ * transaction now rolls back whole.
+ */
+/** The record goes back to the registry unclaimed (Super Admin's «Отвязать», or its representative's account deleted — №84). */
+export const unclaimInstitution = (tx: TransactionClient, id: string) =>
+  tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null, claimedAt: null, pendingChanges: Prisma.DbNull } })
+
+const bindRepresentative = async (tx: TransactionClient, userId: string, institutionId: string) => {
+  const bound = await tx.user.updateMany({ where: { id: userId, institutionId: null }, data: { institutionId } })
+  if (bound.count !== 1) throw AppError.conflict('already_has_institution', 'This account already represents an institution')
 }
 
 /**
@@ -78,15 +97,20 @@ export class InstitutionsService {
     if (await this.representedId(actor)) throw AppError.conflict('already_has_institution', 'This account already represents an institution')
     const alreadyClaimed = () => AppError.conflict('already_claimed', 'This institution is already registered. Write to support if it is yours.')
 
-    const existing = await this.prisma.client.institution.findFirst({ where: { stir: input.stir }, select: { id: true, status: true, mergedIntoId: true, representative: { select: { id: true } } } })
+    let existing = await this.prisma.client.institution.findFirst({ where: { stir: input.stir }, select: { id: true, status: true, mergedIntoId: true, representative: { select: { id: true } } } })
+    // A draft its holder has abandoned is released to the next representative of the STIR (security review №17).
+    if (existing?.representative && (await this.isAbandoned(existing.id))) {
+      await this.release(tenantId, existing.id, 'abandoned-draft')
+      existing = await this.prisma.client.institution.findFirst({ where: { id: existing.id }, select: { id: true, status: true, mergedIntoId: true, representative: { select: { id: true } } } })
+    }
     if (existing) {
       if (existing.representative || existing.status !== 'UNCLAIMED' || existing.mergedIntoId) throw alreadyClaimed()
       try {
         await this.prisma.client.$transaction(async (tx) => {
           // Only while still UNCLAIMED: of two people claiming one STIR at once, exactly one wins.
-          const taken = await tx.institution.updateMany({ where: { id: existing.id, status: 'UNCLAIMED' }, data: { status: 'DRAFT' } })
+          const taken = await tx.institution.updateMany({ where: { id: existing.id, status: 'UNCLAIMED' }, data: { status: 'DRAFT', claimedAt: new Date() } })
           if (taken.count !== 1) throw alreadyClaimed()
-          await tx.user.update({ where: { id: actor.id }, data: { institutionId: existing.id } })
+          await bindRepresentative(tx, actor.id, existing.id)
         })
       } catch (err) {
         if (isUniqueViolation(err)) throw alreadyClaimed()
@@ -101,10 +125,10 @@ export class InstitutionsService {
     try {
       createdId = await this.prisma.client.$transaction(async (tx) => {
         const row = await tx.institution.create({
-          data: { tenantId, stir: input.stir, type: input.type!, name: input.name!, searchKey: registrySearchKey(input.name!), searchText: registrySearchText(input.name!), source: 'SELF', status: 'DRAFT', createdById: actor.id },
+          data: { tenantId, stir: input.stir, type: input.type!, name: input.name!, searchKey: registrySearchKey(input.name!), searchText: registrySearchText(input.name!), source: 'SELF', status: 'DRAFT', claimedAt: new Date(), createdById: actor.id },
           select: { id: true },
         })
-        await tx.user.update({ where: { id: actor.id }, data: { institutionId: row.id } })
+        await bindRepresentative(tx, actor.id, row.id)
         return row.id
       })
     } catch (err) {
@@ -115,18 +139,52 @@ export class InstitutionsService {
     return { institution: await this.passportOf(createdId), created: true }
   }
 
+  /**
+   * Abandoned: never approved, still a draft (or rejected) and untouched for REGISTRY_DRAFT_HOLD_DAYS since it was
+   * claimed, created or reviewed.
+   */
+  private async isAbandoned(id: string): Promise<boolean> {
+    const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true, claimedAt: true } })
+    if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
+    // `claimedAt` (Timur's #46); a record claimed before it has the time of that release, or the claim in the journal.
+    const claimed = row.claimedAt ?? (await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'Institution', entityId: id, action: { in: ['institution.claim', 'institution.create'] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }))?.createdAt
+    const last = Math.max(row.createdAt.getTime(), claimed?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
+    return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
+  }
+
+  /**
+   * Releases the record from its representative (the Super Admin, or an abandoned draft): the account no longer
+   * represents it, the record is UNCLAIMED and closed until the next representative's review. Its data stay.
+   */
+  async release(tenantId: string, id: string, reason: string): Promise<void> {
+    const found = await this.prisma.client.institution.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true } })
+    if (!found) throw AppError.notFound('Institution')
+    // A deleted account still holding the record is found too (№84: «Отвязать» answered 404 and the record stayed held).
+    const representative = (await this.prisma.client.user.findFirst({ where: { institutionId: id }, select: { id: true }, includeDeleted: true } as never)) as { id: string } | null
+    if (!representative) throw AppError.conflict('not_claimed', 'Nobody represents this record')
+    const row = { ...found, representative }
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.user.updateMany({ where: { id: representative.id }, data: { institutionId: null }, includeDeleted: true } as never)
+      await unclaimInstitution(tx, id)
+    })
+    await this.audit.record({ action: 'institution.release', entityType: 'Institution', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, reason })
+    await this.notifications.safely('registry.released', () =>
+      this.notifications.notify({ tenantId, userIds: [row.representative!.id], type: 'registry.released', params: { name: row.name }, dedupeKey: `registry-released:${id}:${Date.now()}` }),
+    )
+  }
+
   async passport(actor: RequestActor): Promise<InstitutionPassportDto> {
     return this.passportOf(await this.ownId(actor))
   }
 
   /**
    * Saves the profile in parts (ТЗ 4.2). Locked while the first review is pending. After approval, a change of the
-   * name, STIR, type, ownership or region sends the profile back to review (status PENDING, `approvedAt` stays,
-   * the workspace keeps working); the other fields change at once. Every change is written to the audit log.
+   * name, STIR, type, ownership or region waits in `pendingChanges` for the Super Admin (the approved values stay
+   * live, the workspace keeps working); the other fields change at once. Every change is written to the audit log.
    */
   async update(tenantId: string, actor: RequestActor, input: InstitutionPatch): Promise<InstitutionPassportDto> {
-    const id = await this.ownId(actor)
-    const current = await this.prisma.client.institution.findFirstOrThrow({ where: { id }, select: { ...PASSPORT_SELECT, representative: { select: { id: true, displayName: true, jobTitle: true } } } })
+    const id = await this.editableId(actor)
+    const current = await this.prisma.client.institution.findFirstOrThrow({ where: { id }, select: { ...PASSPORT_SELECT, source: true, representative: { select: { id: true, displayName: true, jobTitle: true } } } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
 
     const data: Prisma.InstitutionUncheckedUpdateInput = {}
@@ -134,7 +192,11 @@ export class InstitutionsService {
     if (input.ownership !== undefined) data.ownership = input.ownership
     // Renamed: the official Russian and former names stay searchable (PR #22, docs/registry/data-model.md «Поиск учреждений»).
     if (input.name !== undefined) Object.assign(data, { name: input.name, searchKey: registrySearchKey(input.name), searchText: registrySearchText(input.name, current.nameRu, current.formerName) })
-    if (input.stir !== undefined) data.stir = input.stir
+    if (input.stir !== undefined) {
+      // The ministry's list fixes the STIR of its records: whoever claimed one cannot swap it for another (security review №18).
+      if (current.source === 'IMPORT' && current.stir && input.stir !== current.stir) throw AppError.conflict('stir_locked', 'The STIR of a record from the ministry list cannot be changed')
+      data.stir = input.stir
+    }
     if (input.address !== undefined) data.address = input.address || null
     if (input.email !== undefined) data.email = input.email || null
     if (input.website !== undefined) data.website = input.website || null
@@ -149,10 +211,33 @@ export class InstitutionsService {
     }
     if (input.regionId !== undefined || input.districtId !== undefined) Object.assign(data, await this.place(current, input))
 
-    const changed = Object.keys(data).filter((k) => k !== 'searchKey' && k !== 'searchText' && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
-    const backToReview = current.approvedAt !== null && current.status !== 'PENDING' && INSTITUTION_REVIEW_FIELDS.some((f) => changed.includes(f))
+    // After approval the reviewed fields wait for the Super Admin in `pendingChanges`; the live record keeps the approved
+    // values, so the ministry's figures, search and the companies see only what was approved (security review №13).
     const now = new Date()
-    if (backToReview) Object.assign(data, { status: 'PENDING', submittedAt: now, rejectReason: null })
+    let backToReview = false
+    let pending: Record<string, unknown> | null = null
+    if (current.approvedAt !== null) {
+      const was = (current.pendingChanges ?? {}) as Record<string, unknown>
+      const next: Record<string, unknown> = { ...was }
+      const d = data as Record<string, unknown>
+      const fields: string[] = [...INSTITUTION_REVIEW_FIELDS, ...('regionId' in d && d.regionId !== current.regionId ? ['districtId'] : [])]
+      for (const f of fields) {
+        if (!(f in d)) continue
+        if (d[f] === (current as Record<string, unknown>)[f]) delete next[f]
+        else next[f] = d[f]
+        delete d[f]
+      }
+      if (!('name' in d)) { delete d.searchKey; delete d.searchText }
+      if (typeof next.stir === 'string' && next.stir !== was.stir && (await this.prisma.client.institution.findFirst({ where: { stir: next.stir, id: { not: id } }, select: { id: true } }))) {
+        throw AppError.conflict('stir_taken', 'Another institution is registered with this STIR')
+      }
+      backToReview = JSON.stringify(sortKeys(next)) !== JSON.stringify(sortKeys(was))
+      if (backToReview) {
+        pending = Object.keys(next).length ? next : null
+        Object.assign(data, { pendingChanges: pending ?? Prisma.DbNull, ...(pending ? { submittedAt: now, rejectReason: null } : {}) })
+      }
+    }
+    const changed = Object.keys(data).filter((k) => !['searchKey', 'searchText', 'pendingChanges', 'submittedAt', 'rejectReason'].includes(k) && (data as Record<string, unknown>)[k] !== (current as Record<string, unknown>)[k])
 
     const rep = input.representative ?? {}
     const repData = { ...(rep.name !== undefined ? { displayName: rep.name } : {}), ...(rep.jobTitle !== undefined ? { jobTitle: rep.jobTitle } : {}) }
@@ -166,15 +251,15 @@ export class InstitutionsService {
       throw err
     }
 
-    if (changed.length || Object.keys(repData).length) {
+    if (changed.length || backToReview || Object.keys(repData).length) {
       const pick = (o: object, keys: string[]) => Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k]]))
       await this.audit.record({
         action: backToReview ? 'institution.update.review' : 'institution.update', entityType: 'Institution', entityId: id,
         before: { ...pick(current, changed), ...(Object.keys(repData).length ? { representative: current.representative } : {}) },
-        after: { ...pick(data, changed), ...(Object.keys(repData).length ? { representative: repData } : {}) },
+        after: { ...pick(data, changed), ...(backToReview ? { pendingChanges: pending } : {}), ...(Object.keys(repData).length ? { representative: repData } : {}) },
       })
     }
-    if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'institution.changed', `inst-review:${id}:${now.getTime()}`)
+    if (backToReview && pending) await this.notifyReviewers(tenantId, id, current.name, 'institution.changed', changedKey('inst', id, now))
     return this.passportOf(id)
   }
 
@@ -183,7 +268,7 @@ export class InstitutionsService {
    * once per institution, with its number of students. Changes at once, also after approval; written to the audit log.
    */
   async setDirections(tenantId: string, actor: RequestActor, input: DirectionsInput): Promise<InstitutionPassportDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.institution.findFirstOrThrow({ where: { id }, select: { status: true, approvedAt: true, directions: { select: { directionId: true, department: true, studentsCount: true } } } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
 
@@ -205,7 +290,7 @@ export class InstitutionsService {
 
   /** ТЗ 4.2 step 5: DRAFT or REJECTED → PENDING when every required field is filled; the Super Admins are notified. */
   async submit(tenantId: string, actor: RequestActor): Promise<InstitutionPassportDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.institution.findFirstOrThrow({ where: { id }, select: PASSPORT_SELECT })
     if (current.status === 'PENDING') throw AppError.conflict('already_submitted', 'The profile is already under review')
     if (current.status === 'APPROVED') throw AppError.conflict('already_approved', 'The profile is approved; changes of key fields go to review by themselves')
@@ -229,6 +314,14 @@ export class InstitutionsService {
   }
 
   /** The institution this account represents; none reads as «not found», never as someone else's. */
+  /** Blocked: the workspace is closed, the profile too — no edits and no new submission (cybersecurity check 9.4, 11.11). */
+  private async editableId(actor: RequestActor): Promise<string> {
+    const id = await this.ownId(actor)
+    const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { blockedAt: true } })
+    if (row?.blockedAt) throw AppError.forbidden('The institution is blocked; write to support')
+    return id
+  }
+
   private async ownId(actor: RequestActor): Promise<string> {
     const id = await this.representedId(actor)
     if (!id) throw AppError.notFound('Institution')

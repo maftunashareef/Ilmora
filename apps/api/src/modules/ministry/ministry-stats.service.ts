@@ -12,6 +12,20 @@ const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / who
 const add = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k) ?? 0) + v)
 const DASH = T('—', '—', '—')
 
+/** Below this, a count of people is shown as «<5» (cybersecurity check 9.4, Н-3). */
+export const SMALL_CELL = 5
+/**
+ * A count of people as the ministry may see it: 0 stays, 1–4 is «<5», 5 and more is rounded to 5. Rounding is what keeps
+ * «<5» hidden: a table of people has its total next to its parts (and the web adds a column up), so with exact parts the
+ * hidden cell would come back by subtraction; with parts and totals rounded independently it stays a range.
+ */
+export const protectCount = (n: number): number | string => (n === 0 ? 0 : n < SMALL_CELL ? `<${SMALL_CELL}` : Math.round(n / SMALL_CELL) * SMALL_CELL)
+/** The columns of a table of people (students' own records, not the figures institutions or companies declare) protected. */
+const protectPeople = (table: StatsTableDto, keys: string[]): StatsTableDto => ({
+  ...table,
+  rows: table.rows.map((r) => ({ ...r, ...Object.fromEntries(keys.map((k) => [k, typeof r[k] === 'number' ? protectCount(r[k] as number) : r[k]])) })),
+})
+
 const TYPE_NAMES: Record<string, L> = {
   TECHNIKUM: T('Texnikum', 'Техникум', 'Technikum'), COLLEGE: T('Kollej', 'Колледж', 'College'), LYCEUM: T('Litsey', 'Лицей', 'Lyceum'),
   SCHOOL: T('Maktab', 'Школа', 'School'), UNIVERSITY: T('Oliy ta’lim muassasasi', 'Вуз', 'University'), TRAINING_CENTER: T('Öquv markazi', 'Учебный центр', 'Training center'),
@@ -26,7 +40,7 @@ const COLS = {
 }
 
 /** Where an institution is counted officially: approved once, not merged, not a student-added record (ТЗ 7). */
-const OFFICIAL: Prisma.InstitutionWhereInput = { approvedAt: { not: null }, mergedIntoId: null, source: { not: 'STUDENT' } }
+const OFFICIAL: Prisma.InstitutionWhereInput = { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null, source: { not: 'STUDENT' } }
 
 type Ctx = {
   f: MinistryStatsFilters & { regionDbId?: string }
@@ -37,7 +51,8 @@ type Ctx = {
 }
 
 /**
- * The ministry's figures (ТЗ 7.3): counts only — no student, representative or contact ever leaves here. Official
+ * The ministry's figures (ТЗ 7.3): counts only — no student, representative or contact ever leaves here, and a count of
+ * students' own records is protected (`protectCount`: «<5», the rest rounded to 5; the Excel export reads the same tables). Official
  * figures take approved institutions only; student-added records are a table of their own. Filters: region (id or
  * the web app's slug), institution type, ownership, year (of graduation, of a training request, of enrolment).
  * Computed on request from a few grouped reads (600+ institutions, 10 000 students: tens of milliseconds).
@@ -109,7 +124,7 @@ export class MinistryStatsService {
     const count = (where: Prisma.InstitutionWhereInput) => this.prisma.client.institution.count({ where: { ...base, mergedIntoId: null, ...where } })
     const [inList, registered, pending, approved, rejected, approvedSelf] = await Promise.all([
       count({ source: 'IMPORT' }), count({ source: 'IMPORT', status: { not: 'UNCLAIMED' } }), count({ source: { not: 'STUDENT' }, status: 'PENDING' }),
-      count({ source: { not: 'STUDENT' }, approvedAt: { not: null } }), count({ source: { not: 'STUDENT' }, status: 'REJECTED' }), count({ source: 'SELF', approvedAt: { not: null } }),
+      count({ source: { not: 'STUDENT' }, approvedAt: { not: null }, blockedAt: null }), count({ source: { not: 'STUDENT' }, status: 'REJECTED' }), count({ source: 'SELF', approvedAt: { not: null }, blockedAt: null }),
     ])
     return {
       key: 'coverage', title: T('Qamrov', 'Охват реестра', 'Registry coverage'),
@@ -222,38 +237,45 @@ export class MinistryStatsService {
     }).filter((r) => r.total > 0)
     const none = groups.filter((g) => !g.institutionType).reduce((n, g) => n + g._count._all, 0)
     if (none) rows.push({ type: T('Körsatilmagan', 'Не указан', 'Not given'), studying: 0, applying: none, total: none })
-    return {
+    return protectPeople({
       key: 'ilmora_students', title: T('ILMORAdagi talabalar', 'Студенты в ILMORA', 'Students in ILMORA'),
       columns: [COLS.type, col('studying', T('Öqiydi', 'Учатся', 'Studying')), col('applying', T('Kirmoqçi', 'Поступают', 'Applying')), col('total', T('Jami', 'Всего', 'Total'))],
       rows,
-    }
+    }, ['studying', 'applying', 'total'])
   }
 
-  /** ТЗ 7.3 «Абитуриенты»: who wants to enrol, by industry and year. */
+  /**
+   * ТЗ 7.3 «Абитуриенты»: who wants to enrol, by industry and year. Counted in the database by year and direction (a
+   * few hundred groups whatever the number of students), then folded into industries here.
+   */
   private async applicants(ctx: Ctx): Promise<StatsTableDto> {
-    const rows0 = await this.prisma.client.studentProfile.findMany({ where: { ...this.studentWhere(ctx), mode: 'APPLYING', ...(ctx.f.year ? { enrollYear: ctx.f.year } : {}) }, select: { directionId: true, enrollYear: true } })
+    const groups = await this.prisma.client.studentProfile.groupBy({
+      by: ['enrollYear', 'directionId'],
+      where: { ...this.studentWhere(ctx), mode: 'APPLYING', ...(ctx.f.year ? { enrollYear: ctx.f.year } : {}) },
+      _count: { _all: true },
+    })
     const by = new Map<string, number>()
-    for (const p of rows0) add(by, `${p.enrollYear ?? ''}|${p.directionId ? this.industryOf(ctx, p.directionId) : ''}`, 1)
+    for (const g of groups) add(by, `${g.enrollYear ?? ''}|${g.directionId ? this.industryOf(ctx, g.directionId) : ''}`, g._count._all)
     const order = new Map(ctx.industries.map((i) => [i.id, i]))
     const rows = [...by.entries()]
       .map(([k, applicants]) => { const [year, ind] = k.split('|'); return { year: year ? Number(year) : null, industry: order.get(ind)?.name ?? DASH, applicants, sort: order.get(ind)?.sortOrder ?? 99 } })
       .sort((a, b) => (a.year ?? 0) - (b.year ?? 0) || a.sort - b.sort)
       .map(({ sort: _sort, ...r }) => r)
-    return {
+    return protectPeople({
       key: 'applicants', title: T('Abituriyentlar', 'Абитуриенты', 'Applicants'),
       columns: [col('year', T('Kiriş yili', 'Год поступления', 'Enrolment year')), COLS.industry, col('applicants', T('Abituriyentlar', 'Абитуриентов', 'Applicants'))],
       rows,
-    }
+    }, ['applicants'])
   }
 
   private async contractHelp(ctx: Ctx): Promise<StatsTableDto> {
     const groups = await this.prisma.client.contractHelpRequest.groupBy({ by: ['status'], where: { user: { studentProfile: { is: this.studentWhere(ctx) } } }, _count: { _all: true } })
     const of = (s: string) => groups.find((g) => g.status === s)?._count._all ?? 0
-    return {
+    return protectPeople({
       key: 'contract_help', title: T('Kontrakt tölovida yordam', 'Помощь с оплатой контракта', 'Help with the tuition contract'),
       columns: [col('total', T('Arizalar', 'Заявок', 'Requests')), col('active', T('Faol', 'Активных', 'Active')), col('interested', T('Kompaniyalar qiziqqan', 'С интересом компаний', 'With company interest')), col('signed', T('Şartnoma tuzilgan', 'Договор заключён', 'Contract signed')), col('withdrawn', T('Qaytarib olingan', 'Отозвано', 'Withdrawn'))],
       rows: [{ total: groups.reduce((n, g) => n + g._count._all, 0), active: of('ACTIVE'), interested: of('INTERESTED'), signed: of('SIGNED'), withdrawn: of('WITHDRAWN') }],
-    }
+    }, ['total', 'active', 'interested', 'signed', 'withdrawn'])
   }
 
   private async vacancies(ctx: Ctx): Promise<StatsTableDto> {
@@ -262,17 +284,19 @@ export class MinistryStatsService {
       this.prisma.client.vacancy.findMany({ where, select: { kind: true, status: true, seats: true } }),
       this.prisma.client.vacancyApplication.findMany({ where: { vacancy: where }, select: { status: true, vacancy: { select: { kind: true } } } }),
     ])
-    const rows = (['PRACTICE', 'INTERNSHIP'] as const).map((kind) => ({
-      kind: kind === 'PRACTICE' ? T('Amaliyot', 'Практика', 'Practice') : T('Stajirovka', 'Стажировка', 'Internship'),
+    const KIND_NAMES = { PRACTICE: T('Amaliyot', 'Практика', 'Practice'), INTERNSHIP: T('Stajirovka', 'Стажировка', 'Internship'), JOB: T('Iş', 'Работа', 'Job') }
+    const rows = (['PRACTICE', 'INTERNSHIP', 'JOB'] as const).map((kind) => ({
+      kind: KIND_NAMES[kind],
       vacancies: vac.filter((v) => v.kind === kind).length, open: vac.filter((v) => v.kind === kind && v.status === 'OPEN').length,
       seats: vac.filter((v) => v.kind === kind).reduce((n, v) => n + v.seats, 0),
       applications: apps.filter((a) => a.vacancy.kind === kind).length, invited: apps.filter((a) => a.vacancy.kind === kind && a.status === 'INVITED').length,
     }))
-    return {
-      key: 'vacancies', title: T('Amaliyot va stajirovkalar', 'Практика и стажировки', 'Practice and internships'),
+    // Vacancies and seats are the companies' figures; applications and invitations are students.
+    return protectPeople({
+      key: 'vacancies', title: T('Vakansiyalar', 'Вакансии', 'Vacancies'),
       columns: [col('kind', T('Turi', 'Вид', 'Kind'), false), col('vacancies', T('Vakansiyalar', 'Вакансий', 'Vacancies')), col('open', T('Oçiq', 'Открытых', 'Open')), col('seats', T('Örinlar', 'Мест', 'Seats')), col('applications', T('Arizalar', 'Откликов', 'Applications')), col('invited', T('Taklif qilingan', 'Приглашено', 'Invited'))],
       rows,
-    }
+    }, ['applications', 'invited'])
   }
 
   /** ТЗ 7: records students added — shown apart, never in the official figures. */
@@ -356,11 +380,11 @@ export class MinistryStatsService {
    * automatic scope covers only top-level queries of tenant models.
    */
   private companyWhere(ctx: Ctx): Prisma.CompanyWhereInput {
-    return { tenantId: TenantContext.requireTenantId(), approvedAt: { not: null }, ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}) }
+    return { tenantId: TenantContext.requireTenantId(), approvedAt: { not: null }, blockedAt: null, ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}) }
   }
 
   private requestWhere(ctx: Ctx): Prisma.TrainingRequestWhereInput {
-    return { company: { approvedAt: { not: null } }, ...(ctx.f.regionDbId ? { OR: [{ regionId: ctx.f.regionDbId }, { regionId: null, company: { regionId: ctx.f.regionDbId } }] } : {}), ...(ctx.f.year ? { byYear: ctx.f.year } : {}) }
+    return { company: { approvedAt: { not: null }, blockedAt: null }, ...(ctx.f.regionDbId ? { OR: [{ regionId: ctx.f.regionDbId }, { regionId: null, company: { regionId: ctx.f.regionDbId } }] } : {}), ...(ctx.f.year ? { byYear: ctx.f.year } : {}) }
   }
 
   private studentWhere(ctx: Ctx): Prisma.StudentProfileWhereInput {

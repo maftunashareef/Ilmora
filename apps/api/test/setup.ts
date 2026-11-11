@@ -9,6 +9,9 @@ process.env.COOKIE_SECURE = 'false'
 process.env.OTP_DEV_ECHO = 'true'
 process.env.SMS_PROVIDER = 'console'
 process.env.LOG_LEVEL = 'silent'
+// A connected Payme (test key): checkout refuses a provider that is not connected (Н12).
+process.env.PAYME_MERCHANT_ID ??= 'test-merchant'
+process.env.PAYME_TEST_KEY ??= 'test-payme-key'
 ;(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function toJSON(this: bigint) {
   return this.toString()
 }

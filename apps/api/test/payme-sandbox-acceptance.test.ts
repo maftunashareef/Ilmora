@@ -2,7 +2,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { useBodyParsing } from '../src/body-parsing'
+import { configureBodyParsing } from '../src/body-parsing'
 import { ENV, type Env } from '../src/config/env'
 import { PrismaService } from '../src/infra/prisma/prisma.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
@@ -69,7 +69,7 @@ describe.skipIf(!DB_AVAILABLE)('Payme sandbox checklist over HTTP', () => {
       ],
     }).compile()
     app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true, logger: false })
-    useBodyParsing(app)
+    configureBodyParsing(app)
     await app.init()
   })
 

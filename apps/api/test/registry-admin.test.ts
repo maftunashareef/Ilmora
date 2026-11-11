@@ -140,6 +140,37 @@ describe.skipIf(!DB_AVAILABLE)('Reference data for the Super Admin (ТЗ 9.2)', 
     })
   })
 
+  it('search shows the ministry list, approved and student-added records — not a self-registered name nobody approved (security review №45)', async () => {
+    const s = await setup('ra-search')
+    await s.inT(async () => {
+      const db = ctx.prisma.client
+      const imported = await s.inst('Qidiruv texnikumi Bir', 'IMPORT')
+      const student = await s.inst('Qidiruv texnikumi Ikki', 'STUDENT')
+      const approved = await db.institution.create({ data: { tenantId: s.tenantId, type: 'TECHNIKUM', name: 'Qidiruv texnikumi Uç', searchKey: registrySearchKey('Qidiruv texnikumi Uç'), source: 'SELF', status: 'APPROVED', approvedAt: new Date(), regionId: s.tashkent.id } })
+      for (const status of ['DRAFT', 'PENDING', 'REJECTED'] as const) {
+        await db.institution.create({ data: { tenantId: s.tenantId, type: 'TECHNIKUM', name: `Qidiruv texnikumi ${status}`, searchKey: registrySearchKey(`Qidiruv texnikumi ${status}`), source: 'SELF', status, regionId: s.tashkent.id } })
+      }
+      expect((await registry.searchInstitutions({ q: 'qidiruv texnikumi' })).map((i) => i.id).sort()).toEqual([imported.id, student.id, approved.id].sort())
+    })
+  })
+
+  it('a student adds at most 3 institutions and 20 directions a day — the questionnaire path included (security review №44)', async () => {
+    const s = await setup('ra-limit')
+    await s.inT(async () => {
+      const me = { id: (await ctx.makeStudent(s.tenantId)).id, roles: ['STUDENT'] } as RequestActor
+      for (let i = 1; i <= 3; i++) await registry.addStudentInstitution(s.tenantId, me, { name: `Limit texnikumi ${i}`, type: 'TECHNIKUM', regionId: s.tashkent.id })
+      // An existing name is not a new entry and does not count.
+      expect(await registry.addStudentInstitution(s.tenantId, me, { name: 'Limit texnikumi 1', type: 'TECHNIKUM', regionId: s.tashkent.id })).toMatchObject({ created: false })
+      await expect(registry.addStudentInstitution(s.tenantId, me, { name: 'Limit texnikumi 4', type: 'TECHNIKUM', regionId: s.tashkent.id })).rejects.toMatchObject({ code: 'rate_limited' })
+      for (let i = 1; i <= 20; i++) await registry.addDirection(s.tenantId, me, { name: `Limit yönaliş ${i}`, industryId: s.it.id })
+      await expect(registry.addDirection(s.tenantId, me, { name: 'Limit yönaliş 21', industryId: s.it.id })).rejects.toMatchObject({ code: 'rate_limited' })
+      // Saves sent at once do not slip past the limit together (review 11.11): one account, 6 at once, 3 a day.
+      const other = { id: (await ctx.prisma.client.user.create({ data: { tenantId: s.tenantId, phoneE164: '+998907770011', displayName: 'Racer', roles: ['STUDENT'] } })).id, roles: ['STUDENT'] } as RequestActor
+      const burst = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => registry.addStudentInstitution(s.tenantId, other, { name: `Poyga texnikumi ${i}`, type: 'TECHNIKUM', regionId: s.tashkent.id })))
+      expect(burst.filter((r) => r.status === 'fulfilled')).toHaveLength(3)
+    })
+  })
+
   it('a student-added institution merges into the registry record: students move and are confirmed anew; adding it again finds the target', async () => {
     const s = await setup('ra-inst')
     await s.inT(async () => {

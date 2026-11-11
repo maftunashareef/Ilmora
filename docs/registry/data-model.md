@@ -3,7 +3,10 @@
 Модель для ТЗ «ILMORA — реестр учреждений, компании, студенты» (9 ноября 2026). Схема —
 `apps/api/prisma/schema.prisma`, раздел «Registry», миграции `20261113000000_registry_institutions_companies_students`
 `20261114000000_institution_names_region_slug` (названия техникумов на русском и прежние, район текстом, slug региона)
-и `20261115000000_student_contact_phone` (контактный телефон студента).
+`20261115000000_student_contact_phone` (контактный телефон студента) и
+`20261116000000_registry_pending_changes_block_contact_snapshot` (доработки по проверке безопасности 10.11: правка
+после одобрения на проверке, блокировка, контакты на момент согласия, занятие записи, официальное название,
+временный пароль).
 Старая часть ILMORA (центры, курсы, подписки, оплата) не менялась.
 
 > **Схему и миграции меняет только чат БД (дата-инженер).** Нужно поле или таблица — через него. Остальные чаты
@@ -34,8 +37,9 @@
 | Одна открытая заявка студента на помощь с контрактом | `ContractHelpRequest.openKey` — уникален | `openKey = userId`, пока заявка `ACTIVE` или `INTERESTED`; при отзыве или договоре — `null` |
 | Один отклик компании на объявление | `AnnouncementResponse (announcementId, companyId)` | |
 | Один отклик учреждения на заявку | `TrainingOffer (requestId, institutionId)` | |
-| Один запрос контакта на пару компания–студент | `ContactRequest (companyId, userId)` | |
+| Один запрос контакта на канал: именные карточки (объявление о выпуске и раздел «Студенты») — один на пару компания–студент, анонимная карточка — на пару компания–карточка | частичные индексы `ContactRequest_named_once (companyId, userId) WHERE source IN ('GRADUATE', 'STUDENTS')` (миграция `20261121000100`, заменил `ContactRequest_graduate_once`) и `ContactRequest_contract_help_once (companyId, contractHelpId) WHERE source = 'CONTRACT_HELP'` (`20261119000000`); только в SQL | Именные каналы общие: запросил в «Студентах» — в объявлении показать статус этого запроса, не новую кнопку, и наоборот. Анонимная карточка — отдельно: 409 на ней не выдаёт, что это тот же человек (проверка 11.11, №126). Запрос с карточки код всегда создаёт с `contractHelpId`: без него индекс карточки не сработает |
 | Один отклик студента на вакансию | `VacancyApplication (vacancyId, userId)` | |
+| Вакансия доходит до студента от учреждения один раз | `VacancyBroadcastRecipient (vacancyId, userId)` | рассылка пачками: `createMany({ skipDuplicates: true })` — повтор пачки и повторная рассылка той же вакансии никого не задевают |
 
 `P2002` без перехвата уже превращается в 409 `conflict` (`app-exception.filter.ts`); для понятного текста
 перехватывайте его в сервисе, как `login_taken` в `account.service.ts`.
@@ -60,18 +64,30 @@
 **Справочники**
 - `Industry` — отрасль: `slug`, `name {uz,ru,en}`, `sortOrder`, `isActive`.
 - `Region` — 14 регионов, `code` = СОАТО, `slug` — id региона на сайте (`UZ_REGIONS`: `andijan`, `tashkent-city`…).
-  Сайт присылает slug — регион в базе ищите по `slug`. `District` — районы, **только официальные коды** (из
-  справочника министерства или stat.uz), руками не вводятся.
+  Сайт присылает slug — регион в базе ищите по `slug`. `District` — 206 районов и городов районного значения,
+  `code` = СОАТО (7 цифр), `name {uz,ru,en}`; **только из официального списка** (открытые данные Агентства
+  статистики), руками не вводятся. Районы региона: `GET /registry/districts?regionId=<id или slug>`.
 - `Direction` — `name`, `searchKey`, `industryId`, `origin` (`OFFICIAL` / `USER` / `ADMIN`), `code` (классификатор),
   `mergedIntoId`, `createdById`.
 
 **Учреждение** — `Institution`: `type` (`TECHNIKUM` `COLLEGE` `LYCEUM` `SCHOOL` `UNIVERSITY` `TRAINING_CENTER`),
 `ownership` (`STATE` / `PRIVATE`), `name`, `nameRu`, `formerName` (название до переименования 2025 года),
 `searchKey`, `searchText`, `stir`, `parentId` (головная организация филиала), `regionId`, `districtId`,
-`districtName` (район текстом из официального списка, пока нет кодов СОАТО районов), `address`, `phone`, `email`, `website`, `directorName`, `status`, `source`
+`districtName` (район текстом, как он записан в официальном списке техникумов; рядом с `districtId`), `address`, `phone`, `email`, `website`, `directorName`, `status`, `source`
 (`IMPORT` / `SELF` / `STUDENT`), `submittedAt`, `approvedAt`, `reviewedAt`, `reviewedById`, `rejectReason`,
 `centerId` (связь с учебным центром ILMORA), `mergedIntoId`. Представитель — `User` с `institutionId` и ролью
 `INSTITUTION_ADMIN`; должность — `User.jobTitle`.
+- `officialName` — название из официального списка министерства. Ставит импорт (`prisma/import-technikums.ts`), у
+  занятых записей тоже; представитель его не меняет. Проверяющий видит его рядом с `name`.
+- `claimedAt` — когда представитель занял запись. Черновик, не отправленный на проверку за N дней от этой даты,
+  освобождается. У записей, занятых до 11.11, — дата релиза миграции. **У компании — то же поле** (`Company.claimedAt`,
+  миграция `20261122000100`, №83): срок «брошенного» черновика — от самой поздней из дат создания, занятия и решения
+  проверки; при «Отвязать» — очистить. У компаний, занятых до миграции, — дата создания записи (так срок и считался).
+- `pendingChanges` (Json) — правка ключевых полей **после одобрения**: `{ name?, stir?, type?, ownership?, regionId?,
+  districtId? }`. Основные поля до решения Super Admin не меняются; одобрение переносит правку в них, отказ —
+  очищает. СТИР внутри `pendingChanges` уникальный индекс не держит: при одобрении API проверяет, что он свободен (иначе 409).
+- `blockedAt`, `blockReason`, `blockedById` — блокировка Super Admin: кабинет закрыт, в цифрах и поиске записи нет.
+  Это не статус проверки: `status` остаётся каким был.
 - `InstitutionDirection` — направление учреждения: `directionId`, `department` (отделение), `studentsCount`.
   «Всего студентов» = сумма `studentsCount`.
 
@@ -83,12 +99,16 @@ UNCLAIMED (импорт или добавлено студентом) → DRAFT 
 APPROVED → правка названия / СТИР / типа / собственности / региона → PENDING (approvedAt остаётся, кабинет работает)
 ```
 
-Кабинет открыт, если `approvedAt` не пустой. В официальные цифры министерства идут только `APPROVED`.
+Кабинет открыт, если `approvedAt` не пустой и `blockedAt` пустой. В официальные цифры министерства идут только
+`APPROVED` без блокировки (`blockedAt IS NULL`), с основными полями — не с `pendingChanges`. Правка после одобрения
+(схема выше) с 11.11 лежит в `pendingChanges`, а не меняет запись сразу.
 
 **Компания** — `Company`: `stir`, `name`, `searchKey`, `regionId`, `districtId`, `address`, `website`, `about`,
 `certificateFileKey` (свидетельство в закрытом бакете `ilmora-docs`), `status` (`DRAFT` → `PENDING` → `APPROVED` /
 `REJECTED`), `submittedAt`, `approvedAt`, `reviewedAt`, `reviewedById`, `rejectReason`. Отрасли — `CompanyIndustry`,
 направления — `CompanyDirection`. Представитель — `User.companyId`, роль `COMPANY_ADMIN`.
+- `pendingChanges` (Json) — правка после одобрения: `{ name?, stir?, industryIds? }`, смена отраслей тоже идёт на
+  проверку. `blockedAt`, `blockReason`, `blockedById` — блокировка, как у учреждения.
 
 **Студент**
 - ФИО и email — в `User` (`displayName`, `email`). `User.phoneE164` — **номер для входа по SMS**, уникальный; анкета
@@ -102,9 +122,16 @@ APPROVED → правка названия / СТИР / типа / собств�
   `studyConfirmation` (`NONE` / `PENDING` / `CONFIRMED` / `REJECTED`), `studyConfirmedAt`, `studyConfirmedById`.
 - `StudentConsent` — **журнал согласий**, строки не перезаписываются. `kind`: `GRADUATE_CARD` (показ в объявлениях),
   `CONTRACT_HELP_CARD` (обезличенная карточка), `COMPANY_CONTACTS` (контакты конкретной компании, `companyId`),
-  `PARENT_CONSENT` (согласие родителя несовершеннолетнего). Поля: `textVersion`, `givenAt`, `revokedAt`, `ip`.
+  `PARENT_CONSENT` (согласие родителя несовершеннолетнего), `INDUSTRY_CARD` (показ карточки компаниям своей отрасли в
+  их разделе «Студенты» — отдельная цель, из других согласий не следует). Поля: `textVersion`, `givenAt`, `revokedAt`, `ip`.
   Отзыв — поставить `revokedAt`; повторное согласие — новая строка. Действующее согласие — последняя строка без
-  `revokedAt`.
+  `revokedAt`. База держит два правила (миграция `20261120000000`):
+  - **одно действующее согласие каждого вида** — частичный уникальный индекс
+    `StudentConsent_one_active_per_kind (userId, kind) WHERE revokedAt IS NULL AND companyId IS NULL`; второе — P2002.
+    `COMPANY_CONTACTS` сюда не входит: контакты одной компании открываются по каждому принятому запросу;
+  - **журнал переживает аккаунт** — связь с `User` `ON DELETE RESTRICT`: аккаунты удаляются мягко (`deletedAt`), полное
+    удаление пользователя с согласиями база не даст (ТЗ 8: историю согласий и отзывов хранить). Очистка демо-данных
+    удаляет согласия демо-студентов сама.
 - `StudentCertificate` — `title`, `issuer`, `issuedAt`, `fileKey` (бакет `ilmora-docs`), `contentType`, `sizeBytes`.
 
 **Связи**
@@ -120,12 +147,34 @@ APPROVED → правка названия / СТИР / типа / собств�
 - `ContractHelpRequest` — помощь с контрактом: `motivation`, `yearsToWork`, `workRegionId` (пусто = любой),
   `status` (`ACTIVE` → `INTERESTED` → `SIGNED` / `WITHDRAWN`), `openKey`, `signedWithCompanyId`, `signedAt`,
   `withdrawnAt`.
-- `ContactRequest` — запрос контакта: `companyId`, `userId`, `source` (`GRADUATE` / `CONTRACT_HELP`),
-  `contractHelpId` или `announcementId`, `status`. При принятии — строка `COMPANY_CONTACTS` в `StudentConsent`.
-- `Vacancy` — практика или стажировка: `kind`, `title`, `regionId`, `districtId`, `address`, `format`
-  (`ONSITE` / `REMOTE` / `HYBRID`), `paid`, `stipendMinor`, `duration`, `seats`, `requirements`, `deadline`,
-  `status` (`OPEN` / `CLOSED`); направления — `VacancyDirection`. `VacancyApplication` — отклик: `note`, `status`
-  (`NEW` → `VIEWED` → `INVITED` / `REJECTED`).
+- `ContactRequest` — запрос контакта: `companyId`, `userId`, `source` (`GRADUATE` / `CONTRACT_HELP` / `STUDENTS` —
+  из раздела «Студенты» компании),
+  `contractHelpId` или `announcementId`, `status`. При принятии — строка `COMPANY_CONTACTS` в `StudentConsent` и
+  копия того, что студент открыл: `sharedName`, `sharedPhone`, `sharedEmail`. Компания видит эту копию, а не
+  текущие контакты (сменил номер — новый компании не уходит). **Это персональные данные:** отозвал согласие или
+  запрос — копию стереть. Пустые поля у старых записей — API показывает текущие контакты, как раньше.
+- `Vacancy` — практика, стажировка или работа: `kind` (`PRACTICE` / `INTERNSHIP` / `JOB`), `title`, `regionId`,
+  `districtId`, `address`, `format` (`ONSITE` / `REMOTE` / `HYBRID`), `paid`, `stipendMinor` (стипендия в месяц —
+  практика и стажировка), `salaryFromMinor` / `salaryToMinor` (зарплата в месяц «от–до» — только `JOB`; одна сумма —
+  только «от»), `duration`, `seats`, `requirements`, `deadline`, `status` (`OPEN` / `CLOSED`); направления —
+  `VacancyDirection`. Проверки в базе: `JOB` всегда оплачивается (`Vacancy_job_paid_check`); зарплата только у `JOB`,
+  стипендии у `JOB` нет (`Vacancy_pay_by_kind_check`); зарплата > 0, «до» не меньше «от» и без «от» не бывает
+  (`Vacancy_salary_check`). У `JOB` ещё `schedule` — график (`FULL_TIME` / `PART_TIME` / `SHIFT` / `FLEXIBLE`; на месте
+  или удалённо — это `format`) и `experience` — требуемый опыт (`NONE` / `UP_TO_1` / `ONE_TO_3` / `OVER_3`); у практики
+  и стажировки их нет (`Vacancy_job_terms_check`, миграция `20261122000000`). Для `JOB` оба обязательны в API; база
+  станет требовать их, когда код начнёт их заполнять (отдельной миграцией). `VacancyApplication` — отклик: `note`, `status`
+  (`NEW` → `VIEWED` → `INVITED` / `REJECTED`), копия контактов на момент отклика `sharedName`, `sharedPhone`,
+  `sharedEmail` (те же правила, что у `ContactRequest`).
+- `VacancyBroadcast` — рассылка вакансии учреждением своим подтверждённым студентам (ТЗ «Студенты у компании»,
+  3.2), строка журнала: `vacancyId`, `institutionId`, `courses` (1–11, хотя бы один — CHECK
+  `VacancyBroadcast_courses_check`), `createdById`, `recipientsCount` (≥ 0), `finishedAt` (ставит очередь после
+  последней пачки), `createdAt`; направления — `VacancyBroadcastDirection`. Лимит в день считать по
+  `(tenantId, institutionId, createdAt)` — индекс есть. `VacancyBroadcastRecipient` — кому дошла: `broadcastId`,
+  `vacancyId`, `userId`; связь `(broadcastId, vacancyId)` → рассылка, так что вакансия у получателя всегда та же,
+  что у рассылки. Уведомление студенту — обычное `Notification`.
+- Подбор студентов для раздела «Студенты» новых индексов не требует: на нагрузочной копии (200 000 студентов,
+  96 000 подтверждённых) блоки учреждений компании — 0,16 с, страница студентов одного учреждения — 1,4 мс,
+  предпросмотр рассылки — 0,5 мс на существующих индексах.
 - Ответы на отклики и запросы (`MatchStatus`): `PENDING`, `ACCEPTED`, `DECLINED`, `WITHDRAWN`.
 
 **Роли и вход**
@@ -133,18 +182,26 @@ APPROVED → правка названия / СТИР / типа / собств�
 - Второй фактор (TOTP) для министерства и модераторов: `User.totpSecretEnc` (секрет, зашифрованный API — в открытом
   виде не хранить), `User.totpEnabledAt`; резервные коды — `TotpRecoveryCode` (`codeHash`, `usedAt`), 10 штук,
   каждый одноразовый.
+- `User.passwordIssuedAt` — пароль выдал Super Admin (аккаунт министерства, сброс), владелец его ещё не сменил:
+  при входе — смена пароля. Сменил — поле пустое. У старых аккаунтов пусто (на переходное время API смотрит журнал).
 
 ## Справочники и тестовые данные
 
-- **Отрасли и регионы** — `REGISTRY_INDUSTRIES`, `REGISTRY_REGIONS` в `packages/shared/src/registry.ts`. В базу их
-  кладёт `prisma/seed.ts` (в любом режиме) и отдельная команда, безопасная для боевого сервера:
+- **Отрасли, регионы и районы** — `REGISTRY_INDUSTRIES`, `REGISTRY_REGIONS`, `REGISTRY_DISTRICTS` в
+  `packages/shared/src/registry.ts`. В базу их кладёт `prisma/seed.ts` (в любом режиме) и отдельная команда,
+  безопасная для боевого сервера:
   ```bash
   npm run prisma:seed:registry -w apps/api
   # на сервере, один раз после релиза с этой миграцией:
   sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate npx tsx prisma/seed-registry.ts
   ```
-  Существующие строки не перезаписываются (правки Super Admin сохраняются). Коды СОАТО регионов сверить со
-  справочником министерства.
+  Существующие строки не перезаписываются (правки Super Admin сохраняются).
+- **Районы — коды СОАТО**: открытые данные Агентства статистики (SIAT, `api.siat.stat.uz`, набор 1252, обновлён
+  30.06.2026; те же 206 кодов и названий — в наборах 1346, 2853, 2161, 3197, 2152), файл
+  `packages/shared/src/districts.data.ts`, создан из файла агентства, а не набран руками. Коды 14 регионов
+  сверены с теми же данными. Узбекские названия — в алфавите ILMORA (Ö Ğ Ş Ç ’), русские и английские — как
+  опубликованы. Когда у региона есть районы, анкета учреждения требует район (`districtId`; у записи из списка
+  техникумов хватает `districtName`) — сайту нужен выбор района из `GET /registry/districts`.
 - **Техникумы — официальный список** (738: 686 государственных, 52 частных; stat.edu.uz, выгрузка 9 ноября 2026) —
   `TECHNIKUMS` в `packages/shared/src/technikums.data.ts`. В базу их кладёт импорт с **теми же id, что на сайте**
   (`pe-<id в prof.edu.uz>`), так что выбор техникума на сайте = запись в базе:
@@ -156,7 +213,12 @@ APPROVED → правка названия / СТИР / типа / собств�
   ```
   Новые — `UNCLAIMED`, `source = IMPORT`, тип `TECHNIKUM`, СТИР = ИНН из списка (есть у 634). Повторный запуск
   безопасен: незанятые записи догоняют список (пустое в списке не стирает заполненное), у занятых (представитель уже
-  заполняет) меняются только пустые `nameRu`, `formerName`, `districtName`. СТИР, который уже есть у другой записи
+  заполняет) меняются только пустые `nameRu`, `formerName`, `districtName`, `districtId`. С `--apply` импорт сначала
+  кладёт справочники, в том числе районы. Район из списка (текст) связывается с районом СОАТО того же региона
+  (`matchDistrict`: то же название на любом языке; x/h, q/k; инициал — «Sh.Rashidov», «M.Ulugbek», «Q-bozor»;
+  другая гласная — «Toyloq» = «Tayloq»); город и район с одним именем не путаются, неуверенное совпадение не
+  связывается, а выводится в отчёте. Из 634 записей с районом связаны 632; «Uchquduq shahri» (2) — город внутри
+  Uchquduq tumani, не отдельный район СОАТО, остаётся текстом. СТИР, который уже есть у другой записи
   (учреждение зарегистрировалось само), не пишется — импорт выводит такие пары, их сливают руками. Запись с тем же
   названием в том же регионе (добавил студент) импорт тоже выводит — её Super Admin сливает в официальную.
 - **Тестовые данные** — 600 учреждений, 10 000 студентов, 80 компаний, объявления, заявки, вакансии. Только
@@ -168,6 +230,16 @@ APPROVED → правка названия / СТИР / типа / собств�
   тестовых аккаунтов нет (без пароля).
 - **Скорость**: на этих данных типовые запросы министерства (учреждения по регионам и типам, студенты по отраслям,
   выпуск против спроса, карточки строки объявления) выполняются за 1–4 мс.
+- **Прогон цифр министерства** (ТЗ: «600+ учреждений и 10 000 студентов: дашборд меньше 2 секунд») — команда, только
+  читает, на боевом — не в рабочее время:
+  ```bash
+  DATABASE_URL=… npm run bench:ministry -w apps/api        # BENCH_RUNS=20 — больше прогонов
+  ```
+  10 ноября 2026: 600 тестовых учреждений + 738 техникумов, 10 000 студентов — весь дашборд (12 таблиц) **57 мс**;
+  2000 + 738 учреждений, 200 000 студентов — **87 мс**, самая медленная таблица — 35 мс. Новые индексы не нужны: таблицы
+  считаются группировкой в базе по уже существующим индексам (регион, тип и собственность, статус, режим и год
+  студента). Не грузить в приложение строки студентов, чтобы посчитать их там: на всю страну это растёт линейно
+  («Абитуриенты» так и считались — 103 мс на 200 000, после `groupBy` — 27 мс).
 
 ## Проверки
 

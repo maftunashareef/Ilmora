@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import type { MfaChallengeDto, MfaSetupDto } from '@ilmora/shared'
-import { decryptString, encryptString, sha256 } from '../../common/crypto'
+import { decryptString, encryptString, hmacSha256, sha256 } from '../../common/crypto'
 import { AppError } from '../../common/errors'
 import { matchTotp, newRecoveryCodes, newTotpSecret, normalizeRecoveryCode, otpauthUrl } from '../../common/totp'
 import { ENV, type Env } from '../../config/env'
@@ -12,6 +12,15 @@ import { MFA_CHALLENGE_SECONDS, TokenService } from './token.service'
 
 /** Tolerated difference between the database and API clocks when comparing a session with the moment the app was linked. */
 const CLOCK_DRIFT_MS = 120_000
+/**
+ * Wrong codes in a row before the step locks, and for how long (cybersecurity check 9.4, Н-5): 5 tries, then 15 minutes;
+ * each further lock within a day doubles it, up to a day. A right code clears both counts.
+ */
+export const MFA_MAX_FAILURES = 5
+export const MFA_LOCK_FIRST_SECONDS = 15 * 60
+export const MFA_LOCK_MAX_SECONDS = 24 * 3600
+/** How long a session opened with the authenticator code lives, however often it is renewed. */
+const MFA_SESSION_HOURS = 12
 
 type MfaUser = { id: string; tenantId: string; roles: Role[]; isOwner: boolean; totpEnabledAt: Date | null }
 
@@ -41,9 +50,12 @@ export class MfaService {
     return !!this.env.TOTP_ENCRYPTION_KEY
   }
 
-  /** The account must pass the second factor: always for the ministry, for the Super Admins once the key is set. */
+  /**
+   * The account must pass the second factor: always for the ministry; for the Super Admins and the finance admins
+   * (they settle payments by hand — security review 10.11 №1) once the key is set.
+   */
   enforced(user: { roles: Role[]; isOwner: boolean }): boolean {
-    return user.roles.includes('MINISTRY') || (user.isOwner && this.configured)
+    return user.roles.includes('MINISTRY') || ((user.isOwner || user.roles.includes('FINANCE_ADMIN')) && this.configured)
   }
 
   /**
@@ -74,7 +86,9 @@ export class MfaService {
     if (!this.configured || !user.totpEnabledAt) return false
     const first = await this.prisma.client.refreshSession.findFirst({ where: { userId: user.id, familyId }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
     // createdAt comes from the database clock, totpEnabledAt from the API's: allow for a small drift between them.
-    return !!first && first.createdAt.getTime() >= user.totpEnabledAt.getTime() - CLOCK_DRIFT_MS
+    if (!first || first.createdAt.getTime() < user.totpEnabledAt.getTime() - CLOCK_DRIFT_MS) return false
+    // A session opened with the code lives MFA_SESSION_HOURS at most, however often it is renewed (security review №28).
+    return Date.now() - first.createdAt.getTime() <= MFA_SESSION_HOURS * 3_600_000
   }
 
   /** First sign-in: a new secret for the app (shown as a QR code). Asking again replaces it until the first code is confirmed. */
@@ -91,22 +105,23 @@ export class MfaService {
     const user = await this.challengeUser(challenge, 'setup')
     if (user.totpEnabledAt) throw AppError.conflict('mfa_already_enabled', 'The authenticator app is already linked; enter its code')
     if (!user.totpSecretEnc) throw AppError.conflict('mfa_setup_first', 'Scan the QR code first')
-    const failKey = `mfa:fail:${user.id}`
-    await this.assertNotLocked(failKey)
+    // Counted before the code is checked: wrong codes sent at once cannot all pass a check made earlier (review 11.11).
+    await this.countAttempt(user.id, user.tenantId)
     const step = matchTotp(decryptString(user.totpSecretEnc, this.key()), code, new Date())
-    if (step === null) {
-      await this.bump(failKey)
-      throw AppError.invalid('invalid_code', 'The code is wrong or has expired')
-    }
+    if (step === null) throw AppError.invalid('invalid_code', 'The code is wrong or has expired')
+    // The first code links the app once: a double press opens one session and shows the one set of recovery codes
+    // that stays valid (review 11.11).
+    if (!(await this.claimStep(user.id, step))) throw AppError.invalid('invalid_code', 'The code is wrong or has expired')
     const recoveryCodes = newRecoveryCodes()
     const now = new Date()
     await this.prisma.client.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: user.id }, data: { totpEnabledAt: now } })
+      const linked = await tx.user.updateMany({ where: { id: user.id, totpEnabledAt: null }, data: { totpEnabledAt: now } })
+      if (linked.count !== 1) throw AppError.conflict('mfa_already_enabled', 'The authenticator app is already linked; enter its code')
       await tx.totpRecoveryCode.deleteMany({ where: { userId: user.id } })
-      await tx.totpRecoveryCode.createMany({ data: recoveryCodes.map((c) => ({ tenantId: user.tenantId, userId: user.id, codeHash: sha256(normalizeRecoveryCode(c)) })) })
+      await tx.totpRecoveryCode.createMany({ data: recoveryCodes.map((c) => ({ tenantId: user.tenantId, userId: user.id, codeHash: this.recoveryHash(c) })) })
     })
     await this.remember(`mfa:step:${user.id}`, step)
-    await this.clear(failKey)
+    await this.clearAttempts(user.id)
     await this.audit.record({ action: 'auth.mfa.enable', entityType: 'User', entityId: user.id, tenantId: user.tenantId })
     return { userId: user.id, recoveryCodes }
   }
@@ -115,24 +130,25 @@ export class MfaService {
   async verify(challenge: string, code: string): Promise<{ userId: string; method: 'totp' | 'recovery_code' }> {
     const user = await this.challengeUser(challenge, 'verify')
     if (!user.totpEnabledAt || !user.totpSecretEnc) throw AppError.unauthorized('The sign-in step has expired; enter the login and password again', 'invalid_challenge')
-    const failKey = `mfa:fail:${user.id}`
-    await this.assertNotLocked(failKey)
+    // Counted before the code is checked: wrong codes sent at once cannot all pass a check made earlier (review 11.11).
+    await this.countAttempt(user.id, user.tenantId)
     const stepKey = `mfa:step:${user.id}`
     const step = matchTotp(decryptString(user.totpSecretEnc, this.key()), code, new Date())
-    if (step !== null && step > (await this.recall(stepKey))) {
+    // A code is taken once, atomically: requests sent at once with the same code open one session (security review №27).
+    if (step !== null && step > (await this.recall(stepKey)) && (await this.claimStep(user.id, step))) {
       await this.remember(stepKey, step)
-      await this.clear(failKey)
+      await this.clearAttempts(user.id)
       return { userId: user.id, method: 'totp' }
     }
     if (step === null && /[a-z]/i.test(code)) {
-      const used = await this.prisma.client.totpRecoveryCode.updateMany({ where: { userId: user.id, codeHash: sha256(normalizeRecoveryCode(code)), usedAt: null }, data: { usedAt: new Date() } })
+      // Codes issued before the keyed hash (plain SHA-256) still work until used.
+      const used = await this.prisma.client.totpRecoveryCode.updateMany({ where: { userId: user.id, codeHash: { in: [this.recoveryHash(code), sha256(normalizeRecoveryCode(code))] }, usedAt: null }, data: { usedAt: new Date() } })
       if (used.count === 1) {
-        await this.clear(failKey)
+        await this.clearAttempts(user.id)
         await this.audit.record({ action: 'auth.mfa.recovery_code', entityType: 'User', entityId: user.id, tenantId: user.tenantId })
         return { userId: user.id, method: 'recovery_code' }
       }
     }
-    await this.bump(failKey)
     throw AppError.invalid('invalid_code', 'The code is wrong, has expired or was already used')
   }
 
@@ -163,23 +179,92 @@ export class MfaService {
     return user
   }
 
-  /** Wrong codes per account: after LOGIN_MAX_FAILURES the step is locked for LOGIN_LOCK_SECONDS (a 6-digit code cannot be guessed). */
-  private async assertNotLocked(key: string) {
-    if ((await this.recall(key)) >= this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many wrong codes; try again later', this.env.LOGIN_LOCK_SECONDS)
+  /**
+   * Codes tried per account, counted first, then checked (a 6-digit code cannot be guessed). After MFA_MAX_FAILURES the
+   * step is locked for MFA_LOCK_FIRST_SECONDS, each next lock within a day for twice as long, up to MFA_LOCK_MAX_SECONDS
+   * (cybersecurity check 9.4, Н-5). Only someone who passed the password gets here, so a lock per account is safe.
+   */
+  private async countAttempt(userId: string, tenantId: string) {
+    const lockKey = `mfa:lock:${userId}`
+    const left = await this.secondsLeft(lockKey)
+    if (left > 0) throw AppError.tooMany('Too many wrong codes; try again later', left)
+    const count = await this.bump(`mfa:fail:${userId}`, MFA_LOCK_MAX_SECONDS)
+    if (count <= MFA_MAX_FAILURES) return
+    // Only the request that crossed the line sets the lock; others sent at the same moment are refused with it.
+    if (count === MFA_MAX_FAILURES + 1) {
+      const series = await this.bump(`mfa:locks:${userId}`, MFA_LOCK_MAX_SECONDS)
+      const seconds = Math.min(MFA_LOCK_FIRST_SECONDS * 2 ** (Math.max(series, 1) - 1), MFA_LOCK_MAX_SECONDS)
+      await this.hold(lockKey, seconds)
+      await this.clear(`mfa:fail:${userId}`)
+      await this.audit.record({ action: 'auth.mfa.locked', entityType: 'User', entityId: userId, tenantId, after: { seconds, series } })
+      throw AppError.tooMany('Too many wrong codes; try again later', seconds)
+    }
+    throw AppError.tooMany('Too many wrong codes; try again later', MFA_LOCK_FIRST_SECONDS)
   }
 
-  private async bump(key: string) {
+  /** A right code: the wrong ones and the past locks are forgotten. */
+  private async clearAttempts(userId: string) {
+    await this.clear(`mfa:fail:${userId}`)
+    await this.clear(`mfa:locks:${userId}`)
+  }
+
+  /** +1, kept for `seconds` from the first one; counting must never turn a code into a 500 (the route throttle still applies). */
+  private async bump(key: string, seconds: number): Promise<number> {
     if (this.redis.off) {
       const now = Date.now()
       const cur = this.memory.get(key)
-      this.memory.set(key, cur && cur.expires > now ? { ...cur, value: cur.value + 1 } : { value: 1, expires: now + this.env.LOGIN_LOCK_SECONDS * 1000 })
-      return
+      const next = cur && cur.expires > now ? { ...cur, value: cur.value + 1 } : { value: 1, expires: now + seconds * 1000 }
+      this.memory.set(key, next)
+      return next.value
     }
     try {
-      if ((await this.redis.cache.incr(key)) === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
+      const n = await this.redis.cache.incr(key)
+      if (n === 1) await this.redis.cache.expire(key, seconds)
+      return n
     } catch {
-      /* counting must never turn a wrong code into a 500; the route throttle still applies */
+      return 0
     }
+  }
+
+  private async hold(key: string, seconds: number) {
+    if (this.redis.off) { this.memory.set(key, { value: 1, expires: Date.now() + seconds * 1000 }); return }
+    await this.redis.cache.set(key, '1', 'EX', seconds).catch(() => undefined)
+  }
+
+  private async secondsLeft(key: string): Promise<number> {
+    if (this.redis.off) {
+      const rec = this.memory.get(key)
+      return rec && rec.expires > Date.now() ? Math.ceil((rec.expires - Date.now()) / 1000) : 0
+    }
+    try {
+      return Math.max(0, await this.redis.cache.ttl(key))
+    } catch {
+      return 0
+    }
+  }
+
+  /**
+   * Marks one time step of one account as used — atomically (Redis SET NX; in memory, one process). If Redis cannot
+   * answer, the code is refused: the second factor never opens without its replay check (security review №27).
+   */
+  private async claimStep(userId: string, step: number): Promise<boolean> {
+    const key = `mfa:used:${userId}:${step}`
+    if (this.redis.off) {
+      const rec = this.memory.get(key)
+      if (rec && rec.expires > Date.now()) return false
+      this.memory.set(key, { value: step, expires: Date.now() + 300_000 })
+      return true
+    }
+    try {
+      return (await this.redis.cache.set(key, '1', 'EX', 300, 'NX')) === 'OK'
+    } catch {
+      throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
+    }
+  }
+
+  /** Recovery codes are kept as an HMAC with a key derived from the server's: a leaked database alone cannot try 2^40 codes (№37). */
+  private recoveryHash(code: string): string {
+    return hmacSha256(`${this.key()}:recovery`, normalizeRecoveryCode(code))
   }
 
   /** Keeps a number for a few minutes (the last accepted time step: a code is not accepted twice). */

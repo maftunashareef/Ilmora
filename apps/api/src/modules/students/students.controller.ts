@@ -43,6 +43,12 @@ export class StudentsController {
 }
 
 const StudentsQuery = z.object({ status: z.enum(['PENDING', 'CONFIRMED', 'REJECTED']).optional() })
+/**
+ * What the institution saw in the list (cybersecurity check 9.4, Н-8): the direction and the year of graduation. If
+ * the student changed them since, the decision is refused with 409 `study_changed` — not applied to data nobody saw.
+ */
+export const StudySeenInput = z.object({ directionId: z.string().min(1).max(64).nullable(), graduationYear: z.number().int().min(1990).max(2100).nullable() }).strict()
+export type StudySeenInput = z.infer<typeof StudySeenInput>
 
 /** The institution confirms its students (ТЗ 4.1 «Подтверждение учёбы»): name, course, direction, year — no contacts. */
 @Controller('institutions/me/students')
@@ -52,6 +58,6 @@ export class InstitutionStudentsController {
   constructor(private readonly students: StudentsService) {}
 
   @Get() list(@CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(StudentsQuery)) q: z.infer<typeof StudentsQuery>) { return this.students.institutionStudents(a, q.status) }
-  @Post(':id/confirm') confirm(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.students.decideStudy(t, a, id, true) }
-  @Post(':id/reject') reject(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.students.decideStudy(t, a, id, false) }
+  @Post(':id/confirm') confirm(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(StudySeenInput)) seen: StudySeenInput) { return this.students.decideStudy(t, a, id, true, seen) }
+  @Post(':id/reject') reject(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(StudySeenInput)) seen: StudySeenInput) { return this.students.decideStudy(t, a, id, false, seen) }
 }

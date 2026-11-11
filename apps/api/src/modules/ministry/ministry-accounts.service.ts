@@ -46,7 +46,7 @@ export class MinistryAccountsService {
     let row: Row
     try {
       row = await this.prisma.client.user.create({
-        data: { tenantId, login, passwordHash: await argon2.hash(password, PASSWORD_HASH), displayName: input.name, jobTitle: input.jobTitle ?? null, email: input.email ?? null, roles: ['MINISTRY'] },
+        data: { tenantId, login, passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date(), displayName: input.name, jobTitle: input.jobTitle ?? null, email: input.email ?? null, roles: ['MINISTRY'] },
         select: SELECT,
       })
     } catch (err) {
@@ -82,10 +82,28 @@ export class MinistryAccountsService {
   async resetPassword(tenantId: string, id: string): Promise<MinistryAccountCreatedDto> {
     await this.ministryAccount(id)
     const password = temporaryPassword()
-    const row = await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH) }, select: SELECT })
+    const row = await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date() }, select: SELECT })
     await this.tokens.revokeAllForUser(tenantId, id, 'password-reset-by-admin')
     await this.audit.record({ action: 'ministry.account.reset_password', entityType: 'User', entityId: id })
     return { account: toDto(row), temporaryPassword: password }
+  }
+
+  /**
+   * «Сбросить пароль» for any account (security review 10.11 №4): a temporary password, shown once; the sessions end
+   * and the owner must change it at the next sign-in (`passwordIssuedAt`). Not one's own, not another Super Admin's —
+   * those go through the owner-setup command on the server.
+   */
+  async resetAccountPassword(tenantId: string, actor: RequestActor, id: string): Promise<{ temporaryPassword: string }> {
+    if (id === actor.id) throw AppError.forbidden('Change your own password in your profile')
+    const user = await this.prisma.client.user.findFirst({ where: { id }, select: { id: true, isOwner: true, login: true } })
+    if (!user) throw AppError.notFound('Account')
+    if (user.isOwner) throw AppError.forbidden('A Super Admin password is reset on the server')
+    if (!user.login) throw AppError.invalid('no_login', 'This account signs in by SMS only; it has no login to use a password with')
+    const password = temporaryPassword()
+    await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date() } })
+    await this.tokens.revokeAllForUser(tenantId, id, 'password-reset-by-admin')
+    await this.audit.record({ action: 'account.reset_password', entityType: 'User', entityId: id })
+    return { temporaryPassword: password }
   }
 
   /**

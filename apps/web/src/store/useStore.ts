@@ -1,16 +1,16 @@
 'use client'
-import { createContext, createElement, useContext, useEffect, useRef, type ReactNode } from 'react'
+import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from 'react'
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
-import { api, refreshSession, session } from '../lib/api'
+import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, courseSaveBody, groupSaveBody, isUniversityListed, publishableSaveBody, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { api, ApiError, isApiError, REFRESH_LIMITED, refreshRetryAfterSeconds, refreshSessionOutcome, session, setPasswordChangeRequiredHandler } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
 import type {
-  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student, University,
+  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student,
   StudentProfile, Subject, Teacher, Video,
 } from '../types'
 
@@ -27,7 +27,8 @@ export interface CartBundle { presetId: string; directionId?: string; courseIds:
 export type PresetCartResult =
   | { ok: true; added: number; /** The Flex/Winx package the cart left for a custom selection, if it did. */ switchedFrom: string | null }
   | { ok: false; reason: 'unavailable' | 'limit' | 'full' | 'conflict'; courseId?: string; conflictWith?: string }
-export type PaymentProviderId = 'PAYME' | 'CLICK'
+/** Payment goes through Payme only (decision of 10.11, security review №5, №6: Click removed from the API). */
+export type PaymentProviderId = 'PAYME'
 
 export interface AuthUser {
   id: string
@@ -44,6 +45,11 @@ export interface AuthUser {
   offerVersion: string | null
   consentAt: string | null
   marketing: boolean
+  /**
+   * The password was issued by the Super Admin (a new ministry account or a reset) and not changed since: the site asks
+   * for a new one right after sign-in, before anything else (POST /auth/password). Older API answers lack the field.
+   */
+  passwordChangeRequired?: boolean
 }
 
 /** `/auth/login` answered with the authenticator step instead of a session. */
@@ -110,6 +116,18 @@ interface Actions {
   mfaVerify: (challenge: string, code: string) => Promise<AuthUser>
   loginAsDemo: (role: 'STUDENT' | 'TEACHER', customUser?: Partial<AuthUser>) => Promise<AuthUser>
   giveConsent: (input: ConsentInput) => Promise<AuthUser>
+  /**
+   * «Сменить пароль»: every session of the account ends and this browser gets a fresh one (the answer is a sign-in).
+   * Errors: wrong_password, same_password, password_is_login, no_password; 5 tries.
+   */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<AuthUser>
+  /** «Забыли пароль?», step 1: an SMS code to the account's phone (`devCode` only on test servers). */
+  requestPasswordCode: (phone: string) => Promise<{ expiresInSeconds: number; devCode?: string }>
+  /**
+   * «Забыли пароль?», step 2: the code and the new password; every session ends and this browser signs in (the answer
+   * is a sign-in). Not for the ministry, Super Admins and finance (403 mfa_password_login) — the Super Admin resets those.
+   */
+  resetPasswordBySms: (phone: string, code: string, newPassword: string) => Promise<AuthUser>
   logout: () => Promise<void>
   ensureWorkspace: () => Promise<void>
   loadAdminPresets: () => Promise<void>
@@ -175,7 +193,6 @@ interface Actions {
   /** Opens a payment; a free selection is activated at once and comes back with url null. */
   checkout: (provider: PaymentProviderId) => Promise<{ url: string | null; paymentId: string; free?: boolean }>
   renewSubscription: (studentId: string, provider?: PaymentProviderId) => Promise<void>
-  cancelSubscription: (studentId: string) => Promise<void>
   toggleSavedCourse: (studentId: string, courseId: string) => void
   toggleSavedTeacher: (studentId: string, teacherId: string) => void
   updateProfile: (studentId: string, patch: Partial<StudentProfile>) => Promise<void>
@@ -208,8 +225,14 @@ export interface StoreState extends DemoState, Actions {
   workspaceLoaded: boolean
   /** The visitor's saved cart and favourites have been read from this device (hydrateGuest ran). */
   guestHydrated: boolean
-  /** Super Admin only: the full preset list (including disabled ones) has been loaded into `site.presets`. */
+  /**
+   * Super Admin only: the current settings were loaded from `GET /admin/site` — all of them (presets and universities
+   * with the disabled ones, packages) and their version, from one answer. Until then site saves are refused: the page
+   * was rendered from a cached public read, and its values must not go out with a fresh version.
+   */
   presetsLoaded: boolean
+  /** Super Admin only: that load failed — the workspace asks to refresh the page (no site saves until then). */
+  siteLoadFailed: boolean
   myPayments: PaymentSummary[]
   /** Ready-made packages in the cart, read from this device after mount. */
   cartBundles: CartBundle[]
@@ -236,7 +259,7 @@ const CART_BUNDLES_KEY = 'ilmora-cart-bundles'
 let toastSeq = 1
 
 /** The workspace an account lands in. Teacher comes before center admin so accounts that are both keep the Teacher Studio; /center stays reachable from the account menu. */
-export const roleOf = (u: AuthUser | null): Role => (!u ? 'visitor' : u.roles.includes('PLATFORM_ADMIN') ? 'admin' : u.roles.includes('TEACHER') ? 'teacher' : u.roles.includes('CENTER_ADMIN') ? 'center' : 'student')
+export const roleOf = (u: AuthUser | null): Role => (!u ? 'visitor' : u.roles.includes('PLATFORM_ADMIN') ? 'admin' : u.roles.includes('TEACHER') ? 'teacher' : u.roles.includes('CENTER_ADMIN') ? 'center' : u.roles.includes('MINISTRY') ? 'ministry' : u.roles.includes('INSTITUTION_ADMIN') ? 'institution' : u.roles.includes('COMPANY_ADMIN') ? 'company' : 'student')
 
 export const GUEST_STUDENT_ID = 'guest-student'
 const emptyGuestStudent = (builder?: Student['builder'] | null, savedCourseIds: string[] = []): Student => ({
@@ -258,28 +281,16 @@ const emptyStudent = (u: AuthUser): Student => ({
 })
 
 // ───────── payload mappers (web shape → API input) ─────────
-const publishableInput = (p: Partial<Publishable>) => ({
-  ...(p.status ? { status: p.status } : {}), ...(p.visibility ? { visibility: p.visibility } : {}), ...(p.audience ? { audience: p.audience } : {}),
-  ...(p.featured !== undefined ? { featured: p.featured } : {}), ...(p.reviewRequested !== undefined ? { reviewRequested: p.reviewRequested } : {}),
-})
+// The course, group and publish bodies come from @ilmora/shared (save-bodies.ts): the API checks the very same ones (Н1).
+const publishableInput = publishableSaveBody
 /** What a visitor may see of the packages: published ones, and the universities marked published or with one. */
 const publicSite = (site: SiteConfig): SiteConfig => {
   const presets = (site.presets ?? []).filter((p) => p.enabled)
-  return { ...site, presets, universities: (site.universities ?? []).filter((u) => isUniversityListed(u, presets)) }
+  // The admin read also carries the switched-off packages (Ж17): they stay internal as well.
+  return { ...site, presets, universities: (site.universities ?? []).filter((u) => isUniversityListed(u, presets)), packages: (site.packages ?? []).filter((p) => p.enabled) }
 }
-const courseInput = (c: Course, withDiscount = false) => ({
-  title: c.title, categoryId: c.categoryId, subjectId: c.subjectId ?? null, summary: c.summary, description: c.description, curriculum: c.curriculum,
-  // An online course belongs to the platform center/profile, which the server sets; only offline courses send them.
-  ...(isOnlineCourse(c) ? {} : { centerId: c.centerId, teacherId: c.teacherId }),
-  level: c.level, durationMonths: c.durationMonths, price: Math.round(c.price), coverSeed: c.coverSeed, imageUrl: storableUrl(c.imageUrl), meyosGrant: !!c.meyosGrant, ...publishableInput(c),
-  // Only the Super Admin sends the discount; the server refuses it from anyone else.
-  ...(withDiscount ? { discount: c.discount ?? null } : {}),
-  // The learning format always travels; the link, provider and certificate only for online courses (the server accepts them from the Super Admin only).
-  ...(isOnlineCourse(c)
-    ? { learningFormat: 'ONLINE' as const, externalUrl: c.externalUrl ?? null, providerName: c.providerName ?? null, instructorName: c.instructorName ?? null, certificate: c.certificate ?? ('NONE' as const), durationText: c.durationText ?? null }
-    : { learningFormat: 'OFFLINE' as const }),
-})
-const groupInput = (g: Course['groups'][number]) => ({ name: g.name, days: g.days, start: g.start, end: g.end, room: g.room, capacity: g.capacity })
+const courseInput = courseSaveBody
+const groupInput = groupSaveBody
 const videoInput = (v: Video) => ({
   teacherId: v.teacherId, courseId: v.courseId ?? null, title: v.title, description: v.description,
   // A browser-only `blob:` preview is never saved: without storage an uploaded file has no address at all.
@@ -411,16 +422,24 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           // The version in the server-rendered page comes from a cached public fetch and can be a minute old; the admin
           // workspace load (loadAdminPresets) brings the current one, so wait for it before the first save.
           if (workspaceLoading) await workspaceLoading.catch(() => undefined)
-          const { packages: _p, presets, universities, ...rest } = get().site
+          // Only the settings loaded from the server go out, with the version that came with them: never the cached ones.
+          if (!get().presetsLoaded) { get().notify(translate(get().lang, 'admin.siteNotLoaded'), 'warn'); return }
+          const { packages: _p, ...data } = get().site
           void _p
-          // Presets and universities are sent only once the full lists have been loaded; without them the server keeps the
-          // stored ones, so a save made before the load can never delete packages that are still drafts.
-          const data = get().presetsLoaded ? { ...rest, presets, universities } : rest
           try {
             const r = await api<{ version: number }>('/admin/site', { method: 'PUT', body: { data, version: get().siteVersion } })
             set({ siteVersion: r.version })
           } catch (err) {
-            toast(err)
+            if (!isApiError(err) || err.code !== 'version_conflict') { toast(err); return }
+            // Someone else saved the settings meanwhile: their version (and its number) is loaded and the admin is told
+            // that the last change did not go through — otherwise every next save would fail the same way.
+            try {
+              const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
+              set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true })
+              get().notify(translate(get().lang, 'admin.siteReloaded'), 'warn')
+            } catch (reloadErr) {
+              toast(reloadErr)
+            }
           }
         })
       }, 800)
@@ -455,8 +474,18 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         workspaceLoaded: false,
         // Disabled presets are internal: drop them from memory on every sign-in/out; admins reload the full list.
         presetsLoaded: false,
+        siteLoadFailed: false,
         site: s.site.presets ? publicSite(s.site) : s.site,
       }))
+    }
+    // The API's 403 password_change_required: the account still has the temporary password. Mark it, so the sign-in
+    // card, the workspace gate and PasswordChangeRedirect show the change screen (the same as for the flag).
+    // Browser only: the server renders without the visitor's session, and one module-level handler must not outlive a request.
+    if (typeof window !== 'undefined') {
+      setPasswordChangeRequiredHandler(() => {
+        const user = get().auth.user
+        if (user && !user.passwordChangeRequired) set({ auth: { status: 'authenticated', user: { ...user, passwordChangeRequired: true } } })
+      })
     }
     /** Store the access token, apply the account and warm the student overview; used by every sign-in path. */
     const openSession = async (r: { accessToken: string; user: AuthUser }) => {
@@ -507,6 +536,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       workspaceLoaded: false,
       guestHydrated: false,
       presetsLoaded: false,
+      siteLoadFailed: false,
       myPayments: [],
       cartBundles: [],
       sessionQr: {},
@@ -533,13 +563,21 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         set({ auth: { status: 'loading', user: null } })
         // Only call /auth/refresh when the API left its session flag cookie; anonymous visitors cause no 401 noise.
         const hasSession = typeof document !== 'undefined' && /(?:^|;\s*)ilmora_session=1(?:;|$)/.test(document.cookie)
-        const ok = session.token ? true : hasSession ? await refreshSession() : false
-        if (!ok) { applyAuth(null); return }
+        // №19: too many requests right now (e.g. a class on one Wi-Fi) — the cookie is still valid. Keep waiting on
+        // «checking», say «повторите позже» and try again by itself after the pause the API asked for; never sign out.
+        const retryLater = () => {
+          get().notify(apiErrorText(new ApiError(429, REFRESH_LIMITED, ''), get().lang), 'warn')
+          setTimeout(() => { set({ auth: { status: 'idle', user: null } }); void get().bootstrap() }, Math.min(60, Math.max(5, refreshRetryAfterSeconds())) * 1000)
+        }
+        const outcome = session.token ? 'ok' : hasSession ? await refreshSessionOutcome() : 'denied'
+        if (outcome === 'limited') { retryLater(); return }
+        if (outcome !== 'ok') { applyAuth(null); return }
         try {
           const user = await api<AuthUser>('/auth/me')
           applyAuth(user)
           if (user.roles.includes('STUDENT')) await get().loadStudentOverview()
-        } catch {
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 429) { retryLater(); return }
           session.set(null)
           applyAuth(null)
         }
@@ -554,6 +592,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         return { user: await openSession(r), recoveryCodes: r.recoveryCodes }
       },
       mfaVerify: (challenge, code) => api<{ accessToken: string; user: AuthUser }>('/auth/mfa/verify', { method: 'POST', body: { challenge, code }, credentials: true, auth: false }).then(openSession),
+      changePassword: (currentPassword, newPassword) => api<{ accessToken: string; user: AuthUser }>('/auth/password', { method: 'POST', body: { currentPassword, newPassword }, credentials: true }).then(openSession),
+      requestPasswordCode: (phone) => api<{ expiresInSeconds: number; devCode?: string }>('/auth/otp/request', { method: 'POST', body: { phone, lang: get().lang }, auth: false }),
+      resetPasswordBySms: (phone, code, newPassword) =>
+        api<{ accessToken: string; user: AuthUser }>('/auth/password/reset', { method: 'POST', body: { phone, code, newPassword }, credentials: true, auth: false }).then(openSession),
       loginAsDemo: async (role, customUser) => {
         if (!DEMO_LOGIN_ENABLED) throw new Error('demo_login_disabled')
         const id = role === 'TEACHER' ? 't-dilnoza' : 's-aziz'
@@ -609,7 +651,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       ensureWorkspace: async () => {
         // The workspace (own courses, videos, people) exists for teachers and admins only; concurrent callers share one load.
-        if (get().workspaceLoaded || get().role === 'visitor' || get().role === 'student') return
+        if (get().workspaceLoaded || get().role === 'visitor' || get().role === 'student' || get().role === 'ministry' || get().role === 'institution' || get().role === 'company') return
         workspaceLoading ??= guard(refreshWorkspace).finally(() => { workspaceLoading = null })
         await workspaceLoading
       },
@@ -629,10 +671,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         }))
       },
       loadAdminPresets: async () => {
-        // The public site response leaves out presets that are not enabled; the admin editor needs the full list.
-        const full = await api<{ presets?: Preset[]; universities?: University[]; version?: number }>('/admin/site')
-        // The current version replaces the cached one the page was rendered with; a save that finished meanwhile is never undone (versions only grow).
-        set((s) => ({ site: { ...s.site, presets: full.presets ?? [], universities: full.universities ?? [] }, presetsLoaded: true, siteVersion: Math.max(s.siteVersion, full.version ?? 0) }))
+        // The page was rendered from a cached public read (up to a minute old, without the disabled presets, universities and
+        // packages). The admin works on the current settings: all of them and their version, both from this one answer.
+        try {
+          const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
+          set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true, siteLoadFailed: false })
+        } catch (err) {
+          set({ presetsLoaded: false, siteLoadFailed: true })
+          throw err
+        }
       },
       loadStudentOverview: async () => {
         const o = await api<ApiOverview>('/student/subscription')
@@ -738,7 +785,12 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       setStorageConfigured: (configured) => set({ storageConfigured: configured }),
 
       // ── site ──
-      patchSite: (fn) => { set((s) => ({ site: fn(s.site) })); scheduleSiteSave() },
+      patchSite: (fn) => {
+        // Before the current settings are loaded (or when that failed) an edit would be saved over them: refuse it.
+        if (get().role === 'admin' && !get().presetsLoaded) { get().notify(translate(get().lang, 'admin.siteNotLoaded'), 'warn'); return }
+        set((s) => ({ site: fn(s.site) }))
+        scheduleSiteSave()
+      },
       savePackage: (id, patch) => {
         set((s) => ({ site: { ...s.site, packages: s.site.packages.map((p) => (p.id === id ? { ...p, ...patch } : p)) } }))
         if (get().role !== 'admin') return
@@ -972,10 +1024,6 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         get().notify(translate(get().lang, 'checkout.redirecting'))
         window.location.href = r.url
       },
-      cancelSubscription: async () => {
-        await guard(() => api('/student/subscription/cancel', { method: 'POST', body: {} }))
-        await get().loadStudentOverview()
-      },
       toggleSavedCourse: (studentId, courseId) => {
         const me = get().students.find((x) => x.id === studentId)
         const saved = !me?.savedCourseIds.includes(courseId)
@@ -1059,13 +1107,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
 const StoreContext = createContext<StoreApi<StoreState> | null>(null)
 let browserStore: StoreApi<StoreState> | null = null
 
+/** One store per request on the server; in the browser one for the whole visit (it outlives the provider's remounts). */
+function storeFor(initial: InitialData): StoreApi<StoreState> {
+  if (typeof window === 'undefined') return createIlmoraStore(initial)
+  browserStore ??= createIlmoraStore(initial)
+  return browserStore
+}
+
 export function StoreProvider({ initial, children }: { initial: InitialData; children: ReactNode }) {
-  const ref = useRef<StoreApi<StoreState> | null>(null)
-  if (!ref.current) {
-    ref.current = typeof window !== 'undefined' && browserStore ? browserStore : createIlmoraStore(initial)
-    if (typeof window !== 'undefined') browserStore = ref.current
-  }
-  const store = ref.current
+  const [store] = useState(() => storeFor(initial))
   useEffect(() => {
     if (store.getState().lang !== initial.lang) store.setState({ lang: initial.lang })
   }, [store, initial.lang])

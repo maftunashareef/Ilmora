@@ -1,11 +1,12 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { formatUzPhone } from '@ilmora/shared'
+import argon2 from 'argon2'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { AccountService, type LoginResult, type PublicUser } from './account.service'
+import { AccountService, type LoginResult, PASSWORD_HASH, type PublicUser } from './account.service'
 import { MfaService } from './mfa.service'
 import { OtpService } from './otp.service'
 import { type SessionMeta, TokenService } from './token.service'
@@ -56,6 +57,38 @@ export class AuthService {
     return this.accounts.openSession(user, meta)
   }
 
+  /**
+   * «Забыл пароль» (security review 10.11 №4): the code sent to the account's phone (POST /auth/otp/request) proves it
+   * is theirs; the new password replaces the old one, every session ends and this browser gets a new one. The
+   * ministry, the Super Admins and the finance admins never reset by SMS — their passwords are reset by the Super Admin.
+   */
+  async resetPasswordBySms(tenantId: string, input: { phone: string; code: string; newPassword: string }, meta: SessionMeta): Promise<LoginResult> {
+    const { phoneE164 } = await this.otp.verify(tenantId, input.phone, input.code)
+    const user = await this.prisma.client.user.findUnique({ where: { tenantId_phoneE164: { tenantId, phoneE164 } }, include: USER_INCLUDE })
+    // No account has this number as its sign-in phone: accounts made with a login have none linked (№73). Their password is
+    // reset by the Super Admin until a phone can be linked — said plainly, not a bare «not found».
+    if (!user) throw new AppError('phone_not_linked', 'No account has this phone for signing in; the Super Admin resets the password', HttpStatus.NOT_FOUND)
+    if (!user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
+    // An account opened by SMS that never had a password and has no login (№74): someone who forgot the password of their
+    // login account would get a password on this other, empty account and sign in there. It signs in by SMS; nothing to reset.
+    if (!user.passwordHash && !user.login) throw AppError.conflict('no_password_to_reset', 'This number signs in with an SMS code and has no password; an account with a login is reset by the Super Admin')
+    // The owners, finance and the ministry never reset by SMS — with or without the authenticator key on the server: their
+    // password is reset by the Super Admin (review 11.11; the SMS path used to open for them when the key was not set).
+    if (user.isOwner || user.roles.some((r) => r === 'PLATFORM_ADMIN' || r === 'FINANCE_ADMIN' || r === 'MINISTRY')) {
+      throw new AppError('password_reset_by_admin', 'This account\'s password is reset by the Super Admin', HttpStatus.FORBIDDEN)
+    }
+    this.mfa.refuseOtherSignIn(user)
+    if (user.login && input.newPassword.toLowerCase() === user.login) throw AppError.invalid('password_is_login', 'The password must not be the login')
+    const updated = await this.prisma.client.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await argon2.hash(input.newPassword, PASSWORD_HASH), passwordIssuedAt: null, phoneVerifiedAt: user.phoneVerifiedAt ?? new Date(), lastLoginAt: new Date() },
+      include: USER_INCLUDE,
+    })
+    await this.tokens.revokeAllForUser(tenantId, user.id, 'password-reset-by-sms')
+    await this.audit.record({ tenantId, action: 'auth.password.reset', entityType: 'User', entityId: user.id, after: { method: 'sms' } })
+    return this.accounts.openSession(updated, meta)
+  }
+
   async refresh(raw: string, meta: SessionMeta): Promise<LoginResult> {
     const rotated = await this.tokens.rotate(raw, meta)
     const user = await TenantContext.forTenant(rotated.tenantId, () => this.prisma.client.user.findUnique({ where: { id: rotated.userId }, include: USER_INCLUDE }))
@@ -66,8 +99,9 @@ export class AuthService {
       throw AppError.unauthorized('Sign in again with the authenticator code', 'invalid_refresh')
     }
     const roles = await this.accounts.effectiveRoles(user)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId })
-    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: this.accounts.toPublic(user, roles) }
+    const pub = await this.accounts.publicUser(user, roles)
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
+    return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: pub }
   }
 
   /** Second factor, first sign-in: the secret for the app (QR code). */
@@ -100,7 +134,7 @@ export class AuthService {
   async me(userId: string): Promise<PublicUser> {
     const user = await this.prisma.client.user.findUnique({ where: { id: userId }, include: USER_INCLUDE })
     if (!user) throw AppError.notFound('User')
-    return this.accounts.toPublic(user, await this.accounts.effectiveRoles(user))
+    return this.accounts.publicUser(user)
   }
 
   async updateProfile(userId: string, input: { displayName?: string; district?: string; preferredLang?: 'uz' | 'ru' | 'en'; reminders?: boolean }): Promise<PublicUser> {
@@ -110,7 +144,7 @@ export class AuthService {
     if (input.preferredLang !== undefined) data.preferredLang = input.preferredLang
     if (input.reminders !== undefined) data.reminders = input.reminders
     const user = await this.prisma.client.user.update({ where: { id: userId }, data, include: USER_INCLUDE })
-    return this.accounts.toPublic(user, await this.accounts.effectiveRoles(user))
+    return this.accounts.publicUser(user)
   }
 
   /**

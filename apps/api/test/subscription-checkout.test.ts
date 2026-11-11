@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { OFFER_VERSION } from '@ilmora/shared'
 import type { Env } from '../src/config/env'
 import type { PrismaService, TransactionClient } from '../src/infra/prisma/prisma.service'
 import type { AuditService } from '../src/modules/audit/audit.service'
@@ -8,7 +9,7 @@ import type { OutboxService } from '../src/modules/payments/outbox.service'
 import { PaymentsService } from '../src/modules/payments/payments.service'
 import { notificationsStub } from './stubs'
 
-const env = { PAYMENT_EXPIRES_HOURS: 24, PUBLIC_WEB_URL: 'http://localhost:3000' } as unknown as Env
+const env = { PAYMENT_EXPIRES_HOURS: 24, PUBLIC_WEB_URL: 'http://localhost:3000', PAYME_MERCHANT_ID: 'm', PAYME_TEST_KEY: 'k' } as unknown as Env
 const audit = { record: async () => undefined } as unknown as AuditService
 
 const group = (priceMinor: bigint) => ({
@@ -24,13 +25,17 @@ function setup(opts: { priceMinor?: bigint; open?: { id: string; status: string 
   const tx = {
     $queryRawUnsafe: spy('tx.$queryRawUnsafe', []),
     group: { findMany: vi.fn(async () => [group(opts.priceMinor ?? 50_000_00n)]) },
-    enrollment: { groupBy: vi.fn(async () => []), createMany: spy('enrollment.createMany', { count: 1 }), updateMany: spy('enrollment.updateMany', { count: 1 }), findMany: vi.fn(async () => []) },
+    enrollment: { groupBy: vi.fn(async () => []), deleteMany: spy('enrollment.deleteMany', { count: 0 }), createManyAndReturn: spy('enrollment.createManyAndReturn', [{ id: 'e1', groupId: 'g1' }]), updateMany: spy('enrollment.updateMany', { count: 1 }), findMany: vi.fn(async () => []) },
     subscription: {
       updateMany: spy('subscription.updateMany', { count: opts.raceLost ? 0 : 1 }),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { (calls['subscription.update'] ??= []).push(data); return { ...draft, kind: 'PERIOD', lessonsTotal: null, ...data } }),
-      findFirst: vi.fn(async () => ({ ...draft, status: opts.subStatus ?? 'PENDING_PAYMENT', kind: 'PERIOD', startedAt: null, currentPeriodEnd: null, amountMinor: 0n, package: null, student: { displayName: 'S' } })),
+      // The draft read again under the lock (a bare `where: { id }`) is still a draft; the settlement path reads it with its
+      // package and student.
+      findFirst: vi.fn(async (args?: { include?: unknown }) => (args?.include ? { ...draft, status: opts.subStatus ?? 'PENDING_PAYMENT', kind: 'PERIOD', startedAt: null, currentPeriodEnd: null, amountMinor: 0n, package: null, student: { displayName: 'S' } } : { ...draft, status: 'DRAFT' })),
     },
+    paymentLine: { createMany: spy('paymentLine.createMany', { count: 1 }) },
     payment: {
+      findFirst: vi.fn(async () => null),
       updateMany: spy('payment.updateMany', { count: 1 }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { (calls['payment.create'] ??= []).push(data); return { id: 'pay-new', state: 'PENDING', provider: null, paidAt: null, ...data } }),
     },
@@ -39,6 +44,8 @@ function setup(opts: { priceMinor?: bigint; open?: { id: string; status: string 
     client: {
       subscription: { findFirst: vi.fn(async (args: { where: { status: unknown } }) => (args.where.status === 'DRAFT' ? draft : opts.open ?? null)) },
       package: { findFirst: vi.fn(async () => null) },
+      // The student has accepted the current offer and the personal-data consent (security review №31).
+      user: { findFirst: vi.fn(async () => ({ offerAcceptedAt: new Date(), offerVersion: OFFER_VERSION, consentAt: new Date() })) },
     },
     tx: vi.fn(async (fn: (t: TransactionClient) => Promise<unknown>) => fn(tx as unknown as TransactionClient)),
   }
@@ -78,11 +85,11 @@ describe('checkout after a failed, cancelled or abandoned payment', () => {
 describe('free checkout', () => {
   it('records the payment as paid without a provider and activates the subscription on the spot', async () => {
     const { subscriptions, payments, calls } = setup({ priceMinor: 0n })
-    const { payment } = await subscriptions.checkout('t', 's1', 'CLICK')
+    const { payment } = await subscriptions.checkout('t', 's1', 'PAYME')
     expect(calls['payment.create']?.[0]).toMatchObject({ amountMinor: 0n, provider: null, state: 'PAID' })
     expect(calls['enrollment.updateMany']?.[0]).toMatchObject({ where: { subscriptionId: 'sub-draft', status: 'PENDING' }, data: { status: 'ACTIVE' } })
     expect(calls['subscription.update']?.map((d) => (d as { status: string }).status)).toEqual(['PENDING_PAYMENT', 'ACTIVE'])
-    expect(payments.checkoutLink(payment, 'CLICK', 'uz')).toEqual({ paymentId: 'pay-new', provider: null, url: null, expiresAt: payment.expiresAt, free: true })
+    expect(payments.checkoutLink(payment, 'PAYME', 'uz')).toEqual({ paymentId: 'pay-new', provider: null, url: null, expiresAt: payment.expiresAt, free: true })
   })
 
   it('a priced checkout stays pending for the provider', async () => {
@@ -90,6 +97,8 @@ describe('free checkout', () => {
     const { payment } = await subscriptions.checkout('t', 's1', 'PAYME')
     expect(calls['payment.create']?.[0]).toMatchObject({ amountMinor: 50_000_00n, provider: 'PAYME' })
     expect(calls['payment.create']?.[0]).not.toHaveProperty('state')
+    // What the payment pays for each course is kept with it: a refund is counted from it (security review №42).
+    expect(calls['paymentLine.createMany']?.[0]).toEqual({ data: [{ tenantId: 't', paymentId: 'pay-new', enrollmentId: 'e1', courseId: 'c1', listPriceMinor: 50_000_00n, amountMinor: 50_000_00n }] })
     expect(calls['enrollment.updateMany']).toBeUndefined()
     expect(payment.state).toBe('PENDING')
   })

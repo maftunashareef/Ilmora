@@ -12,6 +12,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, mainOf, regionIdByRef } from '../registry/registry.mappers'
 import { RegistryService } from '../registry/registry.service'
 import type { QuestionnaireInput } from './students.schemas'
+import { dateColumnToIso } from '../../common/time'
 
 /** The answer the web wizard expects (apps/web/src/services/questionnaire.ts). */
 export interface QuestionnaireState {
@@ -29,6 +30,9 @@ const PROFILE_SELECT = {
   region: { select: { slug: true } },
   user: { select: { displayName: true, district: true, email: true, phoneE164: true, phoneVerifiedAt: true } },
 } as const satisfies Prisma.StudentProfileSelect
+
+/** One writer of a student's consent journal at a time (the questionnaire, the contract-help form). */
+export const lockConsents = (tx: TransactionClient, userId: string) => tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `consents:${userId}`)
 
 /**
  * The student's questionnaire (ТЗ 4.1) in the shape of the web wizard (`StudentQuestionnaire`, @ilmora/shared), and
@@ -61,7 +65,7 @@ export class StudentsService {
       graduationYear: row.graduationYear,
       admissionYear: row.enrollYear,
       fullName: row.user.displayName,
-      birthDate: row.birthDate ? row.birthDate.toISOString().slice(0, 10) : '',
+      birthDate: row.birthDate ? dateColumnToIso(row.birthDate) : '',
       region: row.region?.slug ?? '',
       district: row.user.district ?? '',
       phone: row.contactPhone ?? this.signInPhone(row.user),
@@ -120,7 +124,7 @@ export class StudentsService {
     await this.prisma.client.$transaction(async (tx) => {
       await tx.studentProfile.upsert({ where: { userId: actor.id }, create: { tenantId, userId: actor.id, ...data }, update: data })
       await tx.user.update({ where: { id: actor.id }, data: { displayName: fullName, district: q.district.trim(), email: q.email.trim() || null } })
-      await this.syncConsents(tx, tenantId, actor.id, { GRADUATE_CARD: !!q.consents.GRADUATE_CARD, CONTRACT_HELP_CARD: !!q.consents.CONTRACT_HELP_CARD, PARENT_CONSENT: minor && q.guardianConsent }, ip, now)
+      await this.syncConsents(tx, tenantId, actor.id, { GRADUATE_CARD: !!q.consents.GRADUATE_CARD, CONTRACT_HELP_CARD: !!q.consents.CONTRACT_HELP_CARD, INDUSTRY_CARD: !!q.consents.INDUSTRY_CARD, PARENT_CONSENT: minor && q.guardianConsent }, ip, now)
     })
     await this.audit.record({ action: before ? 'student.questionnaire.update' : 'student.questionnaire.create', entityType: 'StudentProfile', entityId: actor.id, after: { mode: data.mode, institutionId, directionId, studyConfirmation: confirmation.studyConfirmation ?? before?.studyConfirmation } })
     if (confirmation.studyConfirmation === 'PENDING' && institutionId) await this.askInstitution(tenantId, institutionId, q.fullName)
@@ -149,14 +153,23 @@ export class StudentsService {
     return rows.map((r) => ({ id: r.userId, name: r.user.displayName, course: r.course, graduationYear: r.graduationYear, direction: r.direction ? mainOf(r.direction) : null, confirmation: r.studyConfirmation as InstitutionStudentDto['confirmation'] }))
   }
 
-  async decideStudy(tenantId: string, actor: RequestActor, studentId: string, confirm: boolean): Promise<InstitutionStudentDto[]> {
+  /**
+   * Confirms or rejects what the institution saw (Н-8): the direction (the list shows the main one of an alias) and the
+   * year must still be the student's, checked in the same update; otherwise 409 `study_changed` and the list is re-read.
+   */
+  async decideStudy(tenantId: string, actor: RequestActor, studentId: string, confirm: boolean, seen: { directionId: string | null; graduationYear: number | null }): Promise<InstitutionStudentDto[]> {
     const institutionId = await this.ownInstitution(actor)
     const status = confirm ? 'CONFIRMED' : 'REJECTED'
-    const moved = await this.prisma.client.studentProfile.updateMany({
-      where: { userId: studentId, institutionId, mode: 'STUDYING', studyConfirmation: { in: ['PENDING', 'CONFIRMED', 'REJECTED'] } },
-      data: { studyConfirmation: status, studyConfirmedAt: new Date(), studyConfirmedById: actor.id },
-    })
-    if (moved.count !== 1) throw AppError.notFound('Student')
+    const mine: Prisma.StudentProfileWhereInput = { userId: studentId, institutionId, mode: 'STUDYING', studyConfirmation: { in: ['PENDING', 'CONFIRMED', 'REJECTED'] } }
+    const asSeen: Prisma.StudentProfileWhereInput = {
+      graduationYear: seen.graduationYear,
+      ...(seen.directionId ? { OR: [{ directionId: seen.directionId }, { direction: { mergedIntoId: seen.directionId } }] } : { directionId: null }),
+    }
+    const moved = await this.prisma.client.studentProfile.updateMany({ where: { ...mine, ...asSeen }, data: { studyConfirmation: status, studyConfirmedAt: new Date(), studyConfirmedById: actor.id } })
+    if (moved.count !== 1) {
+      if (await this.prisma.client.studentProfile.count({ where: mine })) throw AppError.conflict('study_changed', 'The student changed the direction or the year meanwhile; check the list again')
+      throw AppError.notFound('Student')
+    }
     await this.audit.record({ action: confirm ? 'student.study.confirm' : 'student.study.reject', entityType: 'StudentProfile', entityId: studentId, after: { institutionId, status } })
     const type = confirm ? 'student.studyConfirmed' : 'student.studyRejected'
     const inst = await this.prisma.client.institution.findFirstOrThrow({ where: { id: institutionId }, select: { name: true } })
@@ -220,7 +233,7 @@ export class StudentsService {
   private async confirmationFor(studying: boolean, institutionId: string | null, before: { institutionId: string | null; studyConfirmation: string; mode: string } | null, confirmedChanged: boolean) {
     if (!studying || !institutionId) return { studyConfirmation: 'NONE' as const, studyConfirmedAt: null, studyConfirmedById: null }
     if (before && before.mode === 'STUDYING' && before.institutionId === institutionId && before.studyConfirmation !== 'NONE' && !confirmedChanged) return {}
-    const approved = await this.prisma.client.institution.findFirst({ where: { id: institutionId, approvedAt: { not: null } }, select: { id: true } })
+    const approved = await this.prisma.client.institution.findFirst({ where: { id: institutionId, approvedAt: { not: null }, blockedAt: null }, select: { id: true } })
     return { studyConfirmation: approved ? ('PENDING' as const) : ('NONE' as const), studyConfirmedAt: null, studyConfirmedById: null }
   }
 
@@ -230,12 +243,18 @@ export class StudentsService {
   }
 
   /** The journal (ТЗ 8): a new row for a consent given, `revokedAt` on the active row of one taken back. */
+  /**
+   * Serialized per student (cybersecurity check 9.4, 11.11): two saves at once both saw «no consent in force» and wrote
+   * two rows; taking the tick off then revoked one of them, and the card stayed visible to companies. A revocation closes
+   * every row of the kind in force, so older duplicates go too.
+   */
   private async syncConsents(tx: TransactionClient, tenantId: string, userId: string, want: Record<StudentConsentKey | 'PARENT_CONSENT', boolean>, ip: string | undefined, now: Date) {
+    await lockConsents(tx, userId)
     const active = await tx.studentConsent.findMany({ where: { userId, revokedAt: null, companyId: null }, select: { id: true, kind: true } })
     for (const [kind, on] of Object.entries(want) as [ConsentKind, boolean][]) {
-      const row = active.find((a) => a.kind === kind)
-      if (on && !row) await tx.studentConsent.create({ data: { tenantId, userId, kind, textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now } })
-      if (!on && row) await tx.studentConsent.update({ where: { id: row.id }, data: { revokedAt: now } })
+      const inForce = active.some((a) => a.kind === kind)
+      if (on && !inForce) await tx.studentConsent.create({ data: { tenantId, userId, kind, textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now } })
+      if (!on && inForce) await tx.studentConsent.updateMany({ where: { userId, kind, companyId: null, revokedAt: null }, data: { revokedAt: now } })
     }
   }
 

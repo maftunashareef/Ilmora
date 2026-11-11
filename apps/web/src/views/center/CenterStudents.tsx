@@ -11,7 +11,7 @@ export function CenterStudents() {
   const { t, tr } = useT()
   const [list, setList] = useState<CenterStudent[] | null>(null)
   const [failed, setFailed] = useState(false)
-  useEffect(() => { api<CenterStudent[]>(`${scope.base}/students`).then(setList).catch(() => setFailed(true)) }, [])
+  useEffect(() => { api<CenterStudent[]>(`${scope.base}/students`).then(setList).catch(() => setFailed(true)) }, [scope.base])
 
   const subscriptionBadge = (s: CenterStudent['subscription']) => {
     if (!s) return <Badge tone="muted">{t('admin.people.noSub')}</Badge>

@@ -16,6 +16,9 @@ const csv = z
  * Missing or malformed values fail fast with a readable message (secrets are never echoed).
  * See .env.example for documentation of each variable.
  */
+/** The longest seat hold in production (security review №12, №82). */
+export const PAYMENT_EXPIRES_MAX_HOURS = 1
+
 export const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -55,6 +58,16 @@ export const EnvSchema = z.object({
    * `openssl rand -base64 32`). Without it the ministry cannot sign in and the Super Admins sign in with a password only.
    */
   TOTP_ENCRYPTION_KEY: z.string().min(32).optional(),
+  /**
+   * Production without TOTP_ENCRYPTION_KEY refuses to start (cybersecurity check 9.4, 11.11): the Super Admins and the
+   * finance admins would sign in with the password alone. A deliberate exception (a demo machine) sets this to true.
+   */
+  TOTP_ALLOW_MISSING_IN_PRODUCTION: bool(false),
+  /**
+   * The key of graduate cards' ids for companies (cybersecurity check 9.4, Н-6): its own secret, not the sign-in one.
+   * Changing it only changes the ids on cards already open. Unset: derived from JWT_ACCESS_SECRET (a warning in production).
+   */
+  CARD_ID_SECRET: z.string().min(32).optional(),
 
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   OTP_LENGTH: z.coerce.number().int().min(4).max(8).default(6),
@@ -98,16 +111,15 @@ export const EnvSchema = z.object({
   // payment ids (the test orders) and the sandbox transactions on them. Empty (default) = test key refused in production.
   PAYME_SANDBOX_PAYMENT_IDS: csv,
   PAYME_FISCAL_IKPU: z.string().default('10399001001000000'),
-  PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501337'),
+  // «услуга (раз)» in the tax committee's unit list (checked 10.11, security review №41).
+  PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501338'),
   PAYME_FISCAL_VAT_PERCENT: z.coerce.number().default(0),
-  CLICK_SERVICE_ID: z.string().optional(),
-  CLICK_MERCHANT_ID: z.string().optional(),
-  CLICK_MERCHANT_USER_ID: z.string().optional(),
-  CLICK_SECRET_KEY: z.string().optional(),
-  CLICK_API_URL: z.string().url().default('https://api.click.uz/v2/merchant'),
-  CLICK_PAY_URL: z.string().url().default('https://my.click.uz/services/pay'),
-  CLICK_ALLOWED_IPS: csv,
-  PAYMENT_EXPIRES_HOURS: z.coerce.number().int().positive().default(24),
+  /**
+   * Seats are held this long for an unpaid checkout (security review 10.11 №12: an hour, not a day). Production holds at
+   * most PAYMENT_EXPIRES_MAX_HOURS whatever is set (№82): Payme's test orders outlive it by being listed in
+   * PAYME_SANDBOX_PAYMENT_IDS, not by a long hold for everybody.
+   */
+  PAYMENT_EXPIRES_HOURS: z.coerce.number().int().positive().default(1),
 
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),
@@ -127,6 +139,13 @@ export const EnvSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   RATE_LIMIT_DEFAULT_PER_MINUTE: z.coerce.number().int().positive().default(240),
   RATE_LIMIT_AUTH_PER_MINUTE: z.coerce.number().int().positive().default(6),
+  /** Session refreshes per minute from one address, all sessions together (a classroom on one Wi-Fi), №19. */
+  RATE_LIMIT_REFRESH_PER_IP_MINUTE: z.coerce.number().int().positive().default(600),
+  /** Password sign-ins per minute from one address, all logins together (№75): a center's students on one Wi-Fi. */
+  RATE_LIMIT_LOGIN_PER_IP_MINUTE: z.coerce.number().int().positive().default(120),
+  /** New accounts from one address (Н-4): wide — a technikum registers a class from one Wi-Fi. */
+  RATE_LIMIT_REGISTER_PER_IP_HOUR: z.coerce.number().int().positive().default(60),
+  RATE_LIMIT_REGISTER_PER_IP_DAY: z.coerce.number().int().positive().default(300),
   /** Password sign-in: after this many failures for one login the login is locked for LOGIN_LOCK_SECONDS. */
   LOGIN_MAX_FAILURES: z.coerce.number().int().positive().default(10),
   LOGIN_LOCK_SECONDS: z.coerce.number().int().positive().default(900),
@@ -147,22 +166,30 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     throw new Error(`Invalid environment configuration:\n  ${issues}`)
   }
   const env = parsed.data
+  // Documents and certificates would land in the public bucket (cybersecurity check 9.4, 11.11).
+  if (env.S3_DOCS_BUCKET && env.S3_DOCS_BUCKET === env.S3_BUCKET) throw new Error('S3_DOCS_BUCKET must differ from S3_BUCKET: documents go to the private bucket only')
   if (env.NODE_ENV === 'production') {
+    if (env.PAYMENT_EXPIRES_HOURS > PAYMENT_EXPIRES_MAX_HOURS) {
+      console.warn(`PAYMENT_EXPIRES_HOURS=${env.PAYMENT_EXPIRES_HOURS} is ignored in production: seats are held ${PAYMENT_EXPIRES_MAX_HOURS} h (security review №12, №82). Payme's test orders listed in PAYME_SANDBOX_PAYMENT_IDS do not expire; remove the line from api.env.`)
+      env.PAYMENT_EXPIRES_HOURS = PAYMENT_EXPIRES_MAX_HOURS
+    }
     if (env.CORS_ORIGINS.length === 0) throw new Error('CORS_ORIGINS must list the web origin(s) in production')
     if (env.CORS_ORIGINS.some((o) => o.includes('*'))) throw new Error('CORS_ORIGINS may not contain wildcards in production')
     if (!env.COOKIE_SECURE) throw new Error('COOKIE_SECURE must be true in production')
     if (env.SMS_PROVIDER === 'console' && !env.SMS_ALLOW_CONSOLE_IN_PRODUCTION) throw new Error('SMS_PROVIDER=console is not allowed in production unless SMS_ALLOW_CONSOLE_IN_PRODUCTION=true (demo/staging without an SMS contract)')
     if (env.REDIS_MODE !== 'redis') throw new Error('REDIS_MODE=off is a development convenience and is not allowed in production')
-    if (!env.TOTP_ENCRYPTION_KEY) console.warn('TOTP_ENCRYPTION_KEY is not set: the ministry cannot sign in, the Super Admins sign in without the authenticator code')
+    if (!env.TOTP_ENCRYPTION_KEY) {
+      if (!env.TOTP_ALLOW_MISSING_IN_PRODUCTION) throw new Error('TOTP_ENCRYPTION_KEY must be set in production (openssl rand -base64 32): without it the Super Admins and the finance admins sign in with the password alone. A deliberate exception sets TOTP_ALLOW_MISSING_IN_PRODUCTION=true')
+      console.warn('TOTP_ENCRYPTION_KEY is not set: the ministry cannot sign in, the Super Admins sign in without the authenticator code')
+    }
+    if (!env.CARD_ID_SECRET) console.warn('CARD_ID_SECRET is not set: graduate card ids are keyed with a key derived from JWT_ACCESS_SECRET (openssl rand -base64 32)')
     // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
     if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
     if (env.PAYME_SANDBOX_PAYMENT_IDS.length) console.warn(`PAYME_SANDBOX_PAYMENT_IDS is set: the Payme test key is accepted for ${env.PAYME_SANDBOX_PAYMENT_IDS.length} test order(s). Clear it once Payme's tests pass.`)
-    if (clickConfigured(env) && env.CLICK_ALLOWED_IPS.length === 0) console.warn('CLICK_ALLOWED_IPS is empty: Click callbacks are accepted from any address (the signature is still checked)')
   }
   return env
 }
 
 export const isProd = (env: Env) => env.NODE_ENV === 'production'
 export const paymeConfigured = (env: Env) => !!(env.PAYME_MERCHANT_ID && (env.PAYME_KEY || env.PAYME_TEST_KEY))
-export const clickConfigured = (env: Env) => !!(env.CLICK_SERVICE_ID && env.CLICK_MERCHANT_ID && env.CLICK_SECRET_KEY)
 export const s3Configured = (env: Env) => !!(env.S3_ENDPOINT && env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY)

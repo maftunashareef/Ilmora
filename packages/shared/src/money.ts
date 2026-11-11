@@ -22,11 +22,4 @@ export const somToTiyin = (som: number | string | bigint): bigint => {
 
 export const tiyinToSom = (tiyin: bigint): number => Number(tiyin) / Number(TIYIN_PER_SOM)
 
-/** Payme sends amounts in tiyin as integers; Click sends so'm with two decimals ("1725000.00"). */
-export const tiyinToClickAmount = (tiyin: bigint): string => {
-  const whole = tiyin / TIYIN_PER_SOM
-  const frac = tiyin % TIYIN_PER_SOM
-  return `${whole}.${frac.toString().padStart(2, '0')}`
-}
-
 export const serializeMoney = (m: Money) => ({ amountMinor: m.amountMinor.toString(), currency: m.currency })

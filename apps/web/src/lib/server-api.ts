@@ -1,7 +1,7 @@
 import 'server-only'
-import { sampleData } from '@ilmora/shared'
+import { sampleData, type L } from '@ilmora/shared'
 import type { Category, Center, Course, SiteConfig, Subject, Teacher } from '../types'
-import { api } from './api'
+import { api, isApiError } from './api'
 
 export type Catalog = { centers: Center[]; categories: Category[]; teachers: Teacher[]; subjects: Subject[]; courses: Course[] }
 export type SiteData = SiteConfig & { version: number }
@@ -27,24 +27,48 @@ export const getSite = () =>
 const DEMO_FALLBACK = process.env.NODE_ENV !== 'production'
 const emptyCatalog: Catalog = { centers: [], categories: [], teachers: [], subjects: [], courses: [] }
 
-/** Public catalog (published + public items only), cached for a minute. */
-export const getCatalog = () =>
+const fetchCatalog = () =>
   api<Catalog>('/public/catalog', { auth: false, next: { revalidate: 60, tags: ['catalog'] } })
     .then((catalog) => (catalog ? { centers: catalog.centers ?? [], categories: catalog.categories ?? [], teachers: catalog.teachers ?? [], subjects: catalog.subjects ?? [], courses: catalog.courses ?? [] } : DEMO_FALLBACK ? fallbackCatalog : emptyCatalog))
-    .catch(() => (DEMO_FALLBACK ? fallbackCatalog : emptyCatalog))
+
+/** Public catalog (published + public items only), cached for a minute; empty when the API cannot be reached. */
+export const getCatalog = () => fetchCatalog().catch(() => (DEMO_FALLBACK ? fallbackCatalog : emptyCatalog))
+
+/**
+ * The catalog for a detail page (a center): an unreachable API is an error, not «not found» — the page fails rather
+ * than answering 404 for every center while the API is down (М2).
+ */
+export const getCatalogOrThrow = () => fetchCatalog().catch((err: unknown) => { if (DEMO_FALLBACK) return fallbackCatalog; throw err })
+
+/**
+ * «Not found» only when the API says so: 404 (no such item) or 403 (a draft, hidden or private one — not for a visitor);
+ * any other failure is an error, so an unreachable API never turns every page into 404.
+ */
+const notFoundOr = <T,>(demo: () => T | null) => (err: unknown): T | null => {
+  if (isApiError(err) && (err.status === 404 || err.status === 403)) return null
+  if (DEMO_FALLBACK) return demo()
+  throw err
+}
 
 export const getCourse = (key: string) =>
   api<Course>(`/public/courses/${encodeURIComponent(key)}`, { auth: false, next: { revalidate: 60, tags: ['catalog'] } }).catch(
-    () => (DEMO_FALLBACK ? ((sampleData.courses.find((c) => c.id === key || c.slug === key) as unknown as Course) ?? null) : null),
+    notFoundOr(() => (sampleData.courses.find((c) => c.id === key || c.slug === key) as unknown as Course) ?? null),
   )
 
 export const getTeacher = (key: string) =>
-  api<{ teacher: Teacher; courses: Course[] }>(`/public/teachers/${encodeURIComponent(key)}`, { auth: false, next: { revalidate: 60, tags: ['catalog'] } }).catch(() => {
-    const teacher = DEMO_FALLBACK ? (sampleData.teachers.find((t) => t.id === key || t.slug === key) as unknown as Teacher | undefined) : undefined
-    if (!teacher) return null
-    const courses = (sampleData.courses.filter((c) => c.teacherId === teacher.id) as unknown as Course[]) ?? []
-    return { teacher, courses }
-  })
+  api<{ teacher: Teacher; courses: Course[] }>(`/public/teachers/${encodeURIComponent(key)}`, { auth: false, next: { revalidate: 60, tags: ['catalog'] } }).catch(
+    notFoundOr(() => {
+      const teacher = sampleData.teachers.find((t) => t.id === key || t.slug === key) as unknown as Teacher | undefined
+      if (!teacher) return null
+      return { teacher, courses: (sampleData.courses.filter((c) => c.teacherId === teacher.id) as unknown as Course[]) ?? [] }
+    }),
+  )
+
+/** The title of a public video, playlist or resource for the browser tab; null for a private or missing one (М17). */
+export const getContentTitle = (kind: 'videos' | 'playlists' | 'resources', id: string) =>
+  api<{ title?: L } | null>(`/public/${kind}/${encodeURIComponent(id)}`, { auth: false, next: { revalidate: 60, tags: ['content'] } })
+    .then((r) => r?.title ?? null)
+    .catch(() => null)
 
 export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 

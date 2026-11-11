@@ -7,6 +7,8 @@ import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import { ENV, type Env, s3Configured } from '../../config/env'
 import type { Prisma } from '../../generated/prisma/client'
+import { unclaimCompany } from '../companies/companies.service'
+import { unclaimInstitution } from '../institutions/institutions.service'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
@@ -16,9 +18,10 @@ import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
 import { ONLINE_PROVIDER } from './online-provider'
 import type { AvatarUploadUrlInput, CenterStatusInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
+import { Role } from '../../generated/prisma/enums'
 
 /** What a finance admin reads in the audit log: the money records only. */
-const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription']
+const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription', 'RefundRequest']
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
@@ -183,12 +186,15 @@ export class ManageService {
   private async ensureOnlineProvider(tenantId: string): Promise<{ centerId: string; teacherId: string }> {
     const db = this.prisma.client
     const slug = ONLINE_PROVIDER.slug
-    let center = await db.center.findFirst({ where: { tenantId, slug } })
+    // A deleted platform center or profile is found and restored, not created again next to it: its slug is still taken,
+    // and a second one would fail on it — online courses could not be created any more (Н17).
+    let center = await db.center.findFirst({ where: { tenantId, slug }, includeDeleted: true } as never) as Awaited<ReturnType<typeof db.center.findFirst>>
     if (!center) center = await db.center.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, district: ONLINE_PROVIDER.district as Json, description: ONLINE_PROVIDER.description as Json, tone: ONLINE_PROVIDER.tone } })
-    else if (center.deletedAt) center = await db.center.update({ where: { id: center.id }, data: { deletedAt: null } })
-    let teacher = await db.teacherProfile.findFirst({ where: { tenantId, slug } })
-    if (!teacher) teacher = await db.teacherProfile.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, title: ONLINE_PROVIDER.teacherTitle as Json, bio: ONLINE_PROVIDER.description as Json, tagline: ONLINE_PROVIDER.teacherTagline as Json, centerId: center.id, channelActive: false } })
-    else if (teacher.deletedAt) teacher = await db.teacherProfile.update({ where: { id: teacher.id }, data: { deletedAt: null } })
+    else if (center.deletedAt) center = await db.center.update({ where: { id: center.id }, data: { deletedAt: null }, includeDeleted: true } as never)
+    let teacher = await db.teacherProfile.findFirst({ where: { tenantId, slug }, includeDeleted: true } as never) as Awaited<ReturnType<typeof db.teacherProfile.findFirst>>
+    if (!teacher) teacher = await db.teacherProfile.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, title: ONLINE_PROVIDER.teacherTitle as Json, bio: ONLINE_PROVIDER.description as Json, tagline: ONLINE_PROVIDER.teacherTagline as Json, centerId: center!.id, channelActive: false } })
+    else if (teacher.deletedAt) teacher = await db.teacherProfile.update({ where: { id: teacher.id }, data: { deletedAt: null, centerId: center!.id }, includeDeleted: true } as never)
+    if (!center || !teacher) throw new Error('Online provider could not be prepared')
     return { centerId: center.id, teacherId: teacher.id }
   }
 
@@ -725,9 +731,14 @@ export class ManageService {
         await tx.payment.updateMany({ where: { subscriptionId: s.id, state: 'PENDING' }, data: { state: 'CANCELLED', cancelledAt: now } })
         await tx.subscription.update({ where: { id: s.id }, data: { status: 'CANCELLED', cancelledAt: now } })
       }
-      if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { userId: null } })
-      await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, roles: [], centerId: null } })
-      await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId }, reason })
+// The profile may be soft-deleted already (deleteTeacher keeps its userId): unlink it all the same (review 11.11).
+      if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { userId: null }, includeDeleted: true } as never)
+      // A representative's institution or company is let go with the account (№84): it used to stay held by a deleted
+      // account forever — nobody could claim it, «Отвязать» answered 404. The company's students' data goes with it.
+      if (user.institutionId) await unclaimInstitution(tx, user.institutionId)
+      if (user.companyId) await unclaimCompany(tx, user.companyId, now)
+      await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, googleId: null, roles: [], centerId: null, institutionId: null, companyId: null } })
+      await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId, institutionId: user.institutionId, companyId: user.companyId }, reason })
     })
     return { ok: true }
   }
@@ -930,6 +941,7 @@ export class ManageService {
   async listUsers(tenantId: string, q: { role?: string; search?: string; page?: number; pageSize?: number }) {
     const page = Math.max(1, q.page ?? 1), pageSize = Math.min(200, Math.max(10, q.pageSize ?? 50))
     // The phone clause only applies to searches that contain digits: an empty digit string would match every phone number.
+    if (q.role && !(Object.values(Role) as string[]).includes(q.role)) throw AppError.invalid('validation_failed', 'Unknown role')
     const search = q.search?.trim()
     const digits = search?.replace(/\D/g, '') ?? ''
     const where = { tenantId, ...(q.role ? { roles: { has: q.role as 'STUDENT' } } : {}), ...(search ? { OR: [{ displayName: { contains: search, mode: 'insensitive' as const } }, { login: { contains: search.toLowerCase() } }, ...(digits ? [{ phoneE164: { contains: digits } }] : [])] } : {}) }

@@ -25,6 +25,10 @@ on:
         description: "Emergency only: release even though CI has not passed on this commit"
         type: boolean
         default: false
+      no_backup:
+        description: "First install or emergency only: run migrations without a database backup (BACKUP_PASSPHRASE not set)"
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -205,11 +209,15 @@ jobs:
           EOF
           ssh web true && ssh admin true && echo "both machines reachable"
 
+      # The Caddyfile lands in web/caddy.next/, not in web/caddy/ that the running Caddy reads: deploy.sh web validates it
+      # there and only then moves it in, so a broken file — or one copied by a release that stopped on ilmora-admin, or
+      # by files_only — never reaches Caddy (security review 11.11, №88).
       - name: Copy infra files (never .env / api.env)
         run: |
           for host in admin web; do
             tar -C "$GITHUB_WORKSPACE" --exclude='.env' --exclude='api.env' --exclude='.env.previous' -czf - infra/uzcloud infra/redis \
-              | ssh "$host" "mkdir -p '$DEPLOY_PATH' && tar -C '$DEPLOY_PATH' --no-same-owner -xzf -"
+              | ssh "$host" "mkdir -p '$DEPLOY_PATH' && tar -C '$DEPLOY_PATH' --no-same-owner \
+                  --transform 's,^infra/uzcloud/web/caddy/,infra/uzcloud/web/caddy.next/,' -xzf -"
             echo "$host: files in $DEPLOY_PATH/infra/uzcloud"
           done
           if [ "$FILES_ONLY" = "true" ]; then
@@ -221,6 +229,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
+          NO_BACKUP: ${{ inputs.no_backup }}
         run: |
           API_REF="$IMAGE_API@$API_DIGEST" MIGRATOR_REF="$IMAGE_API-migrator@$MIGRATOR_DIGEST" WEB_REF="$IMAGE_WEB@$WEB_DIGEST"
           printf '%s' "$GH_TOKEN" | ssh admin "docker login ghcr.io -u '$ACTOR' --password-stdin"
@@ -230,7 +239,7 @@ jobs:
           [ -f .env ] || { echo "missing admin/.env on ilmora-admin (infra/uzcloud/README.md)"; exit 1; }
           cp .env .env.previous
           sed -i "s#^API_IMAGE=.*#API_IMAGE=$API_REF#; s#^API_IMAGE_MIGRATOR=.*#API_IMAGE_MIGRATOR=$MIGRATOR_REF#; s#^WEB_IMAGE=.*#WEB_IMAGE=$WEB_REF#" .env
-          sh '$DEPLOY_PATH/infra/uzcloud/deploy.sh' admin
+          NO_BACKUP='$NO_BACKUP' sh '$DEPLOY_PATH/infra/uzcloud/deploy.sh' admin
           EOF
           ssh admin "docker logout ghcr.io >/dev/null"
 

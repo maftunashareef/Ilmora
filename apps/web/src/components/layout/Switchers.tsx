@@ -1,11 +1,12 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useT } from '../../i18n/useT'
 import { useLocation, useNavigate } from '../../lib/router'
 import { stripLocale, useLocale } from '../../lib/router'
 import { useStore } from '../../store/useStore'
 import type { Role } from '../../types'
+import { PasswordChangeDialog } from '../PasswordChange'
 import { Button, cx, Icon } from '../ui'
 
 export const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: string; short: 'UZ' | 'RU' | 'EN' }[] = [
@@ -15,6 +16,11 @@ export const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: strin
 ] as const
 
 /** Language lives in the URL (/uz, /ru, /en); switching re-routes to the same page in the new locale. */
+/** The language for the next visit (read by the proxy on the first request). */
+function rememberLocale(code: 'uz' | 'ru' | 'en') {
+  document.cookie = `NEXT_LOCALE=${code}; path=/; max-age=31536000; samesite=lax`
+}
+
 export function LangSwitcher({ compact }: { compact?: boolean }) {
   const currentLocale = useLocale()
   const lang = useStore((s) => s.lang)
@@ -27,7 +33,7 @@ export function LangSwitcher({ compact }: { compact?: boolean }) {
 
   const choose = (code: 'uz' | 'ru' | 'en') => {
     setLang(code)
-    document.cookie = `NEXT_LOCALE=${code}; path=/; max-age=31536000; samesite=lax`
+    rememberLocale(code)
     const rest = stripLocale(pathname)
     const search = rest.includes('?') ? '' : (typeof window !== 'undefined' ? window.location.search : '')
     const hash = rest.includes('#') ? '' : (typeof window !== 'undefined' ? window.location.hash : '')
@@ -55,7 +61,7 @@ export function LangSwitcher({ compact }: { compact?: boolean }) {
   )
 }
 
-const WORKSPACE: Record<Role, string | null> = { visitor: null, student: '/student', teacher: '/teacher', center: '/center', admin: '/admin' }
+const WORKSPACE: Record<Role, string | null> = { visitor: null, student: '/student', teacher: '/teacher', center: '/center', admin: '/admin', ministry: '/ministry', institution: '/institution', company: '/company' }
 
 /** Account menu: sign in / out and shortcuts to the workspaces the account can use. Kept under the old export name. */
 export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align?: 'left' | 'right'; showNameOnWide?: boolean }) {
@@ -67,6 +73,8 @@ export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align
   const nav = useNavigate()
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const closePassword = useCallback(() => setPasswordOpen(false), [])
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -86,7 +94,7 @@ export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align
     )
   }
   const user = auth.user
-  const workspaces = (['admin', 'teacher', 'center', 'student'] as Role[]).filter((r) => (r === 'admin' && user.roles.includes('PLATFORM_ADMIN')) || (r === 'teacher' && user.roles.includes('TEACHER')) || (r === 'center' && user.roles.includes('CENTER_ADMIN')) || (r === 'student' && user.roles.includes('STUDENT')))
+  const workspaces = (['admin', 'ministry', 'institution', 'company', 'teacher', 'center', 'student'] as Role[]).filter((r) => (r === 'admin' && user.roles.includes('PLATFORM_ADMIN')) || (r === 'ministry' && (user.roles.includes('MINISTRY') || user.roles.includes('PLATFORM_ADMIN'))) || (r === 'institution' && user.roles.includes('INSTITUTION_ADMIN')) || (r === 'company' && user.roles.includes('COMPANY_ADMIN')) || (r === 'teacher' && user.roles.includes('TEACHER')) || (r === 'center' && user.roles.includes('CENTER_ADMIN')) || (r === 'student' && user.roles.includes('STUDENT')))
 
   return (
     <div ref={ref} className="relative">
@@ -116,6 +124,12 @@ export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align
               </button>
             ))}
           </div>
+          {/* Accounts with a login sign in with a password and can change it here, in every workspace. */}
+          {user.login && (
+            <button type="button" onClick={() => { setOpen(false); setPasswordOpen(true) }} className="mt-3 flex w-full items-center gap-2 rounded-control px-1 py-1.5 text-left text-sm text-charcoal/75 transition hover:text-forest">
+              <Icon name="lock" className="h-3.5 w-3.5" />{t('pwd.title')}
+            </button>
+          )}
           <div className="mt-4 flex items-center justify-between gap-2 border-t border-charcoal/10 pt-3">
             <span className="text-[11px] text-charcoal/45">{t('role.viewingAs')} {t(`role.${role}`)}</span>
             <Button size="sm" variant="ghost" className="text-charcoal/60" onClick={async () => { setOpen(false); await logout(); notify(t('auth.signedOut')); nav('/') }}>
@@ -124,6 +138,7 @@ export function RoleSwitcher({ align = 'right', showNameOnWide = true }: { align
           </div>
         </div>
       )}
+      {passwordOpen && <PasswordChangeDialog onClose={closePassword} />}
     </div>
   )
 }

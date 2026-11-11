@@ -15,7 +15,8 @@ export class NotificationsController {
 
   @Get()
   list(@CurrentActor() actor: RequestActor, @Query('before') before?: string, @Query('limit') limit?: string) {
-    return this.notifications.list(actor.id, { before, limit: limit ? Number(limit) : undefined })
+    const n = limit ? Number(limit) : undefined
+    return this.notifications.list(actor.id, { before, limit: n !== undefined && Number.isFinite(n) ? n : undefined })
   }
 
   @Post('read')

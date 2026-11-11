@@ -1,11 +1,14 @@
-import { Injectable } from '@nestjs/common'
-import type { AnnouncementDto, AnnouncementResponseDto, CompanyAnnouncementDto, GraduateCardDto, L, MatchStatus, PartyContactsDto } from '@ilmora/shared'
+import { Inject, Injectable } from '@nestjs/common'
+import { type AnnouncementDto, type AnnouncementResponseDto, ageOn, type CompanyAnnouncementDto, type GraduateCardDto, type L, type MatchStatus, type PartyContactsDto } from '@ilmora/shared'
+import { companyCardId } from '../../common/card-id'
 import { AppError } from '../../common/errors'
+import { dateColumnToIso } from '../../common/time'
+import { ENV, type Env } from '../../config/env'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { ContactsService } from '../contacts/contacts.service'
+import { ContactsService, NAMED_CONTACT_SOURCES } from '../contacts/contacts.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, toIndustry } from '../registry/registry.mappers'
 import type { AnnouncementInput, AnnouncementPatch, AnnouncementsQuery, ResponseInput } from './graduates.schemas'
@@ -38,6 +41,7 @@ export class GraduatesService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly contacts: ContactsService,
+    @Inject(ENV) private readonly env: Env,
   ) {}
 
   // ───────────── institution ─────────────
@@ -152,7 +156,7 @@ export class GraduatesService {
     const company = await this.ownCompany(actor)
     if (!company.industries.length) return []
     const rows = await this.prisma.client.graduationAnnouncement.findMany({
-      where: { status: 'PUBLISHED', institution: { approvedAt: { not: null }, mergedIntoId: null }, ...(q.year ? { year: q.year } : {}), lines: { some: { direction: this.ofIndustries(company.industries) } } },
+      where: { status: 'PUBLISHED', institution: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null }, ...(q.year ? { year: q.year } : {}), lines: { some: { direction: this.ofIndustries(company.industries) } } },
       orderBy: { publishedAt: 'desc' }, take: 200, select: { id: true },
     })
     return Promise.all(rows.map((r) => this.companyAnnouncement(company, r.id, false)))
@@ -186,23 +190,36 @@ export class GraduatesService {
   }
 
   /** ТЗ 5.1 «Пригласить»: a contact request to a graduate the company sees in this announcement — nobody else. */
-  async invite(tenantId: string, actor: RequestActor, studentId: string, announcementId: string): Promise<CompanyAnnouncementDto> {
+  async invite(tenantId: string, actor: RequestActor, cardId: string, announcementId: string): Promise<CompanyAnnouncementDto> {
     const company = await this.ownCompany(actor)
-    const ann = await this.companyAnnouncement(company, announcementId, true)
-    if (!ann.graduates?.some((g) => g.studentId === studentId)) throw AppError.notFound('Graduate')
-    await this.contacts.request(tenantId, company, studentId, 'GRADUATE', { announcementId })
+    const userId = (await this.companyView(company, announcementId, true)).userByCard.get(cardId)
+    if (!userId) throw AppError.notFound('Graduate')
+    await this.contacts.request(tenantId, company, userId, 'GRADUATE', { announcementId })
     return this.companyAnnouncement(company, announcementId, true)
   }
 
   // ───────────── helpers ─────────────
+
+  /**
+   * A graduate card's id: a keyed hash of the company, the announcement and the student. Stable within the announcement
+   * for this company, unrelated across companies and years, and it cannot be turned back into the account id (№127).
+   */
+  private cardId(companyId: string, announcementId: string, userId: string) {
+    return companyCardId(this.env, companyId, announcementId, userId)
+  }
 
   private ofIndustries(ids: string[]): Prisma.DirectionWhereInput {
     return { OR: [{ mergedIntoId: null, industryId: { in: ids } }, { mergedInto: { industryId: { in: ids } } }] }
   }
 
   private async companyAnnouncement(company: { id: string; industries: string[] }, id: string, withGraduates: boolean): Promise<CompanyAnnouncementDto> {
+    return (await this.companyView(company, id, withGraduates)).dto
+  }
+
+  /** The announcement as the company sees it, and which account stands behind each graduate card (never sent out). */
+  private async companyView(company: { id: string; industries: string[] }, id: string, withGraduates: boolean): Promise<{ dto: CompanyAnnouncementDto; userByCard: Map<string, string> }> {
     const ann = await this.prisma.client.graduationAnnouncement.findFirst({
-      where: { id, status: 'PUBLISHED', institution: { approvedAt: { not: null }, mergedIntoId: null } },
+      where: { id, status: 'PUBLISHED', institution: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null } },
       select: { id: true, year: true, publishedAt: true, institutionId: true, institution: { select: { id: true, name: true, type: true, region: { select: { id: true, name: true } }, phone: true, email: true, website: true, address: true, representative: REP } }, lines: { select: LINE_SELECT } },
     })
     const lines = ann ? ann.lines.filter((l) => company.industries.includes(industryOf(l))) : []
@@ -217,26 +234,39 @@ export class GraduatesService {
       total: lines.reduce((n, l) => n + l.count, 0),
       myResponse: mine ? { id: mine.id, status: mine.status, comment: mine.comment, lines: mine.lines, contacts } : null,
     }
-    if (withGraduates) dto.graduates = await this.cards(company.id, ann, lines)
-    return dto
+    const userByCard = new Map<string, string>()
+    if (withGraduates) {
+      const cards = await this.cards(company.id, ann, lines)
+      dto.graduates = cards.map(({ userId, ...card }) => (userByCard.set(card.cardId, userId), card))
+    }
+    return { dto, userByCard }
   }
 
   /** The cards of the visible lines (ТЗ 5.1 «Что видит компания»): no phone, e-mail or files. */
-  private async cards(companyId: string, ann: { id: string; year: number; institutionId: string; institution: { name: string } }, lines: LineRow[]): Promise<GraduateCardDto[]> {
+  private async cards(companyId: string, ann: { id: string; year: number; institutionId: string; institution: { name: string } }, lines: LineRow[]): Promise<(GraduateCardDto & { userId: string })[]> {
     const byDirection = new Map(lines.map((l) => [l.directionId, l]))
     const excluded = new Set((await this.prisma.client.announcementExclusion.findMany({ where: { announcementId: ann.id }, select: { userId: true } })).map((e) => e.userId))
     const rows = await this.prisma.client.studentProfile.findMany({
       where: { institutionId: ann.institutionId, mode: 'STUDYING', studyConfirmation: 'CONFIRMED', graduationYear: ann.year, directionId: { in: [...byDirection.keys()] }, user: CARD_CONSENT },
       select: {
-        userId: true, directionId: true, about: true, region: { select: { id: true, name: true } },
-        user: { select: { displayName: true, studentCertificates: { select: { title: true }, orderBy: { createdAt: 'asc' } }, enrollments: { where: { status: { in: ['ACTIVE', 'COMPLETED'] } }, select: { course: { select: { title: true } } } } } },
+        userId: true, directionId: true, about: true, birthDate: true, region: { select: { id: true, name: true } },
+        user: { select: { displayName: true, studentConsents: { where: { kind: 'PARENT_CONSENT', revokedAt: null, companyId: null }, select: { id: true } }, studentCertificates: { select: { title: true }, orderBy: { createdAt: 'asc' } }, enrollments: { where: { status: { in: ['ACTIVE', 'COMPLETED'] } }, select: { course: { select: { title: true } } } } } },
       },
       orderBy: { user: { displayName: 'asc' } },
     })
-    const visible = rows.filter((r) => !excluded.has(r.userId))
-    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, userId: { in: visible.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
+    // A minor's card needs the parent's consent in force at every read, as on the contract-help card (ТЗ 8; cybersecurity
+    // check 9.4, 11.11): the questionnaire checks it when saving, but a birth date or the parent's consent can change later.
+    const now = new Date()
+    const adultOrAllowed = (r: { birthDate: Date | null; user: { studentConsents: unknown[] } }) => {
+      const age = r.birthDate ? ageOn(dateColumnToIso(r.birthDate), now) : null
+      return age === null || age >= 18 || r.user.studentConsents.length > 0
+    }
+    const visible = rows.filter((r) => !excluded.has(r.userId) && adultOrAllowed(r))
+    // Only requests by name (an announcement or «Студенты»): a request from the anonymous contract-help card must not show
+    // on the named card, or the company learns who asked for help with the fee (matrix check 11.11, №126).
+    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, source: { in: [...NAMED_CONTACT_SOURCES] }, userId: { in: visible.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
     return visible.map((r) => ({
-      studentId: r.userId, name: r.user.displayName, institution: ann.institution.name, direction: mainOf(byDirection.get(r.directionId!)!.direction), graduationYear: ann.year,
+      userId: r.userId, cardId: this.cardId(companyId, ann.id, r.userId), name: r.user.displayName, institution: ann.institution.name, direction: mainOf(byDirection.get(r.directionId!)!.direction), graduationYear: ann.year,
       region: place(r.region), about: r.about, certificates: r.user.studentCertificates.map((c) => c.title),
       ilmoraCourses: [...new Map(r.user.enrollments.map((e) => [JSON.stringify(e.course.title), e.course.title as L])).values()],
       studyConfirmed: true as const, contactRequest: requests.get(r.userId) ?? null,
@@ -283,7 +313,7 @@ export class GraduatesService {
     await this.notifications.safely('announcement.published', async () => {
       const ann = await this.prisma.client.graduationAnnouncement.findFirstOrThrow({ where: { id }, select: { year: true, lines: { select: LINE_SELECT } } })
       const industries = [...new Set(ann.lines.map(industryOf))]
-      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, industries: { some: { industryId: { in: industries } } } } } }, select: { id: true } })
+      const recipients = await this.prisma.client.user.findMany({ where: { isActive: true, company: { is: { approvedAt: { not: null }, blockedAt: null, industries: { some: { industryId: { in: industries } } } } } }, select: { id: true } })
       await this.notifications.notify({ tenantId, userIds: recipients.map((u) => u.id), type: 'announcement.published', params: { institutionName: inst.name, year: ann.year, announcementId: id }, dedupeKey: `announcement:${id}` })
     })
   }

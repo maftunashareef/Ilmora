@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { isPreparationTrack, MAX_CART_COURSES, priceTotals, universityDirections, universityName } from '@ilmora/shared'
+import { hoursLabel, isPreparationTrack, MAX_CART_COURSES, PAYMENT_HOLD_HOURS, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { Badge, Button, Card, cx, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
@@ -15,9 +15,9 @@ import { Link, useLocation, useNavigate } from '../../lib/router'
 import { useCurrentStudent } from '../../store/selectors'
 import { type PaymentProviderId, useStore } from '../../store/useStore'
 
-const PROVIDER_LABEL: Record<PaymentProviderId, string> = { PAYME: 'Payme', CLICK: 'Click' }
+const PROVIDER_LABEL: Record<PaymentProviderId, string> = { PAYME: 'Payme' }
 
-/** Step 3: review the selection, pick Payme or Click and go to the provider's hosted payment page. */
+/** Step 3: review the selection and go to Payme's hosted payment page (Payme only since 10.11 — Click was removed). */
 export function PreviewPage() {
   const { t, tr, lang } = useT()
   const nav = useNavigate()
@@ -35,13 +35,13 @@ export function PreviewPage() {
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
   const [providers, setProviders] = useState<Record<PaymentProviderId, boolean> | null>(null)
-  const [provider, setProvider] = useState<PaymentProviderId>('PAYME')
+  const provider: PaymentProviderId = 'PAYME'
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     api<Record<PaymentProviderId, boolean>>('/payments/providers', { auth: false })
-      .then((p) => { setProviders(p); if (!p.PAYME && p.CLICK) setProvider('CLICK') })
-      .catch(() => setProviders({ PAYME: false, CLICK: false }))
+      .then((p) => setProviders({ PAYME: !!p.PAYME }))
+      .catch(() => setProviders({ PAYME: false }))
   }, [])
 
   const builder = student?.builder ?? { packageId: null, groupIds: [], meyosGrant: false }
@@ -141,20 +141,13 @@ export function PreviewPage() {
           <Card>
             <div className="flex items-center justify-between gap-3"><Eyebrow>{t('payment.title')}</Eyebrow></div>
             <div className="mt-4 text-sm font-medium text-charcoal">{t('checkout.provider')}</div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {(['PAYME', 'CLICK'] as PaymentProviderId[]).map((p) => {
-                const available = providers?.[p] ?? false
-                return (
-                  <label key={p} className={cx('flex cursor-pointer items-center gap-3 rounded-control border px-4 py-3 text-sm transition', provider === p && available ? 'border-forest bg-sage/40 ring-inset-forest' : 'border-charcoal/12', !available && 'cursor-not-allowed opacity-60')}>
-                    <input type="radio" name="provider" className="accent-forest" disabled={!available} checked={provider === p} onChange={() => setProvider(p)} />
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-ivory"><Icon name="package" className="h-4 w-4" /></span>
-                    <span className="font-medium text-charcoal">{PROVIDER_LABEL[p]}</span>
-                    {!available && <Badge tone="muted" className="ml-auto">{providers ? t('checkout.providerUnavailable') : '…'}</Badge>}
-                  </label>
-                )
-              })}
+            {/* One provider: Payme. Shown as a card (no choice to make), with «not connected yet» while the API has no keys. */}
+            <div className={cx('mt-2 flex items-center gap-3 rounded-control border px-4 py-3 text-sm', providers?.PAYME ? 'border-forest bg-sage/40' : 'border-charcoal/12 opacity-60')}>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-ivory"><Icon name="package" className="h-4 w-4" /></span>
+              <span className="font-medium text-charcoal">{PROVIDER_LABEL.PAYME}</span>
+              {!providers?.PAYME && <Badge tone="muted" className="ml-auto">{providers ? t('checkout.providerUnavailable') : '…'}</Badge>}
             </div>
-            <Notice tone="info" className="mt-3 text-xs">{t('checkout.note', { h: 24 })}</Notice>
+            <Notice tone="info" className="mt-3 text-xs">{t('checkout.note', { hold: hoursLabel(lang, PAYMENT_HOLD_HOURS) })}</Notice>
 
             {grantCourses.length > 0 && (
               <div className="mt-5 border-t border-charcoal/10 pt-5">

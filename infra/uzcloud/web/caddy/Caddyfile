@@ -1,0 +1,104 @@
+# ILMORA edge (machine ilmora-web). Certificates are issued and renewed by Caddy automatically.
+# {$VAR} values come from infra/uzcloud/web/.env through docker-compose.yml.
+# The release checks this file with `caddy validate` before Caddy sees it (deploy.sh web).
+
+{
+	email {$ACME_EMAIL}
+	# Caddy's own log, errors included: when the site or the API does not answer (502, e.g. during a restart), Caddy
+	# writes the whole request there — address and headers — and the filter of the request log below does not apply.
+	# The same QR-token filter here (security review 11.11, №124); Cookie and Authorization Caddy hides by itself.
+	log default {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete t
+					delete next
+				}
+				request>headers>Referer delete
+			}
+		}
+	}
+}
+
+(common) {
+	# Request log (security review 10.11 №71): client address, method, path, status — to stdout, read with
+	# `docker compose logs caddy`. Cookies and Authorization are not logged by Caddy. The attendance QR token is
+	# removed wherever it can travel: the address (?t=), the sign-in return address (?next=… holds the QR page with its
+	# token) and Referer (the page the browser came from — the QR page itself), security review 11.11 №124.
+	# Check with `caddy validate` after changing; CI and the release do it too.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete t
+					delete next
+				}
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>Referer delete
+			}
+		}
+	}
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
+
+(api) {
+	request_body {
+		max_size 2MB
+	}
+	reverse_proxy api:4000
+}
+
+www.{$WEB_DOMAIN} {
+	redir https://{$WEB_DOMAIN}{uri} permanent
+}
+
+# ---------------- site, student and teacher workspaces ----------------
+{$WEB_DOMAIN} {
+	import common
+
+	# The admin API answers only on the admin domain.
+	handle /v1/admin/* {
+		respond 404
+	}
+	handle /v1/* {
+		import api
+	}
+	# Payme callbacks and health checks live outside the /v1 prefix.
+	handle /payments/* {
+		import api
+	}
+	handle /health/* {
+		import api
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+# ---------------- admin panel (served by ilmora-admin over the private network) ----------------
+{$ADMIN_DOMAIN} {
+	import common
+	header X-Robots-Tag "noindex, nofollow"
+
+	# ADMIN_ALLOW_IPS: office / owner addresses, space separated. "0.0.0.0/0 ::/0" leaves it open (login still required).
+	@outsider not remote_ip {$ADMIN_ALLOW_IPS}
+	handle @outsider {
+		respond 403
+	}
+	handle /v1/* {
+		import api
+	}
+	handle {
+		reverse_proxy {$ADMIN_PRIVATE_IP}:3000
+	}
+}

@@ -21,6 +21,7 @@ export function StudioResources() {
   const perms = useStore((s) => s.site.permissions.teacher)
   const { upsertResource, removeResource, notify, storageConfigured } = useStore()
   const [editing, setEditing] = useState<Resource | 'new' | null>(null)
+  const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState<Resource | null>(null)
   const [pub, setPub] = useState<PublishDraft>({ status: 'draft', visibility: null, audience: { studentIds: [], groupIds: [] } })
   useEffect(() => { if (params.get('new')) { open('new'); setParams({}, { replace: true }) } }, [params]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -30,14 +31,19 @@ export function StudioResources() {
     const d: Resource = r === 'new' ? { id: uid('r'), teacherId: teacher!.id, title: emptyL(), description: emptyL(), kind: 'pdf', status: 'draft', visibility: 'public', audience: { studentIds: [], groupIds: [] }, featured: false, updatedAt: new Date().toISOString() } : r
     setDraft(d); setPub({ status: d.status, visibility: r === 'new' ? null : d.visibility, audience: d.audience }); setEditing(r)
   }
-  const save = () => {
-    if (!draft) return
+  const save = async () => {
+    if (!draft || saving) return
     if (!draft.title.uz && !draft.title.en && !draft.title.ru) { notify(`${t('common.title')}: ${t('common.required')}`, 'warn'); return }
     // A file resource carries an uploaded file (its storage address in `url`) or, without storage, a link to the file elsewhere.
     if (draft.kind === 'link' ? !draft.url?.trim() : !draft.file && !draft.url?.trim()) { notify(`${draft.kind === 'link' ? t('common.link') : t('common.upload')}: ${t('common.required')}`, 'warn'); return }
     const r = finalizePublish(pub, 'teacher', perms)
     if (!r.ok) { notify(t(r.error), 'warn'); return }
-    upsertResource({ ...draft, ...r.patch }); setEditing(null); notify(t('common.saved')); if (r.note) notify(t(r.note), 'warn')
+    setSaving(true)
+    // «Сохранено» only after the server has kept it; on an error the store shows it and the form keeps what was typed (М11).
+    try {
+      await upsertResource({ ...draft, ...r.patch })
+      setEditing(null); notify(t('common.saved')); if (r.note) notify(t(r.note), 'warn')
+    } catch { /* shown by the store */ } finally { setSaving(false) }
   }
 
   return (
@@ -59,7 +65,7 @@ export function StudioResources() {
           ))}
         </ul>
       )}
-      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('studio.newResource') : draft ? tr(draft.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button onClick={save}>{t('common.save')}</Button></>}>
+      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('studio.newResource') : draft ? tr(draft.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button disabled={saving} onClick={() => void save()}>{t('common.save')}</Button></>}>
         {draft && (
           <div className="space-y-6">
             <LField label={t('common.title')} required value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />

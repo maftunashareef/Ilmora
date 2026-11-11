@@ -18,6 +18,7 @@ export function StudioPlaylists() {
   const { upsertPlaylist, removePlaylist, notify } = useStore()
   const perms = useStore((s) => s.site.permissions.teacher)
   const [editing, setEditing] = useState<Playlist | 'new' | null>(null)
+  const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState<Playlist | null>(null)
   const [pub, setPub] = useState<PublishDraft>({ status: 'draft', visibility: null, audience: { studentIds: [], groupIds: [] } })
   useEffect(() => { if (params.get('new')) { open('new'); setParams({}, { replace: true }) } }, [params]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -29,12 +30,17 @@ export function StudioPlaylists() {
     setPub({ status: d.status, visibility: p === 'new' ? null : d.visibility, audience: d.audience })
     setEditing(p)
   }
-  const save = () => {
-    if (!draft) return
+  const save = async () => {
+    if (!draft || saving) return
     if (!draft.title.uz && !draft.title.en && !draft.title.ru) { notify(`${t('common.title')}: ${t('common.required')}`, 'warn'); return }
     const r = finalizePublish(pub, 'teacher', perms)
     if (!r.ok) { notify(t(r.error), 'warn'); return }
-    upsertPlaylist({ ...draft, ...r.patch }); setEditing(null); notify(t('common.saved')); if (r.note) notify(t(r.note), 'warn')
+    setSaving(true)
+    // «Сохранено» only after the server has kept it; on an error the store shows it and the form keeps what was typed (М11).
+    try {
+      await upsertPlaylist({ ...draft, ...r.patch })
+      setEditing(null); notify(t('common.saved')); if (r.note) notify(t(r.note), 'warn')
+    } catch { /* shown by the store */ } finally { setSaving(false) }
   }
   const move = (i: number, d: -1 | 1) => { if (!draft) return; const list = [...draft.videoIds]; const j = i + d; if (j < 0 || j >= list.length) return; [list[i], list[j]] = [list[j], list[i]]; setDraft({ ...draft, videoIds: list }) }
 
@@ -55,7 +61,7 @@ export function StudioPlaylists() {
           ))}
         </ul>
       )}
-      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('studio.newPlaylist') : draft ? tr(draft.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button onClick={save}>{t('common.save')}</Button></>}>
+      <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('studio.newPlaylist') : draft ? tr(draft.title) : ''} footer={<><Button variant="ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</Button><Button disabled={saving} onClick={() => void save()}>{t('common.save')}</Button></>}>
         {draft && (
           <div className="space-y-6">
             <LField label={t('common.title')} required value={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />

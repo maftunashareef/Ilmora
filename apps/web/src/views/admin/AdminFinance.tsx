@@ -1,10 +1,12 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, Card, EmptyState, Eyebrow, Icon, Notice, PageTitle, Select } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Eyebrow, Icon, Notice, PageTitle, Select, Tabs } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
+import { useSearchParams } from '../../lib/router'
+import { AdminRefunds } from './AdminRefunds'
 import { useStore } from '../../store/useStore'
 
 interface ReconRow {
@@ -17,8 +19,26 @@ interface Balance { account: string; accountType: string; debit: string; credit:
 /** Exact amount with tiyin (never rounded: this is reconciliation), followed by the currency name in the current language. */
 const som = (minor: string, unit: string) => `${(Number(minor) / 100).toLocaleString('ru-RU')} ${unit}`
 
-/** Finance admin: provider transactions vs. internal payment state vs. ledger postings, plus independent provider checks. */
+/**
+ * Finance admin: «Платежи» — provider transactions vs. internal payment state vs. ledger postings; «Возвраты» — the refund
+ * requests (`?tab=refunds&request=<id>` — the address a refund notification opens).
+ */
 export function AdminFinance() {
+  const { t } = useT()
+  const roles = useStore((s) => s.auth.user?.roles ?? [])
+  const [sp, setSp] = useSearchParams()
+  const tab = sp.get('tab') === 'refunds' ? 'refunds' : 'payments'
+  if (!(roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN'))) return <Notice tone="warn">{t('auth.noAccessBody')}</Notice>
+  return (
+    <div>
+      <PageTitle eyebrow={t('dash.admin')} title={t('finance.title')} subtitle={t('finance.subtitle')} />
+      <Tabs className="mb-6" value={tab} onChange={(v) => setSp(v === 'refunds' ? { tab: 'refunds' } : {})} tabs={[{ id: 'payments', label: t('refund.tab.payments') }, { id: 'refunds', label: t('refund.tab.refunds') }]} />
+      {tab === 'refunds' ? <AdminRefunds key={sp.get('request') ?? ''} focus={sp.get('request')} /> : <FinancePayments />}
+    </div>
+  )
+}
+
+function FinancePayments() {
   const { t, lang } = useT()
   const notify = useStore((s) => s.notify)
   const roles = useStore((s) => s.auth.user?.roles ?? [])
@@ -27,7 +47,6 @@ export function AdminFinance() {
   const [rows, setRows] = useState<ReconRow[]>([])
   const [total, setTotal] = useState(0)
   const [balances, setBalances] = useState<Balance[]>([])
-  const [verify, setVerify] = useState<Record<string, unknown>>({})
   // The failed request is kept, not its text, so the message follows a language switch.
   const [error, setError] = useState<unknown>(null)
   const canSee = roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN')
@@ -44,12 +63,6 @@ export function AdminFinance() {
 
   useEffect(() => { if (canSee) void load() }, [canSee, load])
 
-  const check = async (row: ReconRow) => {
-    try {
-      const r = await api<Record<string, unknown>>(`/admin/finance/transactions/${row.transactionId}/verify`, { method: 'POST', body: {} })
-      setVerify((v) => ({ ...v, [row.transactionId]: r }))
-    } catch (err) { notify(apiErrorText(err, lang), 'warn') }
-  }
   const settle = async (row: ReconRow) => {
     const reference = prompt(t('finance.manualReference'))
     if (!reference || reference.length < 3) return
@@ -59,11 +72,11 @@ export function AdminFinance() {
     } catch (err) { notify(apiErrorText(err, lang), 'warn') }
   }
 
-  if (!canSee) return <Notice tone="warn">{t('auth.noAccessBody')}</Notice>
+  if (!canSee) return null
 
   return (
     <div>
-      <PageTitle eyebrow={t('dash.admin')} title={t('finance.title')} subtitle={t('finance.subtitle')} action={<Button size="sm" variant="secondary" onClick={() => void load()}><Icon name="refresh" className="h-3.5 w-3.5" />{t('common.refresh')}</Button>} />
+      <div className="mb-4 flex justify-end"><Button size="sm" variant="secondary" onClick={() => void load()}><Icon name="refresh" className="h-3.5 w-3.5" />{t('common.refresh')}</Button></div>
       {error != null && <Notice tone="warn" className="mb-4">{apiErrorText(error, lang)}</Notice>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {balances.map((b) => (
@@ -73,7 +86,7 @@ export function AdminFinance() {
       <div className="mt-8 flex flex-wrap items-center gap-2">
         <Eyebrow>{t('finance.transactions')} · {total}</Eyebrow>
         <div className="ml-auto flex gap-2">
-          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="CLICK">Click</option><option value="MANUAL">{t('finance.manual')}</option></Select>
+          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="MANUAL">{t('finance.manual')}</option></Select>
           <Select aria-label={t('finance.status')} className="py-2" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">{t('common.all')}</option><option value="CREATED">CREATED</option><option value="PERFORMED">PERFORMED</option><option value="CANCELLED">CANCELLED</option><option value="FAILED">FAILED</option></Select>
         </div>
       </div>
@@ -98,10 +111,8 @@ export function AdminFinance() {
                   <td className="px-3 py-2.5">{r.discrepancy ? <Badge tone="danger">{r.discrepancy}</Badge> : <Badge tone="sage">{t('finance.match')}</Badge>}</td>
                   <td className="px-3 py-2.5">
                     <div className="flex flex-col gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => void check(r)}>{t('finance.verify')}</Button>
                       {r.paymentState === 'PENDING' && <Button size="sm" variant="ghost" onClick={() => void settle(r)}>{t('finance.manualSettle')}</Button>}
                     </div>
-                    {verify[r.transactionId] !== undefined && <pre className="mt-1 max-w-[16rem] overflow-x-auto rounded bg-ivory p-2 text-[10px] text-charcoal/70">{JSON.stringify(verify[r.transactionId], null, 1)}</pre>}
                   </td>
                 </tr>
               ))}

@@ -2,7 +2,7 @@ import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import { CoreModule } from './core.module'
 import { AppExceptionFilter } from './common/filters/app-exception.filter'
-import { AppThrottlerGuard, AuthGuard, RolesGuard } from './common/guards'
+import { AppThrottlerGuard, AuthGuard, PasswordChangeGuard, RolesGuard } from './common/guards'
 import { ApprovedGuard } from './common/registry-access'
 import { RequestContextMiddleware } from './common/request-context.middleware'
 import { AttendanceModule } from './modules/attendance/attendance.module'
@@ -58,6 +58,7 @@ import { WorkerModule } from './worker.module'
     { provide: APP_FILTER, useClass: AppExceptionFilter },
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: PasswordChangeGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     // Registry: approved-only routes (ТЗ 4.2, 4.3).
     { provide: APP_GUARD, useClass: ApprovedGuard },

@@ -1,11 +1,12 @@
+import { Throttle } from '@nestjs/throttler'
 import { Body, Controller, Get, Headers, Inject, Patch, Post, Req, Res } from '@nestjs/common'
 import type { Request, Response } from 'express'
-import { AuthThrottle, ClientInfo, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
+import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, LoginThrottle, RegisterThrottle, SessionThrottle, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AccountService } from './account.service'
-import { ConsentDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
+import { ChangePasswordDto, ConsentDto, ResetPasswordDto, GoogleAuthDto, MfaChallengeBody, MfaCodeBody, PasswordLoginDto, RegisterDto, RequestOtpDto, UpdateProfileDto, VerifyOtpDto } from './auth.dto'
 import { AuthService, type LoginResult } from './auth.service'
 import { REFRESH_COOKIE, SESSION_FLAG, TokenService } from './token.service'
 
@@ -16,6 +17,7 @@ export class AuthController {
   /** Student/Teacher self-registration with a login and password; opens a session on success. */
   @Public()
   @AuthThrottle(10)
+  @RegisterThrottle()
   @Post('register')
   async register(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: RegisterDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
     this.assertSameSite(req, requestedWith)
@@ -23,9 +25,12 @@ export class AuthController {
     return this.respond(res, result)
   }
 
-  /** Login + password. Wrong login and wrong password produce the same error; repeated failures lock the login. */
+  /**
+   * Login + password. Wrong login and wrong password produce the same error; repeated failures lock the login. Counted
+   * per address and login, a wide limit per address (№75: a center's Wi-Fi is one address).
+   */
   @Public()
-  @AuthThrottle(10)
+  @LoginThrottle(10)
   @Post('login')
   async login(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
     this.assertSameSite(req, requestedWith)
@@ -90,9 +95,21 @@ export class AuthController {
     return this.respond(res, result)
   }
 
+  /**
+   * «Забыл пароль»: first POST /auth/otp/request to the account's phone, then this with the code and the new
+   * password. Answers like a sign-in. Not for the ministry, the Super Admins and the finance admins (403).
+   */
+  @Public()
+  @AuthThrottle(5)
+  @Post('password/reset')
+  async resetPassword(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: ResetPasswordDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
+    this.assertSameSite(req, requestedWith)
+    return this.respond(res, await this.auth.resetPasswordBySms(tenantId, dto, { ip: ci.ip, userAgent: ci.userAgent }))
+  }
+
   /** Cookie-based: requires the custom header (browsers only add it from same-origin JavaScript) and an allowed Origin. */
   @Public()
-  @AuthThrottle(30)
+  @SessionThrottle(30)
   @Post('refresh')
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Headers('x-requested-with') requestedWith: string | undefined, @ClientInfo() ci: ClientInfoValue) {
     this.assertSameSite(req, requestedWith)
@@ -119,6 +136,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @AllowWithIssuedPassword()
   me(@CurrentActor() actor: RequestActor) {
     return this.auth.me(actor.id)
   }
@@ -128,6 +146,18 @@ export class AuthController {
   consent(@CurrentActor() actor: RequestActor, @Body() dto: ConsentDto) {
     void dto
     return this.accounts.giveConsent(actor.id)
+  }
+
+  /**
+   * «Сменить пароль» (any signed-in account with a password; the ministry right after the first sign-in, when
+   * `passwordChangeRequired`). Ends every session of the account and answers like a sign-in: a fresh session here.
+   */
+  @Post('password')
+  @AllowWithIssuedPassword()
+  // Signed in: counted per account, not per address — a center's Wi-Fi is one address (№75).
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async changePassword(@CurrentActor() actor: RequestActor, @CurrentTenantId() tenantId: string, @ClientInfo() ci: ClientInfoValue, @Body() dto: ChangePasswordDto, @Res({ passthrough: true }) res: Response) {
+    return this.respond(res, await this.accounts.changePassword({ id: actor.id, tenantId }, dto, { ip: ci.ip, userAgent: ci.userAgent }))
   }
 
   @Patch('me')
@@ -143,7 +173,8 @@ export class AuthController {
 
   private assertSameSite(req: Request, requestedWith: string | undefined) {
     if (requestedWith !== 'ilmora') throw AppError.forbidden('Missing X-Requested-With header', { code: 'csrf' })
-    const origin = req.headers.origin ?? (req.headers.referer ? new URL(req.headers.referer).origin : undefined)
+    // A Referer that is not a URL is not our site (it used to answer 500 — security review №34).
+    const origin = req.headers.origin ?? (req.headers.referer ? (URL.canParse(req.headers.referer) ? new URL(req.headers.referer).origin : 'invalid') : undefined)
     if (origin && this.env.CORS_ORIGINS.length && !this.env.CORS_ORIGINS.includes(origin)) throw AppError.forbidden('Origin not allowed', { code: 'csrf' })
   }
 }

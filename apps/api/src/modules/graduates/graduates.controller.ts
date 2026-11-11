@@ -4,7 +4,8 @@ import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { Approved } from '../../common/registry-access'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
-import { AnnouncementInput, AnnouncementPatch, AnnouncementsQuery, ExclusionInput, InviteInput, ResponseInput } from './graduates.schemas'
+import { CompanyStudentsService } from './company-students.service'
+import { AnnouncementInput, AnnouncementPatch, AnnouncementsQuery, CompanyStudentsPageQuery, CompanyStudentsQuery, ExclusionInput, InviteInput, ResponseInput } from './graduates.schemas'
 import { GraduatesService } from './graduates.service'
 
 const DAY = 86_400_000
@@ -44,7 +45,32 @@ export class CompanyAnnouncementsController {
   respond(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(ResponseInput)) dto: ResponseInput) { return this.graduates.respond(t, a, id, dto) }
 
   /** ~50 a day: a company does not flood students with requests (ТЗ 9.4 «Лимиты»). */
-  @Post('graduates/:studentId/invite')
+  @Post('graduates/:cardId/invite')
   @Throttle({ default: { limit: 50, ttl: DAY } })
-  invite(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('studentId') studentId: string, @Body(new ZodValidationPipe(InviteInput)) dto: InviteInput) { return this.graduates.invite(t, a, studentId, dto.announcementId) }
+  invite(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('cardId') cardId: string, @Body(new ZodValidationPipe(InviteInput)) dto: InviteInput) { return this.graduates.invite(t, a, cardId, dto.announcementId) }
+}
+
+/**
+ * The company's «Студенты» section (ТЗ «Студенты у компании, Вакансии у учреждения», 2): institutions with matching
+ * students, one institution's cards a page at a time, «Запросить контакты». Approved, unblocked companies only; nothing
+ * can be downloaded, a page holds STUDENTS_PAGE_SIZE cards.
+ */
+@Controller('companies/me/students')
+@Roles('COMPANY_ADMIN')
+@Approved('company')
+export class CompanyStudentsController {
+  constructor(private readonly students: CompanyStudentsService) {}
+
+  @Get('institutions') blocks(@CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(CompanyStudentsQuery)) q: CompanyStudentsQuery) { return this.students.blocks(a, q) }
+
+  @Get('institutions/:institutionId')
+  page(@CurrentActor() a: RequestActor, @Param('institutionId') institutionId: string, @Query(new ZodValidationPipe(CompanyStudentsPageQuery)) q: CompanyStudentsPageQuery) {
+    const { page, ...filters } = q
+    return this.students.page(a, institutionId, filters, page)
+  }
+
+  /** Counted with «Пригласить» and «Заинтересованы» in the company's daily limit (in the database). */
+  @Post('institutions/:institutionId/:cardId/request')
+  @Throttle({ default: { limit: 50, ttl: DAY } })
+  request(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('institutionId') institutionId: string, @Param('cardId') cardId: string) { return this.students.request(t, a, institutionId, cardId) }
 }

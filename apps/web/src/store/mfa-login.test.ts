@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sampleData, type MfaChallengeDto } from '@ilmora/shared'
-import { api } from '../lib/api'
+import { api, ApiError, session } from '../lib/api'
 import type { AuthUser, InitialData } from './useStore'
 import { createIlmoraStore, isMfaChallenge } from './useStore'
 
@@ -59,5 +59,86 @@ describe('sign-in with the authenticator code (ministry, Super Admins)', () => {
     expect(isMfaChallenge(challenge)).toBe(true)
     expect(isMfaChallenge({ accessToken: 't', user: ministry })).toBe(false)
     expect(isMfaChallenge(null)).toBe(false)
+  })
+})
+
+describe('the temporary password of a ministry account', () => {
+  it('changing the password sends the current and the new one and takes the new session', async () => {
+    apiMock.mockResolvedValueOnce({ accessToken: 'fresh', user: { ...ministry, passwordChangeRequired: false } })
+    const store = createIlmoraStore(initialMock)
+    const user = await store.getState().changePassword('UNvGHQemjpsuXYwX', 'Yangi-parol-2026')
+    expect(apiMock).toHaveBeenCalledWith('/auth/password', expect.objectContaining({ method: 'POST', body: { currentPassword: 'UNvGHQemjpsuXYwX', newPassword: 'Yangi-parol-2026' }, credentials: true }))
+    expect(user.passwordChangeRequired).toBe(false)
+    expect(store.getState().auth.status).toBe('authenticated')
+    expect(store.getState().auth.user?.passwordChangeRequired).toBe(false)
+  })
+
+  it('the flag from the sign-in stays on the account until the password is changed', async () => {
+    apiMock.mockResolvedValueOnce({ accessToken: 'token', user: { ...ministry, passwordChangeRequired: true } })
+    const store = createIlmoraStore(initialMock)
+    await store.getState().mfaVerify('v'.repeat(40), '123456')
+    expect(store.getState().auth.user?.passwordChangeRequired).toBe(true)
+  })
+})
+
+describe('403 password_change_required from any request', () => {
+  it('marks the signed-in account, so the change screen shows', async () => {
+    const real = await vi.importActual<typeof import('../lib/api')>('../lib/api')
+    // The store registers its handler in the browser only.
+    vi.stubGlobal('window', globalThis)
+    try {
+      apiMock.mockResolvedValueOnce({ accessToken: 'token', user: ministry })
+      const store = createIlmoraStore(initialMock)
+      await store.getState().mfaVerify('v'.repeat(40), '123456')
+      expect(store.getState().auth.user?.passwordChangeRequired).toBeFalsy()
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'password_change_required', message: 'x' } }), { status: 403 })))
+      await expect(real.api('/ministry/stats')).rejects.toMatchObject({ code: 'password_change_required' })
+      expect(store.getState().auth.status).toBe('authenticated')
+      expect(store.getState().auth.user?.passwordChangeRequired).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+      real.setPasswordChangeRequiredHandler(null)
+    }
+  })
+})
+
+describe('«Забыли пароль?»: SMS code, then the new password (PR #54)', () => {
+  it('asks for a code for the phone in the site language, without the session', async () => {
+    apiMock.mockResolvedValueOnce({ expiresInSeconds: 300 })
+    const store = createIlmoraStore(initialMock)
+    await store.getState().requestPasswordCode('+998901234567')
+    expect(apiMock).toHaveBeenCalledWith('/auth/otp/request', expect.objectContaining({ method: 'POST', body: { phone: '+998901234567', lang: 'uz' }, auth: false }))
+  })
+
+  it('the code and the new password sign in (the answer is a session)', async () => {
+    const student = { ...ministry, id: 'u-student', login: 'anvar', roles: ['STUDENT'] } as AuthUser
+    apiMock.mockResolvedValueOnce({ accessToken: 'fresh', user: student })
+    apiMock.mockResolvedValue({})
+    const store = createIlmoraStore(initialMock)
+    const user = await store.getState().resetPasswordBySms('+998901234567', '123456', 'Yangi-parol-2026')
+    expect(apiMock).toHaveBeenCalledWith('/auth/password/reset', expect.objectContaining({ method: 'POST', body: { phone: '+998901234567', code: '123456', newPassword: 'Yangi-parol-2026' }, credentials: true, auth: false }))
+    expect(user.id).toBe('u-student')
+    expect(store.getState().auth.status).toBe('authenticated')
+  })
+})
+
+describe('№19: a 429 while the page opens does not sign out', () => {
+  it('keeps checking, says «try again shortly» and checks again later', async () => {
+    vi.useFakeTimers()
+    try {
+      session.set('access-token')
+      apiMock.mockRejectedValueOnce(new ApiError(429, 'session_refresh_limited', 'Too many sign-in refreshes'))
+      const store = createIlmoraStore(initialMock)
+      await store.getState().bootstrap()
+      expect(store.getState().auth.status).toBe('loading')
+      expect(session.token).toBe('access-token')
+      expect(store.getState().toasts.at(-1)?.tone).toBe('warn')
+      apiMock.mockResolvedValueOnce(ministry)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(store.getState().auth.status).toBe('authenticated')
+    } finally {
+      vi.useRealTimers()
+      session.set(null)
+    }
   })
 })
