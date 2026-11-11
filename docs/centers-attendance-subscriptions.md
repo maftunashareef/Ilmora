@@ -85,6 +85,9 @@ Everything here is enforced on the server; the web app only reflects it.
 
   Finance (`/v1/admin/finance/refunds`, `FINANCE_ADMIN`):
   - `GET ?status=&overdue=true&page=` — the queue;
+  - `GET students?q=` — the student a letter is about, by name, login or phone (2–60 characters): only students
+    with a paid subscription that still has money to return, at most 20, the phone masked, with the courses and the
+    payments left to return; each search is audited. The Super Admin's `/admin/users` stays closed to the finance admins;
   - `POST` — a request from a letter (`studentId` + the student's body);
   - `POST :id/approve` with `{ approvedMinor, note? }` — up to what is left of the payment;
   - `POST :id/reject` with `{ note }`;

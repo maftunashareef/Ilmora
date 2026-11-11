@@ -1,3 +1,4 @@
+import { maskPhone } from '@ilmora/shared'
 import { Injectable, Logger } from '@nestjs/common'
 import { AppError } from '../../common/errors'
 import { dateColumnToIso, todayLocal } from '../../common/time'
@@ -15,6 +16,8 @@ const DAY_MS = 86_400_000
 export const REFUND_DECISION_DAYS = 10
 /** The finance admins are reminded this many days before the due date. */
 export const REFUND_REMIND_DAYS = 2
+/** Students one search of the finance admin returns. */
+export const SEARCH_LIMIT = 20
 
 /** Reasons that end the course: the refusal takes effect when it is filed, its seats are freed at once (6.4). */
 const ENDS_COURSE = new Set<RefundReason>(['REFUSAL', 'OTHER', 'SCHEDULE_CHANGED', 'GROUP_CLOSED', 'NOT_AS_DESCRIBED'])
@@ -165,6 +168,55 @@ export class RefundsService {
         student: r.student,
         payment: { ...r.payment, amountMinor: r.payment.amountMinor.toString(), refundedMinor: r.payment.refundedMinor.toString() },
       })),
+    }
+  }
+
+  /**
+   * The student a letter is about (6.6), for the finance admin who files the request: search by name, login or phone.
+   * Narrow on purpose — not the Super Admin's account list: only students with a paid subscription that still has money
+   * to return, at most SEARCH_LIMIT, the phone masked; what the form needs (the courses, the payments and what is left
+   * of them) comes with each. Every search is in the audit log.
+   */
+  async searchStudents(tenantId: string, actorId: string, query: string) {
+    const q = query.normalize('NFC').trim()
+    if (q.length < 2) throw AppError.invalid('validation_failed', 'At least 2 characters')
+    const digits = q.replace(/\D/g, '')
+    const match = [
+      { displayName: { contains: q, mode: 'insensitive' as const } },
+      { login: { contains: q.toLowerCase() } },
+      ...(digits.length >= 5 ? [{ phoneE164: { contains: digits } }] : []),
+    ]
+    const rows = await this.prisma.client.user.findMany({
+      where: {
+        tenantId, isActive: true, roles: { has: 'STUDENT' }, OR: match,
+        subscriptions: { some: { status: { in: ['ACTIVE', 'PAST_DUE'] }, payments: { some: { state: 'PAID', amountMinor: { gt: 0n }, transactions: { none: { sandbox: true } } } } } },
+      },
+      orderBy: { displayName: 'asc' }, take: SEARCH_LIMIT,
+      select: {
+        id: true, displayName: true, login: true, phoneE164: true,
+        subscriptions: {
+          where: { status: { in: ['ACTIVE', 'PAST_DUE'] } }, take: 1, orderBy: { updatedAt: 'desc' },
+          select: {
+            id: true, kind: true, status: true,
+            enrollments: { where: { status: 'ACTIVE' }, select: { id: true, course: { select: { id: true, title: true } } } },
+            payments: { where: { state: 'PAID', amountMinor: { gt: 0n } }, orderBy: { periodStart: 'desc' }, select: { id: true, amountMinor: true, refundedMinor: true, periodStart: true, periodEnd: true } },
+          },
+        },
+      },
+    })
+    await this.audit.record({ tenantId, action: 'refund.student_search', entityType: 'User', entityId: actorId, after: { results: rows.length } })
+    return {
+      items: rows.map((u) => {
+        const sub = u.subscriptions[0]
+        return {
+          id: u.id, displayName: u.displayName, login: u.login, phoneMasked: u.phoneE164 ? maskPhone(u.phoneE164) : null,
+          subscription: sub ? {
+            id: sub.id, kind: sub.kind, status: sub.status,
+            courses: sub.enrollments.map((e) => ({ enrollmentId: e.id, courseId: e.course.id, title: e.course.title })),
+            payments: sub.payments.filter((p) => p.refundedMinor < p.amountMinor).map((p) => ({ id: p.id, amountMinor: p.amountMinor.toString(), leftMinor: (p.amountMinor - p.refundedMinor).toString(), periodStart: p.periodStart, periodEnd: p.periodEnd })),
+          } : null,
+        }
+      }),
     }
   }
 
