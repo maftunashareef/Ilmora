@@ -782,6 +782,7 @@ export const dict = {
   'admin.overview.privateItems': d('Yopiq materiallar', 'Приватных материалов', 'Private items'),
   'admin.overview.activeSubs': d('Faol demo abonementlar', 'Активных демо-подписок', 'Active demo subscriptions'),
   'admin.overview.quick': d('Tez amallar', 'Быстрые действия', 'Quick actions'),
+  'admin.siteNotLoaded': d('Sayt sozlamalari serverdan yuklanmadi — özgartirişlar saqlanmaydi. Sahifani yangilang.', 'Настройки сайта не загрузились с сервера — изменения не сохраняются. Обновите страницу.', 'The site settings did not load from the server — changes are not saved. Refresh the page.'),
   'admin.siteReloaded': d('Sayt sozlamalarini bu orada boşqa administrator özgartirdi. Joriy versiya yuklandi — oxirgi özgartirişingiz saqlanmadi, uni qayta kiriting.', 'Настройки сайта за это время изменил другой администратор. Загружена актуальная версия — ваша последняя правка не сохранилась, повторите её.', 'Another administrator changed the site settings meanwhile. The current version is loaded — your last change was not saved; please make it again.'),
   'admin.overview.summary': d('Qisqaça', 'Сводка', 'Summary'),
   'admin.overview.templateNote': d('Şablonlar mavjud funksiyalarni sozlaydi. Forma orqali yangi dasturiy imkoniyat yaratilmaydi.', 'Шаблоны настраивают существующие функции. Новая программная функциональность через форму не создаётся.', 'Templates configure supported features. New software functionality is not created through a form.'),

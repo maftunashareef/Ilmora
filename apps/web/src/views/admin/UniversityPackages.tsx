@@ -23,6 +23,7 @@ export function UniversityPackagesAdmin() {
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
   const loaded = useStore((s) => s.presetsLoaded)
+  const loadFailed = useStore((s) => s.siteLoadFailed)
   const courses = useStore((s) => s.courses)
   const centers = useStore((s) => s.centers)
   const categories = useStore((s) => s.categories)
@@ -46,7 +47,7 @@ export function UniversityPackagesAdmin() {
   const usedBy = (uniId: string) => list.filter((p) => p.universityId === uniId).length
 
   // The public site response hides drafts and unused universities, so editing waits for the full lists.
-  if (!loaded) return <section className="mt-12"><Eyebrow>{t('admin.uni.title')}</Eyebrow><p className="mt-2 text-sm text-charcoal/55">{t('common.loading')}</p></section>
+  if (!loaded) return <section className="mt-12"><Eyebrow>{t('admin.uni.title')}</Eyebrow>{loadFailed ? <Notice tone="warn" className="mt-2">{t('admin.siteNotLoaded')}</Notice> : <p className="mt-2 text-sm text-charcoal/55">{t('common.loading')}</p>}</section>
 
   const needsReview = (p: Preset) => (p.universityId || p.university) && p.admission?.status !== 'verified'
   const visible = list.filter((p) => {

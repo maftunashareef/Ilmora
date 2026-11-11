@@ -10,7 +10,7 @@ import { fetchStorageStatus, storableUrl } from '../services/uploads'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
 import type {
-  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student, University,
+  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student,
   StudentProfile, Subject, Teacher, Video,
 } from '../types'
 
@@ -225,8 +225,14 @@ export interface StoreState extends DemoState, Actions {
   workspaceLoaded: boolean
   /** The visitor's saved cart and favourites have been read from this device (hydrateGuest ran). */
   guestHydrated: boolean
-  /** Super Admin only: the full preset list (including disabled ones) has been loaded into `site.presets`. */
+  /**
+   * Super Admin only: the current settings were loaded from `GET /admin/site` — all of them (presets and universities
+   * with the disabled ones, packages) and their version, from one answer. Until then site saves are refused: the page
+   * was rendered from a cached public read, and its values must not go out with a fresh version.
+   */
   presetsLoaded: boolean
+  /** Super Admin only: that load failed — the workspace asks to refresh the page (no site saves until then). */
+  siteLoadFailed: boolean
   myPayments: PaymentSummary[]
   /** Ready-made packages in the cart, read from this device after mount. */
   cartBundles: CartBundle[]
@@ -280,7 +286,8 @@ const publishableInput = publishableSaveBody
 /** What a visitor may see of the packages: published ones, and the universities marked published or with one. */
 const publicSite = (site: SiteConfig): SiteConfig => {
   const presets = (site.presets ?? []).filter((p) => p.enabled)
-  return { ...site, presets, universities: (site.universities ?? []).filter((u) => isUniversityListed(u, presets)) }
+  // The admin read also carries the switched-off packages (Ж17): they stay internal as well.
+  return { ...site, presets, universities: (site.universities ?? []).filter((u) => isUniversityListed(u, presets)), packages: (site.packages ?? []).filter((p) => p.enabled) }
 }
 const courseInput = courseSaveBody
 const groupInput = groupSaveBody
@@ -415,11 +422,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           // The version in the server-rendered page comes from a cached public fetch and can be a minute old; the admin
           // workspace load (loadAdminPresets) brings the current one, so wait for it before the first save.
           if (workspaceLoading) await workspaceLoading.catch(() => undefined)
-          const { packages: _p, presets, universities, ...rest } = get().site
+          // Only the settings loaded from the server go out, with the version that came with them: never the cached ones.
+          if (!get().presetsLoaded) { get().notify(translate(get().lang, 'admin.siteNotLoaded'), 'warn'); return }
+          const { packages: _p, ...data } = get().site
           void _p
-          // Presets and universities are sent only once the full lists have been loaded; without them the server keeps the
-          // stored ones, so a save made before the load can never delete packages that are still drafts.
-          const data = get().presetsLoaded ? { ...rest, presets, universities } : rest
           try {
             const r = await api<{ version: number }>('/admin/site', { method: 'PUT', body: { data, version: get().siteVersion } })
             set({ siteVersion: r.version })
@@ -468,6 +474,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         workspaceLoaded: false,
         // Disabled presets are internal: drop them from memory on every sign-in/out; admins reload the full list.
         presetsLoaded: false,
+        siteLoadFailed: false,
         site: s.site.presets ? publicSite(s.site) : s.site,
       }))
     }
@@ -529,6 +536,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       workspaceLoaded: false,
       guestHydrated: false,
       presetsLoaded: false,
+      siteLoadFailed: false,
       myPayments: [],
       cartBundles: [],
       sessionQr: {},
@@ -663,10 +671,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         }))
       },
       loadAdminPresets: async () => {
-        // The public site response leaves out presets that are not enabled; the admin editor needs the full list.
-        const full = await api<{ presets?: Preset[]; universities?: University[]; version?: number }>('/admin/site')
-        // The current version replaces the cached one the page was rendered with; a save that finished meanwhile is never undone (versions only grow).
-        set((s) => ({ site: { ...s.site, presets: full.presets ?? [], universities: full.universities ?? [] }, presetsLoaded: true, siteVersion: Math.max(s.siteVersion, full.version ?? 0) }))
+        // The page was rendered from a cached public read (up to a minute old, without the disabled presets, universities and
+        // packages). The admin works on the current settings: all of them and their version, both from this one answer.
+        try {
+          const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
+          set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true, siteLoadFailed: false })
+        } catch (err) {
+          set({ presetsLoaded: false, siteLoadFailed: true })
+          throw err
+        }
       },
       loadStudentOverview: async () => {
         const o = await api<ApiOverview>('/student/subscription')
@@ -772,7 +785,12 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       setStorageConfigured: (configured) => set({ storageConfigured: configured }),
 
       // ── site ──
-      patchSite: (fn) => { set((s) => ({ site: fn(s.site) })); scheduleSiteSave() },
+      patchSite: (fn) => {
+        // Before the current settings are loaded (or when that failed) an edit would be saved over them: refuse it.
+        if (get().role === 'admin' && !get().presetsLoaded) { get().notify(translate(get().lang, 'admin.siteNotLoaded'), 'warn'); return }
+        set((s) => ({ site: fn(s.site) }))
+        scheduleSiteSave()
+      },
       savePackage: (id, patch) => {
         set((s) => ({ site: { ...s.site, packages: s.site.packages.map((p) => (p.id === id ? { ...p, ...patch } : p)) } }))
         if (get().role !== 'admin') return
