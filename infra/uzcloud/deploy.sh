@@ -121,6 +121,9 @@ case "$ROLE" in
       $COMPOSE up -d worker admin
     fi
     wait_healthy admin
+    # The worker has no page to check from outside: a provider missing from its root killed it on start for 14 hours
+    # after release 51 while every check stayed green (11.11). Its healthcheck sees the process; wait for it here.
+    wait_healthy worker
     ;;
   web)
     check_disk
