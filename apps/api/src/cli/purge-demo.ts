@@ -236,6 +236,8 @@ async function buildPlan(db: Client, tenantId: string): Promise<Plan> {
     step('Course', 'of demo centers or demo teachers', (c) => c.course.count(all({ where: { id: { in: courseIds } } })), async (tx) => (await tx.course.deleteMany(hard({ where: { id: { in: courseIds } } }))).count),
     step('Subject', 'of demo teachers', (c) => c.subject.count(all({ where: { id: { in: subjectIds } } })), async (tx) => (await tx.subject.deleteMany(hard({ where: { id: { in: subjectIds } } }))).count),
     step('TeacherProfile', `name ends with "${DEMO_MARKER}", or its login does`, (c) => c.teacherProfile.count(all({ where: { id: { in: teacherIds } } })), async (tx) => (await tx.teacherProfile.deleteMany(hard({ where: { id: { in: teacherIds } } }))).count),
+    // The consent journal is kept when an account is deleted (ON DELETE RESTRICT, ТЗ 8); demo students' rows are demo data.
+    step('StudentConsent', 'of demo students', (c) => c.studentConsent.count({ where: { userId: { in: userIds } } }), async (tx) => (await tx.studentConsent.deleteMany({ where: { userId: { in: userIds } } })).count),
     step('User', `display name ends with "${DEMO_MARKER}", or demo teacher login`, (c) => c.user.count(all({ where: { id: { in: userIds } } })), async (tx) => (await tx.user.deleteMany(hard({ where: { id: { in: userIds } } }))).count),
     step('Center', `name ends with "${DEMO_MARKER}"`, (c) => c.center.count(all({ where: { id: { in: centerIds } } })), async (tx) => (await tx.center.deleteMany(hard({ where: { id: { in: centerIds } } }))).count),
   ]
