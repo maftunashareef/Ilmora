@@ -10,6 +10,7 @@ import { ContactsService } from '../src/modules/contacts/contacts.service'
 import { CompanyStudentsService } from '../src/modules/graduates/company-students.service'
 import { CompanyStudentsController } from '../src/modules/graduates/graduates.controller'
 import { MinistryStatsService } from '../src/modules/ministry/ministry-stats.service'
+import { MinistryController } from '../src/modules/ministry/ministry.controller'
 import { NotificationsService } from '../src/modules/notifications/notifications.service'
 import { RegistryService } from '../src/modules/registry/registry.service'
 import { StudentsService } from '../src/modules/students/students.service'
@@ -18,6 +19,7 @@ import { InstitutionVacanciesController } from '../src/modules/vacancies/vacanci
 import { BroadcastInput, VacancyInput } from '../src/modules/vacancies/vacancies.schemas'
 import { VacanciesService } from '../src/modules/vacancies/vacancies.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
+import { unzip } from './support/xlsx'
 
 const Y = new Date().getUTCFullYear()
 
@@ -245,7 +247,8 @@ describe.skipIf(!DB_AVAILABLE)('ТЗ «Студенты у компании, В�
       expect(await instVacancies.preview(s.tashkentCol.actor, v.id, input)).toEqual({ recipients: 2, alreadySent: 0, leftToday: VACANCY_BROADCASTS_PER_DAY })
 
       const b = await instVacancies.send(s.tenantId, s.tashkentCol.actor, v.id, input)
-      expect(b).toMatchObject({ vacancyId: v.id, courses: [3, 4], recipientsCount: 2, finishedAt: null, directions: [expect.objectContaining({ id: s.dasturlash.id })] })
+      const sender = await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: s.tashkentCol.actor.id }, select: { displayName: true } })
+      expect(b).toMatchObject({ vacancyId: v.id, vacancyTitle: 'Backend stajirovka', companyName: 'Soft Co', sentBy: { name: sender.displayName }, courses: [3, 4], recipientsCount: 2, finishedAt: null, directions: [expect.objectContaining({ id: s.dasturlash.id })] })
       // Nothing is delivered until the queue runs the outbox event.
       expect(await ctx.prisma.client.notification.count({ where: { type: 'vacancy.broadcast' } })).toBe(0)
       expect(await TenantContext.system(() => ctx.prisma.client.outboxEvent.count({ where: { type: 'vacancy.broadcast', dedupeKey: `vacancy-broadcast:${b.id}` } }))).toBe(1)
@@ -259,11 +262,36 @@ describe.skipIf(!DB_AVAILABLE)('ТЗ «Студенты у компании, В�
       await expect(instVacancies.send(s.tenantId, s.tashkentCol.actor, v.id, input)).rejects.toMatchObject({ code: 'no_recipients' })
       expect((await instVacancies.get(s.tashkentCol.actor, v.id)).sentTo).toBe(2)
       expect((await instVacancies.broadcasts(s.tashkentCol.actor, v.id))[0]).toMatchObject({ id: b.id, finishedAt: expect.any(String) })
+      // The journal of all its broadcasts (3.2, п. 6); another institution's journal has none of them.
+      expect((await instVacancies.broadcasts(s.tashkentCol.actor)).map((x) => x.id)).toEqual([b.id])
+      expect(await instVacancies.broadcasts(s.andijanTech.actor)).toEqual([])
 
       // The daily limit, counted in the database.
       await ctx.prisma.client.vacancyBroadcast.createMany({ data: Array.from({ length: VACANCY_BROADCASTS_PER_DAY - 1 }, () => ({ tenantId: s.tenantId, vacancyId: v.id, institutionId: s.tashkentCol.row.id, courses: [1], createdById: 'x', recipientsCount: 0 })) })
       await s.student({ name: 'New', inst: s.tashkentCol, course: 4 })
       await expect(instVacancies.send(s.tenantId, s.tashkentCol.actor, v.id, input)).rejects.toMatchObject({ code: 'rate_limited', status: 429 })
+    })
+  })
+
+  it('«Работа» edited: the salary changes; turning it into practice needs the salary cleared; a job stays paid', async () => {
+    const s = await setup('iv-job-edit')
+    await s.inT(async () => {
+      const base = { title: 'Junior', directionIds: [s.dasturlash.id], region: 'tashkent-city', format: 'ONSITE', seats: 1 }
+      const job = await vacancies.create(s.tenantId, s.softCo.actor, { ...base, kind: 'JOB', paid: true, salaryFrom: 5_000_000 } as never)
+      expect(await vacancies.update(s.softCo.actor, job.id, { salaryTo: 7_000_000 })).toMatchObject({ kind: 'JOB', salaryFrom: 5_000_000, salaryTo: 7_000_000, stipend: null })
+      for (const bad of [{ salaryTo: 1_000 }, { paid: false }, { stipend: 100 }, { kind: 'PRACTICE' as const }]) {
+        await expect(vacancies.update(s.softCo.actor, job.id, bad)).rejects.toMatchObject({ code: 'validation_failed' })
+      }
+      expect(await vacancies.update(s.softCo.actor, job.id, { kind: 'PRACTICE', salaryFrom: null, salaryTo: null, stipend: 1_000_000 })).toMatchObject({ kind: 'PRACTICE', salaryFrom: null, salaryTo: null, stipend: 1_000_000 })
+      // Back to a job: the stipend has to go, the salary comes.
+      await expect(vacancies.update(s.softCo.actor, job.id, { kind: 'JOB', salaryFrom: 6_000_000 })).rejects.toMatchObject({ code: 'validation_failed' })
+      expect(await vacancies.update(s.softCo.actor, job.id, { kind: 'JOB', stipend: null, salaryFrom: 6_000_000 })).toMatchObject({ kind: 'JOB', stipend: null, salaryFrom: 6_000_000 })
+      // The ministry's Excel shows «Работа» too.
+      const headers: Record<string, string> = {}
+      let body: Buffer = Buffer.alloc(0)
+      await new MinistryController(new MinistryStatsService(ctx.prisma), {} as never, ctx.audit).export({ table: 'vacancies', lang: 'ru' }, { setHeader: (k: string, v: string) => { headers[k] = v }, send: (b: Buffer) => { body = b } } as never)
+      expect(headers['Content-Disposition']).toMatch(/ilmora-vacancies-/)
+      expect(unzip(body).get('xl/worksheets/sheet1.xml')).toContain('Работа')
     })
   })
 

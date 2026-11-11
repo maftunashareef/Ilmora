@@ -158,17 +158,32 @@ export class InstitutionVacanciesService {
     return this.broadcastOf(inst.id, created.id)
   }
 
-  /** The institution's broadcasts of one vacancy, newest first (the journal, 3.2, п. 6). */
-  async broadcasts(actor: RequestActor, id: string): Promise<VacancyBroadcastDto[]> {
+  /**
+   * The institution's journal of broadcasts (3.2, п. 6): who sent which vacancy when and to how many, newest first —
+   * all of them, or one vacancy's. Only its own.
+   */
+  async broadcasts(actor: RequestActor, vacancyId?: string): Promise<VacancyBroadcastDto[]> {
     const inst = await this.ownInstitution(actor)
-    const rows = await this.prisma.client.vacancyBroadcast.findMany({ where: { institutionId: inst.id, vacancyId: id }, orderBy: { createdAt: 'desc' }, take: 100, select: BROADCAST_SELECT })
-    return rows.map(toBroadcast)
+    const rows = await this.prisma.client.vacancyBroadcast.findMany({ where: { institutionId: inst.id, ...(vacancyId ? { vacancyId } : {}) }, orderBy: { createdAt: 'desc' }, take: 200, select: BROADCAST_SELECT })
+    return this.toBroadcasts(rows)
   }
 
   // ───────────── helpers ─────────────
 
   private async broadcastOf(institutionId: string, id: string): Promise<VacancyBroadcastDto> {
-    return toBroadcast(await this.prisma.client.vacancyBroadcast.findFirstOrThrow({ where: { id, institutionId }, select: BROADCAST_SELECT }))
+    const [dto] = await this.toBroadcasts([await this.prisma.client.vacancyBroadcast.findFirstOrThrow({ where: { id, institutionId }, select: BROADCAST_SELECT })])
+    return dto
+  }
+
+  /** The senders' names in one read (createdById has no foreign key, as the registry's other «who» columns). */
+  private async toBroadcasts(rows: BroadcastRow[]): Promise<VacancyBroadcastDto[]> {
+    const names = new Map((await this.prisma.client.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById))] } }, select: { id: true, displayName: true } })).map((u) => [u.id, u.displayName]))
+    return rows.map((b) => ({
+      id: b.id, vacancyId: b.vacancyId, vacancyTitle: b.vacancy.title, companyName: b.vacancy.company.name,
+      sentBy: names.has(b.createdById) ? { name: names.get(b.createdById)! } : null,
+      directions: b.directions.map((d) => mainOf(d.direction)), courses: [...b.courses].sort((x, y) => x - y),
+      recipientsCount: b.recipientsCount, createdAt: b.createdAt.toISOString(), finishedAt: b.finishedAt?.toISOString() ?? null,
+    }))
   }
 
   private sentToday(db: TransactionClient | PrismaService['client'], institutionId: string) {
@@ -221,12 +236,9 @@ export class InstitutionVacanciesService {
 }
 
 const BROADCAST_SELECT = {
-  id: true, vacancyId: true, courses: true, recipientsCount: true, createdAt: true, finishedAt: true,
+  id: true, vacancyId: true, courses: true, recipientsCount: true, createdAt: true, finishedAt: true, createdById: true,
+  vacancy: { select: { title: true, company: { select: { name: true } } } },
   directions: { select: { direction: { select: DIRECTION_WITH_MAIN } } },
 } as const satisfies Prisma.VacancyBroadcastSelect
-
-const toBroadcast = (b: Prisma.VacancyBroadcastGetPayload<{ select: typeof BROADCAST_SELECT }>): VacancyBroadcastDto => ({
-  id: b.id, vacancyId: b.vacancyId, directions: b.directions.map((d) => mainOf(d.direction)), courses: [...b.courses].sort((x, y) => x - y),
-  recipientsCount: b.recipientsCount, createdAt: b.createdAt.toISOString(), finishedAt: b.finishedAt?.toISOString() ?? null,
-})
+type BroadcastRow = Prisma.VacancyBroadcastGetPayload<{ select: typeof BROADCAST_SELECT }>
 

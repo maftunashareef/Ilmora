@@ -1,10 +1,10 @@
-import { inflateRawSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { StatsTableDto } from '@ilmora/shared'
 import { registrySearchKey } from '@ilmora/shared'
 import { seedRegistryReference } from '../prisma/registry-reference'
 import { ROLES_KEY } from '../src/common/decorators'
 import { buildXlsx, crc32 } from '../src/common/xlsx'
+import { unzip } from './support/xlsx'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { InstitutionsService } from '../src/modules/institutions/institutions.service'
 import { MinistryRegistryService } from '../src/modules/ministry/ministry-registry.service'
@@ -14,20 +14,6 @@ import { DB_AVAILABLE, TestContext } from './helpers'
 import { notificationsStub } from './stubs'
 
 /** Reads the files of a zip (enough for the xlsx we write: deflate, sizes in the local headers). */
-function unzip(buf: Buffer): Map<string, string> {
-  const out = new Map<string, string>()
-  let p = 0
-  while (buf.readUInt32LE(p) === 0x04034b50) {
-    const size = buf.readUInt32LE(p + 18)
-    const nameLen = buf.readUInt16LE(p + 26)
-    const extra = buf.readUInt16LE(p + 28)
-    const name = buf.subarray(p + 30, p + 30 + nameLen).toString('utf8')
-    const data = buf.subarray(p + 30 + nameLen + extra, p + 30 + nameLen + extra + size)
-    out.set(name, inflateRawSync(data).toString('utf8'))
-    p += 30 + nameLen + extra + size
-  }
-  return out
-}
 
 describe('Excel export', () => {
   it('writes a valid workbook: header, numbers, text — and user text never becomes a formula', () => {

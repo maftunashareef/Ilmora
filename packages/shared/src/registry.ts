@@ -988,10 +988,14 @@ export interface VacancyBroadcastPreviewDto {
   leftToday: number
 }
 
-/** One broadcast in the institution's journal. */
+/** One broadcast in the institution's journal (ТЗ «Студенты у компании», 3.2, п. 6: who, when, which vacancy, how many). */
 export interface VacancyBroadcastDto {
   id: string
   vacancyId: string
+  vacancyTitle: string
+  companyName: string
+  /** The institution's representative who sent it; null if that account is gone. */
+  sentBy: { name: string } | null
   directions: DirectionDto[]
   courses: number[]
   recipientsCount: number
