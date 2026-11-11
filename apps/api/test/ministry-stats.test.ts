@@ -8,7 +8,7 @@ import { buildXlsx, crc32 } from '../src/common/xlsx'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { InstitutionsService } from '../src/modules/institutions/institutions.service'
 import { MinistryRegistryService } from '../src/modules/ministry/ministry-registry.service'
-import { MinistryStatsService } from '../src/modules/ministry/ministry-stats.service'
+import { MinistryStatsService, protectCount } from '../src/modules/ministry/ministry-stats.service'
 import { MinistryController } from '../src/modules/ministry/ministry.controller'
 import { DB_AVAILABLE, TestContext } from './helpers'
 import { notificationsStub } from './stubs'
@@ -174,14 +174,22 @@ describe.skipIf(!DB_AVAILABLE)('Ministry figures match a hand-counted data set (
     })
   })
 
-  it('students and applicants in ILMORA, without any personal data', async () => {
+  it('Н-3: a count of people — 0 stays, 1–4 is «<5», the rest is rounded to 5', () => {
+    expect([0, 1, 4, 5, 7, 8, 12, 13, 127].map(protectCount)).toEqual([0, '<5', '<5', 5, 5, 10, 10, 15, 125])
+  })
+
+  it('students and applicants in ILMORA, without any personal data; small counts hidden (Н-3)', async () => {
     const s = await setup('st-students')
     await TenantContext.forTenant(s.tenantId, async () => {
       const { tables } = await stats.all({})
       const st = table(tables, 'ilmora_students')
-      expect(row(st, 'type', 'Техникум')).toMatchObject({ studying: 2, applying: 0, total: 2 })
-      expect(row(st, 'type', 'Вуз')).toMatchObject({ studying: 0, applying: 1, total: 1 })
-      expect(table(tables, 'applicants').rows).toEqual([expect.objectContaining({ year: Y, applicants: 1, industry: expect.objectContaining({ ru: 'IT и связь' }) })])
+      expect(row(st, 'type', 'Техникум')).toMatchObject({ studying: '<5', applying: 0, total: '<5' })
+      expect(row(st, 'type', 'Вуз')).toMatchObject({ studying: 0, applying: '<5', total: '<5' })
+      expect(table(tables, 'applicants').rows).toEqual([expect.objectContaining({ year: Y, applicants: '<5', industry: expect.objectContaining({ ru: 'IT и связь' }) })])
+      // The contract-help figures are about students' money: a total next to its parts would give a hidden part away.
+      expect(table(tables, 'contract_help').rows[0]).toEqual({ total: 0, active: 0, interested: 0, signed: 0, withdrawn: 0 })
+      // Institutions' own figures are not people's records: left exact.
+      expect(row(table(tables, 'students_by_industry'), 'industry', 'IT и связь').students).toEqual(expect.any(Number))
       const json = JSON.stringify(tables)
       expect(json).not.toMatch(/Student \d+|\+9989/)
     })

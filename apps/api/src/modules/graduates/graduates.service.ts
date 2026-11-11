@@ -205,7 +205,9 @@ export class GraduatesService {
    * for this company, unrelated across companies and years, and it cannot be turned back into the account id (№127).
    */
   private cardId(companyId: string, announcementId: string, userId: string) {
-    return hmacSha256(`${this.env.JWT_ACCESS_SECRET}:graduate-card`, `${companyId}:${announcementId}:${userId}`).slice(0, 32)
+    // Its own secret (Н-6); without it a key derived from the sign-in secret, as before.
+    const key = this.env.CARD_ID_SECRET ?? hmacSha256(this.env.JWT_ACCESS_SECRET, 'ilmora-graduate-card')
+    return hmacSha256(key, `${companyId}:${announcementId}:${userId}`).slice(0, 32)
   }
 
   private ofIndustries(ids: string[]): Prisma.DirectionWhereInput {

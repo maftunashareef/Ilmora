@@ -178,6 +178,12 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
     })
   })
 
+  /** What the institution sees in its list for this student — sent with the decision (Н-8). */
+  const seenBy = async (actor: RequestActor, id: string) => {
+    const r = (await service.institutionStudents(actor)).find((x) => x.id === id)
+    return { directionId: r?.direction?.id ?? null, graduationYear: r?.graduationYear ?? null }
+  }
+
   it('the institution sees its students without contacts, confirms or rejects; another institution cannot', async () => {
     const s = await setup('st-confirm')
     await TenantContext.forTenant(s.tenantId, async () => {
@@ -186,9 +192,9 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
       const list = await service.institutionStudents(s.approved.actor!)
       expect(list).toEqual([expect.objectContaining({ id: me.id, name: 'Aziz Karimov', course: 2, confirmation: 'PENDING' })])
       expect(Object.keys(list[0]).sort()).toEqual(['confirmation', 'course', 'direction', 'graduationYear', 'id', 'name'])
-      await expect(service.decideStudy(s.tenantId, s.other.actor!, me.id, true)).rejects.toMatchObject({ code: 'not_found' })
+      await expect(service.decideStudy(s.tenantId, s.other.actor!, me.id, true, await seenBy(s.approved.actor!, me.id))).rejects.toMatchObject({ code: 'not_found' })
       sent.length = 0
-      expect((await service.decideStudy(s.tenantId, s.approved.actor!, me.id, true))[0].confirmation).toBe('CONFIRMED')
+      expect((await service.decideStudy(s.tenantId, s.approved.actor!, me.id, true, await seenBy(s.approved.actor!, me.id)))[0].confirmation).toBe('CONFIRMED')
       expect(sent).toEqual([expect.objectContaining({ type: 'student.studyConfirmed', userIds: [me.id] })])
       expect((await service.questionnaire(me)).studyConfirmed).toBe('CONFIRMED')
       // Saving again at the same institution keeps the confirmation; moving to another starts over.
@@ -200,6 +206,26 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
     })
   })
 
+  it('Н-8: the institution confirms what it saw — a direction or year changed after the list was read gives 409', async () => {
+    const s = await setup('st-seen')
+    await TenantContext.forTenant(s.tenantId, async () => {
+      const other = await ctx.prisma.client.direction.create({ data: { tenantId: s.tenantId, name: 'Kiberxavfsizlik', searchKey: registrySearchKey('Kiberxavfsizlik'), industryId: s.it.id } })
+      const me = await s.student()
+      await service.save(s.tenantId, me, s.studying() as never)
+      const seen = await seenBy(s.approved.actor!, me.id)
+      // Meanwhile the student moves to another direction, then another year.
+      await service.save(s.tenantId, me, s.studying({ direction: { id: other.id, name: 'Kiberxavfsizlik' } }) as never)
+      await expect(service.decideStudy(s.tenantId, s.approved.actor!, me.id, true, seen)).rejects.toMatchObject({ code: 'study_changed', status: 409 })
+      await expect(service.decideStudy(s.tenantId, s.approved.actor!, me.id, false, { ...seen, graduationYear: Y + 5 })).rejects.toMatchObject({ code: 'study_changed' })
+      expect((await service.questionnaire(me)).studyConfirmed).toBe('PENDING')
+      // The list read again: what it shows now is confirmed.
+      expect((await service.decideStudy(s.tenantId, s.approved.actor!, me.id, true, await seenBy(s.approved.actor!, me.id)))[0].confirmation).toBe('CONFIRMED')
+      // The list shows the main direction of an alias: that is what the institution saw.
+      await ctx.prisma.client.direction.update({ where: { id: other.id }, data: { mergedIntoId: s.dasturlash.id } })
+      expect((await service.decideStudy(s.tenantId, s.approved.actor!, me.id, false, { directionId: s.dasturlash.id, graduationYear: seen.graduationYear }))[0].confirmation).toBe('REJECTED')
+    })
+  })
+
   it('what the institution confirmed — name, direction, year — changed: «ждёт» again (security review №14)', async () => {
     const s = await setup('st-reconfirm')
     await TenantContext.forTenant(s.tenantId, async () => {
@@ -207,14 +233,14 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
       for (const change of [{ fullName: 'Boşqa Odam' }, { direction: { id: other.id, name: 'Kiberxavfsizlik' } }, { graduationYear: Y + 2 }]) {
         const me = await s.student()
         await service.save(s.tenantId, me, s.studying() as never)
-        await service.decideStudy(s.tenantId, s.approved.actor!, me.id, true)
+        await service.decideStudy(s.tenantId, s.approved.actor!, me.id, true, await seenBy(s.approved.actor!, me.id))
         expect((await service.save(s.tenantId, me, s.studying({ fullName: ' Aziz   Karimov ', about: 'Yangi' }) as never)).studyConfirmed).toBe('CONFIRMED')
         expect((await service.save(s.tenantId, me, s.studying(change) as never)).studyConfirmed).toBe('PENDING')
       }
       // A rejected student who fixes the questionnaire is asked about again.
       const me = await s.student()
       await service.save(s.tenantId, me, s.studying() as never)
-      await service.decideStudy(s.tenantId, s.approved.actor!, me.id, false)
+      await service.decideStudy(s.tenantId, s.approved.actor!, me.id, false, await seenBy(s.approved.actor!, me.id))
       expect((await service.save(s.tenantId, me, s.studying({ graduationYear: Y + 2 }) as never)).studyConfirmed).toBe('PENDING')
     })
   })

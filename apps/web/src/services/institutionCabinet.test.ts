@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { InstitutionPassportDto } from '@ilmora/shared'
+import type { InstitutionPassportDto, InstitutionStudentDto } from '@ilmora/shared'
 
 const calls: { path: string; method?: string; body?: unknown }[] = []
 vi.mock('../lib/api', () => ({
@@ -68,8 +68,9 @@ describe('institution workspace calls', () => {
     await institutionApi.submit()
     await institutionApi.districts('andijan')
     await institutionApi.students('PENDING')
-    await institutionApi.confirm('s1')
-    await institutionApi.reject('s1')
+    const s1 = { id: 's1', name: 'Aziz', course: 2, direction: { id: 'dir1' }, graduationYear: 2027, confirmation: 'PENDING' } as unknown as InstitutionStudentDto
+    await institutionApi.confirm(s1)
+    await institutionApi.reject({ ...s1, direction: null } as unknown as InstitutionStudentDto)
     await institutionApi.incoming('it')
     await institutionApi.offer('r1', { count: 20, byYear: 2027, comment: '  ' })
     await institutionApi.withdraw('o1')
@@ -84,6 +85,9 @@ describe('institution workspace calls', () => {
       'POST /institutions/me/announcements/a1/exclusions', 'DELETE /institutions/me/announcements/a1/exclusions/s2', 'POST /institutions/me/announcement-responses/resp1/accept',
     ])
     expect(calls[7].body).toEqual({ count: 20, byYear: 2027, comment: null })
+    // «Подтверждаю то, что видел» (Н-8): the direction and the year from the list go along.
+    expect(calls[4].body).toEqual({ directionId: 'dir1', graduationYear: 2027 })
+    expect(calls[5].body).toEqual({ directionId: null, graduationYear: 2027 })
   })
 
   it('years: an offer this year to 10 ahead, an announcement last year to 6 ahead; empty lines are not sent', () => {

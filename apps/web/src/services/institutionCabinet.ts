@@ -102,6 +102,9 @@ export const announcementYears = (now = new Date()) => Array.from({ length: 8 },
 
 // ───────────── Calls ─────────────
 
+/** What the institution saw in the list of students: sent with its decision (Н-8). */
+export const studySeen = (s: InstitutionStudentDto) => ({ directionId: s.direction?.id ?? null, graduationYear: s.graduationYear ?? null })
+
 export const institutionApi = {
   me: () => api<InstitutionPassportDto>('/institutions/me'),
   update: (patch: Record<string, unknown>) => api<InstitutionPassportDto>('/institutions/me', { method: 'PATCH', body: patch }),
@@ -112,8 +115,9 @@ export const institutionApi = {
 
   /** Students who named this institution (ТЗ 4.1): name, course, direction, year — no contacts. */
   students: (status?: StudyConfirmationStatus) => api<InstitutionStudentDto[]>(`/institutions/me/students${status ? `?status=${status}` : ''}`),
-  confirm: (studentId: string) => api<InstitutionStudentDto[]>(`/institutions/me/students/${id(studentId)}/confirm`, { method: 'POST' }),
-  reject: (studentId: string) => api<InstitutionStudentDto[]>(`/institutions/me/students/${id(studentId)}/reject`, { method: 'POST' }),
+  /** «Подтверждаю то, что видел» (Н-8): the direction and the year from the list go along; changed since → 409 study_changed. */
+  confirm: (s: InstitutionStudentDto) => api<InstitutionStudentDto[]>(`/institutions/me/students/${id(s.id)}/confirm`, { method: 'POST', body: studySeen(s) }),
+  reject: (s: InstitutionStudentDto) => api<InstitutionStudentDto[]>(`/institutions/me/students/${id(s.id)}/reject`, { method: 'POST', body: studySeen(s) }),
 
   /** Companies' requests in the industries of the institution's directions (ТЗ 5.2). */
   incoming: (industryId?: string) => api<IncomingTrainingRequestDto[]>(`/training-requests${industryId ? `?industryId=${id(industryId)}` : ''}`),

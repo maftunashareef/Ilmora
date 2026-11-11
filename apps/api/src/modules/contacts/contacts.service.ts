@@ -31,6 +31,9 @@ const companyContacts = (c: { website: string | null; address: string | null; re
  * is not sent again there, and «Заинтересованы» never answers «already asked» because of an invitation by name (№126). Accepting writes a COMPANY_CONTACTS consent row; only then the company sees the
  * full card (name, phone, e-mail, certificate files), and every view or download is audited.
  */
+/** «Пригласить» and «Заинтересованы» together, per company and 24 hours (ТЗ 9.4 «Лимиты»: ~50 a day). */
+export const CONTACT_REQUESTS_PER_DAY = 50
+
 @Injectable()
 export class ContactsService {
   constructor(
@@ -40,11 +43,21 @@ export class ContactsService {
     private readonly docs: PrivateDocsService,
   ) {}
 
-  /** Called by the features that found the student (graduates, contract help) after their own visibility checks. */
+  /**
+   * Called by the features that found the student (graduates, contract help) after their own visibility checks. At most
+   * CONTACT_REQUESTS_PER_DAY in 24 hours per company over both channels, counted in the database (cybersecurity check
+   * 9.4, Н-2): the two routes used to have 50 each, about 100 together, and a company could flood students.
+   */
   async request(tenantId: string, company: { id: string; name: string }, userId: string, source: ContactSource, ref: { announcementId?: string; contractHelpId?: string }) {
     let id: string
     try {
-      id = (await this.prisma.client.contactRequest.create({ data: { tenantId, companyId: company.id, userId, source, announcementId: ref.announcementId ?? null, contractHelpId: ref.contractHelpId ?? null }, select: { id: true } })).id
+      id = await this.prisma.client.$transaction(async (tx) => {
+        // One company's requests are counted one at a time: clicks sent at once cannot all see «under the limit».
+        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `contact-requests:${company.id}`)
+        const today = await tx.contactRequest.count({ where: { companyId: company.id, createdAt: { gte: new Date(Date.now() - 86_400_000) } } })
+        if (today >= CONTACT_REQUESTS_PER_DAY) throw AppError.tooMany(`At most ${CONTACT_REQUESTS_PER_DAY} contact requests a day`, 3600)
+        return (await tx.contactRequest.create({ data: { tenantId, companyId: company.id, userId, source, announcementId: ref.announcementId ?? null, contractHelpId: ref.contractHelpId ?? null }, select: { id: true } })).id
+      })
     } catch (err) {
       if (isUniqueViolation(err)) throw AppError.conflict('contact_request_exists', 'Your company has already asked this student')
       throw err

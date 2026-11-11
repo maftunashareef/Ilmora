@@ -12,6 +12,20 @@ const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / who
 const add = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k) ?? 0) + v)
 const DASH = T('—', '—', '—')
 
+/** Below this, a count of people is shown as «<5» (cybersecurity check 9.4, Н-3). */
+export const SMALL_CELL = 5
+/**
+ * A count of people as the ministry may see it: 0 stays, 1–4 is «<5», 5 and more is rounded to 5. Rounding is what keeps
+ * «<5» hidden: a table of people has its total next to its parts (and the web adds a column up), so with exact parts the
+ * hidden cell would come back by subtraction; with parts and totals rounded independently it stays a range.
+ */
+export const protectCount = (n: number): number | string => (n === 0 ? 0 : n < SMALL_CELL ? `<${SMALL_CELL}` : Math.round(n / SMALL_CELL) * SMALL_CELL)
+/** The columns of a table of people (students' own records, not the figures institutions or companies declare) protected. */
+const protectPeople = (table: StatsTableDto, keys: string[]): StatsTableDto => ({
+  ...table,
+  rows: table.rows.map((r) => ({ ...r, ...Object.fromEntries(keys.map((k) => [k, typeof r[k] === 'number' ? protectCount(r[k] as number) : r[k]])) })),
+})
+
 const TYPE_NAMES: Record<string, L> = {
   TECHNIKUM: T('Texnikum', 'Техникум', 'Technikum'), COLLEGE: T('Kollej', 'Колледж', 'College'), LYCEUM: T('Litsey', 'Лицей', 'Lyceum'),
   SCHOOL: T('Maktab', 'Школа', 'School'), UNIVERSITY: T('Oliy ta’lim muassasasi', 'Вуз', 'University'), TRAINING_CENTER: T('Öquv markazi', 'Учебный центр', 'Training center'),
@@ -37,7 +51,8 @@ type Ctx = {
 }
 
 /**
- * The ministry's figures (ТЗ 7.3): counts only — no student, representative or contact ever leaves here. Official
+ * The ministry's figures (ТЗ 7.3): counts only — no student, representative or contact ever leaves here, and a count of
+ * students' own records is protected (`protectCount`: «<5», the rest rounded to 5; the Excel export reads the same tables). Official
  * figures take approved institutions only; student-added records are a table of their own. Filters: region (id or
  * the web app's slug), institution type, ownership, year (of graduation, of a training request, of enrolment).
  * Computed on request from a few grouped reads (600+ institutions, 10 000 students: tens of milliseconds).
@@ -222,11 +237,11 @@ export class MinistryStatsService {
     }).filter((r) => r.total > 0)
     const none = groups.filter((g) => !g.institutionType).reduce((n, g) => n + g._count._all, 0)
     if (none) rows.push({ type: T('Körsatilmagan', 'Не указан', 'Not given'), studying: 0, applying: none, total: none })
-    return {
+    return protectPeople({
       key: 'ilmora_students', title: T('ILMORAdagi talabalar', 'Студенты в ILMORA', 'Students in ILMORA'),
       columns: [COLS.type, col('studying', T('Öqiydi', 'Учатся', 'Studying')), col('applying', T('Kirmoqçi', 'Поступают', 'Applying')), col('total', T('Jami', 'Всего', 'Total'))],
       rows,
-    }
+    }, ['studying', 'applying', 'total'])
   }
 
   /**
@@ -246,21 +261,21 @@ export class MinistryStatsService {
       .map(([k, applicants]) => { const [year, ind] = k.split('|'); return { year: year ? Number(year) : null, industry: order.get(ind)?.name ?? DASH, applicants, sort: order.get(ind)?.sortOrder ?? 99 } })
       .sort((a, b) => (a.year ?? 0) - (b.year ?? 0) || a.sort - b.sort)
       .map(({ sort: _sort, ...r }) => r)
-    return {
+    return protectPeople({
       key: 'applicants', title: T('Abituriyentlar', 'Абитуриенты', 'Applicants'),
       columns: [col('year', T('Kiriş yili', 'Год поступления', 'Enrolment year')), COLS.industry, col('applicants', T('Abituriyentlar', 'Абитуриентов', 'Applicants'))],
       rows,
-    }
+    }, ['applicants'])
   }
 
   private async contractHelp(ctx: Ctx): Promise<StatsTableDto> {
     const groups = await this.prisma.client.contractHelpRequest.groupBy({ by: ['status'], where: { user: { studentProfile: { is: this.studentWhere(ctx) } } }, _count: { _all: true } })
     const of = (s: string) => groups.find((g) => g.status === s)?._count._all ?? 0
-    return {
+    return protectPeople({
       key: 'contract_help', title: T('Kontrakt tölovida yordam', 'Помощь с оплатой контракта', 'Help with the tuition contract'),
       columns: [col('total', T('Arizalar', 'Заявок', 'Requests')), col('active', T('Faol', 'Активных', 'Active')), col('interested', T('Kompaniyalar qiziqqan', 'С интересом компаний', 'With company interest')), col('signed', T('Şartnoma tuzilgan', 'Договор заключён', 'Contract signed')), col('withdrawn', T('Qaytarib olingan', 'Отозвано', 'Withdrawn'))],
       rows: [{ total: groups.reduce((n, g) => n + g._count._all, 0), active: of('ACTIVE'), interested: of('INTERESTED'), signed: of('SIGNED'), withdrawn: of('WITHDRAWN') }],
-    }
+    }, ['total', 'active', 'interested', 'signed', 'withdrawn'])
   }
 
   private async vacancies(ctx: Ctx): Promise<StatsTableDto> {
@@ -275,11 +290,12 @@ export class MinistryStatsService {
       seats: vac.filter((v) => v.kind === kind).reduce((n, v) => n + v.seats, 0),
       applications: apps.filter((a) => a.vacancy.kind === kind).length, invited: apps.filter((a) => a.vacancy.kind === kind && a.status === 'INVITED').length,
     }))
-    return {
+    // Vacancies and seats are the companies' figures; applications and invitations are students.
+    return protectPeople({
       key: 'vacancies', title: T('Amaliyot va stajirovkalar', 'Практика и стажировки', 'Practice and internships'),
       columns: [col('kind', T('Turi', 'Вид', 'Kind'), false), col('vacancies', T('Vakansiyalar', 'Вакансий', 'Vacancies')), col('open', T('Oçiq', 'Открытых', 'Open')), col('seats', T('Örinlar', 'Мест', 'Seats')), col('applications', T('Arizalar', 'Откликов', 'Applications')), col('invited', T('Taklif qilingan', 'Приглашено', 'Invited'))],
       rows,
-    }
+    }, ['applications', 'invited'])
   }
 
   /** ТЗ 7: records students added — shown apart, never in the official figures. */

@@ -78,6 +78,12 @@ describe('figures as text', () => {
     expect(columnTotal(table, 'year')).toBeNull()
   })
 
+  it('shows a hidden small count as is and gives its column no total', () => {
+    const people = { ...table, rows: [{ type: 'A', total: 10 }, { type: 'B', total: '<5' }] } as typeof table
+    expect(cellText('<5', 'ru')).toBe('<5')
+    expect(columnTotal(people, 'total')).toBeNull()
+  })
+
   it('names the file like the API and offers years around now', () => {
     expect(exportFileName('coverage', new Date('2026-11-11T09:00:00Z'))).toBe('ilmora-coverage-2026-11-11.xlsx')
     expect(filterYears(new Date('2026-11-11'))).toEqual([2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030])

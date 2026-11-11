@@ -53,6 +53,16 @@ export const AUTH_THROTTLE_KEY = 'ilmora:auth-throttle'
  */
 export const AuthThrottle = (limit: number, ttl = 60_000) => applyDecorators(SetMetadata(AUTH_THROTTLE_KEY, true), Throttle({ auth: { limit, ttl } }))
 
+export const REGISTER_THROTTLE_KEY = 'ilmora:register-throttle'
+/**
+ * New accounts per address over an hour and a day (cybersecurity check 9.4, Н-4), on top of @AuthThrottle's minute. Wide
+ * on purpose: a whole technikum signs up from one Wi-Fi in a lesson (the lesson of №19); the SMS code and the per-phone
+ * limits stop the rest. Limits — RATE_LIMIT_REGISTER_PER_IP_HOUR / _DAY.
+ */
+export const RegisterThrottle = () => SetMetadata(REGISTER_THROTTLE_KEY, true)
+export const isRegisterThrottled = (ctx: ExecutionContext): boolean =>
+  reflector.getAllAndOverride<boolean | undefined>(REGISTER_THROTTLE_KEY, [ctx.getHandler(), ctx.getClass()]) === true
+
 export const SESSION_THROTTLE_KEY = 'ilmora:session-throttle'
 /**
  * The session refresh (security review 10.11 №19): like @AuthThrottle(limit), but counted per refresh cookie, not per
