@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common'
-import type { AnnouncementDto, AnnouncementResponseDto, CompanyAnnouncementDto, GraduateCardDto, L, MatchStatus, PartyContactsDto } from '@ilmora/shared'
+import { type AnnouncementDto, type AnnouncementResponseDto, ageOn, type CompanyAnnouncementDto, type GraduateCardDto, type L, type MatchStatus, type PartyContactsDto } from '@ilmora/shared'
 import { hmacSha256 } from '../../common/crypto'
 import { AppError } from '../../common/errors'
+import { dateColumnToIso } from '../../common/time'
 import { ENV, type Env } from '../../config/env'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
@@ -248,12 +249,19 @@ export class GraduatesService {
     const rows = await this.prisma.client.studentProfile.findMany({
       where: { institutionId: ann.institutionId, mode: 'STUDYING', studyConfirmation: 'CONFIRMED', graduationYear: ann.year, directionId: { in: [...byDirection.keys()] }, user: CARD_CONSENT },
       select: {
-        userId: true, directionId: true, about: true, region: { select: { id: true, name: true } },
-        user: { select: { displayName: true, studentCertificates: { select: { title: true }, orderBy: { createdAt: 'asc' } }, enrollments: { where: { status: { in: ['ACTIVE', 'COMPLETED'] } }, select: { course: { select: { title: true } } } } } },
+        userId: true, directionId: true, about: true, birthDate: true, region: { select: { id: true, name: true } },
+        user: { select: { displayName: true, studentConsents: { where: { kind: 'PARENT_CONSENT', revokedAt: null, companyId: null }, select: { id: true } }, studentCertificates: { select: { title: true }, orderBy: { createdAt: 'asc' } }, enrollments: { where: { status: { in: ['ACTIVE', 'COMPLETED'] } }, select: { course: { select: { title: true } } } } } },
       },
       orderBy: { user: { displayName: 'asc' } },
     })
-    const visible = rows.filter((r) => !excluded.has(r.userId))
+    // A minor's card needs the parent's consent in force at every read, as on the contract-help card (ТЗ 8; cybersecurity
+    // check 9.4, 11.11): the questionnaire checks it when saving, but a birth date or the parent's consent can change later.
+    const now = new Date()
+    const adultOrAllowed = (r: { birthDate: Date | null; user: { studentConsents: unknown[] } }) => {
+      const age = r.birthDate ? ageOn(dateColumnToIso(r.birthDate), now) : null
+      return age === null || age >= 18 || r.user.studentConsents.length > 0
+    }
+    const visible = rows.filter((r) => !excluded.has(r.userId) && adultOrAllowed(r))
     // Only requests sent from announcements: a request from the anonymous contract-help card must not show on the named
     // card, or the company learns who asked for help with the fee (matrix check 11.11, №126).
     const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, source: 'GRADUATE', userId: { in: visible.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))

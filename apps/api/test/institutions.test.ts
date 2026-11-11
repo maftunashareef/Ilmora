@@ -142,6 +142,34 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
     })
   })
 
+  it('cybersecurity 9.4: one account claiming two STIRs at once keeps one — the other STIR stays free, not orphaned', async () => {
+    const { tenantId, inT, representative } = await setup('inst-two-stirs')
+    await inT(async () => {
+      const db = ctx.prisma.client
+      await db.institution.create({ data: { tenantId, type: 'COLLEGE', name: 'Ikkinçi kollej', searchKey: registrySearchKey('Ikkinçi kollej'), stir: '066666666', source: 'IMPORT' } })
+      const rep = await representative()
+      const results = await Promise.allSettled([service.claim(tenantId, rep, { stir: '011111111' }), service.claim(tenantId, rep, { stir: '066666666' })])
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      // No institution left a DRAFT without a representative: the losing claim rolled back whole.
+      expect(await db.institution.count({ where: { tenantId, status: 'DRAFT', representative: null } })).toBe(0)
+      const left = (await db.institution.findFirstOrThrow({ where: { tenantId, stir: { in: ['011111111', '066666666'] }, status: 'UNCLAIMED' }, select: { stir: true } })).stir
+      // …so its real representative can still claim it.
+      expect((await service.claim(tenantId, await representative(), { stir: left! })).created).toBe(false)
+    })
+  })
+
+  it('cybersecurity 9.4: a blocked institution cannot edit its passport or submit it again', async () => {
+    const { tenantId, inT, representative } = await setup('inst-blocked')
+    await inT(async () => {
+      const rep = await representative()
+      const r = await service.claim(tenantId, rep, { stir: '011111111' })
+      await ctx.prisma.client.institution.update({ where: { id: r.institution.id }, data: { blockedAt: new Date() } })
+      await expect(service.update(tenantId, rep, { website: 'https://x.uz' } as never)).rejects.toMatchObject({ code: 'forbidden' })
+      await expect(service.setDirections(tenantId, rep, { directions: [] } as never)).rejects.toMatchObject({ code: 'forbidden' })
+      await expect(service.submit(tenantId, rep)).rejects.toMatchObject({ code: 'forbidden' })
+    })
+  })
+
   it('starts a new record for a STIR not in the registry, with the type and name', async () => {
     const { tenantId, inT, representative } = await setup('inst-new')
     await inT(async () => {

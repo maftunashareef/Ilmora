@@ -55,6 +55,11 @@ export const EnvSchema = z.object({
    * `openssl rand -base64 32`). Without it the ministry cannot sign in and the Super Admins sign in with a password only.
    */
   TOTP_ENCRYPTION_KEY: z.string().min(32).optional(),
+  /**
+   * Production without TOTP_ENCRYPTION_KEY refuses to start (cybersecurity check 9.4, 11.11): the Super Admins and the
+   * finance admins would sign in with the password alone. A deliberate exception (a demo machine) sets this to true.
+   */
+  TOTP_ALLOW_MISSING_IN_PRODUCTION: bool(false),
 
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   OTP_LENGTH: z.coerce.number().int().min(4).max(8).default(6),
@@ -144,13 +149,18 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     throw new Error(`Invalid environment configuration:\n  ${issues}`)
   }
   const env = parsed.data
+  // Documents and certificates would land in the public bucket (cybersecurity check 9.4, 11.11).
+  if (env.S3_DOCS_BUCKET && env.S3_DOCS_BUCKET === env.S3_BUCKET) throw new Error('S3_DOCS_BUCKET must differ from S3_BUCKET: documents go to the private bucket only')
   if (env.NODE_ENV === 'production') {
     if (env.CORS_ORIGINS.length === 0) throw new Error('CORS_ORIGINS must list the web origin(s) in production')
     if (env.CORS_ORIGINS.some((o) => o.includes('*'))) throw new Error('CORS_ORIGINS may not contain wildcards in production')
     if (!env.COOKIE_SECURE) throw new Error('COOKIE_SECURE must be true in production')
     if (env.SMS_PROVIDER === 'console' && !env.SMS_ALLOW_CONSOLE_IN_PRODUCTION) throw new Error('SMS_PROVIDER=console is not allowed in production unless SMS_ALLOW_CONSOLE_IN_PRODUCTION=true (demo/staging without an SMS contract)')
     if (env.REDIS_MODE !== 'redis') throw new Error('REDIS_MODE=off is a development convenience and is not allowed in production')
-    if (!env.TOTP_ENCRYPTION_KEY) console.warn('TOTP_ENCRYPTION_KEY is not set: the ministry cannot sign in, the Super Admins sign in without the authenticator code')
+    if (!env.TOTP_ENCRYPTION_KEY) {
+      if (!env.TOTP_ALLOW_MISSING_IN_PRODUCTION) throw new Error('TOTP_ENCRYPTION_KEY must be set in production (openssl rand -base64 32): without it the Super Admins and the finance admins sign in with the password alone. A deliberate exception sets TOTP_ALLOW_MISSING_IN_PRODUCTION=true')
+      console.warn('TOTP_ENCRYPTION_KEY is not set: the ministry cannot sign in, the Super Admins sign in without the authenticator code')
+    }
     // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
     if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
     if (env.PAYME_SANDBOX_PAYMENT_IDS.length) console.warn(`PAYME_SANDBOX_PAYMENT_IDS is set: the Payme test key is accepted for ${env.PAYME_SANDBOX_PAYMENT_IDS.length} test order(s). Clear it once Payme's tests pass.`)

@@ -173,7 +173,8 @@ export class VacanciesService {
   /** A certificate file of an applicant — a 5-minute link, audited (ТЗ 8 «скачал файл»). */
   async certificateLink(actor: RequestActor, applicationId: string, certificateId: string): Promise<DocumentLinkDto> {
     const company = await this.ownCompany(actor)
-    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, vacancy: { companyId: company.id } }, select: { userId: true, createdAt: true } })
+    // A disabled or deleted student's files go to no company (cybersecurity check 9.4, 11.11).
+    const a = await this.prisma.client.vacancyApplication.findFirst({ where: { id: applicationId, vacancy: { companyId: company.id }, user: { isActive: true, deletedAt: null } }, select: { userId: true, createdAt: true } })
     const cert = a ? await this.prisma.client.studentCertificate.findFirst({ where: { id: certificateId, userId: a.userId, createdAt: { lte: a.createdAt } }, select: { fileKey: true } }) : null
     if (!a || !cert) throw AppError.notFound('Certificate')
     await this.audit.record({ action: 'vacancy.certificate.download', entityType: 'StudentCertificate', entityId: certificateId, after: { companyId: company.id, userId: a.userId, applicationId } })

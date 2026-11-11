@@ -194,6 +194,48 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
     })
   })
 
+  it('cybersecurity 9.4: an invitation by name does not make «Заинтересованы» answer 409 — the anonymous card stays unlinked', async () => {
+    const s = await setup('ch-oracle')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const other = await s.student(s.studying({ fullName: 'Boshqa Talaba' }))
+      const mine = await service.create(s.tenantId, me, INPUT)
+      const theirs = await service.create(s.tenantId, other, INPUT)
+      // Soft Co invited `me` by name from an announcement (pending).
+      await contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})
+      // «Заинтересованы» answers the same on both cards: the student invited by name is not singled out.
+      const a = await service.interest(s.tenantId, s.softCo.actor, mine.id)
+      const b = await service.interest(s.tenantId, s.softCo.actor, theirs.id)
+      expect(a.contactRequest).toBe('PENDING')
+      expect(b.contactRequest).toBe('PENDING')
+      // The same card twice is still refused — that tells the company nothing new.
+      await expect(service.interest(s.tenantId, s.softCo.actor, mine.id)).rejects.toMatchObject({ code: 'contact_request_exists' })
+
+      // The student accepts both; taking the contacts back from the company closes both requests and the consent.
+      for (const r of await contacts.studentList(me)) await contacts.decide(s.tenantId, me, r.id, true)
+      const [first] = await contacts.studentList(me)
+      await contacts.revoke(me, first.id)
+      expect((await contacts.studentList(me)).map((r) => r.status)).toEqual(['WITHDRAWN', 'WITHDRAWN'])
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'COMPANY_CONTACTS', revokedAt: null } })).toBe(0)
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([])
+    })
+  })
+
+  it('cybersecurity 9.4: two saves at once write one consent row, and taking the tick off hides the card', async () => {
+    const s = await setup('ch-consent-race')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      const on = s.studying({ consents: { CONTRACT_HELP_CARD: true } })
+      await Promise.all(Array.from({ length: 4 }, () => students.save(s.tenantId, me, on as never)))
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(1)
+      await students.save(s.tenantId, me, s.studying({ consents: { CONTRACT_HELP_CARD: false } }) as never)
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(0)
+      expect(await service.feed(s.softCo.actor, {})).toEqual([])
+      await expect(service.card(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })
+    })
+  })
+
   it('a minor needs the parent’s consent, and the card shows only with it', async () => {
     const s = await setup('ch-minor')
     await s.inT(async () => {

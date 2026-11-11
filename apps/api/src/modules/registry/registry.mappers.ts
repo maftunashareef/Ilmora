@@ -39,3 +39,10 @@ export async function regionIdByRef(prisma: PrismaService, ref: string): Promise
   const row = await prisma.client.region.findFirst({ where: { OR: [{ id: ref }, { slug: ref }] }, select: { id: true } })
   return row?.id ?? null
 }
+
+/**
+ * «Changes to review» reach the Super Admins at most once an hour per organisation: every save of an approved profile
+ * used to notify them, so a loop of saves flooded them (cybersecurity check 9.4, 11.11). The review queue itself shows
+ * the latest changes; a submission (`*.submitted`) is still notified each time.
+ */
+export const changedKey = (kind: 'company' | 'inst', id: string, now: Date) => `${kind}-review:${id}:changed:${Math.floor(now.getTime() / 3_600_000)}`
