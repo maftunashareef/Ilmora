@@ -176,6 +176,24 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
     })
   })
 
+  it('№126: asking by name and on the anonymous card are separate — neither answers «already asked» (either order)', async () => {
+    const s = await setup('ch-channels')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      // Soft Co invited the student by name from an announcement, then clicks «Заинтересованы» on the anonymous card.
+      await contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})
+      expect(await service.interest(s.tenantId, s.softCo.actor, req.id)).toMatchObject({ contactRequest: 'PENDING' })
+      // Data Co the other way round: the card first, the announcement second.
+      await service.interest(s.tenantId, s.otherIt.actor, req.id)
+      await contacts.request(s.tenantId, { id: s.otherIt.row.id, name: 'Data Co' }, me.id, 'GRADUATE', {})
+      expect((await contacts.studentList(me)).map((r) => r.source).sort()).toEqual(['CONTRACT_HELP', 'CONTRACT_HELP', 'GRADUATE', 'GRADUATE'])
+      // Within one channel the rule stays.
+      await expect(service.interest(s.tenantId, s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'contact_request_exists' })
+      await expect(contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})).rejects.toMatchObject({ code: 'contact_request_exists' })
+    })
+  })
+
   it('cybersecurity 9.4: an invitation by name does not make «Заинтересованы» answer 409 — the anonymous card stays unlinked', async () => {
     const s = await setup('ch-oracle')
     await s.inT(async () => {
