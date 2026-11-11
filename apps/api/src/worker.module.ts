@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { CoreModule } from './core.module'
 import { QueueModule } from './infra/queue/queue.module'
+import { StorageModule } from './infra/storage/storage.module'
 import { AttendanceModule } from './modules/attendance/attendance.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CatalogModule } from './modules/catalog/catalog.module'
@@ -20,6 +21,9 @@ import { SmsProcessor } from './modules/sms/sms.processor'
 })
 export class WorkerModule {}
 
-/** Standalone worker process root (no HTTP server). */
-@Module({ imports: [CoreModule, NotificationsModule, AuthModule, WorkerModule] })
+/**
+ * Standalone worker process root (no HTTP server). Global modules the processors need are imported here as in
+ * AppModule: StorageModule for the outbox (private documents). test/process-roots.test.ts builds this root.
+ */
+@Module({ imports: [CoreModule, NotificationsModule, AuthModule, StorageModule, WorkerModule] })
 export class WorkerAppModule {}
