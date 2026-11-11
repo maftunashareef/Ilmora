@@ -6,7 +6,9 @@ const PREFIXES: [string, Workspace][] = [['/admin', 'admin'], ['/teacher', 'teac
 export const workspaceOf = (path: string): Workspace | null => PREFIXES.find(([p]) => path === p || path.startsWith(`${p}/`) || path.startsWith(`${p}?`))?.[1] ?? null
 
 /** Whether an account with these roles may open the path (used for `next` targets after sign-in). */
-export const canOpen = (roles: readonly string[], path: string): boolean => {
+export const canOpen = (roles: readonly string[], target: string): boolean => {
+  // The query and hash do not change the page: «/admin/finance?tab=refunds&request=…» is the finance page.
+  const path = target.split(/[?#]/)[0]
   const w = workspaceOf(path)
   if (!w || roles.includes('PLATFORM_ADMIN')) return true
   // Finance admins may open the finance page of the admin workspace, nothing else in it.

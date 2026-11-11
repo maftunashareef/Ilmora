@@ -41,6 +41,9 @@ describe('canOpen', () => {
     expect(canOpen(['FINANCE_ADMIN'], '/admin/finance')).toBe(true)
     expect(canOpen(['FINANCE_ADMIN'], '/admin/finance/payouts')).toBe(true)
     expect(canOpen(['FINANCE_ADMIN'], '/admin')).toBe(false)
+    // A refund notification opens the queue on one request.
+    expect(canOpen(['FINANCE_ADMIN'], '/admin/finance?tab=refunds&request=r1')).toBe(true)
+    expect(canOpen(['FINANCE_ADMIN'], '/admin?x=/admin/finance')).toBe(false)
     expect(canOpen(['PLATFORM_ADMIN'], '/admin')).toBe(true)
   })
 })

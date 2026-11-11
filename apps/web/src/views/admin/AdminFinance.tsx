@@ -1,10 +1,12 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, Button, Card, EmptyState, Eyebrow, Icon, Notice, PageTitle, Select } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Eyebrow, Icon, Notice, PageTitle, Select, Tabs } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
+import { useSearchParams } from '../../lib/router'
+import { AdminRefunds } from './AdminRefunds'
 import { useStore } from '../../store/useStore'
 
 interface ReconRow {
@@ -17,8 +19,26 @@ interface Balance { account: string; accountType: string; debit: string; credit:
 /** Exact amount with tiyin (never rounded: this is reconciliation), followed by the currency name in the current language. */
 const som = (minor: string, unit: string) => `${(Number(minor) / 100).toLocaleString('ru-RU')} ${unit}`
 
-/** Finance admin: provider transactions vs. internal payment state vs. ledger postings, plus independent provider checks. */
+/**
+ * Finance admin: «Платежи» — provider transactions vs. internal payment state vs. ledger postings; «Возвраты» — the refund
+ * requests (`?tab=refunds&request=<id>` — the address a refund notification opens).
+ */
 export function AdminFinance() {
+  const { t } = useT()
+  const roles = useStore((s) => s.auth.user?.roles ?? [])
+  const [sp, setSp] = useSearchParams()
+  const tab = sp.get('tab') === 'refunds' ? 'refunds' : 'payments'
+  if (!(roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN'))) return <Notice tone="warn">{t('auth.noAccessBody')}</Notice>
+  return (
+    <div>
+      <PageTitle eyebrow={t('dash.admin')} title={t('finance.title')} subtitle={t('finance.subtitle')} />
+      <Tabs className="mb-6" value={tab} onChange={(v) => setSp(v === 'refunds' ? { tab: 'refunds' } : {})} tabs={[{ id: 'payments', label: t('refund.tab.payments') }, { id: 'refunds', label: t('refund.tab.refunds') }]} />
+      {tab === 'refunds' ? <AdminRefunds key={sp.get('request') ?? ''} focus={sp.get('request')} /> : <FinancePayments />}
+    </div>
+  )
+}
+
+function FinancePayments() {
   const { t, lang } = useT()
   const notify = useStore((s) => s.notify)
   const roles = useStore((s) => s.auth.user?.roles ?? [])
@@ -52,11 +72,11 @@ export function AdminFinance() {
     } catch (err) { notify(apiErrorText(err, lang), 'warn') }
   }
 
-  if (!canSee) return <Notice tone="warn">{t('auth.noAccessBody')}</Notice>
+  if (!canSee) return null
 
   return (
     <div>
-      <PageTitle eyebrow={t('dash.admin')} title={t('finance.title')} subtitle={t('finance.subtitle')} action={<Button size="sm" variant="secondary" onClick={() => void load()}><Icon name="refresh" className="h-3.5 w-3.5" />{t('common.refresh')}</Button>} />
+      <div className="mb-4 flex justify-end"><Button size="sm" variant="secondary" onClick={() => void load()}><Icon name="refresh" className="h-3.5 w-3.5" />{t('common.refresh')}</Button></div>
       {error != null && <Notice tone="warn" className="mb-4">{apiErrorText(error, lang)}</Notice>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {balances.map((b) => (

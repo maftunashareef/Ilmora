@@ -193,7 +193,6 @@ interface Actions {
   /** Opens a payment; a free selection is activated at once and comes back with url null. */
   checkout: (provider: PaymentProviderId) => Promise<{ url: string | null; paymentId: string; free?: boolean }>
   renewSubscription: (studentId: string, provider?: PaymentProviderId) => Promise<void>
-  cancelSubscription: (studentId: string) => Promise<void>
   toggleSavedCourse: (studentId: string, courseId: string) => void
   toggleSavedTeacher: (studentId: string, teacherId: string) => void
   updateProfile: (studentId: string, patch: Partial<StudentProfile>) => Promise<void>
@@ -1010,10 +1009,6 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         if (!r.url) { window.location.href = `/${get().lang}/payments/${r.paymentId}/return`; return }
         get().notify(translate(get().lang, 'checkout.redirecting'))
         window.location.href = r.url
-      },
-      cancelSubscription: async () => {
-        await guard(() => api('/student/subscription/cancel', { method: 'POST', body: {} }))
-        await get().loadStudentOverview()
       },
       toggleSavedCourse: (studentId, courseId) => {
         const me = get().students.find((x) => x.id === studentId)
