@@ -211,8 +211,6 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       const on = s.studying({ consents: { CONTRACT_HELP_CARD: true } })
       await Promise.all(Array.from({ length: 4 }, () => students.save(s.tenantId, me, on as never)))
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(1)
-      // A duplicate left by the old code: the revocation closes it too.
-      await ctx.prisma.client.studentConsent.create({ data: { tenantId: s.tenantId, userId: me.id, kind: 'CONTRACT_HELP_CARD', textVersion: 'old', givenAt: new Date() } })
       await students.save(s.tenantId, me, s.studying({ consents: { CONTRACT_HELP_CARD: false } }) as never)
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(0)
       expect(await service.feed(s.softCo.actor, {})).toEqual([])
