@@ -29,7 +29,7 @@ const CARD_SELECT = {
         select: {
           mode: true, course: true, enrollYear: true, studyForm: true, contractAmountMinor: true, birthDate: true, studyConfirmation: true,
           region: { select: { id: true, name: true } },
-          institution: { select: { id: true, name: true, type: true, region: { select: { id: true, name: true } } } },
+          institution: { select: { type: true, region: { select: { id: true, name: true } } } },
           direction: { select: DIRECTION_WITH_MAIN },
         },
       },
@@ -192,7 +192,9 @@ export class ContractHelpService {
 
   private async cards(companyId: string, rows: CardRow[]): Promise<ContractHelpCardDto[]> {
     const shown = rows.filter((r) => this.shown(r))
-    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, userId: { in: shown.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
+    // Only the request sent from this very card: a request from an announcement (by name) must not show here, or the
+    // company links the anonymous card to the named graduate (matrix check 11.11, №126).
+    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, source: 'CONTRACT_HELP', contractHelpId: { in: shown.map((r) => r.id) } }, select: { contractHelpId: true, status: true } })).map((c) => [c.contractHelpId, c.status as MatchStatus]))
     const now = new Date()
     return shown.map((r) => {
       const p = r.user.studentProfile!
@@ -201,16 +203,18 @@ export class ContractHelpService {
         id: r.id, number: r.id.slice(-6).toUpperCase(), status: r.status as ContractHelpCardDto['status'],
         age: p.birthDate ? ageOn(dateColumnToIso(p.birthDate), now) : null,
         region: place(p.region),
-        institution: inst ? { id: inst.id, name: inst.name, type: inst.type, region: place(inst.region) } : null,
+        // The type and region only, and counts instead of titles (director's decision 11.11): the name of the institution and
+        // the titles of certificates and courses are on the named graduate card too, and would link the two.
+        institution: inst ? { type: inst.type, region: place(inst.region) } : null,
         direction: p.direction ? mainOf(p.direction) : null,
         mode: p.mode, course: p.course, enrollYear: p.enrollYear, studyForm: p.studyForm,
         contractAmount: p.contractAmountMinor !== null ? Number(p.contractAmountMinor / 100n) : null,
         motivation: r.motivation, yearsToWork: r.yearsToWork, workRegion: place(r.workRegion),
-        certificates: r.user.studentCertificates.map((c) => c.title),
-        ilmoraCourses: [...new Map(r.user.enrollments.map((e) => [JSON.stringify(e.course.title), e.course.title as L])).values()],
+        certificates: r.user.studentCertificates.length,
+        ilmoraCourses: new Set(r.user.enrollments.map((e) => JSON.stringify(e.course.title))).size,
         studyConfirmed: p.studyConfirmation === 'CONFIRMED',
         createdAt: r.createdAt.toISOString(),
-        contactRequest: requests.get(r.userId) ?? null,
+        contactRequest: requests.get(r.id) ?? null,
       }
     })
   }

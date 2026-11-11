@@ -44,7 +44,7 @@ export class CompanyAnnouncementsController {
   respond(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(ResponseInput)) dto: ResponseInput) { return this.graduates.respond(t, a, id, dto) }
 
   /** ~50 a day: a company does not flood students with requests (ТЗ 9.4 «Лимиты»). */
-  @Post('graduates/:studentId/invite')
+  @Post('graduates/:cardId/invite')
   @Throttle({ default: { limit: 50, ttl: DAY } })
-  invite(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('studentId') studentId: string, @Body(new ZodValidationPipe(InviteInput)) dto: InviteInput) { return this.graduates.invite(t, a, studentId, dto.announcementId) }
+  invite(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('cardId') cardId: string, @Body(new ZodValidationPipe(InviteInput)) dto: InviteInput) { return this.graduates.invite(t, a, cardId, dto.announcementId) }
 }

@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 import type { AnnouncementDto, AnnouncementResponseDto, CompanyAnnouncementDto, GraduateCardDto, L, MatchStatus, PartyContactsDto } from '@ilmora/shared'
+import { hmacSha256 } from '../../common/crypto'
 import { AppError } from '../../common/errors'
+import { ENV, type Env } from '../../config/env'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -38,6 +40,7 @@ export class GraduatesService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly contacts: ContactsService,
+    @Inject(ENV) private readonly env: Env,
   ) {}
 
   // ───────────── institution ─────────────
@@ -186,21 +189,34 @@ export class GraduatesService {
   }
 
   /** ТЗ 5.1 «Пригласить»: a contact request to a graduate the company sees in this announcement — nobody else. */
-  async invite(tenantId: string, actor: RequestActor, studentId: string, announcementId: string): Promise<CompanyAnnouncementDto> {
+  async invite(tenantId: string, actor: RequestActor, cardId: string, announcementId: string): Promise<CompanyAnnouncementDto> {
     const company = await this.ownCompany(actor)
-    const ann = await this.companyAnnouncement(company, announcementId, true)
-    if (!ann.graduates?.some((g) => g.studentId === studentId)) throw AppError.notFound('Graduate')
-    await this.contacts.request(tenantId, company, studentId, 'GRADUATE', { announcementId })
+    const userId = (await this.companyView(company, announcementId, true)).userByCard.get(cardId)
+    if (!userId) throw AppError.notFound('Graduate')
+    await this.contacts.request(tenantId, company, userId, 'GRADUATE', { announcementId })
     return this.companyAnnouncement(company, announcementId, true)
   }
 
   // ───────────── helpers ─────────────
+
+  /**
+   * A graduate card's id: a keyed hash of the company, the announcement and the student. Stable within the announcement
+   * for this company, unrelated across companies and years, and it cannot be turned back into the account id (№127).
+   */
+  private cardId(companyId: string, announcementId: string, userId: string) {
+    return hmacSha256(`${this.env.JWT_ACCESS_SECRET}:graduate-card`, `${companyId}:${announcementId}:${userId}`).slice(0, 32)
+  }
 
   private ofIndustries(ids: string[]): Prisma.DirectionWhereInput {
     return { OR: [{ mergedIntoId: null, industryId: { in: ids } }, { mergedInto: { industryId: { in: ids } } }] }
   }
 
   private async companyAnnouncement(company: { id: string; industries: string[] }, id: string, withGraduates: boolean): Promise<CompanyAnnouncementDto> {
+    return (await this.companyView(company, id, withGraduates)).dto
+  }
+
+  /** The announcement as the company sees it, and which account stands behind each graduate card (never sent out). */
+  private async companyView(company: { id: string; industries: string[] }, id: string, withGraduates: boolean): Promise<{ dto: CompanyAnnouncementDto; userByCard: Map<string, string> }> {
     const ann = await this.prisma.client.graduationAnnouncement.findFirst({
       where: { id, status: 'PUBLISHED', institution: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null } },
       select: { id: true, year: true, publishedAt: true, institutionId: true, institution: { select: { id: true, name: true, type: true, region: { select: { id: true, name: true } }, phone: true, email: true, website: true, address: true, representative: REP } }, lines: { select: LINE_SELECT } },
@@ -217,12 +233,16 @@ export class GraduatesService {
       total: lines.reduce((n, l) => n + l.count, 0),
       myResponse: mine ? { id: mine.id, status: mine.status, comment: mine.comment, lines: mine.lines, contacts } : null,
     }
-    if (withGraduates) dto.graduates = await this.cards(company.id, ann, lines)
-    return dto
+    const userByCard = new Map<string, string>()
+    if (withGraduates) {
+      const cards = await this.cards(company.id, ann, lines)
+      dto.graduates = cards.map(({ userId, ...card }) => (userByCard.set(card.cardId, userId), card))
+    }
+    return { dto, userByCard }
   }
 
   /** The cards of the visible lines (ТЗ 5.1 «Что видит компания»): no phone, e-mail or files. */
-  private async cards(companyId: string, ann: { id: string; year: number; institutionId: string; institution: { name: string } }, lines: LineRow[]): Promise<GraduateCardDto[]> {
+  private async cards(companyId: string, ann: { id: string; year: number; institutionId: string; institution: { name: string } }, lines: LineRow[]): Promise<(GraduateCardDto & { userId: string })[]> {
     const byDirection = new Map(lines.map((l) => [l.directionId, l]))
     const excluded = new Set((await this.prisma.client.announcementExclusion.findMany({ where: { announcementId: ann.id }, select: { userId: true } })).map((e) => e.userId))
     const rows = await this.prisma.client.studentProfile.findMany({
@@ -234,9 +254,11 @@ export class GraduatesService {
       orderBy: { user: { displayName: 'asc' } },
     })
     const visible = rows.filter((r) => !excluded.has(r.userId))
-    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, userId: { in: visible.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
+    // Only requests sent from announcements: a request from the anonymous contract-help card must not show on the named
+    // card, or the company learns who asked for help with the fee (matrix check 11.11, №126).
+    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, source: 'GRADUATE', userId: { in: visible.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
     return visible.map((r) => ({
-      studentId: r.userId, name: r.user.displayName, institution: ann.institution.name, direction: mainOf(byDirection.get(r.directionId!)!.direction), graduationYear: ann.year,
+      userId: r.userId, cardId: this.cardId(companyId, ann.id, r.userId), name: r.user.displayName, institution: ann.institution.name, direction: mainOf(byDirection.get(r.directionId!)!.direction), graduationYear: ann.year,
       region: place(r.region), about: r.about, certificates: r.user.studentCertificates.map((c) => c.title),
       ilmoraCourses: [...new Map(r.user.enrollments.map((e) => [JSON.stringify(e.course.title), e.course.title as L])).values()],
       studyConfirmed: true as const, contactRequest: requests.get(r.userId) ?? null,
