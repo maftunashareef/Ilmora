@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ExtraLessonForm, SessionPanel, SessionStatus } from '../../components/attendance/SessionPanel'
 import { Badge, Button, EmptyState, Field, Icon, Input, Modal, Notice, PageTitle, Select } from '../../components/ui'
 import { useT } from '../../i18n/useT'
@@ -27,11 +27,11 @@ export function CenterAttendance() {
   const [extraGroup, setExtraGroup] = useState<string>('')
   const [adding, setAdding] = useState(false)
 
-  const load = (d: string) => api<{ date: string; sessions: CenterLesson[] }>(`${scope.base}/attendance?date=${encodeURIComponent(d)}`).then((r) => setLessons(r.sessions)).catch(() => setFailed(true))
-  useEffect(() => { void load(date) }, [date])
+  const load = useCallback((d: string) => api<{ date: string; sessions: CenterLesson[] }>(`${scope.base}/attendance?date=${encodeURIComponent(d)}`).then((r) => setLessons(r.sessions)).catch(() => setFailed(true)), [scope.base])
+  useEffect(() => { void load(date) }, [date, load])
   // A notification about another day links here while the page is already open.
   useEffect(() => { const d = params.get('date'); if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d) }, [params])
-  useEffect(() => { api<CenterCourses>(`${scope.base}/courses`).then((r) => setCourses(r.courses)).catch(() => undefined) }, [])
+  useEffect(() => { api<CenterCourses>(`${scope.base}/courses`).then((r) => setCourses(r.courses)).catch(() => undefined) }, [scope.base])
 
   const open = async (l: CenterLesson) => {
     setActive(l)

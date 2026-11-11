@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
 import { countLabel, foldForSearch, isOnlineCourse, isPreparationTrack, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { Link, useNavigate, useSearchParams } from '@/lib/router'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
@@ -159,6 +159,7 @@ export function BuilderPage() {
   }
 
   // /builder?preset=<id>&extra=<slotIds> (older links to a university package) adds that published package once, with the chosen extras.
+  const startPresetFromLink = useEffectEvent((preset: Preset, extra: string[]) => startPreset(preset, extra))
   const handledPreset = useRef<string | null>(null)
   useEffect(() => {
     const id = params.get('preset')
@@ -167,8 +168,8 @@ export function BuilderPage() {
     const preset = (presets ?? []).find((p) => p.id === id && p.enabled)
     if (!preset) return
     handledPreset.current = key
-    startPreset(preset, (params.get('extra') ?? '').split(',').filter(Boolean))
-  }, [params, student, presets, guestHydrated, startPreset]) // startPreset is new every render; handledPreset makes this run once per link
+    startPresetFromLink(preset, (params.get('extra') ?? '').split(',').filter(Boolean))
+  }, [params, student, presets, guestHydrated]) // handledPreset makes this run once per link
 
   // /builder#cart ("Go to cart" after adding a package) opens on the summary, which on phones sits below the course list.
   useEffect(() => {
@@ -185,6 +186,7 @@ export function BuilderPage() {
   }
 
   // /builder?add=<courseId> (from the saved courses page) adds that course once, opening the group picker when it has several.
+  const addCourseFromLink = useEffectEvent((c: Course) => onAddCourse(c))
   const handledAdd = useRef<string | null>(null)
   useEffect(() => {
     const id = params.get('add')
@@ -192,8 +194,8 @@ export function BuilderPage() {
     const c = courses.find((x) => x.id === id && isPublicListed(x))
     if (!c) return
     handledAdd.current = id
-    onAddCourse(c)
-  }, [params, student, courses, onAddCourse]) // onAddCourse is new every render; handledAdd makes this run once per link
+    addCourseFromLink(c)
+  }, [params, student, courses]) // handledAdd makes this run once per link
 
   return (
     <div className="container-x py-12 lg:py-16">

@@ -1,5 +1,5 @@
 'use client'
-import { createContext, createElement, useContext, useEffect, useRef, type ReactNode } from 'react'
+import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from 'react'
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
@@ -1080,13 +1080,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
 const StoreContext = createContext<StoreApi<StoreState> | null>(null)
 let browserStore: StoreApi<StoreState> | null = null
 
+/** One store per request on the server; in the browser one for the whole visit (it outlives the provider's remounts). */
+function storeFor(initial: InitialData): StoreApi<StoreState> {
+  if (typeof window === 'undefined') return createIlmoraStore(initial)
+  browserStore ??= createIlmoraStore(initial)
+  return browserStore
+}
+
 export function StoreProvider({ initial, children }: { initial: InitialData; children: ReactNode }) {
-  const ref = useRef<StoreApi<StoreState> | null>(null)
-  if (!ref.current) {
-    ref.current = typeof window !== 'undefined' && browserStore ? browserStore : createIlmoraStore(initial)
-    if (typeof window !== 'undefined') browserStore = ref.current
-  }
-  const store = ref.current
+  const [store] = useState(() => storeFor(initial))
   useEffect(() => {
     if (store.getState().lang !== initial.lang) store.setState({ lang: initial.lang })
   }, [store, initial.lang])
