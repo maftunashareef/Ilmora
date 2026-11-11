@@ -37,9 +37,14 @@ describe('Ж1: the strict sign-in limit counts sign-in routes only, per client, 
   it('on the sign-in routes counts by address even with a token attached (security review 10.11 №2)', async () => {
     const guard = Object.create(AppThrottlerGuard.prototype) as AppThrottlerGuard
     const tracker = (req: Record<string, unknown>, ctx: ExecutionContext) => (guard as unknown as { getTracker: (r: Record<string, unknown>, c: ExecutionContext) => Promise<string> }).getTracker(req, ctx)
-    for (const name of ['login', 'register', 'requestOtp', 'verifyOtp', 'resetPassword', 'changePassword']) {
+    for (const name of ['register', 'requestOtp', 'verifyOtp', 'resetPassword']) {
       expect(await tracker({ ip: '10.0.0.7', actor: { id: 'u-1' } }, route(AuthController, name))).toBe('ip:10.0.0.7')
     }
+    // Password sign-in: by address and login together, a token changes nothing (№75: a center's Wi-Fi is one address).
+    expect(await tracker({ ip: '10.0.0.7', actor: { id: 'u-1' }, body: { login: 'Aziz' } }, route(AuthController, 'login'))).toBe(await tracker({ ip: '10.0.0.7', body: { login: ' aziz ' } }, route(AuthController, 'login')))
+    expect(await tracker({ ip: '10.0.0.7', body: { login: 'aziz' } }, route(AuthController, 'login'))).toMatch(/^ip:10\.0\.0\.7:login:/)
+    // Changing one's own password needs a session: counted per account (№75).
+    expect(await tracker({ ip: '10.0.0.7', actor: { id: 'u-1' } }, route(AuthController, 'changePassword'))).toBe('u:u-1')
     expect(await tracker({ ip: '10.0.0.7', actor: { id: 'u-1' } }, route(ManageController, 'mine'))).toBe('u:u-1')
   })
 })

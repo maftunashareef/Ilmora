@@ -146,9 +146,12 @@ export class PaymeService {
     }
   }
 
-  /** The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. */
+  /**
+   * The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. A Payme test order
+   * (PAYME_SANDBOX_PAYMENT_IDS) has no hold: Payme's tests take days, and the hold is an hour for everybody else (№82).
+   */
   private async payable(db: TransactionClient | PrismaService['client'], payment: { id: string; state: PaymentState; subscriptionId: string; periodStart: Date; periodEnd: Date; expiresAt: Date | null }): Promise<boolean> {
-    if (payment.expiresAt && payment.expiresAt < new Date()) return false
+    if (payment.expiresAt && payment.expiresAt < new Date() && !this.env.PAYME_SANDBOX_PAYMENT_IDS.includes(payment.id)) return false
     return (await this.payments.settleBlocker(db, payment)) === null
   }
 

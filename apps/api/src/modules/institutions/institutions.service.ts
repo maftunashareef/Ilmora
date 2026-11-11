@@ -66,6 +66,10 @@ function missingFields(r: PassportRow, regionHasDistricts: boolean): Institution
  * institution stayed a DRAFT without a representative — its STIR could be claimed by no one, nor released. The losing
  * transaction now rolls back whole.
  */
+/** The record goes back to the registry unclaimed (Super Admin's «Отвязать», or its representative's account deleted — №84). */
+export const unclaimInstitution = (tx: TransactionClient, id: string) =>
+  tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null, claimedAt: null, pendingChanges: Prisma.DbNull } })
+
 const bindRepresentative = async (tx: TransactionClient, userId: string, institutionId: string) => {
   const bound = await tx.user.updateMany({ where: { id: userId, institutionId: null }, data: { institutionId } })
   if (bound.count !== 1) throw AppError.conflict('already_has_institution', 'This account already represents an institution')
@@ -153,12 +157,15 @@ export class InstitutionsService {
    * represents it, the record is UNCLAIMED and closed until the next representative's review. Its data stay.
    */
   async release(tenantId: string, id: string, reason: string): Promise<void> {
-    const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, representative: { select: { id: true } } } })
-    if (!row) throw AppError.notFound('Institution')
-    if (!row.representative) throw AppError.conflict('not_claimed', 'Nobody represents this record')
+    const found = await this.prisma.client.institution.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true } })
+    if (!found) throw AppError.notFound('Institution')
+    // A deleted account still holding the record is found too (№84: «Отвязать» answered 404 and the record stayed held).
+    const representative = (await this.prisma.client.user.findFirst({ where: { institutionId: id }, select: { id: true }, includeDeleted: true } as never)) as { id: string } | null
+    if (!representative) throw AppError.conflict('not_claimed', 'Nobody represents this record')
+    const row = { ...found, representative }
     await this.prisma.client.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: row.representative!.id }, data: { institutionId: null } })
-      await tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null, claimedAt: null, pendingChanges: Prisma.DbNull } })
+      await tx.user.updateMany({ where: { id: representative.id }, data: { institutionId: null }, includeDeleted: true } as never)
+      await unclaimInstitution(tx, id)
     })
     await this.audit.record({ action: 'institution.release', entityType: 'Institution', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, reason })
     await this.notifications.safely('registry.released', () =>

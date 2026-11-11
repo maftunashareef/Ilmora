@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { MAX_CART_COURSES } from '@ilmora/shared'
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, Length, ValidateIf } from 'class-validator'
-import { AuthThrottle, CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
+import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { PaymentsService } from '../payments/payments.service'
 import { RefundDto, toRefundInput } from './refunds.dto'
@@ -43,9 +44,13 @@ export class EnrollmentController {
   }
 
   /** Creates the pending payment (with seat holds) and returns the provider checkout URL. */
-  /** Seats are held for an hour; at most 20 checkouts an hour from one address (security review №12). */
+  /**
+   * Seats are held for an hour; at most 20 checkouts an hour per student (security review №12) — counted per account,
+   * not per address: the 21st student on a center's Wi-Fi could not pay (№75). One student holds one unpaid order at a
+   * time anyway (the checkout locks the student's subscriptions; one pending payment per subscription in the database).
+   */
   @Post('checkout')
-  @AuthThrottle(20, 3_600_000)
+  @Throttle({ default: { limit: 20, ttl: 3_600_000 } })
   async checkout(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Body() dto: CheckoutDto) {
     const { payment } = await this.subscriptions.checkout(tenantId, actor.id, dto.provider)
     return this.payments.checkoutLink(payment, dto.provider, dto.lang ?? 'uz')

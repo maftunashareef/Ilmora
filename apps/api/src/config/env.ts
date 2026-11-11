@@ -16,6 +16,9 @@ const csv = z
  * Missing or malformed values fail fast with a readable message (secrets are never echoed).
  * See .env.example for documentation of each variable.
  */
+/** The longest seat hold in production (security review №12, №82). */
+export const PAYMENT_EXPIRES_MAX_HOURS = 1
+
 export const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -111,7 +114,11 @@ export const EnvSchema = z.object({
   // «услуга (раз)» in the tax committee's unit list (checked 10.11, security review №41).
   PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501338'),
   PAYME_FISCAL_VAT_PERCENT: z.coerce.number().default(0),
-  /** Seats are held this long for an unpaid checkout (security review 10.11 №12: an hour, not a day). */
+  /**
+   * Seats are held this long for an unpaid checkout (security review 10.11 №12: an hour, not a day). Production holds at
+   * most PAYMENT_EXPIRES_MAX_HOURS whatever is set (№82): Payme's test orders outlive it by being listed in
+   * PAYME_SANDBOX_PAYMENT_IDS, not by a long hold for everybody.
+   */
   PAYMENT_EXPIRES_HOURS: z.coerce.number().int().positive().default(1),
 
   SENTRY_DSN: z.string().optional(),
@@ -134,6 +141,8 @@ export const EnvSchema = z.object({
   RATE_LIMIT_AUTH_PER_MINUTE: z.coerce.number().int().positive().default(6),
   /** Session refreshes per minute from one address, all sessions together (a classroom on one Wi-Fi), №19. */
   RATE_LIMIT_REFRESH_PER_IP_MINUTE: z.coerce.number().int().positive().default(600),
+  /** Password sign-ins per minute from one address, all logins together (№75): a center's students on one Wi-Fi. */
+  RATE_LIMIT_LOGIN_PER_IP_MINUTE: z.coerce.number().int().positive().default(120),
   /** New accounts from one address (Н-4): wide — a technikum registers a class from one Wi-Fi. */
   RATE_LIMIT_REGISTER_PER_IP_HOUR: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_REGISTER_PER_IP_DAY: z.coerce.number().int().positive().default(300),
@@ -160,6 +169,10 @@ export function validateEnv(raw: Record<string, unknown>): Env {
   // Documents and certificates would land in the public bucket (cybersecurity check 9.4, 11.11).
   if (env.S3_DOCS_BUCKET && env.S3_DOCS_BUCKET === env.S3_BUCKET) throw new Error('S3_DOCS_BUCKET must differ from S3_BUCKET: documents go to the private bucket only')
   if (env.NODE_ENV === 'production') {
+    if (env.PAYMENT_EXPIRES_HOURS > PAYMENT_EXPIRES_MAX_HOURS) {
+      console.warn(`PAYMENT_EXPIRES_HOURS=${env.PAYMENT_EXPIRES_HOURS} is ignored in production: seats are held ${PAYMENT_EXPIRES_MAX_HOURS} h (security review №12, №82). Payme's test orders listed in PAYME_SANDBOX_PAYMENT_IDS do not expire; remove the line from api.env.`)
+      env.PAYMENT_EXPIRES_HOURS = PAYMENT_EXPIRES_MAX_HOURS
+    }
     if (env.CORS_ORIGINS.length === 0) throw new Error('CORS_ORIGINS must list the web origin(s) in production')
     if (env.CORS_ORIGINS.some((o) => o.includes('*'))) throw new Error('CORS_ORIGINS may not contain wildcards in production')
     if (!env.COOKIE_SECURE) throw new Error('COOKIE_SECURE must be true in production')

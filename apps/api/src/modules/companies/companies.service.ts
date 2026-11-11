@@ -73,6 +73,12 @@ export async function closeCompanyData(tx: TransactionClient, id: string, now: D
   return { consents: consents.count, contacts: contacts.count, applications: applications.count, offers: offers.count, responses: responses.count }
 }
 
+/** The company goes back to a draft nobody holds, and none of its data stays (release, or the account deleted — №84). */
+export async function unclaimCompany(tx: TransactionClient, id: string, now: Date) {
+  await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull } })
+  return closeCompanyData(tx, id, now)
+}
+
 /** The account becomes the representative only if it represents nothing yet: two registrations at once roll one back (9.4). */
 const bindRepresentative = async (tx: TransactionClient, userId: string, companyId: string) => {
   const bound = await tx.user.updateMany({ where: { id: userId, companyId: null }, data: { companyId } })
@@ -141,14 +147,16 @@ export class CompaniesService {
    * represents it and the workspace closes; the next representative of the STIR starts it over as a draft.
    */
   async release(tenantId: string, id: string, reason: string): Promise<void> {
-    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, representative: { select: { id: true } } } })
-    if (!row) throw AppError.notFound('Company')
-    if (!row.representative) throw AppError.conflict('not_claimed', 'Nobody represents this company')
+    const found = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true } })
+    if (!found) throw AppError.notFound('Company')
+    // A deleted account still holding the company is found too (№84).
+    const representative = (await this.prisma.client.user.findFirst({ where: { companyId: id }, select: { id: true }, includeDeleted: true } as never)) as { id: string } | null
+    if (!representative) throw AppError.conflict('not_claimed', 'Nobody represents this company')
+    const row = { ...found, representative }
     const now = new Date()
     const closed = await this.prisma.client.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: row.representative!.id }, data: { companyId: null } })
-      await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull } })
-      return closeCompanyData(tx, id, now)
+      await tx.user.updateMany({ where: { id: representative.id }, data: { companyId: null }, includeDeleted: true } as never)
+      return unclaimCompany(tx, id, now)
     })
     await this.audit.record({ action: 'company.release', entityType: 'Company', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, after: { closed }, reason })
     await this.notifications.safely('registry.released', () =>

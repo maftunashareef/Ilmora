@@ -23,7 +23,17 @@ export class AppExceptionFilter implements ExceptionFilter {
     const { status, body } = this.describe(exception, requestId)
 
     if (status >= 500) this.logger.error({ err: exception, requestId, path: req.originalUrl }, 'Unhandled error')
-    else if (status === 429) res.setHeader('Retry-After', String((body.error.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds ?? 60))
+    else if (status === 429) {
+      // The real wait: the error's own, or what the throttler already put on the response (its block, e.g. 5 minutes
+      // after too many sign-ins — №75: the answer used to promise «60 s»); 60 only when nothing says.
+      const fromThrottler = Object.entries(res.getHeaders())
+        .filter(([k]) => k.toLowerCase().startsWith('retry-after'))
+        .map(([, v]) => Number(v))
+        .filter((n) => Number.isFinite(n) && n > 0)
+      const seconds = (body.error.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds ?? (fromThrottler.length ? Math.max(...fromThrottler) : 60)
+      res.setHeader('Retry-After', String(seconds))
+      body.error.details = { ...((body.error.details as object | undefined) ?? {}), retryAfterSeconds: seconds }
+    }
 
     res.status(status).json(body)
   }

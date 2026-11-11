@@ -50,8 +50,10 @@ Optional source-IP allow-list: `PAYME_ALLOWED_IPS` (comma-separated; leave empty
    activates a real subscription. Without a staging machine, pass Payme's tests on `ilmoraa.uz` this way:
    1. Create two test students, put a package in the cart, choose Payme and leave the payment unfinished. Note both
       payment ids.
-   2. In `api.env`: `PAYME_MERCHANT_ID`, `PAYME_TEST_KEY`, `PAYME_SANDBOX_PAYMENT_IDS=<id1>,<id2>`, and a long enough
-      `PAYMENT_EXPIRES_HOURS` for the orders to outlive the test window. Restart the API.
+   2. Within the hour the seats are held: in `api.env` `PAYME_MERCHANT_ID`, `PAYME_TEST_KEY`,
+      `PAYME_SANDBOX_PAYMENT_IDS=<id1>,<id2>`. Restart the API. Listed orders do not expire while listed. Do **not**
+      raise `PAYMENT_EXPIRES_HOURS`: production ignores values over 1 hour (security review №82) — a long hold for
+      everybody let one person keep seats for a week.
    3. The test key now reaches only those two orders and the sandbox transactions on them; any other order looks
       absent (-31050) and live transactions look absent (-31003). The API logs a warning at start while the list is set.
    4. After the tests: clear `PAYME_SANDBOX_PAYMENT_IDS` and `PAYME_TEST_KEY`, restart, and cancel the test students'

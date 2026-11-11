@@ -4,7 +4,7 @@ import { ThrottlerGuard } from '@nestjs/throttler'
 import type { Role } from '../generated/prisma/enums'
 import { REFRESH_COOKIE } from '../modules/auth/token.service'
 import { sha256 } from './crypto'
-import { type AuthenticatedRequest, IS_PUBLIC_KEY, isAuthThrottled, isSessionThrottled, ROLES_KEY, WITH_ISSUED_PASSWORD_KEY } from './decorators'
+import { type AuthenticatedRequest, IS_PUBLIC_KEY, isAuthThrottled, isLoginThrottled, isSessionThrottled, ROLES_KEY, WITH_ISSUED_PASSWORD_KEY } from './decorators'
 import { AppError } from './errors'
 
 /** Requires an authenticated actor unless the handler/class is marked @Public(). */
@@ -67,6 +67,11 @@ export class AppThrottlerGuard extends ThrottlerGuard {
     if (context && isSessionThrottled(context)) {
       const cookie = (r as unknown as { cookies?: Record<string, string> }).cookies?.[REFRESH_COOKIE]
       if (cookie) return `rs:${sha256(cookie).slice(0, 32)}`
+    }
+    // A password sign-in counts per address and login (№75); the wide per-address limit is the `loginIp` throttler.
+    if (context && isLoginThrottled(context)) {
+      const login = String((r as unknown as { body?: { login?: unknown } }).body?.login ?? '').trim().normalize('NFKC').toLowerCase().slice(0, 64)
+      return `ip:${r.ip ?? 'unknown'}:login:${sha256(login).slice(0, 16)}`
     }
     if (context && isAuthThrottled(context)) return `ip:${r.ip ?? 'unknown'}`
     if (r.actor?.id) return `u:${r.actor.id}`

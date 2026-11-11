@@ -65,8 +65,13 @@ export class AuthService {
   async resetPasswordBySms(tenantId: string, input: { phone: string; code: string; newPassword: string }, meta: SessionMeta): Promise<LoginResult> {
     const { phoneE164 } = await this.otp.verify(tenantId, input.phone, input.code)
     const user = await this.prisma.client.user.findUnique({ where: { tenantId_phoneE164: { tenantId, phoneE164 } }, include: USER_INCLUDE })
-    if (!user) throw AppError.notFound('Account')
+    // No account has this number as its sign-in phone: accounts made with a login have none linked (№73). Their password is
+    // reset by the Super Admin until a phone can be linked — said plainly, not a bare «not found».
+    if (!user) throw new AppError('phone_not_linked', 'No account has this phone for signing in; the Super Admin resets the password', HttpStatus.NOT_FOUND)
     if (!user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
+    // An account opened by SMS that never had a password and has no login (№74): someone who forgot the password of their
+    // login account would get a password on this other, empty account and sign in there. It signs in by SMS; nothing to reset.
+    if (!user.passwordHash && !user.login) throw AppError.conflict('no_password_to_reset', 'This number signs in with an SMS code and has no password; an account with a login is reset by the Super Admin')
     // The owners, finance and the ministry never reset by SMS — with or without the authenticator key on the server: their
     // password is reset by the Super Admin (review 11.11; the SMS path used to open for them when the key was not set).
     if (user.isOwner || user.roles.some((r) => r === 'PLATFORM_ADMIN' || r === 'FINANCE_ADMIN' || r === 'MINISTRY')) {

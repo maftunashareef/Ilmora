@@ -1,6 +1,7 @@
+import { Throttle } from '@nestjs/throttler'
 import { Body, Controller, Get, Headers, Inject, Patch, Post, Req, Res } from '@nestjs/common'
 import type { Request, Response } from 'express'
-import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, RegisterThrottle, SessionThrottle, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
+import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, LoginThrottle, RegisterThrottle, SessionThrottle, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -24,9 +25,12 @@ export class AuthController {
     return this.respond(res, result)
   }
 
-  /** Login + password. Wrong login and wrong password produce the same error; repeated failures lock the login. */
+  /**
+   * Login + password. Wrong login and wrong password produce the same error; repeated failures lock the login. Counted
+   * per address and login, a wide limit per address (№75: a center's Wi-Fi is one address).
+   */
   @Public()
-  @AuthThrottle(10)
+  @LoginThrottle(10)
   @Post('login')
   async login(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: PasswordLoginDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
     this.assertSameSite(req, requestedWith)
@@ -150,7 +154,8 @@ export class AuthController {
    */
   @Post('password')
   @AllowWithIssuedPassword()
-  @AuthThrottle(5)
+  // Signed in: counted per account, not per address — a center's Wi-Fi is one address (№75).
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async changePassword(@CurrentActor() actor: RequestActor, @CurrentTenantId() tenantId: string, @ClientInfo() ci: ClientInfoValue, @Body() dto: ChangePasswordDto, @Res({ passthrough: true }) res: Response) {
     return this.respond(res, await this.accounts.changePassword({ id: actor.id, tenantId }, dto, { ip: ci.ip, userAgent: ci.userAgent }))
   }
