@@ -81,7 +81,7 @@ export function AdminRefunds({ focus }: { focus: string | null }) {
       {action?.kind === 'approve' && <ApproveDialog item={action.item} onClose={() => setAction(null)} onDone={(amount) => done(t('refund.approvedToast', { amount: formatMinor(amount) }))} />}
       {action?.kind === 'reject' && <RejectDialog item={action.item} onClose={() => setAction(null)} onDone={() => done(t('refund.rejectedToast'))} />}
       {action?.kind === 'paid' && <PaidDialog item={action.item} onClose={() => setAction(null)} onDone={() => done(t('refund.paidToast'))} />}
-      {letterOpen && <FromLetterDialog canSearch={roles.includes('PLATFORM_ADMIN')} onClose={() => setLetterOpen(false)} onDone={() => { setLetterOpen(false); notify(t('refund.filed')); setRound((r) => r + 1) }} />}
+      {letterOpen && <FromLetterDialog canSearch={roles.includes('PLATFORM_ADMIN') || roles.includes('FINANCE_ADMIN')} onClose={() => setLetterOpen(false)} onDone={() => { setLetterOpen(false); notify(t('refund.filed')); setRound((r) => r + 1) }} />}
     </div>
   )
 }
@@ -267,7 +267,8 @@ function FromLetterDialog({ canSearch, onClose, onDone }: { canSearch: boolean; 
   const { busy, error, submit } = useSubmit(() => refundQueue.fromLetter(student!.id, form), onDone)
   const search = async () => {
     if (q.trim().length < 2) return
-    try { setHits((await api<{ items: StudentHit[] }>(`/admin/users?role=STUDENT&pageSize=10&search=${encodeURIComponent(q.trim())}`)).items) } catch { setHits([]) }
+    // The finance admins' own search (GET /admin/finance/refunds/students): students with money to return, phone masked.
+    try { setHits((await api<{ items: StudentHit[] }>(`/admin/finance/refunds/students?q=${encodeURIComponent(q.trim())}`)).items) } catch { setHits([]) }
   }
   return (
     <Modal open onClose={onClose} title={t('refund.fromLetter')} footer={<>

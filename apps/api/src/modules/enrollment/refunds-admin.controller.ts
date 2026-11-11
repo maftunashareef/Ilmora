@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
-import { RefundApproveDto, RefundFromLetterDto, RefundListQuery, RefundPaidDto, RefundRejectDto, toRefundInput } from './refunds.dto'
+import { RefundApproveDto, RefundFromLetterDto, RefundListQuery, RefundStudentQuery, RefundPaidDto, RefundRejectDto, toRefundInput } from './refunds.dto'
 import { RefundsService } from './refunds.service'
 
 /** The finance admins' queue of refund requests (offer 6.6: a decision within 10 days, money within 5 working days). */
@@ -9,6 +9,12 @@ import { RefundsService } from './refunds.service'
 @Roles('FINANCE_ADMIN')
 export class RefundsAdminController {
   constructor(private readonly refunds: RefundsService) {}
+
+  /** The student a letter is about: name, login or phone (review 11.11 — the Super Admin's account list stays closed). */
+  @Get('students')
+  students(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Query() q: RefundStudentQuery) {
+    return this.refunds.searchStudents(tenantId, actor.id, q.q)
+  }
 
   @Get()
   list(@CurrentTenantId() tenantId: string, @Query() q: RefundListQuery) {
