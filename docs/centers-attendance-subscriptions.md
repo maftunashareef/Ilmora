@@ -75,6 +75,9 @@ Everything here is enforced on the server; the web app only reflects it.
   amounts, a line returns no more than was paid for its course and counts no more lessons held than in the period; a
   request is open (`PENDING`, `APPROVED`) exactly while `openKey` = its `paymentId` — set it to null when closing the
   request.
+- **One unpaid payment per subscription** (partial unique index `Payment_one_pending_per_subscription`, migration
+  `20261118000000`; «Доработки Ilmora» Н6, re-check 11.11 №80): a second `PENDING` payment of the same subscription fails
+  with P2002 (409), whatever path creates it. Cancelled, expired and paid payments do not count.
 - **Refund API.** Student (`/v1/student/subscription`):
   - `POST refunds/quote` — what a request would return;
   - `POST refunds` — files it. Body: `enrollmentIds?` (all courses when absent), `reason`, `reasonText?` (required for
@@ -85,6 +88,9 @@ Everything here is enforced on the server; the web app only reflects it.
 
   Finance (`/v1/admin/finance/refunds`, `FINANCE_ADMIN`):
   - `GET ?status=&overdue=true&page=` — the queue;
+  - `GET students?q=` — the student a letter is about, by name, login or phone (2–60 characters): only students
+    with a paid subscription that still has money to return, at most 20, the phone masked, with the courses and the
+    payments left to return; each search is audited. The Super Admin's `/admin/users` stays closed to the finance admins;
   - `POST` — a request from a letter (`studentId` + the student's body);
   - `POST :id/approve` with `{ approvedMinor, note? }` — up to what is left of the payment;
   - `POST :id/reject` with `{ note }`;

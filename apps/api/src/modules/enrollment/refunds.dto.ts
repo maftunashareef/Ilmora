@@ -40,3 +40,7 @@ export class RefundListQuery {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number
   @IsOptional() @Type(() => Number) @IsInt() @Min(10) @Max(100) pageSize?: number
 }
+
+export class RefundStudentQuery {
+  @IsString() @Length(2, 60) q!: string
+}

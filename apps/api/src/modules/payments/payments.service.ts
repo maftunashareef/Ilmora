@@ -63,10 +63,17 @@ export class PaymentsService {
    * provider transaction, so no debit is taken for an order that can no longer be fulfilled: hold expired or cancelled,
    * already paid through the other provider, or a subscription that is closed for good.
    */
-  async settleBlocker(db: TransactionClient | PrismaService['client'], payment: { state: PaymentState; subscriptionId: string }): Promise<'payment_not_pending' | 'subscription_closed' | null> {
+  async settleBlocker(db: TransactionClient | PrismaService['client'], payment: { id?: string; state: PaymentState; subscriptionId: string; periodStart?: Date; periodEnd?: Date }): Promise<'payment_not_pending' | 'subscription_closed' | 'period_already_paid' | null> {
     if (payment.state !== 'PENDING') return 'payment_not_pending'
-    const sub = await db.subscription.findFirst({ where: { id: payment.subscriptionId }, select: { status: true } })
+    const sub = await db.subscription.findFirst({ where: { id: payment.subscriptionId }, select: { status: true, kind: true } })
     if (!sub || isClosed(sub.status)) return 'subscription_closed'
+    // A month is paid once: an invoice for a period another paid invoice already covers is refused, so the provider
+    // returns the money instead of taking it for nothing — whatever made the second invoice (Н6 / review 11.11 №80).
+    // Lesson packages are bought by lessons, not by months: two of them may overlap in time.
+    if (sub.kind === 'PERIOD' && payment.id && payment.periodStart && payment.periodEnd) {
+      const overlap = await db.payment.count({ where: { subscriptionId: payment.subscriptionId, id: { not: payment.id }, state: 'PAID', periodStart: { lt: payment.periodEnd }, periodEnd: { gt: payment.periodStart } } })
+      if (overlap) return 'period_already_paid'
+    }
     // A course archived, a center blocked or a group deleted since the order: no money for lessons that will not
     // happen (security review №9) — the provider refuses, the student chooses again.
     const closed = await db.enrollment.count({

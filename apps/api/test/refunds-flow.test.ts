@@ -1,4 +1,8 @@
+import 'reflect-metadata'
+import { Reflector } from '@nestjs/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { ROLES_KEY } from '../src/common/decorators'
+import { RefundsAdminController } from '../src/modules/enrollment/refunds-admin.controller'
 import { addDays } from '../src/common/time'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { countLessons, refundShare, splitByPrice } from '../src/modules/enrollment/refund-count'
@@ -298,6 +302,25 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult
     expect(failed.reason).toMatchObject({ code: 'refund_state' })
+  })
+
+  it('the finance admin finds the student of a letter by name or phone — only students with money to return, phone masked, audited', async () => {
+    const s = await paid('rf-search')
+    const nobody = await ctx.makeStudent(s.tenantId) // no subscription: never found
+    const me = await s.inT(() => db.user.findUniqueOrThrow({ where: { id: s.student.id } }))
+    const byName = await s.inT(() => refunds.searchStudents(s.tenantId, s.finance.id, me.displayName))
+    expect(byName.items.map((i) => i.id)).toEqual([s.student.id])
+    expect(byName.items[0]).toMatchObject({ phoneMasked: expect.stringMatching(/\*\*\*/), subscription: { status: 'ACTIVE', courses: expect.arrayContaining([expect.objectContaining({ courseId: s.course.id })]), payments: [expect.objectContaining({ id: s.payment.id, leftMinor: s.payment.amountMinor.toString() })] } })
+    expect(JSON.stringify(byName)).not.toContain(me.phoneE164!)
+    // The phone from the letter, typed with spaces.
+    const digits = me.phoneE164!.replace('+', '')
+    expect((await s.inT(() => refunds.searchStudents(s.tenantId, s.finance.id, `${digits.slice(0, 5)} ${digits.slice(5)}`))).items.map((i) => i.id)).toEqual([s.student.id])
+    const nobodyName = (await s.inT(() => db.user.findUniqueOrThrow({ where: { id: nobody.id } }))).displayName
+    expect((await s.inT(() => refunds.searchStudents(s.tenantId, s.finance.id, nobodyName))).items).toEqual([])
+    await expect(s.inT(() => refunds.searchStudents(s.tenantId, s.finance.id, ' a '))).rejects.toMatchObject({ code: 'validation_failed' })
+    expect(await s.inT(() => db.auditEvent.count({ where: { action: 'refund.student_search', entityId: s.finance.id } }))).toBe(3)
+    // Only the finance admins (and the Super Admin) reach the search.
+    expect(new Reflector().get(ROLES_KEY, RefundsAdminController)).toEqual(['FINANCE_ADMIN'])
   })
 
   it('reminds the finance admins of a request near its due date', async () => {

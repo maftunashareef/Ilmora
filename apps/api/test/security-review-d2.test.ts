@@ -118,10 +118,11 @@ describe.skipIf(!DB_AVAILABLE)('Small fixes of the security review 10.11: paymen
   })
 
   it('Н13: a daily run left «RUNNING» by a stopped worker is taken over later; a live one is not', async () => {
-    const processor = new SessionsProcessor({} as never, ctx.prisma, {} as never, {} as never, {} as never, {} as never, ctx.env)
+    // A worker that still marks itself alive (Redis answers «exists»): its run is left to it until STALE_RUN_MS.
+    const processor = new SessionsProcessor({} as never, ctx.prisma, {} as never, {} as never, {} as never, {} as never, ctx.env, { off: false, cache: { exists: async () => 1 } } as never)
     const runOnce = (processor as unknown as { runOnce: (q: string, k: string, fn: () => Promise<unknown>) => Promise<unknown> }).runOnce.bind(processor)
     const key = `daily-stale-${Date.now()}`
-    await TenantContext.system(() => db.jobRun.create({ data: { queue: 'sessions', jobKey: key, startedAt: new Date(Date.now() - 60_000) } }))
+    await TenantContext.system(() => db.jobRun.create({ data: { queue: 'sessions', jobKey: key, workerId: 'other:1:live0000', startedAt: new Date(Date.now() - 60_000) } }))
     expect(await runOnce('sessions', key, async () => ({ ran: true }))).toEqual({ skipped: true })
     await TenantContext.system(() => db.jobRun.updateMany({ where: { queue: 'sessions', jobKey: key }, data: { startedAt: new Date(Date.now() - STALE_RUN_MS - 60_000) } }))
     expect(await runOnce('sessions', key, async () => ({ ran: true }))).toEqual({ ran: true })

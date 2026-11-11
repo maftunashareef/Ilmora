@@ -1,12 +1,12 @@
 import { hasMarkup, VACANCY_DIRECTIONS_MAX, VACANCY_SEATS_MAX } from '@ilmora/shared'
 import { z } from 'zod'
-import { isCalendarDate } from '../../common/time'
+import { isCalendarDate, todayLocal } from '../../common/time'
 import { id } from '../registry/registry.schemas'
 
 const text = (max: number) =>
   z.string().transform((s) => s.normalize('NFC').trim()).pipe(z.string().max(max).refine((s) => !hasMarkup(s), { message: 'Must not contain < or >' })).transform((s) => s || null)
-const today = () => new Date().toISOString().slice(0, 10)
-/** The last day to apply: a real date, not before today (UTC). */
+const today = () => todayLocal()
+/** The last day to apply: a real date, not before today in Tashkent. */
 const deadline = z.string().refine(isCalendarDate, { message: 'Not a date' }).refine((s) => s >= today(), { message: 'Not before today' })
 
 const fields = {

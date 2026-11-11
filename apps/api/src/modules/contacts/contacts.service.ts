@@ -7,6 +7,7 @@ import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, toIndustry } from '../registry/registry.mappers'
+import { dateColumnToIso } from '../../common/time'
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
 /** The contacts a student agreed to show, as copied into a request or an application (security review №15). */
@@ -215,7 +216,7 @@ export class ContactsService {
       direction: p?.direction ? mainOf(p.direction) : null,
       graduationYear: p?.graduationYear ?? null,
       about: p?.about ?? null,
-      certificates: certs.map((c) => ({ id: c.id, title: c.title, issuer: c.issuer, issuedAt: c.issuedAt?.toISOString().slice(0, 10) ?? null, contentType: c.contentType, sizeBytes: c.sizeBytes, createdAt: c.createdAt.toISOString() })),
+      certificates: certs.map((c) => ({ id: c.id, title: c.title, issuer: c.issuer, issuedAt: c.issuedAt ? dateColumnToIso(c.issuedAt) : null, contentType: c.contentType, sizeBytes: c.sizeBytes, createdAt: c.createdAt.toISOString() })),
     }
   }
 

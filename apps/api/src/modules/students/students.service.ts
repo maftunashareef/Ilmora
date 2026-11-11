@@ -12,6 +12,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, mainOf, regionIdByRef } from '../registry/registry.mappers'
 import { RegistryService } from '../registry/registry.service'
 import type { QuestionnaireInput } from './students.schemas'
+import { dateColumnToIso } from '../../common/time'
 
 /** The answer the web wizard expects (apps/web/src/services/questionnaire.ts). */
 export interface QuestionnaireState {
@@ -61,7 +62,7 @@ export class StudentsService {
       graduationYear: row.graduationYear,
       admissionYear: row.enrollYear,
       fullName: row.user.displayName,
-      birthDate: row.birthDate ? row.birthDate.toISOString().slice(0, 10) : '',
+      birthDate: row.birthDate ? dateColumnToIso(row.birthDate) : '',
       region: row.region?.slug ?? '',
       district: row.user.district ?? '',
       phone: row.contactPhone ?? this.signInPhone(row.user),
