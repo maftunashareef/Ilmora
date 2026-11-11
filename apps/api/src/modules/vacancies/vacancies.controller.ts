@@ -59,20 +59,22 @@ export class StudentVacanciesController {
  * «Вакансии компаний» in the institution's workspace and «Разослать студентам» (ТЗ «Студенты у компании, Вакансии у
  * учреждения», 3). An approved, unblocked institution only; the broadcasts' own daily limit is counted in the database.
  */
-@Controller('institutions/me/vacancies')
+@Controller('institutions/me')
 @Roles('INSTITUTION_ADMIN')
 @Approved('institution')
 export class InstitutionVacanciesController {
   constructor(private readonly vacancies: InstitutionVacanciesService) {}
 
-  @Get() list(@CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(InstitutionVacanciesQuery)) q: InstitutionVacanciesQuery) { return this.vacancies.list(a, q) }
-  @Get(':id') one(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.get(a, id) }
-  @Get(':id/broadcasts') broadcasts(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.broadcasts(a, id) }
+  @Get('vacancies') list(@CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(InstitutionVacanciesQuery)) q: InstitutionVacanciesQuery) { return this.vacancies.list(a, q) }
+  /** The journal of all the institution's broadcasts (3.2, п. 6). */
+  @Get('vacancy-broadcasts') journal(@CurrentActor() a: RequestActor) { return this.vacancies.broadcasts(a) }
+  @Get('vacancies/:id') one(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.get(a, id) }
+  @Get('vacancies/:id/broadcasts') broadcasts(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.broadcasts(a, id) }
 
-  @Post(':id/broadcast/preview')
+  @Post('vacancies/:id/broadcast/preview')
   preview(@CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(BroadcastInput)) dto: BroadcastInput) { return this.vacancies.preview(a, id, dto) }
 
-  @Post(':id/broadcast')
+  @Post('vacancies/:id/broadcast')
   @Throttle({ default: { limit: 30, ttl: DAY } })
   send(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(BroadcastInput)) dto: BroadcastInput) { return this.vacancies.send(t, a, id, dto) }
 }
