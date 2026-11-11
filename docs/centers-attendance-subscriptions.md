@@ -75,6 +75,9 @@ Everything here is enforced on the server; the web app only reflects it.
   amounts, a line returns no more than was paid for its course and counts no more lessons held than in the period; a
   request is open (`PENDING`, `APPROVED`) exactly while `openKey` = its `paymentId` — set it to null when closing the
   request.
+- **One unpaid payment per subscription** (partial unique index `Payment_one_pending_per_subscription`, migration
+  `20261118000000`; «Доработки Ilmora» Н6, re-check 11.11 №80): a second `PENDING` payment of the same subscription fails
+  with P2002 (409), whatever path creates it. Cancelled, expired and paid payments do not count.
 - **Refund API.** Student (`/v1/student/subscription`):
   - `POST refunds/quote` — what a request would return;
   - `POST refunds` — files it. Body: `enrollmentIds?` (all courses when absent), `reason`, `reasonText?` (required for
