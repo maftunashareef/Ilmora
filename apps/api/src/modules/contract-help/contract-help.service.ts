@@ -8,7 +8,7 @@ import { AuditService } from '../audit/audit.service'
 import { ContactsService } from '../contacts/contacts.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, isUniqueViolation, mainOf, regionIdByRef } from '../registry/registry.mappers'
-import { StudentsService } from '../students/students.service'
+import { lockConsents, StudentsService } from '../students/students.service'
 import type { ContractHelpInput, ContractHelpQuery } from './contract-help.schemas'
 import { dateColumnToIso } from '../../common/time'
 
@@ -90,7 +90,8 @@ export class ContractHelpService {
     let id: string
     try {
       id = await this.prisma.client.$transaction(async (tx) => {
-        // Consent 2 is the tick on this form: a new journal row unless one is in force.
+        // Consent 2 is the tick on this form: a new journal row unless one is in force (serialized with the questionnaire).
+        await lockConsents(tx, actor.id)
         if (!(await tx.studentConsent.findFirst({ where: { userId: actor.id, ...active('CONTRACT_HELP_CARD') }, select: { id: true } }))) {
           await tx.studentConsent.create({ data: { tenantId, userId: actor.id, kind: 'CONTRACT_HELP_CARD', textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now } })
         }

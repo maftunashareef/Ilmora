@@ -2,12 +2,12 @@ import { Injectable } from '@nestjs/common'
 import { COMPANY_REVIEW_FIELDS, type CompanyPendingChanges, type CompanyProfileDto, type CompanyRequiredField, type DocumentLinkDto, type DocumentUploadDto, type L, REGISTRY_DRAFT_HOLD_DAYS, registrySearchKey } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { Prisma } from '../../generated/prisma/client'
-import { PrismaService } from '../../infra/prisma/prisma.service'
+import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, regionIdByRef, toIndustry } from '../registry/registry.mappers'
+import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, regionIdByRef, toIndustry, changedKey } from '../registry/registry.mappers'
 import type { CertificateConfirmInput, CertificateUploadInput, CompanyCreateInput, CompanyPatch } from './companies.schemas'
 
 export const PROFILE_SELECT = {
@@ -57,6 +57,29 @@ function missingFields(r: ProfileRow): CompanyRequiredField[] {
 }
 
 /**
+ * A company is never handed over (decision 11.11): whoever claims the record next gets none of the students' or the
+ * institutions' data — the consents end, opened contacts are taken back with their copies, the vacancies close and the
+ * applications to them (with the contacts the students sent) are removed; the training requests close and the offers
+ * and the responses to announcements (which open the institutions' contacts) are withdrawn (cybersecurity check 9.4).
+ */
+export async function closeCompanyData(tx: TransactionClient, id: string, now: Date) {
+  const consents = await tx.studentConsent.updateMany({ where: { kind: 'COMPANY_CONTACTS', companyId: id, revokedAt: null }, data: { revokedAt: now } })
+  const contacts = await tx.contactRequest.updateMany({ where: { companyId: id, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
+  await tx.vacancy.updateMany({ where: { companyId: id, status: 'OPEN' }, data: { status: 'CLOSED' } })
+  const applications = await tx.vacancyApplication.deleteMany({ where: { vacancy: { companyId: id } } })
+  const offers = await tx.trainingOffer.updateMany({ where: { request: { companyId: id }, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now } })
+  await tx.trainingRequest.updateMany({ where: { companyId: id, status: 'OPEN' }, data: { status: 'CLOSED', closedAt: now } })
+  const responses = await tx.announcementResponse.updateMany({ where: { companyId: id, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now } })
+  return { consents: consents.count, contacts: contacts.count, applications: applications.count, offers: offers.count, responses: responses.count }
+}
+
+/** The account becomes the representative only if it represents nothing yet: two registrations at once roll one back (9.4). */
+const bindRepresentative = async (tx: TransactionClient, userId: string, companyId: string) => {
+  const bound = await tx.user.updateMany({ where: { id: userId, companyId: null }, data: { companyId } })
+  if (bound.count !== 1) throw AppError.conflict('already_has_company', 'This account already represents a company')
+}
+
+/**
  * The company's own profile (ТЗ 4.3): STIR and name, the profile with industries, the state-registration certificate
  * (private bucket), submit to the Super Admin. One STIR — one company, one company — one representative: the unique
  * indexes hold it, the code turns a lost race into 409. The company of an account is read from the database
@@ -85,14 +108,16 @@ export class CompaniesService {
         if (existing) {
           const holder = await tx.user.findFirst({ where: { companyId: existing.id }, select: { id: true } })
           if (holder) throw registered()
+          // Whatever the previous representative left (a record unlinked other than by `release`) is not handed over.
+          await closeCompanyData(tx, existing.id, new Date())
           await tx.companyIndustry.deleteMany({ where: { companyId: existing.id } })
           await tx.companyDirection.deleteMany({ where: { companyId: existing.id } })
           await tx.company.update({ where: { id: existing.id }, data: { name: input.name, searchKey: registrySearchKey(input.name), status: 'DRAFT', approvedAt: null, submittedAt: null, reviewedAt: null, rejectReason: null, certificateFileKey: null, about: null, website: null, address: null, pendingChanges: Prisma.DbNull } })
-          await tx.user.update({ where: { id: actor.id }, data: { companyId: existing.id } })
+          await bindRepresentative(tx, actor.id, existing.id)
           return existing.id
         }
         const row = await tx.company.create({ data: { tenantId, stir: input.stir, name: input.name, searchKey: registrySearchKey(input.name) }, select: { id: true } })
-        await tx.user.update({ where: { id: actor.id }, data: { companyId: row.id } })
+        await bindRepresentative(tx, actor.id, row.id)
         return row.id
       })
     } catch (err) {
@@ -123,14 +148,7 @@ export class CompaniesService {
     const closed = await this.prisma.client.$transaction(async (tx) => {
       await tx.user.update({ where: { id: row.representative!.id }, data: { companyId: null } })
       await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull } })
-      // A company is never handed over (decision 11.11): whoever claims the record next gets none of the students'
-      // data — the consents end, opened contacts are taken back with their copies, the vacancies close and the
-      // applications to them (with the contacts the students sent) are removed.
-      const consents = await tx.studentConsent.updateMany({ where: { kind: 'COMPANY_CONTACTS', companyId: id, revokedAt: null }, data: { revokedAt: now } })
-      const contacts = await tx.contactRequest.updateMany({ where: { companyId: id, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
-      await tx.vacancy.updateMany({ where: { companyId: id, status: 'OPEN' }, data: { status: 'CLOSED' } })
-      const applications = await tx.vacancyApplication.deleteMany({ where: { vacancy: { companyId: id } } })
-      return { consents: consents.count, contacts: contacts.count, applications: applications.count }
+      return closeCompanyData(tx, id, now)
     })
     await this.audit.record({ action: 'company.release', entityType: 'Company', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, after: { closed }, reason })
     await this.notifications.safely('registry.released', () =>
@@ -148,7 +166,7 @@ export class CompaniesService {
    * ones); the rest changes at once. Audited.
    */
   async update(tenantId: string, actor: RequestActor, input: CompanyPatch): Promise<CompanyProfileDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: PROFILE_SELECT })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
 
@@ -227,13 +245,13 @@ export class CompaniesService {
         after: { ...pick(data, changed), ...(industryIds ? { industryIds } : {}), ...(directionIds ? { directionIds } : {}), ...(backToReview ? { pendingChanges: pending } : {}), ...(Object.keys(repData).length ? { representative: repData } : {}) },
       })
     }
-    if (backToReview && pending) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)
+    if (backToReview && pending) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', changedKey('company', id, now))
     return this.profileOf(id)
   }
 
   /** Step 1 of the certificate: a presigned PUT under the company's own prefix (the browser uploads to the private bucket). */
   async certificateUploadUrl(tenantId: string, actor: RequestActor, input: CertificateUploadInput): Promise<DocumentUploadDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { status: true, approvedAt: true } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
     const key = this.docs.newKey(certPrefix(tenantId, id), input.contentType)
@@ -245,7 +263,7 @@ export class CompaniesService {
    * first bytes — and only then attaches it; anything else is deleted. After approval a new certificate goes to review.
    */
   async confirmCertificate(tenantId: string, actor: RequestActor, input: CertificateConfirmInput): Promise<CompanyProfileDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { name: true, status: true, approvedAt: true, certificateFileKey: true } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
     const { type, size, key } = await this.docs.verifyUpload(input.key, certPrefix(tenantId, id))
@@ -256,7 +274,7 @@ export class CompaniesService {
     await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: key, ...(current.approvedAt !== null ? { status: 'PENDING', submittedAt: now, rejectReason: null } : {}) } })
     if (current.certificateFileKey && current.certificateFileKey !== key) await this.docs.remove(current.certificateFileKey).catch(() => undefined)
     await this.audit.record({ action: backToReview ? 'company.certificate.review' : 'company.certificate', entityType: 'Company', entityId: id, after: { type, size } })
-    if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)
+    if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', changedKey('company', id, now))
     return this.profileOf(id)
   }
 
@@ -276,7 +294,7 @@ export class CompaniesService {
 
   /** DRAFT or REJECTED → PENDING when every required field is filled; the Super Admins are notified. */
   async submit(tenantId: string, actor: RequestActor): Promise<CompanyProfileDto> {
-    const id = await this.ownId(actor)
+    const id = await this.editableId(actor)
     const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: PROFILE_SELECT })
     if (current.status === 'PENDING') throw AppError.conflict('already_submitted', 'The profile is already under review')
     if (current.status === 'APPROVED') throw AppError.conflict('already_approved', 'The profile is approved; changes of key fields go to review by themselves')
@@ -299,6 +317,14 @@ export class CompaniesService {
   private async representedId(actor: RequestActor): Promise<string | null> {
     const user = await this.prisma.client.user.findFirst({ where: { id: actor.id }, select: { companyId: true } })
     return user?.companyId ?? null
+  }
+
+  /** Blocked: the workspace is closed, the profile too — no edits and no new submission (cybersecurity check 9.4, 11.11). */
+  private async editableId(actor: RequestActor): Promise<string> {
+    const id = await this.ownId(actor)
+    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { blockedAt: true } })
+    if (row?.blockedAt) throw AppError.forbidden('The company is blocked; write to support')
+    return id
   }
 
   private async ownId(actor: RequestActor): Promise<string> {

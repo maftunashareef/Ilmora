@@ -23,7 +23,14 @@ export class InstitutionsController {
   claim(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(ClaimInput)) dto: ClaimInput) { return this.institutions.claim(t, a, dto) }
 
   @Get('me') me(@CurrentActor() a: RequestActor) { return this.institutions.passport(a) }
-  @Patch('me') update(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(InstitutionPatch)) dto: InstitutionPatch) { return this.institutions.update(t, a, dto) }
-  @Put('me/directions') directions(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(DirectionsInput)) dto: DirectionsInput) { return this.institutions.setDirections(t, a, dto) }
-  @Post('me/submit') submit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor) { return this.institutions.submit(t, a) }
+  /** Limited (cybersecurity check 9.4): each save of an approved passport can go back to review. */
+  @Patch('me')
+  @Throttle({ default: { limit: 30, ttl: HOUR } })
+  update(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(InstitutionPatch)) dto: InstitutionPatch) { return this.institutions.update(t, a, dto) }
+  @Put('me/directions')
+  @Throttle({ default: { limit: 30, ttl: HOUR } })
+  directions(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Body(new ZodValidationPipe(DirectionsInput)) dto: DirectionsInput) { return this.institutions.setDirections(t, a, dto) }
+  @Post('me/submit')
+  @Throttle({ default: { limit: 10, ttl: HOUR } })
+  submit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor) { return this.institutions.submit(t, a) }
 }

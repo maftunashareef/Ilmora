@@ -31,6 +31,9 @@ const PROFILE_SELECT = {
   user: { select: { displayName: true, district: true, email: true, phoneE164: true, phoneVerifiedAt: true } },
 } as const satisfies Prisma.StudentProfileSelect
 
+/** One writer of a student's consent journal at a time (the questionnaire, the contract-help form). */
+export const lockConsents = (tx: TransactionClient, userId: string) => tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `consents:${userId}`)
+
 /**
  * The student's questionnaire (ТЗ 4.1) in the shape of the web wizard (`StudentQuestionnaire`, @ilmora/shared), and
  * the institution's confirmation that a student studies there. Saved whole, after the same step rules the wizard uses.
@@ -231,12 +234,18 @@ export class StudentsService {
   }
 
   /** The journal (ТЗ 8): a new row for a consent given, `revokedAt` on the active row of one taken back. */
+  /**
+   * Serialized per student (cybersecurity check 9.4, 11.11): two saves at once both saw «no consent in force» and wrote
+   * two rows; taking the tick off then revoked one of them, and the card stayed visible to companies. A revocation closes
+   * every row of the kind in force, so older duplicates go too.
+   */
   private async syncConsents(tx: TransactionClient, tenantId: string, userId: string, want: Record<StudentConsentKey | 'PARENT_CONSENT', boolean>, ip: string | undefined, now: Date) {
+    await lockConsents(tx, userId)
     const active = await tx.studentConsent.findMany({ where: { userId, revokedAt: null, companyId: null }, select: { id: true, kind: true } })
     for (const [kind, on] of Object.entries(want) as [ConsentKind, boolean][]) {
-      const row = active.find((a) => a.kind === kind)
-      if (on && !row) await tx.studentConsent.create({ data: { tenantId, userId, kind, textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now } })
-      if (!on && row) await tx.studentConsent.update({ where: { id: row.id }, data: { revokedAt: now } })
+      const inForce = active.some((a) => a.kind === kind)
+      if (on && !inForce) await tx.studentConsent.create({ data: { tenantId, userId, kind, textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now } })
+      if (!on && inForce) await tx.studentConsent.updateMany({ where: { userId, kind, companyId: null, revokedAt: null }, data: { revokedAt: now } })
     }
   }
 

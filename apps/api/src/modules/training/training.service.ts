@@ -142,7 +142,8 @@ export class TrainingService {
     })
     if (!offer) throw AppError.notFound('Offer')
     const status = accept ? 'ACCEPTED' : 'DECLINED'
-    const moved = await this.prisma.client.trainingOffer.updateMany({ where: { id: offerId, status: 'PENDING' }, data: { status, decidedAt: new Date() } })
+    // Only on an open request: a closed one opens no contacts (cybersecurity check 9.4, 11.11).
+    const moved = await this.prisma.client.trainingOffer.updateMany({ where: { id: offerId, status: 'PENDING', request: { status: 'OPEN' } }, data: { status, decidedAt: new Date() } })
     if (moved.count !== 1) throw AppError.conflict('offer_decided', 'This offer is no longer waiting for a decision')
     await this.audit.record({ action: accept ? 'training.offer.accept' : 'training.offer.decline', entityType: 'TrainingOffer', entityId: offerId, after: { status, contactsOpened: accept } })
     const userId = offer.institution.representative?.id

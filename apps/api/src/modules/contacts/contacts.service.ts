@@ -26,8 +26,9 @@ const companyContacts = (c: { website: string | null; address: string | null; re
 
 /**
  * Contact requests (ТЗ 5.1 «Пригласить», 5.3 «Заинтересованы», 8): a company asks a student to open their contacts;
- * the student decides each request. One request per company and student, whatever the source (unique index) — a
- * declined request is not sent again. Accepting writes a COMPANY_CONTACTS consent row; only then the company sees the
+ * the student decides each request. One request per company, student and source (unique index) — a declined request is
+ * not sent again from the same place; a request from another source is a request of its own, so «Заинтересованы» on an
+ * anonymous card never answers «already asked» because of an invitation by name (cybersecurity check 9.4, 11.11). Accepting writes a COMPANY_CONTACTS consent row; only then the company sees the
  * full card (name, phone, e-mail, certificate files), and every view or download is audited.
  */
 @Injectable()
@@ -94,7 +95,8 @@ export class ContactsService {
   /** A certificate file of a student who accepted — a 5-minute link, audited (ТЗ 8 «скачал файл»). */
   async certificateLink(actor: RequestActor, requestId: string, certificateId: string): Promise<DocumentLinkDto> {
     const companyId = await this.ownCompany(actor)
-    const r = await this.prisma.client.contactRequest.findFirst({ where: { id: requestId, companyId, status: 'ACCEPTED' }, select: { userId: true } })
+    // A disabled or deleted student's files go to no company, as their card (cybersecurity check 9.4, 11.11).
+    const r = await this.prisma.client.contactRequest.findFirst({ where: { id: requestId, companyId, status: 'ACCEPTED', user: { isActive: true, deletedAt: null } }, select: { userId: true } })
     const consent = r ? await this.activeConsent(r.userId, companyId) : null
     // Only a file the student had when they opened their contacts (ТЗ 8): what they add later is not shared.
     const cert = r && consent ? await this.prisma.client.studentCertificate.findFirst({ where: { id: certificateId, userId: r.userId, createdAt: { lte: consent.givenAt } }, select: { fileKey: true } }) : null
@@ -151,6 +153,8 @@ export class ContactsService {
       // The copy of the contacts is personal data: it goes with the consent.
       const moved = await tx.contactRequest.updateMany({ where: { id, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
       if (moved.count !== 1) throw AppError.conflict('contact_not_open', 'Only opened contacts can be taken back')
+      // The consent is to the company, not to one request: its other accepted requests (another source) close with it.
+      await tx.contactRequest.updateMany({ where: { userId: actor.id, companyId: r.companyId, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
       await tx.studentConsent.updateMany({ where: { userId: actor.id, kind: 'COMPANY_CONTACTS', companyId: r.companyId, revokedAt: null }, data: { revokedAt: now } })
     })
     await this.audit.record({ action: 'contact.revoke', entityType: 'ContactRequest', entityId: id, after: { companyId: r.companyId } })
