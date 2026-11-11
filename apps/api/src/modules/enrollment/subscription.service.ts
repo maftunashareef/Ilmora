@@ -422,7 +422,9 @@ export class SubscriptionService {
   async expirePending(tenantId: string, now = new Date()): Promise<number> {
     // A payment the provider is processing right now (a Payme transaction created, not yet performed) keeps its hold
     // until Payme performs or cancels it — the hold is short (security review №12), the bank's confirmation is not.
-    const expired = await this.prisma.client.payment.findMany({ where: { tenantId, state: 'PENDING', expiresAt: { lt: now }, transactions: { none: { state: 'CREATED' } } }, select: { id: true, subscriptionId: true } })
+    // Payme's test orders (PAYME_SANDBOX_PAYMENT_IDS) keep their seats while listed: the tests take days (№82).
+    const sandbox = this.env.PAYME_SANDBOX_PAYMENT_IDS
+    const expired = await this.prisma.client.payment.findMany({ where: { tenantId, state: 'PENDING', expiresAt: { lt: now }, transactions: { none: { state: 'CREATED' } }, ...(sandbox.length ? { id: { notIn: sandbox } } : {}) }, select: { id: true, subscriptionId: true } })
     for (const p of expired) {
       await this.prisma.tx(async (tx) => {
         const locked = await tx.payment.updateMany({ where: { id: p.id, state: 'PENDING' }, data: { state: 'EXPIRED' } })

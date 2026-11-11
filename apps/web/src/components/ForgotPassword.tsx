@@ -40,8 +40,10 @@ export function ForgotPassword({ onBack, onDone }: { onBack: () => void; onDone:
   const describe = (err: unknown) => {
     if (isApiError(err)) {
       if (err.code === 'mfa_password_login') return t('forgot.adminOnly')
-      if (err.code === 'not_found') return t('forgot.noAccount')
-      if (err.code === 'unavailable' || err.status === 503) return t('forgot.smsUnavailable')
+      if (err.code === 'not_found' || err.code === 'phone_not_linked') return t('forgot.noAccount')
+      // An account opened by SMS without a password (№74): signing in by SMS works; a login account is reset by support.
+      if (err.code === 'no_password_to_reset') return t('forgot.smsOnlyAccount')
+      if (err.code === 'unavailable' || err.code === 'sms_unavailable' || err.status === 503) return t('forgot.smsUnavailable')
     }
     return apiErrorText(err, lang)
   }

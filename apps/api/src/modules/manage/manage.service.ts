@@ -7,6 +7,8 @@ import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import { ENV, type Env, s3Configured } from '../../config/env'
 import type { Prisma } from '../../generated/prisma/client'
+import { unclaimCompany } from '../companies/companies.service'
+import { unclaimInstitution } from '../institutions/institutions.service'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
@@ -731,8 +733,12 @@ export class ManageService {
       }
 // The profile may be soft-deleted already (deleteTeacher keeps its userId): unlink it all the same (review 11.11).
       if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { userId: null }, includeDeleted: true } as never)
-      await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, googleId: null, roles: [], centerId: null } })
-      await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId }, reason })
+      // A representative's institution or company is let go with the account (№84): it used to stay held by a deleted
+      // account forever — nobody could claim it, «Отвязать» answered 404. The company's students' data goes with it.
+      if (user.institutionId) await unclaimInstitution(tx, user.institutionId)
+      if (user.companyId) await unclaimCompany(tx, user.companyId, now)
+      await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, googleId: null, roles: [], centerId: null, institutionId: null, companyId: null } })
+      await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId, institutionId: user.institutionId, companyId: user.companyId }, reason })
     })
     return { ok: true }
   }

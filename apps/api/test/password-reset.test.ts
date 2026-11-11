@@ -53,7 +53,7 @@ describe.skipIf(!DB_AVAILABLE)('Forgotten passwords', () => {
       await expect(accounts.loginWithPassword(s.tenantId, { login: me.login, password: 'old-password-1' }, meta)).rejects.toMatchObject({ code: 'invalid_credentials' })
       expect(await accounts.loginWithPassword(s.tenantId, { login: me.login, password: 'new-password-1' }, meta)).toMatchObject({ user: { id: me.id } })
       expect(await ctx.prisma.client.auditEvent.count({ where: { action: 'auth.password.reset', entityId: me.id } })).toBe(1)
-      await expect(auth.resetPasswordBySms(s.tenantId, { phone: '+998901234500', code: '123456', newPassword: 'new-password-1' }, meta)).rejects.toMatchObject({ code: 'not_found' })
+      await expect(auth.resetPasswordBySms(s.tenantId, { phone: '+998901234500', code: '123456', newPassword: 'new-password-1' }, meta)).rejects.toMatchObject({ code: 'phone_not_linked', status: 404 })
     })
   })
 

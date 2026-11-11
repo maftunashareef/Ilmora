@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import * as argon2 from 'argon2'
 import { encryptString, randomDigits } from '../../common/crypto'
 import { AppError } from '../../common/errors'
@@ -37,6 +37,9 @@ export class OtpService {
 
   async request(tenantId: string, phoneInput: string, lang: 'uz' | 'ru' | 'en', meta: { ip?: string }): Promise<OtpRequestResult> {
     const phone = this.normalize(phoneInput)
+    // Production without an SMS provider (no Eskiz contract yet, SMS_PROVIDER=console): no code would arrive. Say so —
+    // 503, the site shows «SMS не отправляются, напишите в поддержку» — instead of «код отправлен» (№76).
+    if (this.env.NODE_ENV === 'production' && this.env.SMS_PROVIDER === 'console') throw new AppError('sms_unavailable', 'SMS cannot be sent yet; write to support', HttpStatus.SERVICE_UNAVAILABLE)
     await this.enforcePhoneWindow(tenantId, phone)
 
     const code = randomDigits(this.env.OTP_LENGTH)
