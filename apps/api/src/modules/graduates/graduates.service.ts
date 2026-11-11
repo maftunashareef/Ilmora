@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { type AnnouncementDto, type AnnouncementResponseDto, ageOn, type CompanyAnnouncementDto, type GraduateCardDto, type L, type MatchStatus, type PartyContactsDto } from '@ilmora/shared'
-import { hmacSha256 } from '../../common/crypto'
+import { companyCardId } from '../../common/card-id'
 import { AppError } from '../../common/errors'
 import { dateColumnToIso } from '../../common/time'
 import { ENV, type Env } from '../../config/env'
@@ -8,7 +8,7 @@ import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { ContactsService } from '../contacts/contacts.service'
+import { ContactsService, NAMED_CONTACT_SOURCES } from '../contacts/contacts.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, toIndustry } from '../registry/registry.mappers'
 import type { AnnouncementInput, AnnouncementPatch, AnnouncementsQuery, ResponseInput } from './graduates.schemas'
@@ -205,9 +205,7 @@ export class GraduatesService {
    * for this company, unrelated across companies and years, and it cannot be turned back into the account id (№127).
    */
   private cardId(companyId: string, announcementId: string, userId: string) {
-    // Its own secret (Н-6); without it a key derived from the sign-in secret, as before.
-    const key = this.env.CARD_ID_SECRET ?? hmacSha256(this.env.JWT_ACCESS_SECRET, 'ilmora-graduate-card')
-    return hmacSha256(key, `${companyId}:${announcementId}:${userId}`).slice(0, 32)
+    return companyCardId(this.env, companyId, announcementId, userId)
   }
 
   private ofIndustries(ids: string[]): Prisma.DirectionWhereInput {
@@ -264,9 +262,9 @@ export class GraduatesService {
       return age === null || age >= 18 || r.user.studentConsents.length > 0
     }
     const visible = rows.filter((r) => !excluded.has(r.userId) && adultOrAllowed(r))
-    // Only requests sent from announcements: a request from the anonymous contract-help card must not show on the named
-    // card, or the company learns who asked for help with the fee (matrix check 11.11, №126).
-    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, source: 'GRADUATE', userId: { in: visible.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
+    // Only requests by name (an announcement or «Студенты»): a request from the anonymous contract-help card must not show
+    // on the named card, or the company learns who asked for help with the fee (matrix check 11.11, №126).
+    const requests = new Map((await this.prisma.client.contactRequest.findMany({ where: { companyId, source: { in: [...NAMED_CONTACT_SOURCES] }, userId: { in: visible.map((r) => r.userId) } }, select: { userId: true, status: true } })).map((c) => [c.userId, c.status as MatchStatus]))
     return visible.map((r) => ({
       userId: r.userId, cardId: this.cardId(companyId, ann.id, r.userId), name: r.user.displayName, institution: ann.institution.name, direction: mainOf(byDirection.get(r.directionId!)!.direction), graduationYear: ann.year,
       region: place(r.region), about: r.about, certificates: r.user.studentCertificates.map((c) => c.title),

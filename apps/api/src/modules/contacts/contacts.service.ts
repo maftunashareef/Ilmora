@@ -33,6 +33,12 @@ const companyContacts = (c: { website: string | null; address: string | null; re
  */
 /** «Пригласить» and «Заинтересованы» together, per company and 24 hours (ТЗ 9.4 «Лимиты»: ~50 a day). */
 export const CONTACT_REQUESTS_PER_DAY = 50
+/**
+ * The channels that show the student by name — graduation announcements and the «Студенты» section: one request per
+ * company and student over both (index "ContactRequest_named_once"), and their status shows on either card. The
+ * anonymous contract-help card is apart: its request never shows on a named card (security review 11.11, №126).
+ */
+export const NAMED_CONTACT_SOURCES = ['GRADUATE', 'STUDENTS'] as const
 
 @Injectable()
 export class ContactsService {

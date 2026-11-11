@@ -119,6 +119,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   payment_unavailable: 'apiError.paymentUnavailable',
   review_changed: 'apiError.reviewChanged',
   study_changed: 'apiError.studyChanged',
+  no_recipients: 'apiError.noRecipients',
   password_reset_by_admin: 'apiError.passwordResetByAdmin',
   refund_courses: 'apiError.refundCourses',
   refund_whole_package: 'apiError.refundWholePackage',

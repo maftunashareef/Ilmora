@@ -9,7 +9,9 @@ import { JOBS, QUEUES } from '../../infra/queue/queues'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { RefundsService } from '../enrollment/refunds.service'
 import { SubscriptionService } from '../enrollment/subscription.service'
+import { NotificationsService } from '../notifications/notifications.service'
 import { SmsService } from '../sms/sms.service'
+import { deliverBroadcast } from '../vacancies/institution-vacancies.service'
 import { OutboxService } from './outbox.service'
 import { PaymentsService } from './payments.service'
 import { humanDay } from '../../common/time'
@@ -31,6 +33,7 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     private readonly subscriptions: SubscriptionService,
     private readonly refunds: RefundsService,
     private readonly docs: PrivateDocsService,
+    private readonly notifications: NotificationsService,
     @InjectQueue(QUEUES.outbox) private readonly queue: Queue,
     @Inject(ENV) private readonly env: Env,
   ) {
@@ -75,6 +78,9 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     switch (ev.type) {
       case 'payment.receipt':
         return this.receipt(ev.tenantId!, String(payload.paymentId))
+      case 'vacancy.broadcast':
+        // An institution's «Разослать студентам» (ТЗ «Студенты у компании», 3.2): delivered here in batches.
+        return deliverBroadcast(this.prisma, this.notifications, String(payload.broadcastId))
       case 'payment.refunded':
       case 'payment.refund_required':
         // Visible to finance admins through the reconciliation screen and the audit log; no automatic money movement.
