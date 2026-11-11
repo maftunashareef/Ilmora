@@ -4,7 +4,7 @@ import { formatDate, formatTime, type MinistryStatsDto, type MinistryTableKey, t
 import { Button, Card, Field, Icon, Notice, PageTitle, Select } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { REFRESH_LIMITED, isApiError } from '../../lib/api'
-import { apiErrorText } from '../../lib/apiErrors'
+import { apiErrorText, retryMinutes } from '../../lib/apiErrors'
 import {
   cellText, columnTotal, exportFileName, filterYears, formatCount, INSTITUTION_TYPES, ministry, NO_FIGURES_FILTER, OWNERSHIPS, saveBlob,
   type FiguresFilter,
@@ -46,7 +46,8 @@ export function MinistryFigures() {
       saveBlob(await ministry.exportTable(table.key, lang, filter), exportFileName(table.key))
       notify(t('min.downloaded', { table: tr(table.title) }))
     } catch (e) {
-      notify(isApiError(e) && e.status === 429 && e.code !== REFRESH_LIMITED ? t('min.downloadLimited') : apiErrorText(e, lang), 'warn')
+      const m = isApiError(e) && e.code !== REFRESH_LIMITED ? retryMinutes(e) : null
+      notify(isApiError(e) && e.status === 429 && e.code !== REFRESH_LIMITED ? (m ? t('min.downloadLimitedIn', { n: m }) : t('min.downloadLimited')) : apiErrorText(e, lang), 'warn')
     } finally {
       setBusy(null)
     }

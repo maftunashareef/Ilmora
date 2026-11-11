@@ -7,7 +7,7 @@ import { Button, Card, cx, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../
 import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
-import { apiErrorText } from '../../lib/apiErrors'
+import { apiErrorText, tooManyText } from '../../lib/apiErrors'
 import { DEMO_LOGIN_ENABLED } from '../../lib/demoMode'
 import { Link, useNavigate, useSearchParams } from '../../lib/router'
 import { canOpen, homeFor } from '../../lib/workspaceHome'
@@ -146,7 +146,7 @@ export function LoginPage() {
       setNetworkOffline(true)
       return t('auth.err.network')
     }
-    if (err.status === 429) return t('auth.err.tooMany')
+    if (err.status === 429) return tooManyText(err, lang)
     switch (err.code) {
       case 'login_taken': return t('auth.err.loginTaken')
       case 'phone_taken': return t('auth.err.phoneTaken')

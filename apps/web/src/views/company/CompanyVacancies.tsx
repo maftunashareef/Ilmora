@@ -72,7 +72,7 @@ function VacancyEditor({ initial, onCancel, onSaved }: { initial: CompanyVacancy
     <Card className="mb-5">
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t('co.v.kind')} required>
-          <Select value={f.kind} onChange={(e) => set('kind', e.target.value as VacancyForm['kind'])}>{(['PRACTICE', 'INTERNSHIP'] as const).map((k) => <option key={k} value={k}>{t(`co.v.kind.${k}`)}</option>)}</Select>
+          <Select value={f.kind} onChange={(e) => set('kind', e.target.value as VacancyForm['kind'])}>{(['PRACTICE', 'INTERNSHIP', 'JOB'] as const).map((k) => <option key={k} value={k}>{t(`co.v.kind.${k}`)}</option>)}</Select>
         </Field>
         <Field label={t('co.v.titleField')} required><Input maxLength={200} value={f.title} aria-invalid={bad('title')} onChange={(e) => set('title', e.target.value)} /></Field>
         <FieldGroup label={t('co.v.directions')} required className="md:col-span-2" htmlFor={directionId}>
@@ -93,8 +93,32 @@ function VacancyEditor({ initial, onCancel, onSaved }: { initial: CompanyVacancy
           <Select value={f.format} onChange={(e) => set('format', e.target.value as VacancyForm['format'])}>{(['ONSITE', 'REMOTE', 'HYBRID'] as const).map((k) => <option key={k} value={k}>{t(`co.v.format.${k}`)}</option>)}</Select>
         </Field>
         <Field label={t('co.v.seats')} required><Input inputMode="numeric" value={f.seats} aria-invalid={bad('seats')} onChange={(e) => set('seats', e.target.value.replace(/\D/g, '').slice(0, 4))} /></Field>
-        <label className="flex items-center gap-2 text-sm text-charcoal/80"><input type="checkbox" className="h-4 w-4 accent-forest" checked={f.paid} onChange={(e) => set('paid', e.target.checked)} />{t('co.v.paid')}</label>
-        {f.paid ? <Field label={t('co.v.stipend')}><Input inputMode="numeric" value={f.stipend} onChange={(e) => set('stipend', e.target.value.replace(/\D/g, '').slice(0, 10))} /></Field> : <div />}
+        {f.kind === 'JOB' ? (
+          // «Работа» is always paid: a salary from–to (one amount — «от» alone), the schedule and the experience asked for.
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={t('co.v.salaryFrom')}><Input inputMode="numeric" value={f.salaryFrom} aria-invalid={bad('salary')} onChange={(e) => set('salaryFrom', e.target.value.replace(/\D/g, '').slice(0, 10))} /></Field>
+              <Field label={t('co.v.salaryTo')}><Input inputMode="numeric" value={f.salaryTo} aria-invalid={bad('salary')} onChange={(e) => set('salaryTo', e.target.value.replace(/\D/g, '').slice(0, 10))} /></Field>
+            </div>
+            <Field label={t('co.v.scheduleField')} required>
+              <Select value={f.schedule} aria-invalid={bad('schedule')} onChange={(e) => set('schedule', e.target.value as VacancyForm['schedule'])} className={f.schedule ? undefined : 'text-charcoal/40'}>
+                <option value="" disabled>{t('q.choose')}</option>
+                {(['FULL_TIME', 'PART_TIME', 'SHIFT', 'FLEXIBLE'] as const).map((k) => <option key={k} value={k} className="text-charcoal">{t(`co.v.schedule.${k}`)}</option>)}
+              </Select>
+            </Field>
+            <Field label={t('co.v.experienceField')} required>
+              <Select value={f.experience} aria-invalid={bad('experience')} onChange={(e) => set('experience', e.target.value as VacancyForm['experience'])} className={f.experience ? undefined : 'text-charcoal/40'}>
+                <option value="" disabled>{t('q.choose')}</option>
+                {(['NONE', 'UP_TO_1', 'ONE_TO_3', 'OVER_3'] as const).map((k) => <option key={k} value={k} className="text-charcoal">{t(`co.v.experience.${k}`)}</option>)}
+              </Select>
+            </Field>
+          </>
+        ) : (
+          <>
+            <label className="flex items-center gap-2 text-sm text-charcoal/80"><input type="checkbox" className="h-4 w-4 accent-forest" checked={f.paid} onChange={(e) => set('paid', e.target.checked)} />{t('co.v.paid')}</label>
+            {f.paid ? <Field label={t('co.v.stipend')}><Input inputMode="numeric" value={f.stipend} onChange={(e) => set('stipend', e.target.value.replace(/\D/g, '').slice(0, 10))} /></Field> : <div />}
+          </>
+        )}
         <Field label={t('co.v.duration')}><Input maxLength={100} value={f.duration} onChange={(e) => set('duration', e.target.value)} /></Field>
         <Field label={t('co.v.deadline')}><Input type="date" min={tashkentToday()} value={f.deadline} aria-invalid={bad('deadline')} onChange={(e) => set('deadline', e.target.value)} /></Field>
         <Field label={t('co.r.requirements')} className="md:col-span-2"><Textarea rows={3} maxLength={2000} value={f.requirements} onChange={(e) => set('requirements', e.target.value)} /></Field>
@@ -111,6 +135,11 @@ function VacancyEditor({ initial, onCancel, onSaved }: { initial: CompanyVacancy
 
 function VacancyCard({ vacancy: v, onEdit, onChanged }: { vacancy: CompanyVacancyDto; onEdit: () => void; onChanged: () => void }) {
   const { t, tr, lang } = useT()
+  const som = (n: number) => `${n.toLocaleString('ru-RU')} ${t('common.som')}`
+  // «Работа»: the salary from–to; practice and internships: the stipend, if any.
+  const payLine = (x: CompanyVacancyDto) => x.kind === 'JOB'
+    ? (x.salaryFrom != null && x.salaryTo != null ? `${som(x.salaryFrom)} – ${som(x.salaryTo)}` : x.salaryFrom != null ? `${t('co.v.salaryFromShort')} ${som(x.salaryFrom)}` : t('co.v.paid'))
+    : x.paid ? (x.stipend ? som(x.stipend) : t('co.v.paid')) : t('co.v.unpaid')
   const notify = useStore((s) => s.notify)
   const [apps, setApps] = useState<VacancyApplicationDto[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -135,7 +164,7 @@ function VacancyCard({ vacancy: v, onEdit, onChanged }: { vacancy: CompanyVacanc
         <div>
           <div className="flex flex-wrap items-center gap-2"><Badge tone="champagne">{t(`co.v.kind.${v.kind}`)}</Badge><span className="font-medium text-charcoal">{v.title}</span></div>
           <div className="mt-1 text-xs text-charcoal/60">
-            {v.directions.map((d) => d.name).join(', ')} · {tr(v.region.name)} · {t(`co.v.format.${v.format}`)} · {v.paid ? (v.stipend ? `${v.stipend.toLocaleString('ru-RU')} ${t('common.som')}` : t('co.v.paid')) : t('co.v.unpaid')} · {t('co.v.seats')}: {v.seats}
+            {v.directions.map((d) => d.name).join(', ')} · {tr(v.region.name)} · {t(`co.v.format.${v.format}`)} · {payLine(v)}{v.schedule && <> · {t(`co.v.schedule.${v.schedule}`)}</>}{v.experience && <> · {t(`co.v.experience.${v.experience}`)}</>} · {t('co.v.seats')}: {v.seats}
             {v.deadline && <> · {t('co.v.deadline').replace(/\s*\(.*\)/, '')}: {formatDate(v.deadline, lang)}</>}
           </div>
         </div>

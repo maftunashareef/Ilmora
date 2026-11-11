@@ -1,7 +1,7 @@
 import {
   COMPANY_REVIEW_FIELDS, DOCUMENT_CONTENT_TYPES, DOCUMENT_MAX_BYTES, type CompanyAnnouncementDto, type CompanyContactDto, type CompanyProfileDto,
   type CompanyRequiredField, type CompanyVacancyDto, type ContractHelpCardDto, type DocumentLinkDto, type DocumentUploadDto, type TrainingRequestDto,
-  type VacancyApplicationDto, type VacancyKind, type WorkFormat,
+  type ExperienceLevel, type VacancyApplicationDto, type VacancyKind, type WorkFormat, type WorkSchedule,
 } from '@ilmora/shared'
 import { api } from '../lib/api'
 
@@ -73,30 +73,51 @@ export const COMPANY_MISSING_LABEL: Record<CompanyRequiredField, string> = {
 export interface VacancyForm {
   kind: VacancyKind; title: string; directions: { id: string; name: string }[]; region: string; address: string; format: WorkFormat
   paid: boolean; stipend: string; duration: string; seats: string; requirements: string; deadline: string
+  /** «Работа» only: the monthly salary from–to (one amount — «от» alone), the schedule and the experience asked for. */
+  salaryFrom: string; salaryTo: string; schedule: '' | WorkSchedule; experience: '' | ExperienceLevel
 }
-export const emptyVacancy = (): VacancyForm => ({ kind: 'PRACTICE', title: '', directions: [], region: '', address: '', format: 'ONSITE', paid: false, stipend: '', duration: '', seats: '1', requirements: '', deadline: '' })
+export const emptyVacancy = (): VacancyForm => ({
+  kind: 'PRACTICE', title: '', directions: [], region: '', address: '', format: 'ONSITE', paid: false, stipend: '', duration: '', seats: '1', requirements: '', deadline: '',
+  salaryFrom: '', salaryTo: '', schedule: '', experience: '',
+})
 export const vacancyForm = (v: CompanyVacancyDto): VacancyForm => ({
   kind: v.kind, title: v.title, directions: v.directions.map((d) => ({ id: d.id, name: d.name })), region: v.region.id, address: v.address ?? '', format: v.format,
   paid: v.paid, stipend: v.stipend ? String(v.stipend) : '', duration: v.duration ?? '', seats: String(v.seats), requirements: v.requirements ?? '', deadline: v.deadline ?? '',
+  salaryFrom: v.salaryFrom ? String(v.salaryFrom) : '', salaryTo: v.salaryTo ? String(v.salaryTo) : '', schedule: v.schedule ?? '', experience: v.experience ?? '',
 })
 
-/** The body of a new vacancy or of an edit; a stipend only when paid. */
+const amount = (s: string) => (Number(s) >= 1 ? Math.floor(Number(s)) : null)
+/**
+ * The body of a new vacancy or of an edit, by the API's pay rules (vacancies.schemas.ts `payIssue`): «Работа» is always
+ * paid, with a salary from–to, a schedule and the experience, never a stipend; practice and internships have a stipend
+ * only when paid, and no salary, schedule or experience.
+ */
 export function vacancyBody(f: VacancyForm) {
+  const job = f.kind === 'JOB'
   return {
     kind: f.kind, title: f.title.trim(), directionIds: f.directions.map((d) => d.id), region: f.region, address: f.address.trim() || null, format: f.format,
-    paid: f.paid, stipend: f.paid && Number(f.stipend) >= 1 ? Math.floor(Number(f.stipend)) : null, duration: f.duration.trim() || null,
-    seats: Math.floor(Number(f.seats)), requirements: f.requirements.trim() || null, deadline: f.deadline || null,
+    paid: job ? true : f.paid, stipend: !job && f.paid ? amount(f.stipend) : null,
+    salaryFrom: job ? amount(f.salaryFrom) : null, salaryTo: job ? amount(f.salaryTo) : null,
+    schedule: job ? f.schedule || null : null, experience: job ? f.experience || null : null,
+    duration: f.duration.trim() || null, seats: Math.floor(Number(f.seats)), requirements: f.requirements.trim() || null, deadline: f.deadline || null,
   }
 }
 
+export type VacancyProblem = 'title' | 'directions' | 'region' | 'seats' | 'deadline' | 'salary' | 'schedule' | 'experience'
 /** What the API would refuse, checked before sending. `today` is YYYY-MM-DD in Tashkent. */
-export function vacancyProblems(f: VacancyForm, today: string): ('title' | 'directions' | 'region' | 'seats' | 'deadline')[] {
-  const out: ('title' | 'directions' | 'region' | 'seats' | 'deadline')[] = []
+export function vacancyProblems(f: VacancyForm, today: string): VacancyProblem[] {
+  const out: VacancyProblem[] = []
   if (f.title.trim().length < 2) out.push('title')
   if (f.directions.length < 1 || f.directions.length > 10) out.push('directions')
   if (!f.region) out.push('region')
   if (!/^\d+$/.test(f.seats.trim()) || Number(f.seats) < 1 || Number(f.seats) > 1000) out.push('seats')
   if (f.deadline && f.deadline < today) out.push('deadline')
+  if (f.kind === 'JOB') {
+    const from = amount(f.salaryFrom), to = amount(f.salaryTo)
+    if ((to != null && from == null) || (to != null && from != null && to < from)) out.push('salary')
+    if (!f.schedule) out.push('schedule')
+    if (!f.experience) out.push('experience')
+  }
   return out
 }
 

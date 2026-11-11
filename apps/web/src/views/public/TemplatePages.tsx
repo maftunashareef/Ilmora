@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from '@/lib/router'
 import { carouselCourses, countLabel, finalPriceSom, isOnlineCourse, MAX_CAROUSEL_COURSES, MAX_CART_COURSES, normalizeUzPhone, NOUNS, ONLINE_PROVIDER_SLUG } from '@ilmora/shared'
 import { api, isApiError } from '../../lib/api'
-import { apiErrorText } from '../../lib/apiErrors'
+import { apiErrorText, retryMinutes, tooManyText } from '../../lib/apiErrors'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
 import { formatSom } from '../../lib/format'
@@ -640,7 +640,7 @@ function InquiryForm({ s }: { s: Section }) {
         if (err.code === 'invalid_phone') {
           setError(t('centers.form.invalidPhone'))
         } else if (err.code === 'rate_limited' || err.status === 429) {
-          setError(t('centers.form.rateLimited'))
+          setError(retryMinutes(err) ? tooManyText(err, lang) : t('centers.form.rateLimited'))
         } else if (err.code === 'consent_required') {
           setError(t('centers.form.consentRequired'))
         } else if (err.status >= 500) {
