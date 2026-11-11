@@ -138,7 +138,8 @@ describe.skipIf(!DB_AVAILABLE)('Payme sandbox checklist over HTTP', () => {
     await db(async () => {
       expect((await ctx.prisma.client.payment.findFirst({ where: { id: order2.id } }))?.state).toBe('PAID')
       expect((await ctx.prisma.client.subscription.findFirst({ where: { id: order2.subscriptionId } }))?.status).toBe('ACTIVE')
-      expect(await ctx.prisma.client.ledgerJournal.count({ where: { referenceId: order2.id, kind: 'PAYMENT_SETTLED' } })).toBe(1)
+      // A payment with the test key activates the order but books no revenue (security review 10.11, №39).
+      expect(await ctx.prisma.client.ledgerJournal.count({ where: { referenceId: order2.id, kind: 'PAYMENT_SETTLED' } })).toBe(0)
     })
 
     const cancelled = await call('CancelTransaction', { id: tx2, reason: 5 })
