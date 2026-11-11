@@ -254,7 +254,7 @@ const CART_BUNDLES_KEY = 'ilmora-cart-bundles'
 let toastSeq = 1
 
 /** The workspace an account lands in. Teacher comes before center admin so accounts that are both keep the Teacher Studio; /center stays reachable from the account menu. */
-export const roleOf = (u: AuthUser | null): Role => (!u ? 'visitor' : u.roles.includes('PLATFORM_ADMIN') ? 'admin' : u.roles.includes('TEACHER') ? 'teacher' : u.roles.includes('CENTER_ADMIN') ? 'center' : 'student')
+export const roleOf = (u: AuthUser | null): Role => (!u ? 'visitor' : u.roles.includes('PLATFORM_ADMIN') ? 'admin' : u.roles.includes('TEACHER') ? 'teacher' : u.roles.includes('CENTER_ADMIN') ? 'center' : u.roles.includes('MINISTRY') ? 'ministry' : 'student')
 
 export const GUEST_STUDENT_ID = 'guest-student'
 const emptyGuestStudent = (builder?: Student['builder'] | null, savedCourseIds: string[] = []): Student => ({
@@ -648,7 +648,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       ensureWorkspace: async () => {
         // The workspace (own courses, videos, people) exists for teachers and admins only; concurrent callers share one load.
-        if (get().workspaceLoaded || get().role === 'visitor' || get().role === 'student') return
+        if (get().workspaceLoaded || get().role === 'visitor' || get().role === 'student' || get().role === 'ministry') return
         workspaceLoading ??= guard(refreshWorkspace).finally(() => { workspaceLoading = null })
         await workspaceLoading
       },
