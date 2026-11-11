@@ -138,12 +138,17 @@ export class SiteService {
       await this.assertPresetsUsable(presets, stored)
     }
     const data = { ...parsed.data, presets: presets ?? (Array.isArray(stored) ? (stored as Preset[]) : []), universities }
-    const updated = await this.prisma.tx(async (tx) => {
-      const u = await tx.siteConfig.update({ where: { tenantId }, data: { data: data as unknown as Prisma.InputJsonValue, version: { increment: 1 } } })
-      await this.audit.record({ tx, action: 'site.update', entityType: 'SiteConfig', entityId: tenantId, before: { version: current.version }, after: { version: u.version } })
-      return u
+    // Compare-and-set in one statement: the row is written only if it still has the version the admin edited. Two
+    // saves of one version at once — one is written, the other gets 409 `version_conflict`; the check made above on a
+    // read could not stop that (Н18).
+    const base = expectedVersion ?? current.version
+    const version = await this.prisma.tx(async (tx) => {
+      const moved = await tx.siteConfig.updateMany({ where: { tenantId, version: base }, data: { data: data as unknown as Prisma.InputJsonValue, version: { increment: 1 } } })
+      if (moved.count !== 1) throw AppError.conflict('version_conflict', 'The site configuration was changed by someone else; reload and retry')
+      await this.audit.record({ tx, action: 'site.update', entityType: 'SiteConfig', entityId: tenantId, before: { version: base }, after: { version: base + 1 } })
+      return base + 1
     })
-    return { version: updated.version }
+    return { version }
   }
 
   /**

@@ -29,10 +29,13 @@ function setup(opts: { priceMinor?: bigint; open?: { id: string; status: string 
     subscription: {
       updateMany: spy('subscription.updateMany', { count: opts.raceLost ? 0 : 1 }),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { (calls['subscription.update'] ??= []).push(data); return { ...draft, kind: 'PERIOD', lessonsTotal: null, ...data } }),
-      findFirst: vi.fn(async () => ({ ...draft, status: opts.subStatus ?? 'PENDING_PAYMENT', kind: 'PERIOD', startedAt: null, currentPeriodEnd: null, amountMinor: 0n, package: null, student: { displayName: 'S' } })),
+      // The draft read again under the lock (a bare `where: { id }`) is still a draft; the settlement path reads it with its
+      // package and student.
+      findFirst: vi.fn(async (args?: { include?: unknown }) => (args?.include ? { ...draft, status: opts.subStatus ?? 'PENDING_PAYMENT', kind: 'PERIOD', startedAt: null, currentPeriodEnd: null, amountMinor: 0n, package: null, student: { displayName: 'S' } } : { ...draft, status: 'DRAFT' })),
     },
     paymentLine: { createMany: spy('paymentLine.createMany', { count: 1 }) },
     payment: {
+      findFirst: vi.fn(async () => null),
       updateMany: spy('payment.updateMany', { count: 1 }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { (calls['payment.create'] ??= []).push(data); return { id: 'pay-new', state: 'PENDING', provider: null, paidAt: null, ...data } }),
     },

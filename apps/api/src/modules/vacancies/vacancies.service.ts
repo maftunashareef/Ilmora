@@ -11,9 +11,11 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, regionIdByRef, toIndustry } from '../registry/registry.mappers'
 import { StudentsService } from '../students/students.service'
 import type { ApplyInput, VacanciesQuery, VacancyInput, VacancyPatch } from './vacancies.schemas'
+import { dateColumnToIso, isoToDateColumn, todayLocal } from '../../common/time'
 
 const place = (r: { id: string; name: unknown } | null) => (r ? { id: r.id, name: r.name as L } : null)
-const todayUtc = () => new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`)
+/** Today in Tashkent as the DATE column stores it (UTC midnight of that day): a vacancy is open through its last day. */
+const todayUtc = () => isoToDateColumn(todayLocal())
 const dateOf = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null)
 const STATUSES: ApplicationStatus[] = ['NEW', 'VIEWED', 'INVITED', 'REJECTED']
 
@@ -33,7 +35,7 @@ const toVacancy = (v: VacancyRow): Omit<VacancyDto, 'myApplication'> => ({
   region: place(v.region)!, district: place(v.district), address: v.address, format: v.format, paid: v.paid,
   stipend: v.stipendMinor !== null ? Number(v.stipendMinor / 100n) : null,
   duration: v.duration, seats: v.seats, requirements: v.requirements,
-  deadline: v.deadline?.toISOString().slice(0, 10) ?? null, status: v.status, createdAt: v.createdAt.toISOString(),
+  deadline: v.deadline ? dateColumnToIso(v.deadline) : null, status: v.status, createdAt: v.createdAt.toISOString(),
 })
 
 /**

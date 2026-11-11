@@ -90,3 +90,19 @@ export const addMonthsInZone = (d: Date, months: number, timeZone = 'Asia/Tashke
   const shifted = addMonthsUtc(new Date(d.getTime() + offset), months)
   return new Date(shifted.getTime() - tzOffsetMinutes(shifted, timeZone) * 60_000)
 }
+
+/**
+ * The calendar the people of ILMORA live on. Days a person reads, dates «today» is compared with and per-day keys are
+ * taken on it — never on UTC, where 00:00–05:00 in Tashkent is still yesterday (Н7, review 11.11 №100). The only
+ * place for `toISOString().slice(0, 10)` is this file (test/time-guard.test.ts keeps it so).
+ */
+export const LOCAL_TIMEZONE = 'Asia/Tashkent'
+/** «YYYY-MM-DD» of an instant on the Tashkent calendar. */
+export const localDay = (d: Date, timeZone = LOCAL_TIMEZONE): string => localDate(d, timeZone)
+/** Today on the Tashkent calendar, «YYYY-MM-DD». */
+export const todayLocal = (now = new Date(), timeZone = LOCAL_TIMEZONE): string => localDate(now, timeZone)
+/** A day for a person to read, «31.12.2026», on the Tashkent calendar. */
+export const humanDay = (d: Date, timeZone = LOCAL_TIMEZONE): string => {
+  const [y, m, day] = localDate(d, timeZone).split('-')
+  return `${day}.${m}.${y}`
+}

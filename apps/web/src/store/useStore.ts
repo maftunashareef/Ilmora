@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useRef, type React
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, isOnlineCourse, isUniversityListed, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, courseSaveBody, groupSaveBody, isUniversityListed, publishableSaveBody, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, ApiError, REFRESH_LIMITED, refreshRetryAfterSeconds, refreshSessionOutcome, session, setPasswordChangeRequiredHandler } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
@@ -276,28 +276,15 @@ const emptyStudent = (u: AuthUser): Student => ({
 })
 
 // ───────── payload mappers (web shape → API input) ─────────
-const publishableInput = (p: Partial<Publishable>) => ({
-  ...(p.status ? { status: p.status } : {}), ...(p.visibility ? { visibility: p.visibility } : {}), ...(p.audience ? { audience: p.audience } : {}),
-  ...(p.featured !== undefined ? { featured: p.featured } : {}), ...(p.reviewRequested !== undefined ? { reviewRequested: p.reviewRequested } : {}),
-})
+// The course, group and publish bodies come from @ilmora/shared (save-bodies.ts): the API checks the very same ones (Н1).
+const publishableInput = publishableSaveBody
 /** What a visitor may see of the packages: published ones, and the universities marked published or with one. */
 const publicSite = (site: SiteConfig): SiteConfig => {
   const presets = (site.presets ?? []).filter((p) => p.enabled)
   return { ...site, presets, universities: (site.universities ?? []).filter((u) => isUniversityListed(u, presets)) }
 }
-const courseInput = (c: Course, withDiscount = false) => ({
-  title: c.title, categoryId: c.categoryId, subjectId: c.subjectId ?? null, summary: c.summary, description: c.description, curriculum: c.curriculum,
-  // An online course belongs to the platform center/profile, which the server sets; only offline courses send them.
-  ...(isOnlineCourse(c) ? {} : { centerId: c.centerId, teacherId: c.teacherId }),
-  level: c.level, durationMonths: c.durationMonths, price: Math.round(c.price), coverSeed: c.coverSeed, imageUrl: storableUrl(c.imageUrl), meyosGrant: !!c.meyosGrant, ...publishableInput(c),
-  // Only the Super Admin sends the discount; the server refuses it from anyone else.
-  ...(withDiscount ? { discount: c.discount ?? null } : {}),
-  // The learning format always travels; the link, provider and certificate only for online courses (the server accepts them from the Super Admin only).
-  ...(isOnlineCourse(c)
-    ? { learningFormat: 'ONLINE' as const, externalUrl: c.externalUrl ?? null, providerName: c.providerName ?? null, instructorName: c.instructorName ?? null, certificate: c.certificate ?? ('NONE' as const), durationText: c.durationText ?? null }
-    : { learningFormat: 'OFFLINE' as const }),
-})
-const groupInput = (g: Course['groups'][number]) => ({ name: g.name, days: g.days, start: g.start, end: g.end, room: g.room, capacity: g.capacity })
+const courseInput = courseSaveBody
+const groupInput = groupSaveBody
 const videoInput = (v: Video) => ({
   teacherId: v.teacherId, courseId: v.courseId ?? null, title: v.title, description: v.description,
   // A browser-only `blob:` preview is never saved: without storage an uploaded file has no address at all.

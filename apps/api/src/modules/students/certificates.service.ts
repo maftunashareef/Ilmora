@@ -6,11 +6,12 @@ import { DOC_LINK_SECONDS, finalKeyOf, PrivateDocsService } from '../../infra/st
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import type { CertificateInput, CertificatePatch, CertificateUploadInput } from './certificates.schemas'
+import { dateColumnToIso } from '../../common/time'
 
 const SELECT = { id: true, title: true, issuer: true, issuedAt: true, contentType: true, sizeBytes: true, createdAt: true } as const
 type Row = { id: string; title: string; issuer: string | null; issuedAt: Date | null; contentType: string; sizeBytes: number; createdAt: Date }
 const toDto = (r: Row): StudentCertificateDto => ({
-  id: r.id, title: r.title, issuer: r.issuer, issuedAt: r.issuedAt?.toISOString().slice(0, 10) ?? null, contentType: r.contentType, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(),
+  id: r.id, title: r.title, issuer: r.issuer, issuedAt: r.issuedAt ? dateColumnToIso(r.issuedAt) : null, contentType: r.contentType, sizeBytes: r.sizeBytes, createdAt: r.createdAt.toISOString(),
 })
 const prefixOf = (tenantId: string, userId: string) => `student-certs/${tenantId}/${userId}/`
 const dateOf = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null)

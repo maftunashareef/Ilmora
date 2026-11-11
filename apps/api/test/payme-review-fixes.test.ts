@@ -66,7 +66,9 @@ describe.skipIf(!DB_AVAILABLE)('Payme fixes of the security review 10.11 (Ð2, â
     const s = await paid('pm-renew')
     await s.inT(async () => {
       await expect(ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')).rejects.toMatchObject({ code: 'renewal_too_early' })
-      await db.subscription.update({ where: { id: s.subscription.id }, data: { currentPeriodEnd: new Date(Date.now() + (RENEW_WINDOW_DAYS - 2) * DAY) } })
+      const end = new Date(Date.now() + (RENEW_WINDOW_DAYS - 2) * DAY)
+      await db.subscription.update({ where: { id: s.subscription.id }, data: { currentPeriodEnd: end } })
+      await db.payment.update({ where: { id: s.payment.id }, data: { periodEnd: end } })
       // The center raised the price: the renewal costs today's price, not the first payment's.
       await db.course.update({ where: { id: s.course.id }, data: { priceMinor: 70_000_00n } })
       const { payment } = await ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')

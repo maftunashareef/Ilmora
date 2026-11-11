@@ -147,7 +147,7 @@ export class PaymeService {
   }
 
   /** The order can still be paid: pending, inside its hold, and its subscription not closed meanwhile. */
-  private async payable(db: TransactionClient | PrismaService['client'], payment: { state: PaymentState; subscriptionId: string; expiresAt: Date | null }): Promise<boolean> {
+  private async payable(db: TransactionClient | PrismaService['client'], payment: { id: string; state: PaymentState; subscriptionId: string; periodStart: Date; periodEnd: Date; expiresAt: Date | null }): Promise<boolean> {
     if (payment.expiresAt && payment.expiresAt < new Date()) return false
     return (await this.payments.settleBlocker(db, payment)) === null
   }
