@@ -96,6 +96,8 @@ export class InstitutionVacanciesService {
     if (q.kind) and.push({ kind: q.kind })
     if (q.format) and.push({ format: q.format })
     if (q.paid !== undefined) and.push({ paid: q.paid === 'true' })
+    if (q.schedule) and.push({ schedule: q.schedule })
+    if (q.experience) and.push({ experience: q.experience })
     if (q.direction) {
       const d = await this.prisma.client.direction.findFirst({ where: { id: q.direction }, select: { id: true, mergedIntoId: true } })
       if (!d) return { hasDirections: true, items: [] }

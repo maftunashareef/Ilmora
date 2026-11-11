@@ -33,8 +33,11 @@ describe('ТЗ «Студенты у компании, Вакансии у уч�
 
   it('«Работа»: always paid, a salary from–to and no stipend; a salary only on a job', () => {
     const pipe = new ZodValidationPipe(VacancyInput)
-    const job = { kind: 'JOB', title: 'Junior dasturçi', directionIds: ['d'], region: 'tashkent-city', format: 'ONSITE', paid: true, seats: 1 }
-    expect(pipe.transform({ ...job, salaryFrom: 5_000_000, salaryTo: 8_000_000 })).toMatchObject({ kind: 'JOB', salaryFrom: 5_000_000 })
+    const job = { kind: 'JOB', title: 'Junior dasturçi', directionIds: ['d'], region: 'tashkent-city', format: 'ONSITE', paid: true, seats: 1, schedule: 'FULL_TIME', experience: 'NONE' }
+    expect(pipe.transform({ ...job, salaryFrom: 5_000_000, salaryTo: 8_000_000 })).toMatchObject({ kind: 'JOB', salaryFrom: 5_000_000, schedule: 'FULL_TIME', experience: 'NONE' })
+    // A job names its schedule and the experience asked for; practice and internships have neither.
+    for (const bad of [{ schedule: null }, { experience: undefined }, { schedule: 'NIGHTS' }]) expect(() => pipe.transform({ ...job, ...bad })).toThrow()
+    for (const bad of [{ schedule: 'FULL_TIME' }, { experience: 'NONE' }]) expect(() => pipe.transform({ kind: 'PRACTICE', title: 'Amaliyot', directionIds: ['d'], region: 'tashkent-city', format: 'ONSITE', paid: false, seats: 1, ...bad })).toThrow()
     expect(pipe.transform({ ...job, salaryFrom: 5_000_000 })).not.toHaveProperty('salaryTo')
     for (const bad of [{ paid: false }, { stipend: 100 }, { salaryTo: 1_000 }, { salaryFrom: 9_000, salaryTo: 1_000 }]) expect(() => pipe.transform({ ...job, ...bad })).toThrow()
     expect(() => pipe.transform({ ...job, kind: 'PRACTICE', salaryFrom: 1_000 })).toThrow()
@@ -202,7 +205,7 @@ describe.skipIf(!DB_AVAILABLE)('ТЗ «Студенты у компании, В�
       const local = await make(s.softCo, { title: 'Toşkent amaliyot' })
       await new Promise((r) => setTimeout(r, 5))
       const far = await make(s.dataCo, { title: 'Andijon amaliyot', region: String(s.andijan.id) })
-      const job = await make(s.softCo, { kind: 'JOB', title: 'Junior', paid: true, salaryFrom: 6_000_000, format: 'REMOTE', region: String(s.andijan.id) })
+      const job = await make(s.softCo, { kind: 'JOB', title: 'Junior', paid: true, salaryFrom: 6_000_000, schedule: 'PART_TIME', experience: 'UP_TO_1', format: 'REMOTE', region: String(s.andijan.id) })
       const mebel = await make(s.mebelCo, { title: 'Mebel', directionIds: [s.mebel.id] })
       const closed = await make(s.softCo, { title: 'Yopiq' })
       await vacancies.close(s.softCo.actor, closed.id)
@@ -210,10 +213,13 @@ describe.skipIf(!DB_AVAILABLE)('ТЗ «Студенты у компании, В�
       const tashkentView = await instVacancies.list(s.tashkentCol.actor, {})
       expect(tashkentView.hasDirections).toBe(true)
       expect(tashkentView.items.map((v) => v.title)).toEqual(['Mebel', 'Toşkent amaliyot', 'Junior', 'Andijon amaliyot'])
-      expect(tashkentView.items.find((v) => v.id === job.id)).toMatchObject({ kind: 'JOB', salaryFrom: 6_000_000, salaryTo: null, stipend: null, sentTo: 0 })
+      expect(tashkentView.items.find((v) => v.id === job.id)).toMatchObject({ kind: 'JOB', salaryFrom: 6_000_000, salaryTo: null, stipend: null, schedule: 'PART_TIME', experience: 'UP_TO_1', sentTo: 0 })
+      expect(tashkentView.items.find((v) => v.id === local.id)).toMatchObject({ schedule: null, experience: null })
       // The Andijan technikum (IT only): no furniture; its own region first.
       expect((await instVacancies.list(s.andijanTech.actor, {})).items.map((v) => v.title)).toEqual(['Junior', 'Andijon amaliyot', 'Toşkent amaliyot'])
       expect((await instVacancies.list(s.andijanTech.actor, { kind: 'JOB' })).items.map((v) => v.id)).toEqual([job.id])
+      expect((await instVacancies.list(s.andijanTech.actor, { schedule: 'PART_TIME', experience: 'UP_TO_1' })).items.map((v) => v.id)).toEqual([job.id])
+      expect((await instVacancies.list(s.andijanTech.actor, { schedule: 'FULL_TIME' })).items).toEqual([])
       expect((await instVacancies.list(s.andijanTech.actor, { paid: 'false', format: 'ONSITE' })).items.map((v) => v.id).sort()).toEqual([local.id, far.id].sort())
       expect((await instVacancies.list(s.tashkentCol.actor, { direction: s.mebel.id })).items.map((v) => v.id)).toEqual([mebel.id])
       await expect(instVacancies.get(s.andijanTech.actor, mebel.id)).rejects.toMatchObject({ code: 'not_found' })
@@ -277,15 +283,16 @@ describe.skipIf(!DB_AVAILABLE)('ТЗ «Студенты у компании, В�
     const s = await setup('iv-job-edit')
     await s.inT(async () => {
       const base = { title: 'Junior', directionIds: [s.dasturlash.id], region: 'tashkent-city', format: 'ONSITE', seats: 1 }
-      const job = await vacancies.create(s.tenantId, s.softCo.actor, { ...base, kind: 'JOB', paid: true, salaryFrom: 5_000_000 } as never)
-      expect(await vacancies.update(s.softCo.actor, job.id, { salaryTo: 7_000_000 })).toMatchObject({ kind: 'JOB', salaryFrom: 5_000_000, salaryTo: 7_000_000, stipend: null })
-      for (const bad of [{ salaryTo: 1_000 }, { paid: false }, { stipend: 100 }, { kind: 'PRACTICE' as const }]) {
+      const job = await vacancies.create(s.tenantId, s.softCo.actor, { ...base, kind: 'JOB', paid: true, salaryFrom: 5_000_000, schedule: 'FULL_TIME', experience: 'NONE' } as never)
+      expect(await vacancies.update(s.softCo.actor, job.id, { salaryTo: 7_000_000, schedule: 'SHIFT' })).toMatchObject({ kind: 'JOB', salaryFrom: 5_000_000, salaryTo: 7_000_000, stipend: null, schedule: 'SHIFT', experience: 'NONE' })
+      for (const bad of [{ salaryTo: 1_000 }, { paid: false }, { stipend: 100 }, { schedule: null }, { experience: null }, { kind: 'PRACTICE' as const }, { kind: 'PRACTICE' as const, salaryFrom: null, salaryTo: null }]) {
         await expect(vacancies.update(s.softCo.actor, job.id, bad)).rejects.toMatchObject({ code: 'validation_failed' })
       }
-      expect(await vacancies.update(s.softCo.actor, job.id, { kind: 'PRACTICE', salaryFrom: null, salaryTo: null, stipend: 1_000_000 })).toMatchObject({ kind: 'PRACTICE', salaryFrom: null, salaryTo: null, stipend: 1_000_000 })
-      // Back to a job: the stipend has to go, the salary comes.
-      await expect(vacancies.update(s.softCo.actor, job.id, { kind: 'JOB', salaryFrom: 6_000_000 })).rejects.toMatchObject({ code: 'validation_failed' })
-      expect(await vacancies.update(s.softCo.actor, job.id, { kind: 'JOB', stipend: null, salaryFrom: 6_000_000 })).toMatchObject({ kind: 'JOB', stipend: null, salaryFrom: 6_000_000 })
+      // Into practice: the salary, the schedule and the experience all go (the database refuses them on practice too).
+      expect(await vacancies.update(s.softCo.actor, job.id, { kind: 'PRACTICE', salaryFrom: null, salaryTo: null, schedule: null, experience: null, stipend: 1_000_000 })).toMatchObject({ kind: 'PRACTICE', salaryFrom: null, salaryTo: null, schedule: null, experience: null, stipend: 1_000_000 })
+      // Back to a job: the stipend has to go, the salary, schedule and experience come.
+      await expect(vacancies.update(s.softCo.actor, job.id, { kind: 'JOB', stipend: null, salaryFrom: 6_000_000 })).rejects.toMatchObject({ code: 'validation_failed' })
+      expect(await vacancies.update(s.softCo.actor, job.id, { kind: 'JOB', stipend: null, salaryFrom: 6_000_000, schedule: 'FLEXIBLE', experience: 'ONE_TO_3' })).toMatchObject({ kind: 'JOB', stipend: null, salaryFrom: 6_000_000, schedule: 'FLEXIBLE', experience: 'ONE_TO_3' })
       // The ministry's Excel shows «Работа» too.
       const headers: Record<string, string> = {}
       let body: Buffer = Buffer.alloc(0)

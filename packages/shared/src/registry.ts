@@ -939,6 +939,9 @@ export interface VacancyDto {
   /** «Работа»: the monthly salary, so'm, from–to; one amount is `salaryFrom` alone. */
   salaryFrom: number | null
   salaryTo: number | null
+  /** «Работа»: the work schedule and the experience asked for; null on practice and internships. */
+  schedule: WorkSchedule | null
+  experience: ExperienceLevel | null
   duration: string | null
   seats: number
   requirements: string | null

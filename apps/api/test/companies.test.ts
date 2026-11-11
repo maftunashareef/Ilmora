@@ -168,7 +168,8 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       await service.update(s.tenantId, squatter, { about: 'Squatter text', industryIds: [s.furniture.id] })
       const real = await s.representative()
       await expect(service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })).rejects.toMatchObject({ code: 'company_registered' })
-      await db.company.update({ where: { id: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000) } })
+      // Abandoned counts from the latest of creation, claim and review (№83): the squatter's own claim aged too.
+      await db.company.update({ where: { id: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000), claimedAt: new Date(Date.now() - 15 * 86_400_000) } })
       sent.length = 0
       const taken = await service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })
       expect(taken).toMatchObject({ id: first.id, name: 'Haqiqiy', status: 'DRAFT', about: null, industries: [] })

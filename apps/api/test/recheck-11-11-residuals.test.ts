@@ -150,6 +150,32 @@ describe.skipIf(!DB_AVAILABLE)('The 11.11 recheck residues: password reset, sand
     })
   })
 
+  it('№83: a hijacker released by the Super Admin cannot take the company straight back from its real owner', async () => {
+    const t = await ctx.makeTenant('res-reclaim')
+    const db = ctx.prisma.client
+    const companies = new CompaniesService(ctx.prisma, ctx.audit, notificationsStub, {} as never)
+    const account = async (name: string) => ({ id: (await db.user.create({ data: { tenantId: t.tenantId, login: `${name}-${Date.now()}`, displayName: name, roles: ['COMPANY_ADMIN'] } })).id, roles: ['COMPANY_ADMIN'] as const })
+    await TenantContext.forTenant(t.tenantId, async () => {
+      // An old record: created a month ago, so «14 days since creation» has long passed.
+      const co = await db.company.create({ data: { tenantId: t.tenantId, stir: '409999993', name: 'Haqiqiy Co', searchKey: registrySearchKey('Haqiqiy Co'), createdAt: new Date(Date.now() - 30 * 86_400_000) } })
+      const hijacker = await account('hijacker')
+      await companies.create(t.tenantId, hijacker as never, { stir: '409999993', name: 'Soxta' })
+      expect((await db.company.findUniqueOrThrow({ where: { id: co.id } })).claimedAt).not.toBeNull()
+      await companies.release(t.tenantId, co.id, 'hijacked')
+      expect((await db.company.findUniqueOrThrow({ where: { id: co.id } })).claimedAt).toBeNull()
+      // The real company claims it; the hijacker, with a new account, types the same STIR at once.
+      const owner = await account('owner')
+      await companies.create(t.tenantId, owner as never, { stir: '409999993', name: 'Haqiqiy Co' })
+      const again = await account('hijacker2')
+      await expect(companies.create(t.tenantId, again as never, { stir: '409999993', name: 'Soxta' })).rejects.toMatchObject({ code: 'company_registered' })
+      expect((await db.user.findUniqueOrThrow({ where: { id: owner.id } })).companyId).toBe(co.id)
+      // A draft its representative really left: abandoned 14 days after the claim, not before.
+      await db.company.update({ where: { id: co.id }, data: { claimedAt: new Date(Date.now() - 15 * 86_400_000) } })
+      await companies.create(t.tenantId, again as never, { stir: '409999993', name: 'Yangi' })
+      expect((await db.user.findUniqueOrThrow({ where: { id: again.id } })).companyId).toBe(co.id)
+    })
+  })
+
   it('№84: deleting a representative lets the institution or company go; «Отвязать» finds a deleted one', async () => {
     const t = await ctx.makeTenant('res-delete')
     const db = ctx.prisma.client
