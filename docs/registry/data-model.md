@@ -121,7 +121,13 @@ APPROVED → правка названия / СТИР / типа / собств�
   `CONTRACT_HELP_CARD` (обезличенная карточка), `COMPANY_CONTACTS` (контакты конкретной компании, `companyId`),
   `PARENT_CONSENT` (согласие родителя несовершеннолетнего). Поля: `textVersion`, `givenAt`, `revokedAt`, `ip`.
   Отзыв — поставить `revokedAt`; повторное согласие — новая строка. Действующее согласие — последняя строка без
-  `revokedAt`.
+  `revokedAt`. База держит два правила (миграция `20261120000000`):
+  - **одно действующее согласие каждого вида** — частичный уникальный индекс
+    `StudentConsent_one_active_per_kind (userId, kind) WHERE revokedAt IS NULL AND companyId IS NULL`; второе — P2002.
+    `COMPANY_CONTACTS` сюда не входит: контакты одной компании открываются по каждому принятому запросу;
+  - **журнал переживает аккаунт** — связь с `User` `ON DELETE RESTRICT`: аккаунты удаляются мягко (`deletedAt`), полное
+    удаление пользователя с согласиями база не даст (ТЗ 8: историю согласий и отзывов хранить). Очистка демо-данных
+    удаляет согласия демо-студентов сама.
 - `StudentCertificate` — `title`, `issuer`, `issuedAt`, `fileKey` (бакет `ilmora-docs`), `contentType`, `sizeBytes`.
 
 **Связи**

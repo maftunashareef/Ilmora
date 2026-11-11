@@ -1796,7 +1796,9 @@ model StudentConsent {
   tenantId    String
   tenant      Tenant      @relation(fields: [tenantId], references: [id])
   userId      String
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Restrict, not Cascade: the journal outlives the account (ТЗ 8 — the history of consents and revocations is kept by
+  /// law). Accounts are soft-deleted; a hard delete of a user who has consents is refused (demo purge deletes them first).
+  user        User        @relation(fields: [userId], references: [id], onDelete: Restrict)
   kind        ConsentKind
   /** COMPANY_CONTACTS only: the company the contacts were opened to. */
   companyId   String?
@@ -1807,6 +1809,9 @@ model StudentConsent {
   revokedAt   DateTime?
   ip          String?
 
+  // One active consent per kind (not COMPANY_CONTACTS, which is per company): partial unique index
+  // "StudentConsent_one_active_per_kind" (userId, kind) WHERE revokedAt IS NULL AND companyId IS NULL, migration
+  // 20261120000000; Prisma does not describe partial indexes.
   @@index([tenantId, userId, kind])
   @@index([tenantId, kind, revokedAt])
 }
