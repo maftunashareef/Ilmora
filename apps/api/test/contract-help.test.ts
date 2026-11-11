@@ -126,12 +126,14 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       const [card] = await service.feed(s.softCo.actor, {})
       expect(card).toMatchObject({
         id: req.id, number: req.id.slice(-6).toUpperCase(), status: 'ACTIVE', age: 20, region: { id: s.tashkent.id },
-        institution: { name: 'Toşkent IT texnikumi', type: 'TECHNIKUM' }, direction: { id: s.dasturlash.id, industry: { id: s.it.id } },
-        mode: 'STUDYING', course: 2, studyForm: 'CONTRACT', contractAmount: 5_000_000, yearsToWork: 3, certificates: ['IELTS 7.0'], studyConfirmed: false, contactRequest: null,
+        institution: { type: 'TECHNIKUM', region: { id: s.tashkent.id } }, direction: { id: s.dasturlash.id, industry: { id: s.it.id } },
+        mode: 'STUDYING', course: 2, studyForm: 'CONTRACT', contractAmount: 5_000_000, yearsToWork: 3, certificates: 1, ilmoraCourses: 0, studyConfirmed: false, contactRequest: null,
       })
+      // The institution's name and id and the certificate titles are on the named graduate card too: not here (№126).
+      expect(Object.keys(card.institution!).sort()).toEqual(['region', 'type'])
       expect([...deepKeys(await service.feed(s.softCo.actor, {}))].filter((k) => PRIVATE_KEYS.includes(k))).toEqual([])
       const text = JSON.stringify(card)
-      for (const secret of ['Aziz', 'Karimov', 'aziz@mail.uz', '+998935554433', `${Y - 20}-05-01`, me.id, 'student-certs', 'Python']) expect(text).not.toContain(secret)
+      for (const secret of ['Aziz', 'Karimov', 'aziz@mail.uz', '+998935554433', `${Y - 20}-05-01`, me.id, 'student-certs', 'Python', 'IELTS', 'Toşkent IT texnikumi', s.inst.id]) expect(text).not.toContain(secret)
       expect(Object.keys(card)).not.toEqual(expect.arrayContaining(['userId', 'name', 'birthDate', 'phone', 'email']))
 
       expect(await service.feed(s.mebelCo.actor, {})).toEqual([])
@@ -152,6 +154,25 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       await service.withdraw(me)
       expect(await service.feed(s.softCo.actor, {})).toEqual([])
       await expect(service.card(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })
+    })
+  })
+
+  it('№126: a request sent from an announcement (by name) does not show on the anonymous card; the card shows only its own', async () => {
+    const s = await setup('ch-link')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      // Soft Co invited this student by name from a graduation announcement and the student accepted.
+      await ctx.prisma.client.contactRequest.create({ data: { tenantId: s.tenantId, companyId: s.softCo.row.id, userId: me.id, source: 'GRADUATE', status: 'ACCEPTED', decidedAt: new Date() } })
+      expect((await service.card(s.softCo.actor, req.id)).contactRequest).toBeNull()
+      expect((await service.feed(s.softCo.actor, {}))[0].contactRequest).toBeNull()
+      // Data Co clicked «Заинтересованы» on this card: its status shows here.
+      await service.interest(s.tenantId, s.otherIt.actor, req.id)
+      expect((await service.card(s.otherIt.actor, req.id)).contactRequest).toBe('PENDING')
+      // A request from the student's earlier, withdrawn card is not this card's either.
+      await service.withdraw(me)
+      const again = await service.create(s.tenantId, me, INPUT)
+      expect((await service.card(s.otherIt.actor, again.id)).contactRequest).toBeNull()
     })
   })
 

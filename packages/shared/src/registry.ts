@@ -720,7 +720,11 @@ export type ContactSource = 'GRADUATE' | 'CONTRACT_HELP'
 
 /** A graduate as a company sees them in an announcement (ТЗ 5.1): no phone, e-mail or files until they accept a request. */
 export interface GraduateCardDto {
-  studentId: string
+  /**
+   * The card's id for «Пригласить»: the same within one announcement for this company, different for another company or
+   * announcement — not the student's account id, which would let companies match students (matrix check 11.11, №127).
+   */
+  cardId: string
   name: string
   institution: string
   direction: DirectionDto
@@ -733,7 +737,7 @@ export interface GraduateCardDto {
   ilmoraCourses: L[]
   /** Only students the institution confirmed are shown. */
   studyConfirmed: true
-  /** This company's contact request to the student, if any. */
+  /** This company's contact request to the student from an announcement, if any — not one from a contract-help card. */
   contactRequest: MatchStatus | null
 }
 
@@ -874,7 +878,8 @@ export interface ContractHelpCardDto {
   status: 'ACTIVE' | 'INTERESTED'
   age: number | null
   region: PlaceRefDto | null
-  institution: InstitutionCardDto | null
+  /** The type and region only: the name would link the card to the named graduate card (director's decision 11.11). */
+  institution: { type: RegistryInstitutionType; region: PlaceRefDto | null } | null
   direction: DirectionDto | null
   mode: 'STUDYING' | 'APPLYING'
   /** Year of study (studying) or the year of admission (applying). */
@@ -886,11 +891,12 @@ export interface ContractHelpCardDto {
   motivation: string
   yearsToWork: number
   workRegion: PlaceRefDto | null
-  certificates: string[]
-  ilmoraCourses: L[]
+  /** How many certificates and «Курсы в ILMORA» — counts, not titles: titles would link the card to the named one. */
+  certificates: number
+  ilmoraCourses: number
   studyConfirmed: boolean
   createdAt: string
-  /** This company's contact request to the student, if any (from any source). */
+  /** This company's contact request sent from this card, if any — not one sent from an announcement. */
   contactRequest: MatchStatus | null
 }
 
