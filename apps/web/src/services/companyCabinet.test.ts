@@ -9,7 +9,7 @@ vi.mock('../lib/api', () => ({
   }),
 }))
 
-const { certificateProblem, companyApi, companyForm, companyPatch, companyReviewedChanged, emptyVacancy, tashkentToday, vacancyBody, vacancyProblems } = await import('./companyCabinet')
+const { certificateProblem, companyApi, companyForm, companyPatch, companyReviewedChanged, emptyStudentsFilters, emptyVacancy, studentsQuery, tashkentToday, vacancyBody, vacancyProblems } = await import('./companyCabinet')
 
 const it_ = { id: 'it', slug: 'it', name: { uz: 'IT', ru: 'IT', en: 'IT' } }
 const profile: CompanyProfileDto = {
@@ -93,6 +93,14 @@ describe('«Работа» in the vacancy form (ТЗ «Студенты у ко�
     expect(body).toMatchObject({ kind: 'JOB', paid: true, stipend: null, salaryFrom: 4000000, salaryTo: 6000000, schedule: 'SHIFT', experience: 'UP_TO_1' })
     const practice = vacancyBody({ ...job, kind: 'PRACTICE', paid: true, stipend: '900000', salaryFrom: '4000000', schedule: 'SHIFT', experience: 'NONE' })
     expect(practice).toMatchObject({ kind: 'PRACTICE', paid: true, stipend: 900000, salaryFrom: null, salaryTo: null, schedule: null, experience: null })
+  })
+})
+
+describe('«Студенты» filters', () => {
+  it('send only what is set, and the page from 2 on', () => {
+    expect(studentsQuery(emptyStudentsFilters())).toBe('')
+    expect(studentsQuery({ ...emptyStudentsFilters(), type: 'TECHNIKUM', course: '2' }, 3)).toBe('?type=TECHNIKUM&course=2&page=3')
+    expect(studentsQuery({ ...emptyStudentsFilters(), region: 'andijan' }, 1)).toBe('?region=andijan')
   })
 })
 

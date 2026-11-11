@@ -1,7 +1,7 @@
 import {
   COMPANY_REVIEW_FIELDS, DOCUMENT_CONTENT_TYPES, DOCUMENT_MAX_BYTES, type CompanyAnnouncementDto, type CompanyContactDto, type CompanyProfileDto,
-  type CompanyRequiredField, type CompanyVacancyDto, type ContractHelpCardDto, type DocumentLinkDto, type DocumentUploadDto, type TrainingRequestDto,
-  type ExperienceLevel, type VacancyApplicationDto, type VacancyKind, type WorkFormat, type WorkSchedule,
+  type CompanyRequiredField, type CompanyStudentCardDto, type CompanyStudentsPageDto, type CompanyVacancyDto, type ContractHelpCardDto, type DocumentLinkDto, type DocumentUploadDto, type TrainingRequestDto,
+  type ExperienceLevel, type StudentsBlockDto, type VacancyApplicationDto, type VacancyKind, type WorkFormat, type WorkSchedule,
 } from '@ilmora/shared'
 import { api } from '../lib/api'
 
@@ -121,6 +121,17 @@ export function vacancyProblems(f: VacancyForm, today: string): VacancyProblem[]
   return out
 }
 
+/** Filters of «Студенты» (ТЗ «Студенты у компании», 2.1); empty — not applied. */
+export interface StudentsFilters { direction: string; type: string; region: string; course: string; graduationYear: string }
+export const emptyStudentsFilters = (): StudentsFilters => ({ direction: '', type: '', region: '', course: '', graduationYear: '' })
+export function studentsQuery(f: StudentsFilters, page?: number): string {
+  const p = new URLSearchParams()
+  for (const k of ['direction', 'type', 'region', 'course', 'graduationYear'] as const) if (f[k]) p.set(k, f[k])
+  if (page && page > 1) p.set('page', String(page))
+  const s = p.toString()
+  return s ? `?${s}` : ''
+}
+
 /** Today in Tashkent (UTC+5), as the API counts the deadline. */
 export const tashkentToday = (now = new Date()) => new Date(now.getTime() + 5 * 3_600_000).toISOString().slice(0, 10)
 
@@ -138,6 +149,11 @@ export const companyApi = {
     return api<CompanyProfileDto>('/companies/me/certificate', { method: 'POST', body: { key: up.key } })
   },
   certificateLink: () => api<DocumentLinkDto>('/companies/me/certificate'),
+
+  /** «Студенты» (ТЗ «Студенты у компании», 2): institutions with matching students, their cards, «Запросить контакты». */
+  studentBlocks: (f: StudentsFilters) => api<StudentsBlockDto[]>(`/companies/me/students/institutions${studentsQuery(f)}`),
+  studentsPage: (institutionId: string, f: StudentsFilters, page: number) => api<CompanyStudentsPageDto>(`/companies/me/students/institutions/${id(institutionId)}${studentsQuery(f, page)}`),
+  requestStudent: (institutionId: string, cardId: string) => api<CompanyStudentCardDto>(`/companies/me/students/institutions/${id(institutionId)}/${id(cardId)}/request`, { method: 'POST' }),
 
   /** Requests «под обучение» (ТЗ 5.2). */
   requests: () => api<TrainingRequestDto[]>('/companies/me/training-requests'),

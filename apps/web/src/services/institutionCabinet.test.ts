@@ -12,6 +12,7 @@ vi.mock('../lib/api', () => ({
 const {
   announcementLines, announcementYears, directionProblems, directionRows, directionsBody, institutionApi, MISSING_FIELD, offerYears, passportForm,
   passportPatch, reviewedChanged,
+  broadcastCourses, broadcastDirections, emptyInstVacancyFilters, instVacancyQuery,
 } = await import('./institutionCabinet')
 
 const industry = { id: 'it', slug: 'it', name: { uz: 'IT', ru: 'IT', en: 'IT' } }
@@ -98,3 +99,19 @@ describe('institution workspace calls', () => {
     expect(announcementLines([{ directionId: 'd1', count: '40' }, { directionId: '', count: '5' }, { directionId: 'd2', count: '0' }])).toEqual([{ directionId: 'd1', count: 40 }])
   })
 })
+
+describe('«Вакансии компаний» and «Разослать студентам»', () => {
+  it('send the tab and the filters of that tab only', () => {
+    expect(instVacancyQuery(emptyInstVacancyFilters('JOB'))).toBe('?kind=JOB')
+    expect(instVacancyQuery({ ...emptyInstVacancyFilters('PRACTICE'), paid: 'true', schedule: 'SHIFT' })).toBe('?kind=PRACTICE&paid=true')
+    expect(instVacancyQuery({ ...emptyInstVacancyFilters('JOB'), paid: 'true', schedule: 'SHIFT', region: 'andijan' })).toBe('?kind=JOB&region=andijan&schedule=SHIFT')
+  })
+  it('offer only the institution’s directions of the vacancy’s industries, and years up to the institution’s kind', () => {
+    const dir = (id: string, industry: string) => ({ id, name: id, industry: { id: industry }, official: true, code: null })
+    const passport = { type: 'TECHNIKUM', directions: [{ id: 'r1', direction: dir('a', 'it'), department: null, studentsCount: 5 }, { id: 'r2', direction: dir('b', 'wood'), department: null, studentsCount: 3 }] }
+    expect(broadcastDirections(passport as never, { directions: [dir('x', 'wood')] } as never).map((d) => d.direction.id)).toEqual(['b'])
+    expect(broadcastCourses('TECHNIKUM')).toEqual([1, 2, 3, 4, 5, 6])
+    expect(broadcastCourses('SCHOOL')).toHaveLength(11)
+  })
+})
+

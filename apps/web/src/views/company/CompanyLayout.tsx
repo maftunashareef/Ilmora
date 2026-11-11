@@ -10,6 +10,7 @@ export function CompanyLayout() {
       { id: 'profile', to: '/company', end: true, label: t('co.nav.profile'), icon: 'building' },
       { id: 'requests', to: '/company/requests', label: t('co.nav.requests'), icon: 'cap' },
       { id: 'graduates', to: '/company/graduates', label: t('co.nav.graduates'), icon: 'users' },
+      { id: 'students', to: '/company/students', label: t('co.nav.students'), icon: 'cap' },
       { id: 'vacancies', to: '/company/vacancies', label: t('co.nav.vacancies'), icon: 'briefcase' },
       { id: 'contract-help', to: '/company/contract-help', label: t('co.nav.contractHelp'), icon: 'shield' },
       { id: 'contacts', to: '/company/contacts', label: t('co.nav.contacts'), icon: 'user' },

@@ -3,8 +3,7 @@ import { useState, type ReactNode } from 'react'
 import {
   ABOUT_MAX, APPLYING_TYPES, EMPTY_QUESTIONNAIRE, firstIncompleteStep, isMinor, maxCourse, QUESTIONNAIRE_STEPS,
   STUDYING_TYPES, UZ_REGIONS, validateQuestionnaireStep, type InstitutionType, type PlannedStudyForm, type QuestionnaireErrors,
-  type StudentQuestionnaire as Questionnaire, type StudyStatus,
-} from '@ilmora/shared'
+  type StudentQuestionnaire as Questionnaire, type StudyStatus, type StudentConsentKey } from '@ilmora/shared'
 import { DirectionField } from '../../components/DirectionField'
 import { InstitutionSearch } from '../../components/InstitutionSearch'
 import { RegionDistrictField } from '../../components/RegionDistrictField'
@@ -16,10 +15,16 @@ import { saveQuestionnaire, useQuestionnaire, type QuestionnaireState } from '..
 import { useStore } from '../../store/useStore'
 
 /**
- * Section 8 consents shown on step 4 (texts and which are required come with section 8; every mark starts unticked).
- * Empty until then: the step explains that the marks will appear here.
+ * Section 8 consents on step 4 (ТЗ 8 and «Студенты у компании», 4): each a separate purpose, every mark starts unticked,
+ * none is required to finish the questionnaire. The API keeps them in the consent journal with the text version
+ * (STUDENT_CONSENT_TEXT_VERSION). The wording is the ТЗ's working text until the lawyer's version comes; then the texts
+ * here and the version in @ilmora/shared change together. A minor reaches this step only with the parent's consent (step 3).
  */
-const STUDENT_CONSENTS: readonly { key: string; label: TKey; required: boolean }[] = []
+const STUDENT_CONSENTS: readonly { key: StudentConsentKey; label: TKey; required: boolean }[] = [
+  { key: 'GRADUATE_CARD', label: 'q.consent.GRADUATE_CARD', required: false },
+  { key: 'CONTRACT_HELP_CARD', label: 'q.consent.CONTRACT_HELP_CARD', required: false },
+  { key: 'INDUSTRY_CARD', label: 'q.consent.INDUSTRY_CARD', required: false },
+]
 const REQUIRED_CONSENTS = STUDENT_CONSENTS.filter((c) => c.required).map((c) => c.key)
 const STEP_TITLES: TKey[] = ['q.step.status', 'q.step.study', 'q.step.person', 'q.step.consents']
 const STATUS_ICON: Record<StudyStatus, string> = { STUDYING: 'cap', APPLYING: 'arrowRight' }
@@ -251,7 +256,12 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
               ? <Notice>{t('q.consentsSoon')}</Notice>
               : STUDENT_CONSENTS.map((c) => (
                 <label key={c.key} className="flex cursor-pointer items-start gap-3 text-[13px] leading-relaxed text-charcoal/80">
-                  <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-forest" checked={!!q.consents[c.key]} onChange={(e) => set('consents', { ...q.consents, [c.key]: e.target.checked })} />
+                  <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-forest" checked={!!q.consents[c.key]}
+                    onChange={(e) => {
+                      // Taking back a consent already given: the card leaves at once, contacts companies already have stay (ТЗ 8).
+                      if (!e.target.checked && initial.questionnaire?.consents?.[c.key] && !confirm(t('q.consentRevokeConfirm'))) return
+                      set('consents', { ...q.consents, [c.key]: e.target.checked })
+                    }} />
                   <span>{t(c.label)}{c.required && <span className="text-red-700"> *</span>}</span>
                 </label>
               ))}

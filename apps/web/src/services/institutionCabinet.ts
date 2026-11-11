@@ -1,7 +1,7 @@
 import {
   INSTITUTION_REVIEW_FIELDS, type AnnouncementDto, type AnnouncementResponseDto, type DistrictDto, type IncomingTrainingRequestDto,
   type InstitutionPassportDto, type InstitutionRequiredField, type InstitutionStudentDto, type RegistryInstitutionType, type RegistryOwnership,
-  type StudyConfirmationStatus,
+  type InstitutionVacanciesDto, type InstitutionVacancyDto, type StudyConfirmationStatus, type VacancyBroadcastDto, type VacancyBroadcastPreviewDto, type VacancyKind,
 } from '@ilmora/shared'
 import { api } from '../lib/api'
 
@@ -105,8 +105,34 @@ export const announcementYears = (now = new Date()) => Array.from({ length: 8 },
 /** What the institution saw in the list of students: sent with its decision (Н-8). */
 export const studySeen = (s: InstitutionStudentDto) => ({ directionId: s.direction?.id ?? null, graduationYear: s.graduationYear ?? null })
 
+// ───────────── «Вакансии компаний» and «Разослать студентам» (ТЗ «Студенты у компании, Вакансии у учреждения», 3) ─────────────
+
+/** A tab is a kind; the other filters apply when set (paid — practice and internships, schedule and experience — jobs). */
+export interface InstVacancyFilters { kind: VacancyKind; direction: string; region: string; format: string; paid: string; schedule: string; experience: string }
+export const emptyInstVacancyFilters = (kind: VacancyKind = 'PRACTICE'): InstVacancyFilters => ({ kind, direction: '', region: '', format: '', paid: '', schedule: '', experience: '' })
+export function instVacancyQuery(f: InstVacancyFilters): string {
+  const p = new URLSearchParams({ kind: f.kind })
+  const job = f.kind === 'JOB'
+  for (const k of ['direction', 'region', 'format'] as const) if (f[k]) p.set(k, f[k])
+  if (!job && f.paid) p.set('paid', f.paid)
+  if (job && f.schedule) p.set('schedule', f.schedule)
+  if (job && f.experience) p.set('experience', f.experience)
+  return `?${p.toString()}`
+}
+/** The institution's own directions a vacancy can be sent on: those of the vacancy's industries (the API checks the same). */
+export function broadcastDirections(passport: InstitutionPassportDto, vacancy: Pick<InstitutionVacancyDto, 'directions'>) {
+  const industries = new Set(vacancy.directions.map((d) => d.industry.id))
+  return passport.directions.filter((d) => industries.has(d.direction.industry.id))
+}
+/** Years of study a broadcast can choose: a school up to the 11th class, the others up to the 6th year. */
+export const broadcastCourses = (type: RegistryInstitutionType) => Array.from({ length: type === 'SCHOOL' ? 11 : 6 }, (_, i) => i + 1)
+
 export const institutionApi = {
   me: () => api<InstitutionPassportDto>('/institutions/me'),
+  vacancies: (f: InstVacancyFilters) => api<InstitutionVacanciesDto>(`/institutions/me/vacancies${instVacancyQuery(f)}`),
+  broadcastPreview: (vacancyId: string, b: { directionIds: string[]; courses: number[] }) => api<VacancyBroadcastPreviewDto>(`/institutions/me/vacancies/${id(vacancyId)}/broadcast/preview`, { method: 'POST', body: b }),
+  broadcast: (vacancyId: string, b: { directionIds: string[]; courses: number[] }) => api<VacancyBroadcastDto>(`/institutions/me/vacancies/${id(vacancyId)}/broadcast`, { method: 'POST', body: b }),
+  broadcasts: () => api<VacancyBroadcastDto[]>('/institutions/me/vacancy-broadcasts'),
   update: (patch: Record<string, unknown>) => api<InstitutionPassportDto>('/institutions/me', { method: 'PATCH', body: patch }),
   setDirections: (rows: DirectionRow[]) => api<InstitutionPassportDto>('/institutions/me/directions', { method: 'PUT', body: directionsBody(rows) }),
   submit: () => api<InstitutionPassportDto>('/institutions/me/submit', { method: 'POST' }),
