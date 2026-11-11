@@ -10,7 +10,8 @@ describe('homeFor', () => {
     expect(homeFor(['FINANCE_ADMIN'])).toBe('/admin/finance')
     expect(homeFor(['STUDENT'])).toBe('/student')
     expect(homeFor(['MINISTRY'])).toBe('/ministry')
-    expect(homeFor(['INSTITUTION_ADMIN'])).toBe('/')
+    expect(homeFor(['INSTITUTION_ADMIN'])).toBe('/institution')
+    expect(homeFor(['COMPANY_ADMIN'])).toBe('/')
     expect(homeFor([])).toBe('/student')
   })
 })
@@ -23,6 +24,13 @@ describe('canOpen', () => {
     expect(workspaceOf('/courses/abc')).toBeNull()
     // Public pages whose path only starts with a workspace's name are not workspaces.
     expect(workspaceOf('/teachers/t1')).toBeNull()
+  })
+  it('opens the institution workspace to its representative and the Super Admin only', () => {
+    expect(workspaceOf('/institution/students')).toBe('institution')
+    expect(canOpen(['INSTITUTION_ADMIN'], '/institution/graduates')).toBe(true)
+    expect(canOpen(['INSTITUTION_ADMIN'], '/ministry')).toBe(false)
+    expect(canOpen(['COMPANY_ADMIN'], '/institution')).toBe(false)
+    expect(canOpen(['PLATFORM_ADMIN'], '/institution')).toBe(true)
   })
   it('opens the ministry workspace to the ministry and the Super Admin only', () => {
     expect(canOpen(['MINISTRY'], '/ministry/companies')).toBe(true)

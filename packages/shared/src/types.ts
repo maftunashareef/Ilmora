@@ -7,8 +7,8 @@
 export type Lang = 'uz' | 'ru' | 'en'
 export type L = Record<Lang, string>
 
-/** The workspace an account lands in; 'ministry' — the ministry's figures and registry (`/ministry`). */
-export type Role = 'visitor' | 'student' | 'teacher' | 'center' | 'admin' | 'ministry'
+/** The workspace an account lands in; 'ministry' — the ministry's figures and registry (`/ministry`); 'institution' — an institution's representative (`/institution`). */
+export type Role = 'visitor' | 'student' | 'teacher' | 'center' | 'admin' | 'ministry' | 'institution'
 
 export type Status = 'draft' | 'published' | 'archived'
 export type Visibility = 'public' | 'private'
