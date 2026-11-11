@@ -2,10 +2,14 @@
 import type { CompanyCardDto, PartyContactsDto } from '@ilmora/shared'
 import { Badge, Card, EmptyState, Icon, LinkButton } from '../../components/ui'
 import { useT } from '../../i18n/useT'
+import { usePassport } from './passportStore'
 
 /** Students, requests and graduation open once the Super Admin approved the profile (the API answers 403 `not_approved` before). */
 export function ClosedNotice() {
   const { t } = useT()
+  // A blocked institution is closed whatever its review status: filling the passport in would not open anything.
+  const { passport } = usePassport()
+  if (passport?.blocked) return <EmptyState icon={<Icon name="lock" className="h-6 w-6" />} title={t('org.blocked')} />
   return (
     <EmptyState
       icon={<Icon name="lock" className="h-6 w-6" />}

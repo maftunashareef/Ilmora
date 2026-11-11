@@ -10,6 +10,7 @@ import { apiErrorText } from '../../lib/apiErrors'
 import { certificateProblem, COMPANY_MISSING_LABEL, companyApi, companyForm, companyPatch, companyReviewedChanged, type CompanyForm } from '../../services/companyCabinet'
 import { institutionApi } from '../../services/institutionCabinet'
 import { useIndustries, useRegions } from '../../services/registry'
+import { orgErrorText, type OrgAction } from '../../services/orgErrors'
 import { useStore } from '../../store/useStore'
 import { setCompany, useCompany } from './companyStore'
 
@@ -30,7 +31,7 @@ export function CompanyProfile() {
   const [districts, setDistricts] = useState<{ region: string; list: DistrictDto[] } | null>(null)
   const [missing, setMissing] = useState<CompanyRequiredField[]>([])
   const [busy, setBusy] = useState<'save' | 'submit' | 'cert' | 'open' | null>(null)
-  const [failure, setFailure] = useState<unknown>(null)
+  const [failure, setFailure] = useState<{ error: unknown; action?: OrgAction } | null>(null)
   const [certError, setCertError] = useState<string | null>(null)
   const file = useRef<HTMLInputElement>(null)
 
@@ -57,17 +58,19 @@ export function CompanyProfile() {
   }
   const run = async (kind: 'save' | 'submit') => {
     setBusy(kind); setFailure(null); setMissing([])
+    // Which request failed, for its hourly limit: «Отправить» saves the changes first.
+    let action: OrgAction = 'save'
     try {
       if (kind === 'save') {
         const reviewed = profile.approvedAt && companyReviewedChanged(patch)
         await save(); notify(t(reviewed ? 'inst.p.savedReview' : 'common.saved'))
       } else {
-        await save(); setCompany(await companyApi.submit()); notify(t('inst.p.submitted'))
+        await save(); action = 'submit'; setCompany(await companyApi.submit()); notify(t('inst.p.submitted'))
       }
     } catch (e) {
       const list = isApiError(e) && e.code === 'incomplete_profile' ? (e.details as { missing?: CompanyRequiredField[] } | undefined)?.missing : undefined
       if (list?.length) setMissing(list)
-      else setFailure(e)
+      else setFailure({ error: e, action })
     } finally {
       setBusy(null)
     }
@@ -78,14 +81,14 @@ export function CompanyProfile() {
     const problem = certificateProblem(f)
     if (problem) { setCertError(t(problem === 'type' ? 'co.p.certType' : 'co.p.certSize')); return }
     setCertError(null); setBusy('cert')
-    try { setCompany(await companyApi.uploadCertificate(f)); notify(t('co.p.certDone')) } catch (e) { setCertError(apiErrorText(e, lang)) } finally { setBusy(null) }
+    try { setCompany(await companyApi.uploadCertificate(f)); notify(t('co.p.certDone')) } catch (e) { setCertError(orgErrorText(e, lang)) } finally { setBusy(null) }
   }
   const openCertificate = async () => {
     setBusy('open')
     try { window.open((await companyApi.certificateLink()).url, '_blank', 'noopener,noreferrer') } catch (e) { notify(apiErrorText(e, lang), 'warn') } finally { setBusy(null) }
   }
 
-  const banner = profile.blocked ? { tone: 'warn' as const, text: t('co.p.blocked') }
+  const banner = profile.blocked ? { tone: 'warn' as const, text: t('org.blocked') }
     : profile.status === 'REJECTED' ? { tone: 'warn' as const, text: t('inst.p.status.REJECTED', { reason: profile.rejectReason ?? '—' }) }
       : profile.status === 'PENDING' && !profile.approvedAt ? { tone: 'info' as const, text: t('inst.p.status.PENDING') }
         : profile.approvedAt ? { tone: 'ok' as const, text: t('co.p.status.APPROVED') }
@@ -101,7 +104,7 @@ export function CompanyProfile() {
       <Notice tone={banner.tone} className="mb-3">{banner.text}</Notice>
       {profile.pendingChanges && <Notice className="mb-3">{t('inst.p.pendingChanges')}</Notice>}
       {missing.length > 0 && <Notice tone="warn" className="mb-3">{t('inst.p.missing', { fields: missing.map((m) => t(COMPANY_MISSING_LABEL[m] as TKey)).join(', ') })}</Notice>}
-      {failure != null && <Notice tone="warn" className="mb-3">{apiErrorText(failure, lang)}</Notice>}
+      {failure != null && <Notice tone="warn" className="mb-3">{orgErrorText(failure.error, lang, failure.action)}</Notice>}
 
       <Card className="mb-6">
         <div className="grid gap-4 md:grid-cols-2">
