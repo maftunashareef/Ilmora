@@ -907,6 +907,9 @@ export interface ContractHelpCardDto {
 /** JOB: «Работа» (ТЗ «Студенты у компании», 5) — always paid, with a salary (from–to) instead of a stipend. */
 export type VacancyKind = 'PRACTICE' | 'INTERNSHIP' | 'JOB'
 export type WorkFormat = 'ONSITE' | 'REMOTE' | 'HYBRID'
+/** «Работа» only: work schedule (onsite or remote is WorkFormat) and the experience asked for. */
+export type WorkSchedule = 'FULL_TIME' | 'PART_TIME' | 'SHIFT' | 'FLEXIBLE'
+export type ExperienceLevel = 'NONE' | 'UP_TO_1' | 'ONE_TO_3' | 'OVER_3'
 export type VacancyStatus = 'OPEN' | 'CLOSED'
 /** новый → просмотрен → приглашён / отказ. */
 export type ApplicationStatus = 'NEW' | 'VIEWED' | 'INVITED' | 'REJECTED'

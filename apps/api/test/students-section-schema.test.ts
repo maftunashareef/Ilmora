@@ -83,6 +83,22 @@ describe.skipIf(!DB_AVAILABLE)('students section and vacancy broadcasts: databas
     })
   })
 
+  it('keeps the schedule and the experience on a JOB only (migration 20261122000000)', async () => {
+    const s = await setup('stu-terms')
+    await TenantContext.forTenant(s.tenantId, async () => {
+      const job = await db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Dasturchi', regionId: s.region.id, format: 'ONSITE', seats: 1, paid: true, schedule: 'FULL_TIME', experience: 'UP_TO_1' } })
+      expect(job).toMatchObject({ schedule: 'FULL_TIME', experience: 'UP_TO_1' })
+      // Not required by the database yet: the backend in main creates a JOB without them until it sends both.
+      await db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Operator', regionId: s.region.id, format: 'REMOTE', seats: 1, paid: true } })
+
+      await expect(db.vacancy.update({ where: { id: s.vacancy.id }, data: { schedule: 'SHIFT' } })).rejects.toThrow(/Vacancy_job_terms_check/)
+      await expect(db.vacancy.update({ where: { id: s.vacancy.id }, data: { experience: 'NONE' } })).rejects.toThrow(/Vacancy_job_terms_check/)
+      // A JOB turned into an internship has to drop them.
+      await expect(db.vacancy.update({ where: { id: job.id }, data: { kind: 'INTERNSHIP', salaryFromMinor: null, salaryToMinor: null } })).rejects.toThrow(/Vacancy_job_terms_check/)
+      await db.vacancy.update({ where: { id: job.id }, data: { kind: 'INTERNSHIP', salaryFromMinor: null, salaryToMinor: null, schedule: null, experience: null } })
+    })
+  })
+
   it('sends a vacancy to a student once, keeps recipients on the broadcast\'s vacancy and checks the courses', async () => {
     const s = await setup('stu-cast')
     await TenantContext.forTenant(s.tenantId, async () => {
