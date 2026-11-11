@@ -11,7 +11,7 @@ describe('homeFor', () => {
     expect(homeFor(['STUDENT'])).toBe('/student')
     expect(homeFor(['MINISTRY'])).toBe('/ministry')
     expect(homeFor(['INSTITUTION_ADMIN'])).toBe('/institution')
-    expect(homeFor(['COMPANY_ADMIN'])).toBe('/')
+    expect(homeFor(['COMPANY_ADMIN'])).toBe('/company')
     expect(homeFor([])).toBe('/student')
   })
 })
@@ -30,6 +30,8 @@ describe('canOpen', () => {
     expect(canOpen(['INSTITUTION_ADMIN'], '/institution/graduates')).toBe(true)
     expect(canOpen(['INSTITUTION_ADMIN'], '/ministry')).toBe(false)
     expect(canOpen(['COMPANY_ADMIN'], '/institution')).toBe(false)
+    expect(canOpen(['COMPANY_ADMIN'], '/company/vacancies')).toBe(true)
+    expect(canOpen(['INSTITUTION_ADMIN'], '/company')).toBe(false)
     expect(canOpen(['PLATFORM_ADMIN'], '/institution')).toBe(true)
   })
   it('opens the ministry workspace to the ministry and the Super Admin only', () => {

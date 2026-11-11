@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { formatDate, type AnnouncementDto, type AnnouncementResponseDto, type AnnouncementStatus, type MatchStatus } from '@ilmora/shared'
-import { Badge, Button, Card, EmptyState, Field, Icon, Input, Notice, PageTitle, Select } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Field, FieldGroup, Icon, Input, Notice, PageTitle, Select } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
 import { useSearchParams } from '../../lib/router'
@@ -114,7 +114,7 @@ function CreateForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: 
     <Card className="mb-5">
       <div className="grid gap-4 md:grid-cols-[10rem_minmax(0,1fr)]">
         <Field label={t('inst.g.year')} required><Select value={year} onChange={(e) => setYear(e.target.value)}>{years.map((y) => <option key={y} value={y}>{y}</option>)}</Select></Field>
-        <Field label={t('inst.g.lines')} required><LinesEditor rows={rows} onChange={setRows} /></Field>
+        <FieldGroup label={t('inst.g.lines')} required><LinesEditor rows={rows} onChange={setRows} /></FieldGroup>
       </div>
       {error != null && <Notice tone="warn" className="mt-3">{apiErrorText(error, lang)}</Notice>}
       <div className="mt-4 flex justify-end gap-2">
