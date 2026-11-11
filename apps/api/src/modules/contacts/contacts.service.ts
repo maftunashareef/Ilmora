@@ -26,9 +26,9 @@ const companyContacts = (c: { website: string | null; address: string | null; re
 
 /**
  * Contact requests (ТЗ 5.1 «Пригласить», 5.3 «Заинтересованы», 8): a company asks a student to open their contacts;
- * the student decides each request. One request per company, student and source (unique index) — a declined request is
- * not sent again from the same place; a request from another source is a request of its own, so «Заинтересованы» on an
- * anonymous card never answers «already asked» because of an invitation by name (cybersecurity check 9.4, 11.11). Accepting writes a COMPANY_CONTACTS consent row; only then the company sees the
+ * the student decides each request. One request per channel (partial unique indexes, migration 20261119000000, #76):
+ * from announcements once per company and student, from an anonymous card once per company and card — a declined request
+ * is not sent again there, and «Заинтересованы» never answers «already asked» because of an invitation by name (№126). Accepting writes a COMPANY_CONTACTS consent row; only then the company sees the
  * full card (name, phone, e-mail, certificate files), and every view or download is audited.
  */
 @Injectable()
