@@ -1443,7 +1443,8 @@ enum ContactSource {
   STUDENTS
 }
 
-/// JOB: a job (ТЗ «Студенты у компании», 5); always paid, `Vacancy.stipendMinor` is then the monthly salary.
+/// JOB: a job (ТЗ «Студенты у компании», 5); always paid, with a salary (`Vacancy.salaryFromMinor`/`salaryToMinor`)
+/// instead of a stipend.
 enum VacancyKind {
   PRACTICE
   INTERNSHIP
@@ -2045,8 +2046,9 @@ model ContactRequest {
   @@index([tenantId, companyId, status])
 }
 
-/// Practice, internship or job offered by an approved company (published without a separate review). A JOB is always
-/// paid: CHECK "Vacancy_job_paid_check" (migration 20261121000100).
+/// Practice, internship or job offered by an approved company (published without a separate review). Checks (migration
+/// 20261121000100): a JOB is always paid ("Vacancy_job_paid_check"); a salary only on a JOB, a stipend never on one
+/// ("Vacancy_pay_by_kind_check"); a salary is positive and «to» is not below «from» ("Vacancy_salary_check").
 model Vacancy {
   id           String        @id @default(cuid())
   tenantId     String
@@ -2062,8 +2064,11 @@ model Vacancy {
   address      String?
   format       WorkFormat
   paid         Boolean       @default(false)
-  /** Monthly pay in tiyin, when paid and stated: the stipend of a practice or internship, the salary of a JOB. */
+  /** Monthly stipend in tiyin of a practice or internship, when paid and stated. */
   stipendMinor BigInt?
+  /** JOB: monthly salary in tiyin, «from–to»; a single amount is «from» alone. Both optional. */
+  salaryFromMinor BigInt?
+  salaryToMinor   BigInt?
   /** Free text, e.g. «2 месяца». */
   duration     String?
   seats        Int

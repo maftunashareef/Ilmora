@@ -904,7 +904,7 @@ export interface ContractHelpCardDto {
 
 // ───────────── practice and internships (ТЗ 5.4) ─────────────
 
-/** JOB: «Работа» (ТЗ «Студенты у компании», 5) — always paid; stipendMinor is then the monthly salary. */
+/** JOB: «Работа» (ТЗ «Студенты у компании», 5) — always paid, with a salary (from–to) instead of a stipend. */
 export type VacancyKind = 'PRACTICE' | 'INTERNSHIP' | 'JOB'
 export type WorkFormat = 'ONSITE' | 'REMOTE' | 'HYBRID'
 export type VacancyStatus = 'OPEN' | 'CLOSED'

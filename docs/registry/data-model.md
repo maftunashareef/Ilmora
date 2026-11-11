@@ -152,9 +152,12 @@ APPROVED → правка названия / СТИР / типа / собств�
   текущие контакты (сменил номер — новый компании не уходит). **Это персональные данные:** отозвал согласие или
   запрос — копию стереть. Пустые поля у старых записей — API показывает текущие контакты, как раньше.
 - `Vacancy` — практика, стажировка или работа: `kind` (`PRACTICE` / `INTERNSHIP` / `JOB`), `title`, `regionId`,
-  `districtId`, `address`, `format` (`ONSITE` / `REMOTE` / `HYBRID`), `paid`, `stipendMinor` (в месяц: стипендия, у
-  `JOB` — зарплата), `duration`, `seats`, `requirements`, `deadline`, `status` (`OPEN` / `CLOSED`); направления —
-  `VacancyDirection`. `JOB` всегда оплачивается: CHECK `Vacancy_job_paid_check` (`kind <> 'JOB' OR paid`). `VacancyApplication` — отклик: `note`, `status`
+  `districtId`, `address`, `format` (`ONSITE` / `REMOTE` / `HYBRID`), `paid`, `stipendMinor` (стипендия в месяц —
+  практика и стажировка), `salaryFromMinor` / `salaryToMinor` (зарплата в месяц «от–до» — только `JOB`; одна сумма —
+  только «от»), `duration`, `seats`, `requirements`, `deadline`, `status` (`OPEN` / `CLOSED`); направления —
+  `VacancyDirection`. Проверки в базе: `JOB` всегда оплачивается (`Vacancy_job_paid_check`); зарплата только у `JOB`,
+  стипендии у `JOB` нет (`Vacancy_pay_by_kind_check`); зарплата > 0, «до» не меньше «от» и без «от» не бывает
+  (`Vacancy_salary_check`). `VacancyApplication` — отклик: `note`, `status`
   (`NEW` → `VIEWED` → `INVITED` / `REJECTED`), копия контактов на момент отклика `sharedName`, `sharedPhone`,
   `sharedEmail` (те же правила, что у `ContactRequest`).
 - `VacancyBroadcast` — рассылка вакансии учреждением своим подтверждённым студентам (ТЗ «Студенты у компании»,

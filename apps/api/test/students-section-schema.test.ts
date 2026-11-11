@@ -60,15 +60,26 @@ describe.skipIf(!DB_AVAILABLE)('students section and vacancy broadcasts: databas
     })
   })
 
-  it('makes a JOB always paid', async () => {
+  it('makes a JOB always paid, with a salary «from–to» and no stipend; a salary only on a JOB', async () => {
     const s = await setup('stu-job')
     await TenantContext.forTenant(s.tenantId, async () => {
-      const job = (paid: boolean) => db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Dasturchi', regionId: s.region.id, format: 'HYBRID', seats: 1, paid, stipendMinor: paid ? 8_000_000_00n : null } })
-      await expect(job(false)).rejects.toThrow(/Vacancy_job_paid_check/)
-      const ok = await job(true)
-      await expect(db.vacancy.update({ where: { id: ok.id }, data: { paid: false } })).rejects.toThrow(/Vacancy_job_paid_check/)
-      // Practice and internship may still be unpaid.
+      const job = (data: { paid?: boolean; salaryFromMinor?: bigint | null; salaryToMinor?: bigint | null; stipendMinor?: bigint | null }) =>
+        db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Dasturchi', regionId: s.region.id, format: 'HYBRID', seats: 1, paid: true, ...data } })
+      await expect(job({ paid: false })).rejects.toThrow(/Vacancy_job_paid_check/)
+      await expect(job({ stipendMinor: 1_000_000_00n })).rejects.toThrow(/Vacancy_pay_by_kind_check/)
+      await expect(job({ salaryFromMinor: 0n })).rejects.toThrow(/Vacancy_salary_check/)
+      await expect(job({ salaryToMinor: 9_000_000_00n })).rejects.toThrow(/Vacancy_salary_check/)
+      await expect(job({ salaryFromMinor: 9_000_000_00n, salaryToMinor: 8_000_000_00n })).rejects.toThrow(/Vacancy_salary_check/)
+
+      await job({}) // salary not stated
+      await job({ salaryFromMinor: 8_000_000_00n }) // one amount
+      const range = await job({ salaryFromMinor: 8_000_000_00n, salaryToMinor: 12_000_000_00n })
+      await expect(db.vacancy.update({ where: { id: range.id }, data: { paid: false } })).rejects.toThrow(/Vacancy_job_paid_check/)
+
+      // Practice and internship: unpaid or with a stipend, never with a salary.
       expect(s.vacancy.paid).toBe(false)
+      await db.vacancy.update({ where: { id: s.vacancy.id }, data: { paid: true, stipendMinor: 1_500_000_00n } })
+      await expect(db.vacancy.update({ where: { id: s.vacancy.id }, data: { salaryFromMinor: 1_500_000_00n } })).rejects.toThrow(/Vacancy_pay_by_kind_check/)
     })
   })
 

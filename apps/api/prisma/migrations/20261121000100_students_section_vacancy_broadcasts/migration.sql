@@ -10,9 +10,10 @@
 -- 5: no new index for selecting students: measured on a load copy (200 000 students, 96 000 confirmed), the existing
 --    ones serve it — a company's institution blocks 0.16 s, one institution's page of students 1.4 ms, a broadcast
 --    preview 0.5 ms; a partial index on confirmed students saved nothing (0.14 s).
--- Also: a JOB is always paid (ТЗ 5) — CHECK "Vacancy_job_paid_check".
--- Compatible with the code of the previous release: new tables, one index swapped for a wider one (the GRADUATE rule
--- is unchanged), a check that no existing row can break (no JOB vacancies yet).
+-- Also, «Работа» (ТЗ 5): salary columns «from–to» (the ТЗ leaves «one amount or a range» open; one amount is «from»
+--    alone), a salary only on a JOB and a stipend never on one, a JOB always paid (Нозим, 11.11).
+-- Compatible with the code of the previous release: new tables and nullable columns, one index swapped for a wider one
+-- (the GRADUATE rule is unchanged), checks that every existing row passes (no JOB vacancies, no salaries yet).
 -- One transaction with a lock timeout (security review 11.11, №87 and №122; docs/migrations.md).
 BEGIN;
 SET LOCAL lock_timeout = '3s';
@@ -78,7 +79,17 @@ ALTER TABLE "VacancyBroadcastRecipient" ADD CONSTRAINT "VacancyBroadcastRecipien
 ALTER TABLE "VacancyBroadcastRecipient" ADD CONSTRAINT "VacancyBroadcastRecipient_broadcastId_vacancyId_fkey" FOREIGN KEY ("broadcastId", "vacancyId") REFERENCES "VacancyBroadcast"("id", "vacancyId") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "VacancyBroadcastRecipient" ADD CONSTRAINT "VacancyBroadcastRecipient_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- ТЗ 5: «Работа» is always paid.
+-- ТЗ 5: «Работа».
+ALTER TABLE "Vacancy" ADD COLUMN "salaryFromMinor" BIGINT,
+ADD COLUMN "salaryToMinor" BIGINT;
 ALTER TABLE "Vacancy" ADD CONSTRAINT "Vacancy_job_paid_check" CHECK ("kind" <> 'JOB' OR "paid");
+ALTER TABLE "Vacancy" ADD CONSTRAINT "Vacancy_pay_by_kind_check" CHECK (
+  ("kind" = 'JOB' OR ("salaryFromMinor" IS NULL AND "salaryToMinor" IS NULL))
+  AND ("kind" <> 'JOB' OR "stipendMinor" IS NULL)
+);
+ALTER TABLE "Vacancy" ADD CONSTRAINT "Vacancy_salary_check" CHECK (
+  ("salaryFromMinor" IS NULL OR "salaryFromMinor" > 0)
+  AND ("salaryToMinor" IS NULL OR ("salaryFromMinor" IS NOT NULL AND "salaryToMinor" >= "salaryFromMinor"))
+);
 
 COMMIT;
