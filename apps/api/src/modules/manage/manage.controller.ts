@@ -17,7 +17,8 @@ import { ManageService } from './manage.service'
 
 const body = <T>(schema: z.ZodType<T>) => new ZodValidationPipe(schema)
 const GenerateDto = z.object({ days: z.number().int().min(1).max(90).default(28) }).strict()
-const SiteDto = z.object({ data: z.unknown(), version: z.number().int().optional() }).strict()
+/** `version`: the one the admin loaded — required, so a save never overwrites changes it has not seen (Н18). */
+const SiteDto = z.object({ data: z.unknown(), version: z.number().int().positive() }).strict()
 const QueueParam = z.enum([QUEUES.sms, QUEUES.notifications, QUEUES.sessions, QUEUES.outbox, QUEUES.maintenance])
 
 /** Teacher Studio and Super Admin write API. */

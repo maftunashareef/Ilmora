@@ -107,7 +107,7 @@ describe('presets: internal until enabled (stubbed storage)', () => {
         siteConfig: { findUnique: async () => ({ data: storedData, version: 3 }) },
         package: { findMany: async () => [] },
       },
-      tx: async (fn: (tx: unknown) => Promise<unknown>) => fn({ siteConfig: { update: async ({ data }: { data: { data: { presets?: Preset[] } } }) => (savedList.push(data.data), { version: 4 }) } }),
+      tx: async (fn: (tx: unknown) => Promise<unknown>) => fn({ siteConfig: { updateMany: async ({ data }: { data: { data: { presets?: Preset[] } } }) => (savedList.push(data.data), { count: 1 }) } }),
     }
     return new SiteService(prisma as never, { record: async () => undefined } as never)
   }

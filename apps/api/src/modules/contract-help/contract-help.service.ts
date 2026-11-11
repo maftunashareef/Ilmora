@@ -10,6 +10,7 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { DIRECTION_WITH_MAIN, isUniqueViolation, mainOf, regionIdByRef } from '../registry/registry.mappers'
 import { StudentsService } from '../students/students.service'
 import type { ContractHelpInput, ContractHelpQuery } from './contract-help.schemas'
+import { dateColumnToIso } from '../../common/time'
 
 const OPEN = ['ACTIVE', 'INTERESTED'] as const
 const place = (r: { id: string; name: unknown } | null) => (r ? { id: r.id, name: r.name as L } : null)
@@ -178,7 +179,7 @@ export class ContractHelpService {
   }
 
   private isMinor(birthDate: Date | null, now: Date) {
-    const age = birthDate ? ageOn(birthDate.toISOString().slice(0, 10), now) : null
+    const age = birthDate ? ageOn(dateColumnToIso(birthDate), now) : null
     return age !== null && age < 18
   }
 
@@ -198,7 +199,7 @@ export class ContractHelpService {
       const inst = p.institution
       return {
         id: r.id, number: r.id.slice(-6).toUpperCase(), status: r.status as ContractHelpCardDto['status'],
-        age: p.birthDate ? ageOn(p.birthDate.toISOString().slice(0, 10), now) : null,
+        age: p.birthDate ? ageOn(dateColumnToIso(p.birthDate), now) : null,
         region: place(p.region),
         institution: inst ? { id: inst.id, name: inst.name, type: inst.type, region: place(inst.region) } : null,
         direction: p.direction ? mainOf(p.direction) : null,

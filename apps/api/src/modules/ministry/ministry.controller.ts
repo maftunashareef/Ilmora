@@ -9,6 +9,7 @@ import { AuditService } from '../audit/audit.service'
 import { MinistryRegistryService } from './ministry-registry.service'
 import { MinistryStatsService } from './ministry-stats.service'
 import { ExportQuery, MinistryCompaniesQuery, MinistryInstitutionsQuery, StatsQuery } from './ministry.schemas'
+import { todayLocal } from '../../common/time'
 
 const isL = (v: unknown): v is L => !!v && typeof v === 'object' && 'ru' in (v as object)
 
@@ -34,7 +35,7 @@ export class MinistryController {
     const file = buildXlsx(t.title[lang], header, rows)
     await this.audit.record({ action: 'ministry.export', entityType: 'StatsTable', entityId: table, after: { filters, lang, rows: rows.length } })
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    res.setHeader('Content-Disposition', `attachment; filename="ilmora-${table}-${new Date().toISOString().slice(0, 10)}.xlsx"`)
+    res.setHeader('Content-Disposition', `attachment; filename="ilmora-${table}-${todayLocal()}.xlsx"`)
     res.setHeader('Cache-Control', 'no-store')
     res.send(file)
   }

@@ -12,6 +12,7 @@ import { SubscriptionService } from '../enrollment/subscription.service'
 import { SmsService } from '../sms/sms.service'
 import { OutboxService } from './outbox.service'
 import { PaymentsService } from './payments.service'
+import { humanDay } from '../../common/time'
 
 /**
  * Worker: drains the transactional outbox (receipts, refund notices) every 20 s, expires stale payments and runs the
@@ -97,7 +98,8 @@ export class OutboxProcessor extends WorkerHost implements OnModuleInit {
     const claimed = await this.prisma.client.receipt.updateMany({ where: { id: receipt.id, deliveredAt: null }, data: { deliveredAt: new Date(), channel: 'sms' } })
     if (claimed.count !== 1) return
     const lang = payment.student.preferredLang
-    const period = `${payment.periodStart.toISOString().slice(0, 10)} – ${payment.periodEnd.toISOString().slice(0, 10)}`
+    // The days the student reads, on the Tashkent calendar: a payment at 02:00 on 1 December is «01.12», not «30.11» (Н7, №100).
+    const period = `${humanDay(payment.periodStart)} – ${humanDay(payment.periodEnd)}`
     try {
       await this.sms.enqueue({
         tenantId,

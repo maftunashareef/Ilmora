@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppError } from '../../common/errors'
-import { dateColumnToIso } from '../../common/time'
+import { dateColumnToIso, todayLocal } from '../../common/time'
 import type { RefundReason, RefundRequestStatus, RefundSource } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
@@ -245,7 +245,7 @@ export class RefundsService {
           reminded += await this.notifications.notify({
             tenantId: t.id, userIds: finance, type: 'refund.due',
             params: { studentName: r.student.displayName, requestId: r.id, amount: formatSom(r.approvedMinor ?? r.requestedMinor), dueAt: r.decisionDueAt.toISOString(), overdue: r.decisionDueAt < now, queuePath: refundQueuePath(r.id) },
-            dedupeKey: `refund-due:${r.id}:${now.toISOString().slice(0, 10)}`,
+            dedupeKey: `refund-due:${r.id}:${todayLocal(now)}`,
           }) > 0 ? 1 : 0
         }
       })
