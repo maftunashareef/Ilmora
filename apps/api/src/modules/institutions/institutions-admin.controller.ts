@@ -10,6 +10,17 @@ import { InstitutionReviewService } from './institution-review.service'
 export const RejectInput = z
   .object({ reason: z.string().transform((s) => s.normalize('NFC').trim()).pipe(z.string().min(5).max(1000).refine((s) => !hasMarkup(s), { message: 'Must not contain < or >' })) })
   .strict()
+
+/**
+ * The review decision may carry `submittedAt` of the change the reviewer looked at (review 11.11): if the
+ * representative saved another change since, the decision is refused with 409 `review_changed` instead of approving
+ * values nobody has seen. Without it the decision still applies only to the change as it was when read.
+ */
+const SubmittedAt = z.string().datetime({ offset: true }).optional()
+export const DecideInput = z.object({ submittedAt: SubmittedAt }).strict().default({})
+export type DecideInput = z.infer<typeof DecideInput>
+export const ReviewRejectInput = RejectInput.extend({ submittedAt: SubmittedAt }).strict()
+export type ReviewRejectInput = z.infer<typeof ReviewRejectInput>
 export type RejectInput = z.infer<typeof RejectInput>
 
 const page = z.coerce.number().int().min(1).max(10_000).default(1)
@@ -40,9 +51,9 @@ export class InstitutionsAdminController {
   @Get() search(@Query(new ZodValidationPipe(AdminInstitutionsQuery)) q: AdminInstitutionsQuery) { return this.review.search(q) }
   @Get('reviews') queue() { return this.review.queue() }
   @Get(':id') detail(@Param('id') id: string) { return this.review.detail(id) }
-  @Post(':id/approve') approve(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.review.approve(t, a, id) }
+  @Post(':id/approve') approve(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(DecideInput)) dto: DecideInput) { return this.review.approve(t, a, id, dto.submittedAt) }
   @Post(':id/block') block(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(RejectInput)) dto: RejectInput) { return this.review.setBlocked(t, a, id, true, dto.reason) }
   @Post(':id/unblock') unblock(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string) { return this.review.setBlocked(t, a, id, false) }
   @Post(':id/release') release(@CurrentTenantId() t: string, @Param('id') id: string, @Body(new ZodValidationPipe(RejectInput)) dto: RejectInput) { return this.review.release(t, id, dto.reason) }
-  @Post(':id/reject') reject(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(RejectInput)) dto: RejectInput) { return this.review.reject(t, a, id, dto.reason) }
+  @Post(':id/reject') reject(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(ReviewRejectInput)) dto: ReviewRejectInput) { return this.review.reject(t, a, id, dto.reason, dto.submittedAt) }
 }

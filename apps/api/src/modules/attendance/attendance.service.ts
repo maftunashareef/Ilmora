@@ -162,26 +162,33 @@ export class AttendanceService {
   async setStatus(sessionId: string, status: 'scheduled' | 'cancelled' | 'completed', actor: RequestActor, reason?: string) {
     const session = await this.sessionForWrite(sessionId, actor)
     const next = status.toUpperCase() as 'SCHEDULED' | 'CANCELLED' | 'COMPLETED'
-    const updated = await this.prisma.client.lessonSession.update({
-      where: { id: session.id },
-      data: {
-        status: next,
-        ...(next === 'CANCELLED'
-          ? { attendanceOpen: false, attendanceClosedAt: new Date(), attendanceTokenHash: null, attendanceTokenExpiresAt: null, cancelledAt: new Date(), cancelledById: actor.id, ...(reason ? { note: reason } : {}) }
-          : { cancelledAt: null, cancelledById: null }),
-      },
+    const data = {
+      status: next,
+      ...(next === 'CANCELLED'
+        ? { attendanceOpen: false, attendanceClosedAt: new Date(), attendanceTokenHash: null, attendanceTokenExpiresAt: null, cancelledAt: new Date(), cancelledById: actor.id, ...(reason ? { note: reason } : {}) }
+        : { cancelledAt: null, cancelledById: null }),
+    }
+    // The change of status and the lessons it moves happen together, and only from the status that was read: two
+    // presses at once (cancel twice, restore twice) move the lessons once.
+    const changed = await this.prisma.tx(async (tx) => {
+      const claimed = await tx.lessonSession.updateMany({ where: { id: session.id, status: session.status }, data })
+      if (claimed.count !== 1) return false
+      if (next === 'CANCELLED' && session.status !== 'CANCELLED') {
+        // Lessons used by check-ins on a lesson that is now cancelled go back to lesson-based subscriptions.
+        const counted = await tx.attendanceRecord.findMany({ where: { sessionId: session.id, lessonCounted: true }, select: { id: true, studentId: true } })
+        for (const r of counted) await this.subscriptions.releaseLesson(tx, session.tenantId, r.studentId, r.id)
+      }
+      if (session.status === 'CANCELLED' && next !== 'CANCELLED') {
+        // The lesson is back: the check-ins kept on it take their lessons again — cancel and restore never give a lesson
+        // away for free (security review 10.11 №40).
+        const present = await tx.attendanceRecord.findMany({ where: { sessionId: session.id, status: 'PRESENT', lessonCounted: false }, select: { id: true, studentId: true } })
+        for (const r of present) await this.subscriptions.consumeLesson(tx, session.tenantId, r.studentId, r.id)
+      }
+      return true
     })
-    if (next === 'CANCELLED' && session.status !== 'CANCELLED') {
-      // Lessons used by check-ins on a lesson that is now cancelled go back to lesson-based subscriptions.
-      const counted = await this.prisma.client.attendanceRecord.findMany({ where: { sessionId: session.id, lessonCounted: true }, select: { id: true, studentId: true } })
-      if (counted.length) await this.prisma.tx(async (tx) => { for (const r of counted) await this.subscriptions.releaseLesson(tx, session.tenantId, r.studentId, r.id) })
-    }
-    if (session.status === 'CANCELLED' && next !== 'CANCELLED') {
-      // The lesson is back: the check-ins kept on it take their lessons again — cancel and restore never give a lesson
-      // away for free (security review 10.11 №40).
-      const present = await this.prisma.client.attendanceRecord.findMany({ where: { sessionId: session.id, status: 'PRESENT', lessonCounted: false }, select: { id: true, studentId: true } })
-      if (present.length) await this.prisma.tx(async (tx) => { for (const r of present) await this.subscriptions.consumeLesson(tx, session.tenantId, r.studentId, r.id) })
-    }
+    const updated = await this.prisma.client.lessonSession.findFirstOrThrow({ where: { id: session.id } })
+    // Someone else changed the lesson a moment earlier: its current state is the answer, nothing is moved twice.
+    if (!changed) return { session: SessionsService.toDto(updated) }
     await this.audit.record({ action: 'session.status', entityType: 'LessonSession', entityId: session.id, before: { status: session.status }, after: { status: next }, reason })
     await this.events.publish(session.id, { type: 'session', session: SessionsService.toDto(updated) })
     if (session.status !== next && (next === 'CANCELLED' || session.status === 'CANCELLED')) {

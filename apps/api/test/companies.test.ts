@@ -175,8 +175,14 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       expect((await db.user.findUniqueOrThrow({ where: { id: squatter.id } })).companyId).toBeNull()
       expect(sent).toEqual([expect.objectContaining({ type: 'registry.released', userIds: [squatter.id] })])
 
-      // The Super Admin releases the new holder; the STIR is free for the next one.
+      // The Super Admin releases the new holder; the STIR is free for the next one. A company is never handed over
+      // (decision 11.11): what students opened to it closes — the next claimant gets none of it.
+      const student = await ctx.makeStudent(s.tenantId)
+      const opened = await db.contactRequest.create({ data: { tenantId: s.tenantId, companyId: first.id, userId: student.id, source: 'GRADUATE', status: 'ACCEPTED', decidedAt: new Date(), sharedName: 'Aziz', sharedPhone: '+998900000000' } })
+      await db.studentConsent.create({ data: { tenantId: s.tenantId, userId: student.id, kind: 'COMPANY_CONTACTS', companyId: first.id, textVersion: 'contact-request', givenAt: new Date() } })
       await review.release(s.tenantId, first.id, 'Not the company representative')
+      expect(await db.contactRequest.findUniqueOrThrow({ where: { id: opened.id } })).toMatchObject({ status: 'WITHDRAWN', sharedName: null, sharedPhone: null })
+      expect(await db.studentConsent.count({ where: { companyId: first.id, revokedAt: null } })).toBe(0)
       expect((await db.user.findUniqueOrThrow({ where: { id: real.id } })).companyId).toBeNull()
       await expect(review.release(s.tenantId, first.id, 'Again, nobody')).rejects.toMatchObject({ code: 'not_claimed' })
       expect(await service.create(s.tenantId, await s.representative(), { stir: '305555555', name: 'Uçinçi' })).toMatchObject({ id: first.id, name: 'Uçinçi' })
@@ -286,6 +292,20 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       await expect(guard.canActivate(ctxFor)).resolves.toBe(true)
       // A new certificate goes back to the first-review path; the workspace stays open.
       expect((await s.upload(rep, PNG, 'image/png')).profile).toMatchObject({ status: 'PENDING', workspaceOpen: true })
+
+      // Review 11.11: a rejection of the re-review with a waiting change does not approve the waiting certificate.
+      await service.update(s.tenantId, rep, { name: 'Mebel Plus Pro' })
+      expect(await review.reject(s.tenantId, s.admin, item.id, 'The certificate is not readable')).toMatchObject({ status: 'REJECTED', name: 'Mebel Plus Group', pendingChanges: null })
+
+      // A change saved after the reviewer opened it is not approved blindly: the decision carries what was seen.
+      await s.upload(rep, PDF)
+      await service.update(s.tenantId, rep, { name: 'Mebel A' })
+      const seen = (await review.detail(item.id)).profile.submittedAt!
+      await new Promise((r) => setTimeout(r, 5))
+      await service.update(s.tenantId, rep, { name: 'Mebel B' })
+      await expect(review.approve(s.tenantId, s.admin, item.id, seen)).rejects.toMatchObject({ code: 'review_changed' })
+      const fresh = (await review.detail(item.id)).profile.submittedAt!
+      expect(await review.approve(s.tenantId, s.admin, item.id, fresh)).toMatchObject({ name: 'Mebel B', status: 'APPROVED' })
     })
   })
 

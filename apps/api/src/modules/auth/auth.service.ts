@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { formatUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { AppError } from '../../common/errors'
@@ -67,6 +67,11 @@ export class AuthService {
     const user = await this.prisma.client.user.findUnique({ where: { tenantId_phoneE164: { tenantId, phoneE164 } }, include: USER_INCLUDE })
     if (!user) throw AppError.notFound('Account')
     if (!user.isActive) throw AppError.forbidden('Account disabled', { code: 'account_disabled' })
+    // The owners, finance and the ministry never reset by SMS — with or without the authenticator key on the server: their
+    // password is reset by the Super Admin (review 11.11; the SMS path used to open for them when the key was not set).
+    if (user.isOwner || user.roles.some((r) => r === 'PLATFORM_ADMIN' || r === 'FINANCE_ADMIN' || r === 'MINISTRY')) {
+      throw new AppError('password_reset_by_admin', 'This account\'s password is reset by the Super Admin', HttpStatus.FORBIDDEN)
+    }
     this.mfa.refuseOtherSignIn(user)
     if (user.login && input.newPassword.toLowerCase() === user.login) throw AppError.invalid('password_is_login', 'The password must not be the login')
     const updated = await this.prisma.client.user.update({

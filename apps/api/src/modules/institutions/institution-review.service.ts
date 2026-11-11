@@ -106,13 +106,13 @@ export class InstitutionReviewService {
     }
   }
 
-  async approve(tenantId: string, actor: RequestActor, id: string): Promise<InstitutionPassportDto> {
-    const current = await this.pending(id)
+  async approve(tenantId: string, actor: RequestActor, id: string, seenSubmittedAt?: string): Promise<InstitutionPassportDto> {
+    const current = await this.pending(id, seenSubmittedAt)
     const now = new Date()
     if (current.pendingChanges) return this.decideChange(tenantId, actor, id, { ...current, pendingChanges: current.pendingChanges }, true)
     // Only while still PENDING: two reviewers deciding at once — one decision counts.
     const moved = await this.prisma.client.institution.updateMany({
-      where: { id, status: 'PENDING' },
+      where: { id, status: 'PENDING', submittedAt: current.submittedAt },
       data: { status: 'APPROVED', approvedAt: current.approvedAt ?? now, reviewedAt: now, reviewedById: actor.id, rejectReason: null },
     })
     if (moved.count !== 1) throw notPending()
@@ -123,12 +123,12 @@ export class InstitutionReviewService {
     return this.institutions.passportOf(id)
   }
 
-  async reject(tenantId: string, actor: RequestActor, id: string, reason: string): Promise<InstitutionPassportDto> {
-    const current = await this.pending(id)
+  async reject(tenantId: string, actor: RequestActor, id: string, reason: string, seenSubmittedAt?: string): Promise<InstitutionPassportDto> {
+    const current = await this.pending(id, seenSubmittedAt)
     const now = new Date()
     if (current.pendingChanges) return this.decideChange(tenantId, actor, id, { ...current, pendingChanges: current.pendingChanges }, false, reason)
     const moved = await this.prisma.client.institution.updateMany({
-      where: { id, status: 'PENDING' },
+      where: { id, status: 'PENDING', submittedAt: current.submittedAt },
       data: { status: 'REJECTED', reviewedAt: now, reviewedById: actor.id, rejectReason: reason },
     })
     if (moved.count !== 1) throw notPending()
@@ -148,17 +148,17 @@ export class InstitutionReviewService {
    * STIR must still be free — the unique index answers, 409 `stir_taken`); rejection drops them. Either way the record
    * stays APPROVED with the values the ministry and the companies saw; of two reviewers at once one decision counts.
    */
-  private async decideChange(tenantId: string, actor: RequestActor, id: string, current: { name: string; representativeId: string | null; pendingChanges: InstitutionPendingChanges }, accept: boolean, reason?: string): Promise<InstitutionPassportDto> {
+  private async decideChange(tenantId: string, actor: RequestActor, id: string, current: { name: string; status: string; submittedAt: Date | null; representativeId: string | null; pendingChanges: InstitutionPendingChanges }, accept: boolean, reason?: string): Promise<InstitutionPassportDto> {
     const now = new Date()
     const p = current.pendingChanges
     const names = accept && p.name ? await this.prisma.client.institution.findFirstOrThrow({ where: { id }, select: { nameRu: true, formerName: true } }) : null
     const apply = accept ? { ...p, ...(p.name ? { searchKey: registrySearchKey(p.name), searchText: registrySearchText(p.name, names!.nameRu, names!.formerName) } : {}) } : {}
     try {
       const moved = await this.prisma.client.institution.updateMany({
-        where: { id, pendingChanges: { not: Prisma.DbNull } },
+        where: { id, pendingChanges: { not: Prisma.DbNull }, submittedAt: current.submittedAt },
         data: { ...apply, pendingChanges: Prisma.DbNull, status: 'APPROVED', reviewedAt: now, reviewedById: actor.id, rejectReason: accept ? null : (reason ?? null) },
       })
-      if (moved.count !== 1) throw notPending()
+      if (moved.count !== 1) throw reviewChanged()
     } catch (err) {
       if (isUniqueViolation(err)) throw AppError.conflict('stir_taken', 'Another institution is registered with this STIR')
       throw err
@@ -188,11 +188,12 @@ export class InstitutionReviewService {
     return this.institutions.passportOf(id)
   }
 
-  private async pending(id: string) {
-    const row = await this.prisma.client.institution.findFirst({ where: { id, mergedIntoId: null }, select: { name: true, status: true, approvedAt: true, pendingChanges: true, representative: { select: { id: true } } } })
+  private async pending(id: string, seenSubmittedAt?: string) {
+    const row = await this.prisma.client.institution.findFirst({ where: { id, mergedIntoId: null }, select: { name: true, status: true, approvedAt: true, submittedAt: true, pendingChanges: true, representative: { select: { id: true } } } })
     if (!row) throw AppError.notFound('Institution')
     if (row.status !== 'PENDING' && !row.pendingChanges) throw notPending()
-    return { name: row.name, approvedAt: row.approvedAt, representativeId: row.representative?.id ?? null, pendingChanges: (row.pendingChanges as InstitutionPendingChanges | null) ?? null }
+    if (seenSubmittedAt && row.submittedAt?.toISOString() !== new Date(seenSubmittedAt).toISOString()) throw reviewChanged()
+    return { name: row.name, status: row.status, approvedAt: row.approvedAt, submittedAt: row.submittedAt, representativeId: row.representative?.id ?? null, pendingChanges: (row.pendingChanges as InstitutionPendingChanges | null) ?? null }
   }
 
   private async tell(tenantId: string, userId: string | null, type: 'institution.approved' | 'institution.rejected', params: Record<string, unknown>, dedupeKey: string) {
@@ -202,3 +203,5 @@ export class InstitutionReviewService {
 }
 
 const notPending = () => AppError.conflict('not_pending', 'The profile is not waiting for a decision')
+/** The representative saved another change after the reviewer read it, or another reviewer decided first (review 11.11). */
+const reviewChanged = () => AppError.conflict('review_changed', 'The change was edited or decided meanwhile; open it again')

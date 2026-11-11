@@ -27,7 +27,7 @@ async function main() {
       const user = await prisma.user.findFirst({ where: { login, deletedAt: null }, include: { teacherProfile: { select: { id: true } } } })
       if (!user) { console.log(`[cleanup] ${login}: not found or already removed`); continue }
       await prisma.$transaction(async (tx) => {
-        if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { deletedAt: now, channelActive: false } })
+        if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { deletedAt: now, channelActive: false }, includeDeleted: true } as never)
         await tx.refreshSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: now, revokedReason: 'cleanup' } })
         await tx.user.update({ where: { id: user.id }, data: { isActive: false, deletedAt: now } })
         await tx.auditEvent.create({ data: { tenantId: user.tenantId, actorId: null, actorRoles: [], action: 'user.cleanup', entityType: 'User', entityId: user.id, after: { login, reason: 'test account removed by cleanup command' } } })

@@ -12,8 +12,8 @@ import { SmsService } from '../sms/sms.service'
 import { TenantsService } from '../tenants/tenants.service'
 import { SessionsService } from './sessions.service'
 
-/** A daily run still «RUNNING» after this long was interrupted and may be run again (Н13). */
-export const STALE_RUN_MS = 30 * 60_000
+/** A daily run still «RUNNING» after this long was interrupted and may be run again (Н13); a real run takes minutes. */
+export const STALE_RUN_MS = 3 * 3_600_000
 
 /**
  * Worker for the `sessions` queue.
@@ -96,10 +96,10 @@ export class SessionsProcessor extends WorkerHost implements OnModuleInit {
     }
     try {
       const result = await TenantContext.system(() => fn(date))
-      await TenantContext.system(() => this.prisma.client.jobRun.update({ where: { id: run.id }, data: { status: 'SUCCEEDED', finishedAt: new Date(), result: result as object } }))
+      await TenantContext.system(() => this.prisma.client.jobRun.updateMany({ where: { id: run.id }, data: { status: 'SUCCEEDED', finishedAt: new Date(), result: result as object } }))
       return result
     } catch (err) {
-      await TenantContext.system(() => this.prisma.client.jobRun.update({ where: { id: run.id }, data: { status: 'FAILED', finishedAt: new Date(), error: String((err as Error).message).slice(0, 500) } }))
+      await TenantContext.system(() => this.prisma.client.jobRun.updateMany({ where: { id: run.id }, data: { status: 'FAILED', finishedAt: new Date(), error: String((err as Error).message).slice(0, 500) } }))
       throw err
     }
   }

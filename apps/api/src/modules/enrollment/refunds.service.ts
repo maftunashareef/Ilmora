@@ -134,7 +134,11 @@ export class RefundsService {
 
   /** The student takes a request back while it waits for the decision. Freed seats are not given back. */
   async withdraw(tenantId: string, studentId: string, id: string) {
-    const done = await this.prisma.client.refundRequest.updateMany({ where: { tenantId, id, studentId, status: 'PENDING' }, data: { status: 'WITHDRAWN', openKey: null } })
+    const done = await this.prisma.tx(async (tx) => {
+      const head = await tx.refundRequest.findFirst({ where: { tenantId, id, studentId }, select: { paymentId: true } })
+      if (head) await tx.$queryRawUnsafe(`SELECT id FROM "Payment" WHERE id = $1 FOR UPDATE`, head.paymentId)
+      return tx.refundRequest.updateMany({ where: { tenantId, id, studentId, status: 'PENDING' }, data: { status: 'WITHDRAWN', openKey: null } })
+    })
     if (done.count !== 1) throw AppError.conflict('refund_state', 'This request can no longer be withdrawn')
     await this.audit.record({ tenantId, action: 'refund.withdrawn', entityType: 'RefundRequest', entityId: id })
     return { ok: true }
@@ -176,7 +180,9 @@ export class RefundsService {
       if (r.status !== 'PENDING') throw AppError.conflict('refund_state', 'Only a request waiting for the decision can be approved')
       const left = r.payment.amountMinor - r.payment.refundedMinor
       if (approvedMinor <= 0n || approvedMinor > left) throw AppError.invalid('refund_amount', `The amount must be more than 0 and at most ${left}`, { maxMinor: left.toString() })
-      await tx.refundRequest.update({ where: { id }, data: { status: 'APPROVED', approvedMinor, decidedAt: new Date(), decidedById: actorId, decisionNote: note?.trim() || null } })
+      // Conditional: a withdrawal committed meanwhile wins, the approval is refused (no APPROVED row without its openKey).
+      const done = await tx.refundRequest.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'APPROVED', approvedMinor, decidedAt: new Date(), decidedById: actorId, decisionNote: note?.trim() || null } })
+      if (done.count !== 1) throw AppError.conflict('refund_state', 'Only a request waiting for the decision can be approved')
       await this.audit.record({ tx, tenantId, action: 'refund.approved', entityType: 'RefundRequest', entityId: id, after: { approvedMinor: approvedMinor.toString(), requestedMinor: r.requestedMinor.toString() }, reason: note })
       await this.notifications.notify({ tenantId, userIds: [r.studentId], type: 'refund.approved', params: { amountMinor: approvedMinor.toString(), requestId: id }, dedupeKey: `refund-approved:${id}` }, tx)
       return { ok: true }
@@ -187,7 +193,8 @@ export class RefundsService {
     return this.prisma.tx(async (tx) => {
       const r = await this.lockedRequest(tx, tenantId, id)
       if (!OPEN.includes(r.status)) throw AppError.conflict('refund_state', 'This request is already closed')
-      await tx.refundRequest.update({ where: { id }, data: { status: 'REJECTED', openKey: null, decidedAt: new Date(), decidedById: actorId, decisionNote: note.trim() } })
+      const done = await tx.refundRequest.updateMany({ where: { id, status: { in: OPEN } }, data: { status: 'REJECTED', openKey: null, decidedAt: new Date(), decidedById: actorId, decisionNote: note.trim() } })
+      if (done.count !== 1) throw AppError.conflict('refund_state', 'This request is already closed')
       await this.audit.record({ tx, tenantId, action: 'refund.rejected', entityType: 'RefundRequest', entityId: id, reason: note })
       await this.notifications.notify({ tenantId, userIds: [r.studentId], type: 'refund.rejected', params: { requestId: id, note: note.trim() }, dedupeKey: `refund-rejected:${id}` }, tx)
       return { ok: true }
@@ -205,6 +212,9 @@ export class RefundsService {
       if (r.status !== 'APPROVED' || r.approvedMinor == null) throw AppError.conflict('refund_state', 'Only an approved request can be marked as paid')
       const left = r.payment.amountMinor - r.payment.refundedMinor
       if (r.approvedMinor > left) throw AppError.conflict('refund_amount', 'More than is left of the payment', { maxMinor: left.toString() })
+      const now = new Date()
+      const claimed = await tx.refundRequest.updateMany({ where: { id, status: 'APPROVED' }, data: { status: 'PAID', openKey: null, paidAt: now, paidById: actorId, providerRef: providerRef.trim() } })
+      if (claimed.count !== 1) throw AppError.conflict('refund_state', 'Only an approved request can be marked as paid')
       const provider = (r.payment.provider ?? 'MANUAL').toLowerCase()
       await this.ledger.post(tx, {
         tenantId, kind: 'PAYMENT_REFUNDED', referenceType: 'RefundRequest', referenceId: r.id, createdById: actorId, reason: providerRef,
@@ -215,9 +225,7 @@ export class RefundsService {
         ],
       })
       const refundedMinor = r.payment.refundedMinor + r.approvedMinor
-      const now = new Date()
       await tx.payment.update({ where: { id: r.paymentId }, data: { refundedMinor, ...(refundedMinor === r.payment.amountMinor ? { state: 'REFUNDED' as const, refundedAt: now } : {}) } })
-      await tx.refundRequest.update({ where: { id }, data: { status: 'PAID', openKey: null, paidAt: now, paidById: actorId, providerRef: providerRef.trim() } })
       await this.audit.record({ tx, tenantId, action: 'refund.paid', entityType: 'RefundRequest', entityId: id, after: { amountMinor: r.approvedMinor.toString(), paymentRefundedMinor: refundedMinor.toString(), providerRef } })
       await this.notifications.notify({ tenantId, userIds: [r.studentId], type: 'refund.paid', params: { amountMinor: r.approvedMinor.toString(), requestId: id }, dedupeKey: `refund-paid:${id}` }, tx)
       return { ok: true, paymentRefundedMinor: refundedMinor.toString(), paymentState: refundedMinor === r.payment.amountMinor ? 'REFUNDED' : r.payment.state }
@@ -256,7 +264,7 @@ export class RefundsService {
    * every course gets the same share — unused ÷ all lessons — of its part of the latest payment.
    */
   private async plan(tx: TransactionClient, tenantId: string, studentId: string, input: RefundInput, now: Date): Promise<Plan> {
-    const sub = await tx.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE'] } } })
+    const sub = await tx.subscription.findFirst({ where: { tenantId, studentId, status: { in: ['ACTIVE', 'PAST_DUE'] } }, include: { package: { select: { lessonCount: true } } } })
     if (!sub) throw AppError.notFound('Subscription')
     const active = await tx.enrollment.findMany({ where: { subscriptionId: sub.id, status: 'ACTIVE' }, include: { group: true, course: { select: { priceMinor: true } } } })
     const ids = input.enrollmentIds?.length ? [...new Set(input.enrollmentIds)] : active.map((e) => e.id)
@@ -265,10 +273,16 @@ export class RefundsService {
     const endsCourses = ENDS_COURSE.has(input.reason)
     if (sub.kind === 'LESSONS' && chosen.length !== active.length) throw AppError.invalid('refund_whole_package', 'A lesson package is refused whole: choose all its courses')
 
-    let payments = await tx.payment.findMany({ where: { subscriptionId: sub.id, state: 'PAID', amountMinor: { gt: 0n } }, orderBy: { periodStart: 'desc' }, include: { lines: true } })
+    // A payment made with Payme's test key is no money (security review №39): nothing to return from it.
+    let payments = await tx.payment.findMany({ where: { subscriptionId: sub.id, state: 'PAID', amountMinor: { gt: 0n }, transactions: { none: { sandbox: true } } }, orderBy: { periodStart: 'desc' }, include: { lines: true } })
     payments = payments.filter((p) => p.refundedMinor < p.amountMinor)
-    if (sub.kind === 'LESSONS') payments = payments.slice(0, 1)
-    else payments = payments.filter((p) => p.periodEnd > now && (endsCourses || p.periodStart <= now))
+    if (sub.kind !== 'LESSONS') payments = payments.filter((p) => p.periodEnd > now && (endsCourses || p.periodStart <= now))
+    // A lesson package: lessons not held do not use up the balance, so «lessons not held» has nothing to return.
+    if (sub.kind === 'LESSONS' && input.reason === 'LESSONS_NOT_HELD') payments = []
+    // Lesson packages: the unused lessons are returned from the newest payment back — a renewal adds its lessons to
+    // those left, so the balance can hold lessons bought by two payments.
+    let unusedLessons = Math.max(0, (sub.lessonsTotal ?? 0) - sub.lessonsUsed)
+    const boughtPerPayment = Math.max(1, sub.package?.lessonCount ?? sub.lessonsTotal ?? 1)
 
     const requests: PlannedRequest[] = []
     for (const p of payments) {
@@ -277,13 +291,32 @@ export class RefundsService {
       if (p.lines.length) {
         parts = p.lines.filter((l) => l.enrollmentId && ids.includes(l.enrollmentId)).map((l) => ({ enrollmentId: l.enrollmentId!, courseId: l.courseId, priceMinor: l.amountMinor }))
       } else {
-        const split = splitByPrice(p.amountMinor, active.map((e) => e.course.priceMinor))
-        parts = active.map((e, i) => ({ enrollmentId: e.id, courseId: e.courseId, priceMinor: split[i] })).filter((x) => ids.includes(x.enrollmentId))
+        // A payment from before PaymentLine: split over the courses it paid for — those the subscription had when it was
+        // paid, including ones refused since — by their prices, not over the courses left now.
+        const paidAt = p.paidAt ?? p.createdAt
+        const covered = (await tx.enrollment.findMany({ where: { subscriptionId: sub.id, createdAt: { lte: paidAt } }, include: { course: { select: { priceMinor: true } } }, orderBy: { createdAt: 'asc' } }))
+          .filter((e) => e.status === 'ACTIVE' || (e.cancelledAt !== null && e.cancelledAt > paidAt))
+        const split = splitByPrice(p.amountMinor, covered.map((e) => e.course.priceMinor))
+        parts = covered.map((e, i) => ({ enrollmentId: e.id, courseId: e.courseId, priceMinor: split[i] })).filter((x) => ids.includes(x.enrollmentId))
       }
-      // What an earlier request already returned for a course from this payment (lessons not held, 6.5 b) is not
-      // returned twice: it comes off this count.
-      const earlier = await tx.refundRequestLine.findMany({ where: { enrollmentId: { in: parts.map((x) => x.enrollmentId) }, refundRequest: { tenantId, paymentId: p.id, status: 'PAID' } }, select: { enrollmentId: true, amountMinor: true } })
-      const returned = (enrollmentId: string) => earlier.filter((e) => e.enrollmentId === enrollmentId).reduce((s, e) => s + e.amountMinor, 0n)
+      // What earlier paid requests already returned for a course from this payment comes off this count. The amount is
+      // what the finance admin actually paid (approvedMinor), spread over that request's lines.
+      const earlier = await tx.refundRequest.findMany({ where: { tenantId, paymentId: p.id, status: 'PAID' }, select: { approvedMinor: true, lines: { select: { enrollmentId: true, amountMinor: true } } } })
+      const returnedBy = new Map<string, bigint>()
+      for (const r of earlier) {
+        const paid = r.approvedMinor ?? 0n
+        const sum = r.lines.reduce((a, l) => a + l.amountMinor, 0n)
+        r.lines.forEach((l, i) => {
+          let part = sum > 0n ? (paid * l.amountMinor) / sum : paid / BigInt(r.lines.length)
+          if (i === r.lines.length - 1) part = paid - r.lines.slice(0, -1).reduce((a, x) => a + (sum > 0n ? (paid * x.amountMinor) / sum : paid / BigInt(r.lines.length)), 0n)
+          returnedBy.set(l.enrollmentId, (returnedBy.get(l.enrollmentId) ?? 0n) + part)
+        })
+      }
+      const returned = (enrollmentId: string) => returnedBy.get(enrollmentId) ?? 0n
+
+      // A lesson package: this payment's lessons and how many of them are still unused.
+      const packageTake = Math.min(unusedLessons, boughtPerPayment)
+      if (sub.kind === 'LESSONS') unusedLessons -= packageTake
 
       const lines: PlannedLine[] = []
       for (const part of parts) {
@@ -291,20 +324,22 @@ export class RefundsService {
         let lessonsTotal: number
         let held: number
         if (sub.kind === 'LESSONS') {
-          lessonsTotal = Math.max(0, sub.lessonsTotal ?? 0)
-          held = Math.min(lessonsTotal, sub.lessonsUsed)
+          lessonsTotal = boughtPerPayment
+          held = boughtPerPayment - packageTake
+          // The center's fault on a package: the lessons still unused in this payment come back whole.
+          if (NO_DEDUCTION.has(input.reason) && packageTake === 0) held = lessonsTotal
         } else {
           const c = await this.countFor(tx, enrollment.group, p.periodStart, p.periodEnd, now)
           lessonsTotal = c.total
           // Lessons the center did not hold (6.5 b): the course goes on, the money of those lessons comes back.
           held = input.reason === 'LESSONS_NOT_HELD' ? c.total - c.notHeld : c.held
         }
-        if (NO_DEDUCTION.has(input.reason)) held = 0
+        if (NO_DEDUCTION.has(input.reason) && (sub.kind !== 'LESSONS' || packageTake > 0)) held = 0
         // The operator's fault (6.5 e): the part is the finance admin's decision — counted as 0, decided on approval.
         if (input.reason === 'PLATFORM_FAULT') held = lessonsTotal
         const share = refundShare(part.priceMinor, lessonsTotal, held) - returned(part.enrollmentId)
         const amountMinor = share < 0n ? 0n : share > part.priceMinor ? part.priceMinor : share
-        lines.push({ ...part, lessonsTotal, lessonsHeld: Math.min(held, lessonsTotal), amountMinor })
+        lines.push({ ...part, lessonsTotal, lessonsHeld: Math.min(Math.max(held, 0), lessonsTotal), amountMinor })
       }
       if (!lines.length) continue
       const counted = lines.reduce((s, l) => s + l.amountMinor, 0n)
@@ -312,16 +347,24 @@ export class RefundsService {
       const requestedMinor = counted > left ? left : counted
       if (requestedMinor === 0n && input.reason !== 'PLATFORM_FAULT') continue
       requests.push({ paymentId: p.id, requestedMinor, currency: p.currency, lines })
+      // The operator's fault is decided once, on the current payment.
+      if (input.reason === 'PLATFORM_FAULT') break
     }
     return { subscriptionId: sub.id, kind: sub.kind, endsCourses, enrollmentIds: chosen.map((e) => e.id), requests }
   }
 
   private async countFor(tx: TransactionClient, group: { id: string; days: number[]; startTime: string; timezone: string }, periodStart: Date, periodEnd: Date, at: Date) {
+    const select = { id: true, startsAt: true, status: true, rescheduledFromId: true } as const
     const [inPeriod, last] = await Promise.all([
-      tx.lessonSession.findMany({ where: { groupId: group.id, startsAt: { gte: periodStart, lt: periodEnd } }, select: { id: true, startsAt: true, status: true, rescheduledFromId: true } }),
-      tx.lessonSession.findFirst({ where: { groupId: group.id }, orderBy: { date: 'desc' }, select: { date: true } }),
+      tx.lessonSession.findMany({ where: { groupId: group.id, startsAt: { gte: periodStart, lt: periodEnd } }, select }),
+      // The weekly calendar ends at the last generated lesson; a one-off or moved lesson far ahead does not end it.
+      tx.lessonSession.findFirst({ where: { groupId: group.id, isExtra: false, rescheduledFromId: null }, orderBy: { date: 'desc' }, select: { date: true } }),
     ])
-    return countLessons({ periodStart, periodEnd, at, sessions: inPeriod, lastCalendarDate: last ? dateColumnToIso(last.date) : null, weekly: { days: group.days, startTime: group.startTime, timezone: group.timezone } })
+    // A lesson of the period moved out of it is held at its new date: the lesson that points back at it is fetched too,
+    // so the cancelled original is not taken for a lesson the center did not hold.
+    const cancelledIds = inPeriod.filter((s) => s.status === 'CANCELLED').map((s) => s.id)
+    const movedOut = cancelledIds.length ? await tx.lessonSession.findMany({ where: { groupId: group.id, rescheduledFromId: { in: cancelledIds }, NOT: { startsAt: { gte: periodStart, lt: periodEnd } } }, select }) : []
+    return countLessons({ periodStart, periodEnd, at, sessions: [...inPeriod, ...movedOut], lastCalendarDate: last ? dateColumnToIso(last.date) : null, weekly: { days: group.days, startTime: group.startTime, timezone: group.timezone } })
   }
 
   /** The refused courses end now; a renewal waiting for payment is cancelled (its amount still has them); no course left — the subscription ends. */

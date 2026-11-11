@@ -40,11 +40,19 @@ export class CertificatesService {
   /** Step 2: the server checks the upload (prefix, size, real type) and only then records the certificate. */
   async add(tenantId: string, actor: RequestActor, input: CertificateInput): Promise<StudentCertificateDto> {
     await this.assertRoom(actor)
+    // One upload key is checked and recorded once: two «add» at once with the same file would both copy it and leave two
+    // rows on one file, and deleting one would take the other's file (review 11.11). Serialized per file key.
+    // The check of the file (a copy in the bucket) stays outside the transaction; copying one upload twice writes the
+    // same final key with the same bytes, so only the row decides.
     if (await this.prisma.client.studentCertificate.findFirst({ where: { userId: actor.id, fileKey: finalKeyOf(input.key) }, select: { id: true } })) throw AppError.conflict('certificate_exists', 'This file is already added')
     const { type, size, key } = await this.docs.verifyUpload(input.key, prefixOf(tenantId, actor.id))
-    const row = await this.prisma.client.studentCertificate.create({
-      data: { tenantId, userId: actor.id, title: input.title, issuer: input.issuer ?? null, issuedAt: dateOf(input.issuedAt), fileKey: key, contentType: type, sizeBytes: size },
-      select: SELECT,
+    const row = await this.prisma.tx(async (tx) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `certificate:${key}`)
+      if (await tx.studentCertificate.findFirst({ where: { fileKey: key }, select: { id: true } })) throw AppError.conflict('certificate_exists', 'This file is already added')
+      return tx.studentCertificate.create({
+        data: { tenantId, userId: actor.id, title: input.title, issuer: input.issuer ?? null, issuedAt: dateOf(input.issuedAt), fileKey: key, contentType: type, sizeBytes: size },
+        select: SELECT,
+      })
     })
     await this.audit.record({ action: 'student.certificate.add', entityType: 'StudentCertificate', entityId: row.id, after: { title: row.title, type, size } })
     return toDto(row)

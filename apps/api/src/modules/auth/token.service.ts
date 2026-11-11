@@ -78,12 +78,16 @@ export class TokenService {
     }
   }
 
-  async issueRefresh(userId: string, tenantId: string, meta: SessionMeta, familyId = randomUUID()): Promise<{ raw: string; expiresAt: Date; familyId: string }> {
+  /**
+   * `startedAt`: when the sign-in this session continues happened — a session reopened after a change of password keeps
+   * the time of the sign-in with the authenticator code, so the 12-hour limit is not restarted by it (review 11.11).
+   */
+  async issueRefresh(userId: string, tenantId: string, meta: SessionMeta, familyId = randomUUID(), startedAt?: Date): Promise<{ raw: string; expiresAt: Date; familyId: string }> {
     const raw = randomToken(48)
     const expiresAt = new Date(Date.now() + this.env.REFRESH_TOKEN_TTL_DAYS * 86_400_000)
     await TenantContext.forTenant(tenantId, () =>
       this.prisma.client.refreshSession.create({
-        data: { tenantId, userId, familyId, tokenHash: sha256(raw), expiresAt, ip: meta.ip, userAgent: meta.userAgent },
+        data: { tenantId, userId, familyId, tokenHash: sha256(raw), expiresAt, ip: meta.ip, userAgent: meta.userAgent, ...(startedAt ? { createdAt: startedAt } : {}) },
       }),
     )
     return { raw, expiresAt, familyId }

@@ -119,11 +119,20 @@ export class CompaniesService {
     const row = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, representative: { select: { id: true } } } })
     if (!row) throw AppError.notFound('Company')
     if (!row.representative) throw AppError.conflict('not_claimed', 'Nobody represents this company')
-    await this.prisma.client.$transaction(async (tx) => {
+    const now = new Date()
+    const closed = await this.prisma.client.$transaction(async (tx) => {
       await tx.user.update({ where: { id: row.representative!.id }, data: { companyId: null } })
       await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull } })
+      // A company is never handed over (decision 11.11): whoever claims the record next gets none of the students'
+      // data — the consents end, opened contacts are taken back with their copies, the vacancies close and the
+      // applications to them (with the contacts the students sent) are removed.
+      const consents = await tx.studentConsent.updateMany({ where: { kind: 'COMPANY_CONTACTS', companyId: id, revokedAt: null }, data: { revokedAt: now } })
+      const contacts = await tx.contactRequest.updateMany({ where: { companyId: id, status: { in: ['PENDING', 'ACCEPTED'] } }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
+      await tx.vacancy.updateMany({ where: { companyId: id, status: 'OPEN' }, data: { status: 'CLOSED' } })
+      const applications = await tx.vacancyApplication.deleteMany({ where: { vacancy: { companyId: id } } })
+      return { consents: consents.count, contacts: contacts.count, applications: applications.count }
     })
-    await this.audit.record({ action: 'company.release', entityType: 'Company', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, reason })
+    await this.audit.record({ action: 'company.release', entityType: 'Company', entityId: id, before: { status: row.status, approved: !!row.approvedAt, representativeId: row.representative.id }, after: { closed }, reason })
     await this.notifications.safely('registry.released', () =>
       this.notifications.notify({ tenantId, userIds: [row.representative!.id], type: 'registry.released', params: { name: row.name }, dedupeKey: `registry-released:${id}:${Date.now()}` }),
     )
@@ -242,7 +251,9 @@ export class CompaniesService {
     const { type, size, key } = await this.docs.verifyUpload(input.key, certPrefix(tenantId, id))
     const backToReview = current.approvedAt !== null && current.status !== 'PENDING'
     const now = new Date()
-    await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: key, ...(backToReview ? { status: 'PENDING', submittedAt: now, rejectReason: null } : {}) } })
+    // After approval every new certificate is a new version for the reviewer (submittedAt), even while one waits: the
+    // reviewer approves the file they looked at (review 11.11).
+    await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: key, ...(current.approvedAt !== null ? { status: 'PENDING', submittedAt: now, rejectReason: null } : {}) } })
     if (current.certificateFileKey && current.certificateFileKey !== key) await this.docs.remove(current.certificateFileKey).catch(() => undefined)
     await this.audit.record({ action: backToReview ? 'company.certificate.review' : 'company.certificate', entityType: 'Company', entityId: id, after: { type, size } })
     if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', `company-review:${id}:${now.getTime()}`)

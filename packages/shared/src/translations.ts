@@ -1359,6 +1359,8 @@ export const dict = {
   'apiError.notClaimed': d('Bu yozuvning vakili yöq.', 'У этой записи нет представителя.', 'Nobody represents this record.'),
   'apiError.renewalTooEarly': d('Obunani muddati tugaşidan 7 kun oldin uzaytiriş mumkin.', 'Продлить абонемент можно за 7 дней до конца периода.', 'A subscription can be renewed in the last 7 days of its period.'),
   'apiError.renewalUnavailable': d('Kurslardan biri endi oçiq emas: kurslarni qaytadan tanlang.', 'Один из курсов больше не открыт: выберите курсы заново.', 'One of the courses is no longer open: choose the courses again.'),
+  'apiError.passwordResetByAdmin': d('Bu akkaunt parolini Super Admin tiklaydi. Unga murojaat qiling.', 'Пароль этого аккаунта восстанавливает Super Admin. Обратитесь к нему.', 'This account\'s password is reset by the Super Admin. Please contact them.'),
+  'apiError.reviewChanged': d('Özgarişlar bu orada tahrirlandi yoki köribçiqildi. Uni qaytadan oçing.', 'Изменения за это время отредактировали или уже рассмотрели. Откройте их заново.', 'The change was edited or decided meanwhile. Open it again.'),
   'apiError.refundCourses': d('Abonementingizdagi kurslarni tanlang.', 'Выберите курсы своего абонемента.', 'Choose the courses of your subscription.'),
   'apiError.refundWholePackage': d('Darslar paketi faqat butunlay qaytariladi: barça kurslarni tanlang.', 'Пакет занятий возвращается только целиком: выберите все его курсы.', 'A lesson package is refunded whole: choose all its courses.'),
   'apiError.refundOpen': d('Bu tölov böyiça ariza allaqaçon köribçiqilmoqda.', 'По этому платежу заявка уже рассматривается.', 'A request for this payment is already being reviewed.'),

@@ -186,7 +186,8 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       const [fromData, fromSoft] = await contacts.studentList(me)
       expect(fromSoft).toMatchObject({ source: 'CONTRACT_HELP', status: 'PENDING', company: { name: 'Soft Co' }, contacts: null })
       expect((await service.mine(me))!.interests.map((i) => i.company.name)).toEqual(['Soft Co', 'Data Co'])
-      expect((await contacts.companyContact(s.softCo.actor, fromSoft.id)).student.full).toBeNull()
+      // Before the student agrees the company does not learn who it is: not even the name (review 11.11).
+      await expect(contacts.companyContact(s.softCo.actor, fromSoft.id)).rejects.toMatchObject({ code: 'not_found' })
       // Only a company the student opened contacts to can be named in «договор заключён».
       await expect(service.signed(me, s.softCo.row.id)).rejects.toMatchObject({ code: 'not_found' })
 

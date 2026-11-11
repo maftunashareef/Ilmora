@@ -729,7 +729,8 @@ export class ManageService {
         await tx.payment.updateMany({ where: { subscriptionId: s.id, state: 'PENDING' }, data: { state: 'CANCELLED', cancelledAt: now } })
         await tx.subscription.update({ where: { id: s.id }, data: { status: 'CANCELLED', cancelledAt: now } })
       }
-      if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { userId: null } })
+// The profile may be soft-deleted already (deleteTeacher keeps its userId): unlink it all the same (review 11.11).
+      if (user.teacherProfile) await tx.teacherProfile.update({ where: { id: user.teacherProfile.id }, data: { userId: null }, includeDeleted: true } as never)
       await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, googleId: null, roles: [], centerId: null } })
       await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId }, reason })
     })
