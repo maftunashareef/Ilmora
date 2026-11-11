@@ -2018,8 +2018,7 @@ model ContactRequest {
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
-  /// Per source: a request from an announcement must not block (and so reveal) one from an anonymous card (9.4, 11.11).
-  @@unique([companyId, userId, source])
+  @@unique([companyId, userId])
   @@index([tenantId, userId, status])
   @@index([tenantId, companyId, status])
 }
