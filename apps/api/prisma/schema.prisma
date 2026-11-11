@@ -304,6 +304,8 @@ model Tenant {
   contactRequests        ContactRequest[]
   vacancies              Vacancy[]
   vacancyApplications    VacancyApplication[]
+  vacancyBroadcasts      VacancyBroadcast[]
+  vacancyRecipients      VacancyBroadcastRecipient[]
   totpRecoveryCodes      TotpRecoveryCode[]
 }
 
@@ -388,6 +390,7 @@ model User {
   contractHelpRequests   ContractHelpRequest[]
   contactRequests        ContactRequest[]
   vacancyApplications    VacancyApplication[]
+  vacancyBroadcasts      VacancyBroadcastRecipient[]
 
   @@unique([tenantId, phoneE164])
   @@unique([tenantId, login])
@@ -1396,12 +1399,14 @@ enum StudyConfirmation {
 
 /// GRADUATE_CARD: show my card in my institution's graduation announcements. CONTRACT_HELP_CARD: send my anonymised
 /// card to companies. COMPANY_CONTACTS: open my contacts to one company (StudentConsent.companyId). PARENT_CONSENT:
-/// the parent or legal representative of a minor agreed.
+/// the parent or legal representative of a minor agreed. INDUSTRY_CARD: show my card to companies of my industry in
+/// their «Студенты» section (ТЗ «Студенты у компании», 4) — a purpose of its own, never implied by the other kinds.
 enum ConsentKind {
   GRADUATE_CARD
   CONTRACT_HELP_CARD
   COMPANY_CONTACTS
   PARENT_CONSENT
+  INDUSTRY_CARD
 }
 
 enum AnnouncementStatus {
@@ -1430,14 +1435,20 @@ enum ContractHelpStatus {
   WITHDRAWN
 }
 
+/// Where a company asked for a student's contacts. GRADUATE: a graduation announcement. CONTRACT_HELP: an anonymous
+/// contract-help card. STUDENTS: the company's «Студенты» section (ТЗ «Студенты у компании», 2.4).
 enum ContactSource {
   GRADUATE
   CONTRACT_HELP
+  STUDENTS
 }
 
+/// JOB: a job (ТЗ «Студенты у компании», 5); always paid, with a salary (`Vacancy.salaryFromMinor`/`salaryToMinor`)
+/// instead of a stipend.
 enum VacancyKind {
   PRACTICE
   INTERNSHIP
+  JOB
 }
 
 enum WorkFormat {
@@ -1565,6 +1576,7 @@ model Direction {
   announcementLines     AnnouncementLine[]
   trainingRequests      TrainingRequest[]
   vacancies             VacancyDirection[]
+  vacancyBroadcasts     VacancyBroadcastDirection[]
 
   @@unique([tenantId, searchKey])
   @@index([tenantId, industryId])
@@ -1641,8 +1653,9 @@ model Institution {
   representative User?
   directions     InstitutionDirection[]
   students       StudentProfile[]
-  announcements  GraduationAnnouncement[]
-  trainingOffers TrainingOffer[]
+  announcements     GraduationAnnouncement[]
+  trainingOffers    TrainingOffer[]
+  vacancyBroadcasts VacancyBroadcast[]
 
   @@unique([tenantId, stir])
   @@index([tenantId, status])
@@ -1994,9 +2007,10 @@ model ContractHelpRequest {
   @@index([tenantId, userId])
 }
 
-/// A company asks a student to open their contacts. One request per channel: from announcements once per company and
-/// student, from an anonymous contract-help card once per company and card — so asking on one channel never reveals,
-/// by «already asked», that the two cards are one person (security review 11.11, №126). When the student accepts, the
+/// A company asks a student to open their contacts. Named cards (graduation announcements and the «Студенты» section)
+/// share one request per company and student; an anonymous contract-help card has its own, once per company and card —
+/// so asking on one channel never reveals, by «already asked», that the anonymous card is that person (security review
+/// 11.11, №126). When the student accepts, the
 /// company sees the full card (name, phone, e-mail, certificate files) and a COMPANY_CONTACTS consent row is written.
 model ContactRequest {
   id             String                  @id @default(cuid())
@@ -2025,13 +2039,16 @@ model ContactRequest {
   updatedAt      DateTime                @updatedAt
 
   // One request per channel, not per company and student (security review 11.11, №126): partial unique indexes
-  // "ContactRequest_graduate_once" (companyId, userId) for GRADUATE and "ContactRequest_contract_help_once"
-  // (companyId, contractHelpId) for CONTRACT_HELP, in migration 20261119000000; Prisma does not describe partial indexes.
+  // "ContactRequest_named_once" (companyId, userId) for GRADUATE and STUDENTS (migration 20261121000100, it replaced
+  // "ContactRequest_graduate_once") and "ContactRequest_contract_help_once" (companyId, contractHelpId) for
+  // CONTRACT_HELP (20261119000000); Prisma does not describe partial indexes.
   @@index([tenantId, userId, status])
   @@index([tenantId, companyId, status])
 }
 
-/// Practice or internship offered by an approved company (published without a separate review).
+/// Practice, internship or job offered by an approved company (published without a separate review). Checks (migration
+/// 20261121000100): a JOB is always paid ("Vacancy_job_paid_check"); a salary only on a JOB, a stipend never on one
+/// ("Vacancy_pay_by_kind_check"); a salary is positive and «to» is not below «from» ("Vacancy_salary_check").
 model Vacancy {
   id           String        @id @default(cuid())
   tenantId     String
@@ -2047,8 +2064,11 @@ model Vacancy {
   address      String?
   format       WorkFormat
   paid         Boolean       @default(false)
-  /** Monthly stipend in tiyin, when paid and stated. */
+  /** Monthly stipend in tiyin of a practice or internship, when paid and stated. */
   stipendMinor BigInt?
+  /** JOB: monthly salary in tiyin, «from–to»; a single amount is «from» alone. Both optional. */
+  salaryFromMinor BigInt?
+  salaryToMinor   BigInt?
   /** Free text, e.g. «2 месяца». */
   duration     String?
   seats        Int
@@ -2061,6 +2081,7 @@ model Vacancy {
 
   directions   VacancyDirection[]
   applications VacancyApplication[]
+  broadcasts   VacancyBroadcast[]
 
   @@index([tenantId, status, regionId])
   @@index([tenantId, companyId])
@@ -2098,4 +2119,63 @@ model VacancyApplication {
   @@unique([vacancyId, userId])
   @@index([tenantId, userId])
   @@index([tenantId, vacancyId, status])
+}
+
+/// An institution sent a company's vacancy to its own students (ТЗ «Студенты у компании», 3.2): by hand, only to students
+/// whose study it confirmed, on the chosen directions and courses. A row is the journal entry of one send; the queue
+/// delivers it in batches and sets `finishedAt`. The daily limit counts rows by (institutionId, createdAt).
+model VacancyBroadcast {
+  id              String      @id @default(cuid())
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  vacancyId       String
+  vacancy         Vacancy     @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  institutionId   String
+  institution     Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  /** Years of study chosen (1–11, at least one): CHECK "VacancyBroadcast_courses_check". */
+  courses         Int[]
+  /** The institution's representative who sent it. */
+  createdById     String
+  /** Students it was addressed to when sent (the number the sender confirmed); never negative. */
+  recipientsCount Int
+  /** Set when the queue has delivered the last batch. */
+  finishedAt      DateTime?
+  createdAt       DateTime    @default(now())
+
+  directions VacancyBroadcastDirection[]
+  recipients VacancyBroadcastRecipient[]
+
+  // (id, vacancyId) lets a recipient row point at the broadcast and its vacancy together, so they always match.
+  @@unique([id, vacancyId])
+  @@index([tenantId, institutionId, createdAt])
+  @@index([vacancyId])
+}
+
+/// The directions a send was limited to (the institution's own, matching the vacancy).
+model VacancyBroadcastDirection {
+  broadcastId String
+  broadcast   VacancyBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  directionId String
+  direction   Direction        @relation(fields: [directionId], references: [id])
+
+  @@id([broadcastId, directionId])
+  @@index([directionId])
+}
+
+/// A student who got a vacancy from their institution. One vacancy reaches a student once (3.2, п. 5): the unique pair
+/// also makes a retried batch harmless. Only a delivery marker: no personal data beyond the account id.
+model VacancyBroadcastRecipient {
+  id          String           @id @default(cuid())
+  tenantId    String
+  tenant      Tenant           @relation(fields: [tenantId], references: [id])
+  broadcastId String
+  vacancyId   String
+  broadcast   VacancyBroadcast @relation(fields: [broadcastId, vacancyId], references: [id, vacancyId], onDelete: Cascade)
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime         @default(now())
+
+  @@unique([vacancyId, userId])
+  @@index([broadcastId])
+  @@index([tenantId, userId])
 }

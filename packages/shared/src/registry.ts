@@ -716,7 +716,8 @@ export interface IlmoraCourseDto {
 // ───────────── Graduation announcements and contact requests (ТЗ 5.1, 5.3 «запрос контакта», 8) ─────────────
 
 export type AnnouncementStatus = 'DRAFT' | 'PUBLISHED' | 'CLOSED'
-export type ContactSource = 'GRADUATE' | 'CONTRACT_HELP'
+/** STUDENTS: from the company's «Студенты» section (ТЗ «Студенты у компании», 2.4). */
+export type ContactSource = 'GRADUATE' | 'CONTRACT_HELP' | 'STUDENTS'
 
 /** A graduate as a company sees them in an announcement (ТЗ 5.1): no phone, e-mail or files until they accept a request. */
 export interface GraduateCardDto {
@@ -809,7 +810,8 @@ export interface CompanyContactDto {
 /** One row of the student's consent journal (ТЗ 8): given, and when taken back; nothing is overwritten. */
 export interface StudentConsentDto {
   id: string
-  kind: 'GRADUATE_CARD' | 'CONTRACT_HELP_CARD' | 'COMPANY_CONTACTS' | 'PARENT_CONSENT'
+  /** INDUSTRY_CARD: show my card to companies of my industry («Студенты», ТЗ «Студенты у компании», 4). */
+  kind: 'GRADUATE_CARD' | 'CONTRACT_HELP_CARD' | 'COMPANY_CONTACTS' | 'PARENT_CONSENT' | 'INDUSTRY_CARD'
   /** COMPANY_CONTACTS: the company the contacts were opened to. */
   company: { id: string; name: string } | null
   textVersion: string
@@ -902,7 +904,8 @@ export interface ContractHelpCardDto {
 
 // ───────────── practice and internships (ТЗ 5.4) ─────────────
 
-export type VacancyKind = 'PRACTICE' | 'INTERNSHIP'
+/** JOB: «Работа» (ТЗ «Студенты у компании», 5) — always paid, with a salary (from–to) instead of a stipend. */
+export type VacancyKind = 'PRACTICE' | 'INTERNSHIP' | 'JOB'
 export type WorkFormat = 'ONSITE' | 'REMOTE' | 'HYBRID'
 export type VacancyStatus = 'OPEN' | 'CLOSED'
 /** новый → просмотрен → приглашён / отказ. */

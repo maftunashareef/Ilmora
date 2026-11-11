@@ -37,8 +37,9 @@
 | Одна открытая заявка студента на помощь с контрактом | `ContractHelpRequest.openKey` — уникален | `openKey = userId`, пока заявка `ACTIVE` или `INTERESTED`; при отзыве или договоре — `null` |
 | Один отклик компании на объявление | `AnnouncementResponse (announcementId, companyId)` | |
 | Один отклик учреждения на заявку | `TrainingOffer (requestId, institutionId)` | |
-| Один запрос контакта на канал: из объявления — на пару компания–студент, с анонимной карточки — на пару компания–карточка | частичные индексы `ContactRequest_graduate_once (companyId, userId) WHERE source = 'GRADUATE'` и `ContactRequest_contract_help_once (companyId, contractHelpId) WHERE source = 'CONTRACT_HELP'` (только в SQL миграции `20261119000000`) | Каналы не зависят друг от друга: 409 на одном канале не выдаёт, что анонимная карточка — тот же выпускник (проверка 11.11, №126). Запрос с карточки код всегда создаёт с `contractHelpId`: без него индекс карточки не сработает |
+| Один запрос контакта на канал: именные карточки (объявление о выпуске и раздел «Студенты») — один на пару компания–студент, анонимная карточка — на пару компания–карточка | частичные индексы `ContactRequest_named_once (companyId, userId) WHERE source IN ('GRADUATE', 'STUDENTS')` (миграция `20261121000100`, заменил `ContactRequest_graduate_once`) и `ContactRequest_contract_help_once (companyId, contractHelpId) WHERE source = 'CONTRACT_HELP'` (`20261119000000`); только в SQL | Именные каналы общие: запросил в «Студентах» — в объявлении показать статус этого запроса, не новую кнопку, и наоборот. Анонимная карточка — отдельно: 409 на ней не выдаёт, что это тот же человек (проверка 11.11, №126). Запрос с карточки код всегда создаёт с `contractHelpId`: без него индекс карточки не сработает |
 | Один отклик студента на вакансию | `VacancyApplication (vacancyId, userId)` | |
+| Вакансия доходит до студента от учреждения один раз | `VacancyBroadcastRecipient (vacancyId, userId)` | рассылка пачками: `createMany({ skipDuplicates: true })` — повтор пачки и повторная рассылка той же вакансии никого не задевают |
 
 `P2002` без перехвата уже превращается в 409 `conflict` (`app-exception.filter.ts`); для понятного текста
 перехватывайте его в сервисе, как `login_taken` в `account.service.ts`.
@@ -119,7 +120,8 @@ APPROVED → правка названия / СТИР / типа / собств�
   `studyConfirmation` (`NONE` / `PENDING` / `CONFIRMED` / `REJECTED`), `studyConfirmedAt`, `studyConfirmedById`.
 - `StudentConsent` — **журнал согласий**, строки не перезаписываются. `kind`: `GRADUATE_CARD` (показ в объявлениях),
   `CONTRACT_HELP_CARD` (обезличенная карточка), `COMPANY_CONTACTS` (контакты конкретной компании, `companyId`),
-  `PARENT_CONSENT` (согласие родителя несовершеннолетнего). Поля: `textVersion`, `givenAt`, `revokedAt`, `ip`.
+  `PARENT_CONSENT` (согласие родителя несовершеннолетнего), `INDUSTRY_CARD` (показ карточки компаниям своей отрасли в
+  их разделе «Студенты» — отдельная цель, из других согласий не следует). Поля: `textVersion`, `givenAt`, `revokedAt`, `ip`.
   Отзыв — поставить `revokedAt`; повторное согласие — новая строка. Действующее согласие — последняя строка без
   `revokedAt`. База держит два правила (миграция `20261120000000`):
   - **одно действующее согласие каждого вида** — частичный уникальный индекс
@@ -143,16 +145,31 @@ APPROVED → правка названия / СТИР / типа / собств�
 - `ContractHelpRequest` — помощь с контрактом: `motivation`, `yearsToWork`, `workRegionId` (пусто = любой),
   `status` (`ACTIVE` → `INTERESTED` → `SIGNED` / `WITHDRAWN`), `openKey`, `signedWithCompanyId`, `signedAt`,
   `withdrawnAt`.
-- `ContactRequest` — запрос контакта: `companyId`, `userId`, `source` (`GRADUATE` / `CONTRACT_HELP`),
+- `ContactRequest` — запрос контакта: `companyId`, `userId`, `source` (`GRADUATE` / `CONTRACT_HELP` / `STUDENTS` —
+  из раздела «Студенты» компании),
   `contractHelpId` или `announcementId`, `status`. При принятии — строка `COMPANY_CONTACTS` в `StudentConsent` и
   копия того, что студент открыл: `sharedName`, `sharedPhone`, `sharedEmail`. Компания видит эту копию, а не
   текущие контакты (сменил номер — новый компании не уходит). **Это персональные данные:** отозвал согласие или
   запрос — копию стереть. Пустые поля у старых записей — API показывает текущие контакты, как раньше.
-- `Vacancy` — практика или стажировка: `kind`, `title`, `regionId`, `districtId`, `address`, `format`
-  (`ONSITE` / `REMOTE` / `HYBRID`), `paid`, `stipendMinor`, `duration`, `seats`, `requirements`, `deadline`,
-  `status` (`OPEN` / `CLOSED`); направления — `VacancyDirection`. `VacancyApplication` — отклик: `note`, `status`
+- `Vacancy` — практика, стажировка или работа: `kind` (`PRACTICE` / `INTERNSHIP` / `JOB`), `title`, `regionId`,
+  `districtId`, `address`, `format` (`ONSITE` / `REMOTE` / `HYBRID`), `paid`, `stipendMinor` (стипендия в месяц —
+  практика и стажировка), `salaryFromMinor` / `salaryToMinor` (зарплата в месяц «от–до» — только `JOB`; одна сумма —
+  только «от»), `duration`, `seats`, `requirements`, `deadline`, `status` (`OPEN` / `CLOSED`); направления —
+  `VacancyDirection`. Проверки в базе: `JOB` всегда оплачивается (`Vacancy_job_paid_check`); зарплата только у `JOB`,
+  стипендии у `JOB` нет (`Vacancy_pay_by_kind_check`); зарплата > 0, «до» не меньше «от» и без «от» не бывает
+  (`Vacancy_salary_check`). `VacancyApplication` — отклик: `note`, `status`
   (`NEW` → `VIEWED` → `INVITED` / `REJECTED`), копия контактов на момент отклика `sharedName`, `sharedPhone`,
   `sharedEmail` (те же правила, что у `ContactRequest`).
+- `VacancyBroadcast` — рассылка вакансии учреждением своим подтверждённым студентам (ТЗ «Студенты у компании»,
+  3.2), строка журнала: `vacancyId`, `institutionId`, `courses` (1–11, хотя бы один — CHECK
+  `VacancyBroadcast_courses_check`), `createdById`, `recipientsCount` (≥ 0), `finishedAt` (ставит очередь после
+  последней пачки), `createdAt`; направления — `VacancyBroadcastDirection`. Лимит в день считать по
+  `(tenantId, institutionId, createdAt)` — индекс есть. `VacancyBroadcastRecipient` — кому дошла: `broadcastId`,
+  `vacancyId`, `userId`; связь `(broadcastId, vacancyId)` → рассылка, так что вакансия у получателя всегда та же,
+  что у рассылки. Уведомление студенту — обычное `Notification`.
+- Подбор студентов для раздела «Студенты» новых индексов не требует: на нагрузочной копии (200 000 студентов,
+  96 000 подтверждённых) блоки учреждений компании — 0,16 с, страница студентов одного учреждения — 1,4 мс,
+  предпросмотр рассылки — 0,5 мс на существующих индексах.
 - Ответы на отклики и запросы (`MatchStatus`): `PENDING`, `ACCEPTED`, `DECLINED`, `WITHDRAWN`.
 
 **Роли и вход**
