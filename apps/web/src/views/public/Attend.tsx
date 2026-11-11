@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Button, Card, Eyebrow, Icon, LinkButton, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { formatDayMonth, formatTime } from '../../lib/format'
 import { Link, useNavigate, useParams, useSearchParams } from '../../lib/router'
 import { type CheckInOutcome, useStore } from '../../store/useStore'
@@ -23,21 +24,24 @@ export function AttendPage() {
   const checkIn = useStore((s) => s.checkIn)
   const [info, setInfo] = useState<LinkInfo | null | undefined>(undefined)
   const [result, setResult] = useState<CheckInOutcome | null>(null)
+  // A failed request (no connection, server error, too many attempts) is not «invalid link»: it is shown as is, with a retry (М13).
+  const [failure, setFailure] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!sessionId) return
-    api<LinkInfo | null>(`/attendance/links/${sessionId}`, { auth: false }).then(setInfo).catch(() => setInfo(null))
+    // An empty answer means there is no such session (М13: it used to count as a working link). A failed request says
+    // nothing about the link: the check-in itself answers then.
+    api<LinkInfo | null>(`/attendance/links/${sessionId}`, { auth: false }).then((r) => setInfo(r ?? null), () => undefined)
   }, [sessionId])
 
   useEffect(() => {
-    if (auth.status !== 'authenticated' || !token || !sessionId || result || busy) return
+    if (auth.status !== 'authenticated' || !token || !sessionId || result || busy || failure != null) return
     setBusy(true)
     checkIn({ sessionId, token })
-      .then(setResult)
-      .catch(() => setResult({ ok: false, reason: 'invalid-link' }))
+      .then(setResult, setFailure)
       .finally(() => setBusy(false))
-  }, [auth.status, token, sessionId, result, busy, checkIn])
+  }, [auth.status, token, sessionId, result, busy, failure, checkIn])
 
   const sessionLine = info ? `${tr(info.courseTitle as never)} · ${info.groupName} · ${formatDayMonth(info.session.date, lang)} · ${formatTime(info.session.startsAt, lang)}–${formatTime(info.session.endsAt, lang)}` : ''
   const linkValid = !!token && info !== null
@@ -54,9 +58,13 @@ export function AttendPage() {
             ? { icon: 'lock', tone: 'warn' as const, title: t('attend.expired'), body: t('attend.expiredBody') }
             : result && !result.ok && result.reason === 'not-enrolled'
               ? { icon: 'warn', tone: 'warn' as const, title: t('attend.notEnrolled'), body: t('attend.notEnrolledBody') }
-              : result && !result.ok
-                ? { icon: 'warn', tone: 'warn' as const, title: t('attend.invalid'), body: t('attend.invalidBody') }
-                : null
+              : result && !result.ok && result.reason === 'blocked'
+                ? { icon: 'lock', tone: 'warn' as const, title: t('attend.blocked'), body: t('attend.blockedBody') }
+                : result && !result.ok
+                  ? { icon: 'warn', tone: 'warn' as const, title: t('attend.invalid'), body: t('attend.invalidBody') }
+                  : failure != null
+                    ? { icon: 'warn', tone: 'warn' as const, title: t('attend.failed'), body: apiErrorText(failure, lang) }
+                    : null
 
   const returnTo = `/attend/${sessionId}?t=${encodeURIComponent(token)}`
 
@@ -72,6 +80,8 @@ export function AttendPage() {
             <p className="mt-3 text-sm leading-relaxed text-charcoal/65">{state.body}</p>
             {result?.ok && auth.user && <p className="mt-2 text-xs text-charcoal/45">{auth.user.displayName}</p>}
             <div className="mt-7 flex flex-wrap justify-center gap-2">
+              {failure != null && <Button onClick={() => setFailure(null)}><Icon name="refresh" className="h-4 w-4" />{t('q.retry')}</Button>}
+              {result?.reason === 'blocked' && <LinkButton to="/student/subscription">{t('student.subscription')}</LinkButton>}
               {auth.status === 'authenticated' && <LinkButton to="/student/attendance" variant="secondary">{t('attend.viewMine')}</LinkButton>}
               <LinkButton to="/">{t('common.goHome')}</LinkButton>
             </div>

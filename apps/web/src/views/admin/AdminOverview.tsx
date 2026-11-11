@@ -57,7 +57,7 @@ export function AdminOverview() {
           </div>
         </section>
         <section>
-          <Eyebrow className="mb-4">{t('common.demo')}</Eyebrow>
+          <Eyebrow className="mb-4">{t('admin.overview.summary')}</Eyebrow>
           <Card className="space-y-3 text-sm text-charcoal/70">
             <p>{t('admin.overview.templateNote')}</p>
             <p>{t('perm.superAdminNote')}</p>
