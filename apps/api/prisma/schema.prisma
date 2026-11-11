@@ -1989,9 +1989,10 @@ model ContractHelpRequest {
   @@index([tenantId, userId])
 }
 
-/// A company asks a student to open their contacts. One request per company and student, whatever the source. When
-/// the student accepts, the company sees the full card (name, phone, e-mail, certificate files) and a COMPANY_CONTACTS
-/// consent row is written.
+/// A company asks a student to open their contacts. One request per channel: from announcements once per company and
+/// student, from an anonymous contract-help card once per company and card — so asking on one channel never reveals,
+/// by «already asked», that the two cards are one person (security review 11.11, №126). When the student accepts, the
+/// company sees the full card (name, phone, e-mail, certificate files) and a COMPANY_CONTACTS consent row is written.
 model ContactRequest {
   id             String                  @id @default(cuid())
   tenantId       String
@@ -2018,7 +2019,9 @@ model ContactRequest {
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
-  @@unique([companyId, userId])
+  // One request per channel, not per company and student (security review 11.11, №126): partial unique indexes
+  // "ContactRequest_graduate_once" (companyId, userId) for GRADUATE and "ContactRequest_contract_help_once"
+  // (companyId, contractHelpId) for CONTRACT_HELP, in migration 20261119000000; Prisma does not describe partial indexes.
   @@index([tenantId, userId, status])
   @@index([tenantId, companyId, status])
 }

@@ -37,7 +37,7 @@
 | Одна открытая заявка студента на помощь с контрактом | `ContractHelpRequest.openKey` — уникален | `openKey = userId`, пока заявка `ACTIVE` или `INTERESTED`; при отзыве или договоре — `null` |
 | Один отклик компании на объявление | `AnnouncementResponse (announcementId, companyId)` | |
 | Один отклик учреждения на заявку | `TrainingOffer (requestId, institutionId)` | |
-| Один запрос контакта на пару компания–студент | `ContactRequest (companyId, userId)` | |
+| Один запрос контакта на канал: из объявления — на пару компания–студент, с анонимной карточки — на пару компания–карточка | частичные индексы `ContactRequest_graduate_once (companyId, userId) WHERE source = 'GRADUATE'` и `ContactRequest_contract_help_once (companyId, contractHelpId) WHERE source = 'CONTRACT_HELP'` (только в SQL миграции `20261119000000`) | Каналы не зависят друг от друга: 409 на одном канале не выдаёт, что анонимная карточка — тот же выпускник (проверка 11.11, №126). Запрос с карточки код всегда создаёт с `contractHelpId`: без него индекс карточки не сработает |
 | Один отклик студента на вакансию | `VacancyApplication (vacancyId, userId)` | |
 
 `P2002` без перехвата уже превращается в 409 `conflict` (`app-exception.filter.ts`); для понятного текста
