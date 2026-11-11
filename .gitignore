@@ -56,3 +56,7 @@ infra/backups/*.sql.gz
 
 # Vercel CLI link data (the demo copy is gone; the CLI may still create it locally)
 .vercel/
+# Release working files on the machines (deploy.sh)
+infra/uzcloud/web/caddy.next/
+infra/uzcloud/web/caddy.rejected/
+infra/uzcloud/admin/.redis-conf.sha256
