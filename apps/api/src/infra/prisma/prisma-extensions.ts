@@ -10,6 +10,7 @@ export const TENANT_SCOPED_MODELS = new Set<string>([
   'TotpRecoveryCode', 'Industry', 'Region', 'District', 'Direction', 'Institution', 'InstitutionDirection', 'Company',
   'StudentProfile', 'StudentConsent', 'StudentCertificate', 'GraduationAnnouncement', 'AnnouncementResponse',
   'TrainingRequest', 'TrainingOffer', 'ContractHelpRequest', 'ContactRequest', 'Vacancy', 'VacancyApplication',
+  'VacancyBroadcast', 'VacancyBroadcastRecipient',
 ])
 
 /** Models with `deletedAt`: deletes become soft deletes and normal reads exclude deleted rows. */
