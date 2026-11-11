@@ -134,7 +134,7 @@ export const companyApi = {
   respond: (annId: string, lines: { lineId: string; wantedCount: number }[], comment: string) =>
     api<CompanyAnnouncementDto>(`/announcements/${id(annId)}/responses`, { method: 'POST', body: { lines, comment: comment.trim() || null } }),
   /** «Запросить контакты» of a graduate: the student decides. */
-  invite: (studentId: string, announcementId: string) => api<CompanyAnnouncementDto>(`/graduates/${id(studentId)}/invite`, { method: 'POST', body: { announcementId } }),
+  invite: (cardId: string, announcementId: string) => api<CompanyAnnouncementDto>(`/graduates/${id(cardId)}/invite`, { method: 'POST', body: { announcementId } }),
 
   vacancies: () => api<CompanyVacancyDto[]>('/companies/me/vacancies'),
   createVacancy: (f: VacancyForm) => api<CompanyVacancyDto>('/companies/me/vacancies', { method: 'POST', body: vacancyBody(f) }),

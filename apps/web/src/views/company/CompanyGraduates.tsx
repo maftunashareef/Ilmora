@@ -137,7 +137,7 @@ function AnnouncementView({ id, onBack }: { id: string; onBack: () => void }) {
       {!a.graduates?.length && <p className="text-sm text-charcoal/55">{t('co.g.noGraduates')}</p>}
       <ul className="space-y-3">
         {a.graduates?.map((g) => (
-          <li key={g.studentId}>
+          <li key={g.cardId}>
             <Card>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -151,7 +151,7 @@ function AnnouncementView({ id, onBack }: { id: string; onBack: () => void }) {
               {g.ilmoraCourses.length > 0 && <p className="mt-1 text-xs text-charcoal/60">{t('co.g.ilmoraCourses', { list: g.ilmoraCourses.map((c) => tr(c)).join(', ') })}</p>}
               <div className="mt-3 flex justify-end">
                 {g.contactRequest ? <Badge tone={TONE[g.contactRequest]}>{t(`co.g.request.${g.contactRequest}`)}</Badge>
-                  : <Button size="sm" disabled={busy !== null} onClick={() => void act(`i-${g.studentId}`, () => companyApi.invite(g.studentId, a.id), t('co.g.invited'))}><Icon name="user" className="h-3.5 w-3.5" />{t('co.g.invite')}</Button>}
+                  : <Button size="sm" disabled={busy !== null} onClick={() => void act(`i-${g.cardId}`, () => companyApi.invite(g.cardId, a.id), t('co.g.invited'))}><Icon name="user" className="h-3.5 w-3.5" />{t('co.g.invite')}</Button>}
               </div>
             </Card>
           </li>

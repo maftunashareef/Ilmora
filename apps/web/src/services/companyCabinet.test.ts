@@ -63,14 +63,14 @@ describe('company workspace calls', () => {
     await companyApi.acceptOffer('o1')
     await companyApi.announcements(2027)
     await companyApi.respond('a1', [{ lineId: 'l1', wantedCount: 2 }], '')
-    await companyApi.invite('s1', 'a1')
+    await companyApi.invite('card1', 'a1')
     await companyApi.setApplication('ap1', 'INVITED')
     await companyApi.contractHelp('andijan')
     await companyApi.interest('ch1')
     await companyApi.contact('k1')
     expect(calls.map((c) => `${c.method ?? 'GET'} ${c.path}`)).toEqual([
       'POST /companies/me/training-requests', 'POST /companies/me/training-requests/r1/close', 'POST /companies/me/offers/o1/accept', 'GET /announcements?year=2027',
-      'POST /announcements/a1/responses', 'POST /graduates/s1/invite', 'POST /companies/me/vacancy-applications/ap1/status', 'GET /contract-help?region=andijan',
+      'POST /announcements/a1/responses', 'POST /graduates/card1/invite', 'POST /companies/me/vacancy-applications/ap1/status', 'GET /contract-help?region=andijan',
       'POST /contract-help/ch1/interest', 'GET /companies/me/contacts/k1',
     ])
     expect(calls[0].body).toEqual({ directionId: 'd1', count: 10, byYear: 2027, regionId: null, requirements: null })

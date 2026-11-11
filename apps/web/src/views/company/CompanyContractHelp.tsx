@@ -13,7 +13,8 @@ import { useCompany } from './companyStore'
 const TONE: Record<MatchStatus, 'champagne' | 'forest' | 'danger' | 'muted'> = { PENDING: 'champagne', ACCEPTED: 'forest', DECLINED: 'danger', WITHDRAWN: 'muted' }
 
 /**
- * Help with the contract fee (ТЗ 5.3): anonymised cards — no name or contacts; «Проявить интерес» asks the student,
+ * Help with the contract fee (ТЗ 5.3): anonymised cards — no name or contacts, the institution by type and region only,
+ * certificates and ILMORA courses as counts (titles would link the card to the named graduate card); «Проявить интерес» asks the student,
  * who decides whether to share contacts (then the student is in «Мои контакты»).
  */
 export function CompanyContractHelp() {
@@ -62,15 +63,15 @@ export function CompanyContractHelp() {
               </div>
               <div className="mt-2 space-y-0.5 text-sm text-charcoal/75">
                 {c.age != null && <div>{t('co.h.age', { n: c.age })}{c.region && <> · {tr(c.region.name)}</>}</div>}
-                {c.institution && <div>{c.institution.name}</div>}
+                {c.institution && <div>{t(`inst.type.${c.institution.type}`)}{c.institution.region && <> · {tr(c.institution.region.name)}</>}</div>}
                 {c.direction && <div>{c.direction.name} · {tr(c.direction.industry.name)}</div>}
                 <div>{c.mode === 'STUDYING' ? t('co.h.studying', { n: c.course ?? '—' }) : t('co.h.applying', { year: c.enrollYear ?? '—' })}{c.studyForm && <> · {t(`co.h.studyForm.${c.studyForm}`)}</>}</div>
                 {c.contractAmount != null && <div className="font-medium text-charcoal">{t('co.h.contract', { amount: formatSom(c.contractAmount, lang, false) })}</div>}
                 <div>{t('co.h.years', { n: c.yearsToWork })} · {t('co.h.workRegion', { region: c.workRegion ? tr(c.workRegion.name) : t('inst.r.anyRegion') })}</div>
               </div>
               <p className="mt-2 text-sm text-charcoal/80"><span className="text-xs text-charcoal/50">{t('co.h.motivation')}:</span> {c.motivation}</p>
-              {c.certificates.length > 0 && <p className="mt-1 text-xs text-charcoal/60">{t('co.g.certificates', { list: c.certificates.join(', ') })}</p>}
-              {c.ilmoraCourses.length > 0 && <p className="mt-1 text-xs text-charcoal/60">{t('co.g.ilmoraCourses', { list: c.ilmoraCourses.map((x) => tr(x)).join(', ') })}</p>}
+              {c.certificates > 0 && <p className="mt-1 text-xs text-charcoal/60">{t('co.g.certificates', { list: c.certificates })}</p>}
+              {c.ilmoraCourses > 0 && <p className="mt-1 text-xs text-charcoal/60">{t('co.g.ilmoraCourses', { list: c.ilmoraCourses })}</p>}
               <div className="mt-auto flex justify-end pt-3">
                 {c.contactRequest ? <Badge tone={TONE[c.contactRequest]}>{t(`co.g.request.${c.contactRequest}`)}</Badge>
                   : <Button size="sm" disabled={busy !== null} onClick={() => void interest(c)}><Icon name="star" className="h-3.5 w-3.5" />{t('co.h.interest')}</Button>}
