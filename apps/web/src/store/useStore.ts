@@ -4,7 +4,7 @@ import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, courseSaveBody, groupSaveBody, isUniversityListed, publishableSaveBody, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
-import { api, ApiError, REFRESH_LIMITED, refreshRetryAfterSeconds, refreshSessionOutcome, session, setPasswordChangeRequiredHandler } from '../lib/api'
+import { api, ApiError, isApiError, REFRESH_LIMITED, refreshRetryAfterSeconds, refreshSessionOutcome, session, setPasswordChangeRequiredHandler } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
@@ -424,7 +424,16 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
             const r = await api<{ version: number }>('/admin/site', { method: 'PUT', body: { data, version: get().siteVersion } })
             set({ siteVersion: r.version })
           } catch (err) {
-            toast(err)
+            if (!isApiError(err) || err.code !== 'version_conflict') { toast(err); return }
+            // Someone else saved the settings meanwhile: their version (and its number) is loaded and the admin is told
+            // that the last change did not go through — otherwise every next save would fail the same way.
+            try {
+              const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
+              set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true })
+              get().notify(translate(get().lang, 'admin.siteReloaded'), 'warn')
+            } catch (reloadErr) {
+              toast(reloadErr)
+            }
           }
         })
       }, 800)
