@@ -6,6 +6,7 @@ import type {
 } from '@ilmora/shared'
 import { Badge, Button, EmptyState, Icon, Input, Modal, Notice, PageTitle, Select, Tabs, Textarea } from '../../components/ui'
 import { useT } from '../../i18n/useT'
+import { isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
 import { registryApi, useIndustries } from '../../services/registry'
@@ -274,25 +275,38 @@ function ReviewCard({ open, onClose, onChanged }: { open: Open; onClose: () => v
   const closeAction = useCallback(() => setAction(null), [])
   const api = open.kind === 'institutions' ? reviews.institutions : reviews.companies
 
+  // Bumped after 409 review_changed: the card is read again, so the reviewer decides on the version that is there now.
+  const [round, setRound] = useState(0)
   useEffect(() => {
     let live = true
     const load = open.kind === 'institutions' ? reviews.institutions.detail(open.id).then((d) => { if (live) setInst(d) }) : reviews.companies.detail(open.id).then((d) => { if (live) setComp(d) })
     load.catch((err) => { if (live) setError(apiErrorText(err, lang)) })
     return () => { live = false }
-  }, [open, lang])
+  }, [open, lang, round])
 
   const status = inst?.passport.status ?? comp?.profile.status
   const name = inst?.passport.name ?? comp?.profile.name ?? ''
   const representative = inst ? inst.representative : comp?.representative ?? null
   const pending = status === 'PENDING'
 
+  // The version on the screen: approve and reject apply only to it (409 review_changed if another one was sent since).
+  const seen = { submittedAt: inst?.passport.submittedAt ?? comp?.profile.submittedAt ?? null }
   const done = (text: string) => { notify(text); onChanged(); onClose() }
+  const changedMeanwhile = (err: unknown) => {
+    if (!isApiError(err) || err.code !== 'review_changed') return false
+    setAction(null); setError(apiErrorText(err, lang)); setRound((r) => r + 1); onChanged()
+    return true
+  }
   const approve = async () => {
     setBusy(true); setError(null)
-    try { await api.approve(open.id); done(t('rev.approved', { name })) } catch (err) { setError(apiErrorText(err, lang)) } finally { setBusy(false) }
+    try { await api.approve(open.id, seen); done(t('rev.approved', { name })) } catch (err) { if (!changedMeanwhile(err)) setError(apiErrorText(err, lang)) } finally { setBusy(false) }
   }
   const decide = async (reason: string) => {
-    if (action === 'reject') { await api.reject(open.id, reason); done(t('rev.rejected', { name })) } else { await api.release(open.id, reason); done(t('rev.released', { name })) }
+    try {
+      if (action === 'reject') { await api.reject(open.id, reason, seen); done(t('rev.rejected', { name })) } else { await api.release(open.id, reason); done(t('rev.released', { name })) }
+    } catch (err) {
+      if (!changedMeanwhile(err)) throw err
+    }
   }
 
   const footer = (

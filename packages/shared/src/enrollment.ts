@@ -47,6 +47,12 @@ export const migratedCapacity = (previousSeats: unknown, enrolled: number): numb
  */
 export const MAX_CART_COURSES = 30
 
+/**
+ * How long a checkout holds the seats while the student pays (hours): the API's PAYMENT_EXPIRES_HOURS, 1 by default and
+ * on the live server. The checkout page says it in words; change both together.
+ */
+export const PAYMENT_HOLD_HOURS = 1
+
 export type CartDropReason = 'unknown' | 'duplicate' | 'full' | 'limit' | 'conflict'
 export interface CartMergeResult {
   groupIds: string[]

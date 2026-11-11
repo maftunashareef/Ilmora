@@ -9,13 +9,18 @@ import { formatDate, formatSom } from '../../lib/format'
 import { lessonsPerWeek, resolveGroups, weeklyHours } from '../../lib/schedule'
 import { useCurrentStudent } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
+import { formatMinor } from '../../services/refunds'
+import { MyRefunds, RefundDialog } from './StudentRefunds'
 
 export function StudentSubscription() {
   const { t, tr, lang } = useT()
   const nav = useNavigate()
   const student = useCurrentStudent()
   const s = useStore()
-  const [busy, setBusy] = useState<'renew' | 'cancel' | null>(null)
+  const [busy, setBusy] = useState<'renew' | null>(null)
+  const [refundOpen, setRefundOpen] = useState(false)
+  // Bumped after a request is filed: «Мои заявки на возврат» is read again.
+  const [refunds, setRefunds] = useState(0)
   if (!student) return null
   const sub = student.subscription
   // Renewal is paid on the provider's page: the store redirects there once the API has created the payment; errors are toasted by the store.
@@ -24,10 +29,12 @@ export function StudentSubscription() {
     setBusy('renew')
     try { await s.renewSubscription(student.id) } catch { /* toasted by the store */ } finally { setBusy(null) }
   }
-  const cancel = async () => {
-    if (busy || !confirm(t('common.confirmDelete'))) return
-    setBusy('cancel')
-    try { await s.cancelSubscription(student.id); s.notify(t('common.saved')) } catch { /* toasted by the store */ } finally { setBusy(null) }
+  // A refusal (offer 6.3–6.6) is a refund request: the courses that end are gone from the subscription at once.
+  const filed = (r: { endsCourses: boolean; requested: string }) => {
+    setRefundOpen(false)
+    s.notify(r.requested !== '0' ? `${t('refund.filed')} ${t('refund.total', { amount: formatMinor(r.requested) })}` : t('refund.filedNoMoney'))
+    setRefunds((n) => n + 1)
+    if (r.endsCourses) void s.loadStudentOverview().catch(() => undefined)
   }
   const pkg = s.site.packages.find((p) => p.id === sub.packageId)
   const groups = resolveGroups(sub.groupIds, s.courses)
@@ -35,7 +42,7 @@ export function StudentSubscription() {
   // What is billed each period is fixed at checkout (discounts included); demo data without it falls back to list prices.
   const total = billedSom(sub.amountMinor) ?? listTotal
   // A custom selection (bought without a package) has no package record; it is still an active subscription.
-  if (sub.status !== 'active') return <div><PageTitle eyebrow={t('dash.studentSpace')} title={t('student.subscription')} /><EmptyState title={t('student.overview.noSub')} action={<LinkButton to="/builder">{t('student.overview.buildOne')}</LinkButton>} /></div>
+  if (sub.status !== 'active') return <div><PageTitle eyebrow={t('dash.studentSpace')} title={t('student.subscription')} /><EmptyState title={t('student.overview.noSub')} action={<LinkButton to="/builder">{t('student.overview.buildOne')}</LinkButton>} /><MyRefunds round={refunds} /></div>
   return (
     <div>
       <PageTitle eyebrow={t('dash.studentSpace')} title={t('student.subscription')} action={<><Button variant="secondary" onClick={() => { s.setBuilderPackage(student.id, pkg?.id ?? null); nav('/builder') }}><Icon name="edit" className="h-4 w-4" />{t('student.sub.change')}</Button><Button disabled={busy !== null} onClick={() => void renew()}><Icon name="refresh" className={busy === 'renew' ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />{busy === 'renew' ? t('checkout.redirecting') : t('student.sub.renewNow')}</Button></>} />
@@ -62,7 +69,7 @@ export function StudentSubscription() {
           {total < listTotal && <p className="mt-1 text-[11px] text-charcoal/45">{t('discount.applied')}</p>}
           <p className="mt-2 text-[11px] text-charcoal/45">{t('builder.transparent')}</p>
           <Notice tone="info" className="mt-5 text-xs">{t('preview.renewalNote')} {t('preview.paymentNote')}</Notice>
-          <Button variant="danger" size="sm" className="mt-5" disabled={busy !== null} onClick={() => void cancel()}>{t('student.sub.cancel')}</Button>
+          <Button variant="danger" size="sm" className="mt-5" disabled={busy !== null} onClick={() => setRefundOpen(true)}>{t('refund.open')}</Button>
         </Card>
         <div>
           <Eyebrow className="mb-3">{t('student.courses')}</Eyebrow>
@@ -77,6 +84,8 @@ export function StudentSubscription() {
           <ul className="mt-5 space-y-2 text-sm text-charcoal/70">{pkg?.perks.map((p, i) => <li key={i} className="flex gap-2"><Icon name="check" className="mt-0.5 h-4 w-4 text-forest" />{tr(p)}</li>)}</ul>
         </div>
       </div>
+      <MyRefunds round={refunds} />
+      {refundOpen && <RefundDialog kind={sub.kind ?? 'PERIOD'} onClose={() => setRefundOpen(false)} onFiled={filed} />}
     </div>
   )
 }

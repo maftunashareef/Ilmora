@@ -36,6 +36,11 @@ export const NOUNS = {
   teacher: { uz: 'öqituvçi', ru: ['преподаватель', 'преподавателя', 'преподавателей'], en: ['teacher', 'teachers'] },
   student: { uz: 'talaba', ru: ['студент', 'студента', 'студентов'], en: ['student', 'students'] },
 } as const satisfies Record<string, CountNoun>
+/** A span of hours in words: «1 soat», «1 час», «2 часа», «5 часов», «1 hour», «24 hours». */
+export function hoursLabel(lang: Lang, n: number): string {
+  if (lang === 'uz') return `${n} soat`
+  return countLabel(lang, n, { uz: 'soat', ru: ['час', 'часа', 'часов'], en: ['hour', 'hours'] })
+}
 export function countLabel(lang: Lang, n: number, noun: CountNoun): string {
   if (lang === 'uz') return `${n} ta ${noun.uz}`
   if (lang === 'ru') {
