@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { isPreparationTrack, MAX_CART_COURSES, priceTotals, universityDirections, universityName } from '@ilmora/shared'
+import { hoursLabel, isPreparationTrack, MAX_CART_COURSES, PAYMENT_HOLD_HOURS, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { Badge, Button, Card, cx, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
@@ -147,7 +147,7 @@ export function PreviewPage() {
               <span className="font-medium text-charcoal">{PROVIDER_LABEL.PAYME}</span>
               {!providers?.PAYME && <Badge tone="muted" className="ml-auto">{providers ? t('checkout.providerUnavailable') : '…'}</Badge>}
             </div>
-            <Notice tone="info" className="mt-3 text-xs">{t('checkout.note', { h: 24 })}</Notice>
+            <Notice tone="info" className="mt-3 text-xs">{t('checkout.note', { hold: hoursLabel(lang, PAYMENT_HOLD_HOURS) })}</Notice>
 
             {grantCourses.length > 0 && (
               <div className="mt-5 border-t border-charcoal/10 pt-5">

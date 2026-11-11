@@ -35,6 +35,20 @@ describe('Super Admin review of institutions and companies', () => {
     ])
   })
 
+  it('approve and reject carry the submittedAt of the version on the card', async () => {
+    const seen = { submittedAt: '2026-11-11T08:30:00.000Z' }
+    await reviews.institutions.approve('i1', seen)
+    await reviews.institutions.reject('i1', ' STIR does not match ', seen)
+    await reviews.companies.approve('c1', { submittedAt: null })
+    await reviews.companies.reject('c1', 'No certificate', seen)
+    expect(calls.map((c) => c.body)).toEqual([
+      { submittedAt: '2026-11-11T08:30:00.000Z' },
+      { reason: 'STIR does not match', submittedAt: '2026-11-11T08:30:00.000Z' },
+      {},
+      { reason: 'No certificate', submittedAt: '2026-11-11T08:30:00.000Z' },
+    ])
+  })
+
   it('a reason is 5–1000 characters without < or > (as the API checks)', () => {
     expect(reasonOk('abcd')).toBe(false)
     expect(reasonOk('  abcde  ')).toBe(true)

@@ -72,6 +72,23 @@ jobs:
           PGPASSWORD=ilmora psql -h localhost -U ilmora -d ilmora_test -v ON_ERROR_STOP=1 -c 'CREATE DATABASE ilmora_shadow'
           npx prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code
 
+  # The Caddyfile of ilmora-web with sample values, on the same Caddy image as the machine: a broken file fails here,
+  # before a release (security review 11.11, №88). The release checks it again with the machine's real values.
+  caddyfile:
+    name: Caddyfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: caddy validate
+        run: |
+          image=$(sed -n 's/^ *image: *\(caddy:[^ ]*\).*/\1/p' infra/uzcloud/web/docker-compose.yml)
+          echo "image: $image"
+          docker run --rm -v "$PWD/infra/uzcloud/web/caddy:/etc/caddy:ro" \
+            -e WEB_DOMAIN=ilmoraa.uz -e ADMIN_DOMAIN=admin.ilmoraa.uz -e ADMIN_PRIVATE_IP=10.0.0.2 \
+            -e "ADMIN_ALLOW_IPS=0.0.0.0/0 ::/0" -e ACME_EMAIL=ci@example.com \
+            "$image" caddy validate --config /etc/caddy/Caddyfile
+
   images:
     name: Build container images
     runs-on: ubuntu-latest

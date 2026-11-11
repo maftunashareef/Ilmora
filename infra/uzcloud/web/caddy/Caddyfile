@@ -4,12 +4,30 @@
 
 {
 	email {$ACME_EMAIL}
+	# Caddy's own log, errors included: when the site or the API does not answer (502, e.g. during a restart), Caddy
+	# writes the whole request there — address and headers — and the filter of the request log below does not apply.
+	# The same QR-token filter here (security review 11.11, №124); Cookie and Authorization Caddy hides by itself.
+	log default {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete t
+					delete next
+				}
+				request>headers>Referer delete
+			}
+		}
+	}
 }
 
 (common) {
 	# Request log (security review 10.11 №71): client address, method, path, status — to stdout, read with
-	# `docker compose logs caddy`. Cookies and Authorization are not logged by Caddy; the attendance QR token (?t=) is
-	# removed from the logged address. Check with `caddy validate` after changing.
+	# `docker compose logs caddy`. Cookies and Authorization are not logged by Caddy. The attendance QR token is
+	# removed wherever it can travel: the address (?t=), the sign-in return address (?next=… holds the QR page with its
+	# token) and Referer (the page the browser came from — the QR page itself), security review 11.11 №124.
+	# Check with `caddy validate` after changing; CI and the release do it too.
 	log {
 		output stdout
 		format filter {
@@ -17,9 +35,11 @@
 			fields {
 				request>uri query {
 					delete t
+					delete next
 				}
 				request>headers>Cookie delete
 				request>headers>Authorization delete
+				request>headers>Referer delete
 			}
 		}
 	}

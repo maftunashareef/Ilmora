@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasMarkup, isStir, matchDistrict, REGISTRY_DISTRICTS, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey, registrySearchText, STUDENT_ADDABLE_TYPES } from './registry.js'
+import { hasMarkup, isStir, matchDistrict, registryDistrictNames, REGISTRY_DISTRICTS, REGISTRY_INDUSTRIES, REGISTRY_REGIONS, registrySearchKey, registrySearchText, STUDENT_ADDABLE_TYPES } from './registry.js'
 import { UZ_REGIONS } from './organization.js'
 
 describe('registrySearchText', () => {
@@ -81,6 +81,20 @@ describe('registry reference data', () => {
     expect(isStir('12345678')).toBe(false)
     expect(isStir('1234567890')).toBe(false)
     expect(isStir('12345678a')).toBe(false)
+  })
+})
+
+describe('registryDistrictNames (the student questionnaire’s district suggestions)', () => {
+  it('every region of the site has its official districts', () => {
+    for (const r of UZ_REGIONS) expect(registryDistrictNames(r.id, 'ru').length, r.id).toBeGreaterThan(0)
+    expect(UZ_REGIONS.reduce((n, r) => n + registryDistrictNames(r.id, 'uz').length, 0)).toBe(REGISTRY_DISTRICTS.length)
+  })
+  it('names in the reader’s language, sorted; unknown region — none', () => {
+    const ru = registryDistrictNames('andijan', 'ru')
+    expect(ru).toEqual([...ru].sort((a, b) => a.localeCompare(b, 'ru')))
+    expect(ru.some((n) => /Андижан/.test(n))).toBe(true)
+    expect(registryDistrictNames('andijan', 'uz').every((n) => !/[А-я]/.test(n))).toBe(true)
+    expect(registryDistrictNames('atlantis', 'ru')).toEqual([])
   })
 })
 

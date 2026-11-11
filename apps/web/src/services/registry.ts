@@ -49,6 +49,22 @@ export function useIndustries(): Loaded<IndustryDto> {
   return snap
 }
 
+// ── Regions: one list for the page, loaded once (a failed load is asked again on the next mount) ──
+let regions: RegionDto[] | null = null
+let regionsLoading: Promise<RegionDto[]> | null = null
+
+export function useRegions(): RegionDto[] {
+  const [list, setList] = useState<RegionDto[]>(regions ?? [])
+  useEffect(() => {
+    if (regions) return
+    let live = true
+    regionsLoading ??= registryApi.regions()
+    regionsLoading.then((r) => { regions = r; if (live) setList(r) }, () => { regionsLoading = null })
+    return () => { live = false }
+  }, [])
+  return list
+}
+
 // ── Suggestions while typing ──────────────────────────────────────────────────
 const PAUSE_MS = 250
 

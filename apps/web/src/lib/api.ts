@@ -45,6 +45,8 @@ export interface RequestOptions {
   next?: { revalidate?: number | false; tags?: string[] }
   cache?: RequestCache
   retryOn401?: boolean
+  /** 'blob' — a file (the ministry's Excel): the body comes back as a Blob; errors are read as JSON as usual. */
+  responseType?: 'json' | 'blob'
 }
 
 /**
@@ -169,6 +171,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     if (outcome === 'limited') throw new ApiError(429, REFRESH_LIMITED, 'Too many sign-in refreshes; try again shortly', { retryAfter: refreshRetryAfter })
   }
   if (res.status === 204) return undefined as T
+  if (opts.responseType === 'blob' && res.ok) return (await res.blob()) as T
   const text = await res.text()
   const data = text ? (JSON.parse(text) as unknown) : undefined
   if (!res.ok) {

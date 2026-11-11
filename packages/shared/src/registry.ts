@@ -106,6 +106,16 @@ export type RegistryDistrict = { code: string; region: string; name: L }
 /** The 206 districts and cities of district status with their SOATO codes; source and date are in districts.data.ts. */
 export const REGISTRY_DISTRICTS: readonly RegistryDistrict[] = REGISTRY_DISTRICT_DATA
 
+/**
+ * The official districts of a region (the web app's region slug), named in the reader's language and sorted by name —
+ * cities of district status included as their own entries. Empty for an unknown slug.
+ */
+export function registryDistrictNames(regionSlug: string, lang: 'uz' | 'ru' | 'en'): string[] {
+  const code = REGISTRY_REGIONS.find((r) => r.slug === regionSlug)?.code
+  if (!code) return []
+  return REGISTRY_DISTRICTS.filter((d) => d.region === code).map((d) => d.name[lang]).sort((a, b) => a.localeCompare(b, lang))
+}
+
 const CITY_WORDS = new Set(['shahri', 'shahar', 'shaxri', 'city', 'gorod'])
 const DISTRICT_WORDS = new Set(['tumani', 'tuman', 'district', 'rayon', 'r', 'n'])
 /** x/h, q/k and a final d/t are written either way in Latin district names (Shahrixon, Marhamat, Samarqand). */
