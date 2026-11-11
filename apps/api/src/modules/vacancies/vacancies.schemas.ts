@@ -24,6 +24,9 @@ const fields = {
   /** «Работа» (JOB): the monthly salary, so'm, from–to; one amount is `salaryFrom` alone. Never with a stipend. */
   salaryFrom: z.number().int().min(1).max(1_000_000_000).nullable().optional(),
   salaryTo: z.number().int().min(1).max(1_000_000_000).nullable().optional(),
+  /** «Работа» only, and required there: the work schedule and the experience asked for. */
+  schedule: z.enum(['FULL_TIME', 'PART_TIME', 'SHIFT', 'FLEXIBLE']).nullable().optional(),
+  experience: z.enum(['NONE', 'UP_TO_1', 'ONE_TO_3', 'OVER_3']).nullable().optional(),
   duration: text(100).nullable().optional(),
   seats: z.number().int().min(1).max(VACANCY_SEATS_MAX),
   requirements: text(2000).nullable().optional(),
@@ -31,12 +34,15 @@ const fields = {
 }
 
 /**
- * The pay rules of a vacancy (ТЗ 5.4; «Работа» — ТЗ «Студенты у компании», 5), the same as the database checks: a stipend
- * only when paid and never on a JOB; a JOB is always paid and its salary is from–to («до» not below «от»); a salary only
- * on a JOB. Returns the first broken rule as a path and a message.
+ * The pay and terms rules of a vacancy (ТЗ 5.4; «Работа» — ТЗ «Студенты у компании», 5), the same as the database
+ * checks: a stipend only when paid and never on a JOB; a JOB is always paid, its salary is from–to («до» not below «от»),
+ * its schedule and the experience asked for are required; a salary, a schedule and experience only on a JOB. Returns the
+ * first broken rule as a path and a message.
  */
-export function payIssue(v: { kind: string; paid: boolean; stipend?: number | null; salaryFrom?: number | null; salaryTo?: number | null }): { path: string; message: string } | null {
+export function payIssue(v: { kind: string; paid: boolean; stipend?: number | null; salaryFrom?: number | null; salaryTo?: number | null; schedule?: string | null; experience?: string | null }): { path: string; message: string } | null {
   if (v.kind === 'JOB') {
+    if (!v.schedule) return { path: 'schedule', message: 'Choose the work schedule' }
+    if (!v.experience) return { path: 'experience', message: 'Choose the experience asked for' }
     if (!v.paid) return { path: 'paid', message: 'A job is always paid' }
     if (v.stipend != null) return { path: 'stipend', message: 'A job has a salary, not a stipend' }
     if (v.salaryTo != null && v.salaryFrom == null) return { path: 'salaryFrom', message: 'Give the salary «from» first' }
@@ -44,6 +50,7 @@ export function payIssue(v: { kind: string; paid: boolean; stipend?: number | nu
     return null
   }
   if (v.salaryFrom != null || v.salaryTo != null) return { path: 'salaryFrom', message: 'A salary is only for a job' }
+  if (v.schedule != null || v.experience != null) return { path: v.schedule != null ? 'schedule' : 'experience', message: 'A schedule and experience are only for a job' }
   if (!v.paid && v.stipend != null) return { path: 'stipend', message: 'A stipend needs paid' }
   return null
 }
@@ -62,6 +69,8 @@ export const VacanciesQuery = z.object({
   region: z.string().trim().max(64).optional(),
   kind: z.enum(['PRACTICE', 'INTERNSHIP', 'JOB']).optional(),
   format: z.enum(['ONSITE', 'REMOTE', 'HYBRID']).optional(),
+  schedule: z.enum(['FULL_TIME', 'PART_TIME', 'SHIFT', 'FLEXIBLE']).optional(),
+  experience: z.enum(['NONE', 'UP_TO_1', 'ONE_TO_3', 'OVER_3']).optional(),
 })
 
 /** «Вакансии компаний» of an institution (ТЗ «Студенты у компании», 3.1): the tab (kind) and the filters. */
@@ -72,6 +81,8 @@ export const InstitutionVacanciesQuery = z.object({
   region: z.string().trim().max(64).optional(),
   format: z.enum(['ONSITE', 'REMOTE', 'HYBRID']).optional(),
   paid: z.enum(['true', 'false']).optional(),
+  schedule: z.enum(['FULL_TIME', 'PART_TIME', 'SHIFT', 'FLEXIBLE']).optional(),
+  experience: z.enum(['NONE', 'UP_TO_1', 'ONE_TO_3', 'OVER_3']).optional(),
 })
 
 /** «Разослать студентам» (3.2): the institution's own directions of the vacancy's industry, and years of study. */

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import type { ApplicationStatus, CompanyVacancyDto, DocumentLinkDto, L, StudentApplicationDto, VacancyApplicationDto, VacancyDto } from '@ilmora/shared'
+import type { ApplicationStatus, CompanyVacancyDto, DocumentLinkDto, ExperienceLevel, L, StudentApplicationDto, VacancyApplicationDto, VacancyDto, WorkSchedule } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import type { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
@@ -20,15 +20,17 @@ const dateOf = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`)
 const STATUSES: ApplicationStatus[] = ['NEW', 'VIEWED', 'INVITED', 'REJECTED']
 const minor = (som: number | null | undefined) => (som ? BigInt(som) * 100n : null)
 /** The pay columns of a vacancy that passed `payIssue`: a stipend only when paid, a salary only on a JOB. */
-const payColumns = (p: { kind: string; paid: boolean; stipend: number | null; salaryFrom: number | null; salaryTo: number | null }) => ({
+const payColumns = (p: { kind: string; paid: boolean; stipend: number | null; salaryFrom: number | null; salaryTo: number | null; schedule?: WorkSchedule | null; experience?: ExperienceLevel | null }) => ({
   paid: p.paid,
   stipendMinor: p.kind !== 'JOB' && p.paid ? minor(p.stipend) : null,
   salaryFromMinor: p.kind === 'JOB' ? minor(p.salaryFrom) : null,
   salaryToMinor: p.kind === 'JOB' ? minor(p.salaryTo) : null,
+  schedule: p.kind === 'JOB' ? (p.schedule ?? null) : null,
+  experience: p.kind === 'JOB' ? (p.experience ?? null) : null,
 })
 
 export const VACANCY_SELECT = {
-  id: true, kind: true, title: true, address: true, format: true, paid: true, stipendMinor: true, salaryFromMinor: true, salaryToMinor: true, duration: true, seats: true, requirements: true,
+  id: true, kind: true, title: true, address: true, format: true, paid: true, stipendMinor: true, salaryFromMinor: true, salaryToMinor: true, schedule: true, experience: true, duration: true, seats: true, requirements: true,
   deadline: true, status: true, closedAt: true, createdAt: true,
   region: { select: { id: true, name: true } }, district: { select: { id: true, name: true } },
   company: { select: { id: true, name: true, industries: { select: { industry: { select: { ...INDUSTRY_SELECT, sortOrder: true } } } } } },
@@ -44,6 +46,7 @@ export const toVacancy = (v: VacancyRow): Omit<VacancyDto, 'myApplication'> => (
   stipend: v.stipendMinor !== null ? Number(v.stipendMinor / 100n) : null,
   salaryFrom: v.salaryFromMinor !== null ? Number(v.salaryFromMinor / 100n) : null,
   salaryTo: v.salaryToMinor !== null ? Number(v.salaryToMinor / 100n) : null,
+  schedule: v.schedule, experience: v.experience,
   duration: v.duration, seats: v.seats, requirements: v.requirements,
   deadline: v.deadline ? dateColumnToIso(v.deadline) : null, status: v.status, createdAt: v.createdAt.toISOString(),
 })
@@ -90,7 +93,7 @@ export class VacanciesService {
     const row = await this.prisma.client.vacancy.create({
       data: {
         tenantId, companyId: company.id, kind: input.kind, title: input.title, ...where, address: input.address ?? null, format: input.format,
-        ...payColumns({ kind: input.kind, paid: input.paid, stipend: input.stipend ?? null, salaryFrom: input.salaryFrom ?? null, salaryTo: input.salaryTo ?? null }),
+        ...payColumns({ kind: input.kind, paid: input.paid, stipend: input.stipend ?? null, salaryFrom: input.salaryFrom ?? null, salaryTo: input.salaryTo ?? null, schedule: input.schedule ?? null, experience: input.experience ?? null }),
         duration: input.duration ?? null, seats: input.seats,
         requirements: input.requirements ?? null, deadline: dateOf(input.deadline), directions: { create: directionIds.map((directionId) => ({ directionId })) },
       },
@@ -113,7 +116,10 @@ export class VacanciesService {
     const paid = input.paid ?? v.paid
     const was = toVacancy(v)
     const stipend = input.stipend !== undefined ? input.stipend : paid ? was.stipend : null
-    const pay = { kind, paid, stipend, salaryFrom: input.salaryFrom !== undefined ? input.salaryFrom : was.salaryFrom, salaryTo: input.salaryTo !== undefined ? input.salaryTo : was.salaryTo }
+    const pay = {
+      kind, paid, stipend, salaryFrom: input.salaryFrom !== undefined ? input.salaryFrom : was.salaryFrom, salaryTo: input.salaryTo !== undefined ? input.salaryTo : was.salaryTo,
+      schedule: input.schedule !== undefined ? input.schedule : was.schedule, experience: input.experience !== undefined ? input.experience : was.experience,
+    }
     const issue = payIssue(pay)
     if (issue) throw AppError.invalid('validation_failed', 'Validation failed', { issues: [issue] })
     const directionIds = input.directionIds ? await this.mainDirections(input.directionIds) : null
@@ -220,6 +226,8 @@ export class VacanciesService {
     }
     if (q.kind) where.kind = q.kind
     if (q.format) where.format = q.format
+    if (q.schedule) where.schedule = q.schedule
+    if (q.experience) where.experience = q.experience
     const rows = await this.prisma.client.vacancy.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200, select: VACANCY_SELECT })
     return this.withMine(actor, rows)
   }

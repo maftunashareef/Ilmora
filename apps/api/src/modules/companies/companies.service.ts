@@ -75,7 +75,7 @@ export async function closeCompanyData(tx: TransactionClient, id: string, now: D
 
 /** The company goes back to a draft nobody holds, and none of its data stays (release, or the account deleted — №84). */
 export async function unclaimCompany(tx: TransactionClient, id: string, now: Date) {
-  await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull } })
+  await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull, claimedAt: null } })
   return closeCompanyData(tx, id, now)
 }
 
@@ -118,11 +118,11 @@ export class CompaniesService {
           await closeCompanyData(tx, existing.id, new Date())
           await tx.companyIndustry.deleteMany({ where: { companyId: existing.id } })
           await tx.companyDirection.deleteMany({ where: { companyId: existing.id } })
-          await tx.company.update({ where: { id: existing.id }, data: { name: input.name, searchKey: registrySearchKey(input.name), status: 'DRAFT', approvedAt: null, submittedAt: null, reviewedAt: null, rejectReason: null, certificateFileKey: null, about: null, website: null, address: null, pendingChanges: Prisma.DbNull } })
+          await tx.company.update({ where: { id: existing.id }, data: { name: input.name, searchKey: registrySearchKey(input.name), status: 'DRAFT', approvedAt: null, submittedAt: null, reviewedAt: null, rejectReason: null, certificateFileKey: null, about: null, website: null, address: null, pendingChanges: Prisma.DbNull, claimedAt: new Date() } })
           await bindRepresentative(tx, actor.id, existing.id)
           return existing.id
         }
-        const row = await tx.company.create({ data: { tenantId, stir: input.stir, name: input.name, searchKey: registrySearchKey(input.name) }, select: { id: true } })
+        const row = await tx.company.create({ data: { tenantId, stir: input.stir, name: input.name, searchKey: registrySearchKey(input.name), claimedAt: new Date() }, select: { id: true } })
         await bindRepresentative(tx, actor.id, row.id)
         return row.id
       })
@@ -134,11 +134,15 @@ export class CompaniesService {
     return this.profileOf(id)
   }
 
-  /** Abandoned: never approved, a draft (or rejected) untouched for REGISTRY_DRAFT_HOLD_DAYS since it was created or reviewed. */
+  /**
+   * Abandoned: never approved, a draft (or rejected) untouched for REGISTRY_DRAFT_HOLD_DAYS since it was created, claimed
+   * by its present representative or reviewed — the latest of the three. Counting from the creation only let a hijacker
+   * take an old record straight back from the company that claimed it after a release (security review 11.11, №83).
+   */
   private async isAbandoned(id: string): Promise<boolean> {
-    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true } })
+    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true, claimedAt: true } })
     if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
-    const last = Math.max(row.createdAt.getTime(), row.reviewedAt?.getTime() ?? 0)
+    const last = Math.max(row.createdAt.getTime(), row.claimedAt?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
     return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
   }
 
