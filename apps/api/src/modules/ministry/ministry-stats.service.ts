@@ -284,15 +284,16 @@ export class MinistryStatsService {
       this.prisma.client.vacancy.findMany({ where, select: { kind: true, status: true, seats: true } }),
       this.prisma.client.vacancyApplication.findMany({ where: { vacancy: where }, select: { status: true, vacancy: { select: { kind: true } } } }),
     ])
-    const rows = (['PRACTICE', 'INTERNSHIP'] as const).map((kind) => ({
-      kind: kind === 'PRACTICE' ? T('Amaliyot', 'Практика', 'Practice') : T('Stajirovka', 'Стажировка', 'Internship'),
+    const KIND_NAMES = { PRACTICE: T('Amaliyot', 'Практика', 'Practice'), INTERNSHIP: T('Stajirovka', 'Стажировка', 'Internship'), JOB: T('Iş', 'Работа', 'Job') }
+    const rows = (['PRACTICE', 'INTERNSHIP', 'JOB'] as const).map((kind) => ({
+      kind: KIND_NAMES[kind],
       vacancies: vac.filter((v) => v.kind === kind).length, open: vac.filter((v) => v.kind === kind && v.status === 'OPEN').length,
       seats: vac.filter((v) => v.kind === kind).reduce((n, v) => n + v.seats, 0),
       applications: apps.filter((a) => a.vacancy.kind === kind).length, invited: apps.filter((a) => a.vacancy.kind === kind && a.status === 'INVITED').length,
     }))
     // Vacancies and seats are the companies' figures; applications and invitations are students.
     return protectPeople({
-      key: 'vacancies', title: T('Amaliyot va stajirovkalar', 'Практика и стажировки', 'Practice and internships'),
+      key: 'vacancies', title: T('Vakansiyalar', 'Вакансии', 'Vacancies'),
       columns: [col('kind', T('Turi', 'Вид', 'Kind'), false), col('vacancies', T('Vakansiyalar', 'Вакансий', 'Vacancies')), col('open', T('Oçiq', 'Открытых', 'Open')), col('seats', T('Örinlar', 'Мест', 'Seats')), col('applications', T('Arizalar', 'Откликов', 'Applications')), col('invited', T('Taklif qilingan', 'Приглашено', 'Invited'))],
       rows,
     }, ['applications', 'invited'])

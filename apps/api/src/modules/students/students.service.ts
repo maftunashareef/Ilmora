@@ -124,7 +124,7 @@ export class StudentsService {
     await this.prisma.client.$transaction(async (tx) => {
       await tx.studentProfile.upsert({ where: { userId: actor.id }, create: { tenantId, userId: actor.id, ...data }, update: data })
       await tx.user.update({ where: { id: actor.id }, data: { displayName: fullName, district: q.district.trim(), email: q.email.trim() || null } })
-      await this.syncConsents(tx, tenantId, actor.id, { GRADUATE_CARD: !!q.consents.GRADUATE_CARD, CONTRACT_HELP_CARD: !!q.consents.CONTRACT_HELP_CARD, PARENT_CONSENT: minor && q.guardianConsent }, ip, now)
+      await this.syncConsents(tx, tenantId, actor.id, { GRADUATE_CARD: !!q.consents.GRADUATE_CARD, CONTRACT_HELP_CARD: !!q.consents.CONTRACT_HELP_CARD, INDUSTRY_CARD: !!q.consents.INDUSTRY_CARD, PARENT_CONSENT: minor && q.guardianConsent }, ip, now)
     })
     await this.audit.record({ action: before ? 'student.questionnaire.update' : 'student.questionnaire.create', entityType: 'StudentProfile', entityId: actor.id, after: { mode: data.mode, institutionId, directionId, studyConfirmation: confirmation.studyConfirmation ?? before?.studyConfirmation } })
     if (confirmation.studyConfirmation === 'PENDING' && institutionId) await this.askInstitution(tenantId, institutionId, q.fullName)

@@ -665,7 +665,7 @@ export interface PageDto<T> {
  * announcements; send my anonymous card to companies (help with the contract). Contacts for one company are a
  * per-request decision, not a questionnaire mark.
  */
-export const STUDENT_CONSENT_KEYS = ['GRADUATE_CARD', 'CONTRACT_HELP_CARD'] as const
+export const STUDENT_CONSENT_KEYS = ['GRADUATE_CARD', 'CONTRACT_HELP_CARD', 'INDUSTRY_CARD'] as const
 export type StudentConsentKey = (typeof STUDENT_CONSENT_KEYS)[number]
 /** Edition of the consent texts the marks refer to; a new edition (after the lawyer's review) gets a new version. */
 export const STUDENT_CONSENT_TEXT_VERSION = '2026-11-10'
@@ -912,6 +912,12 @@ export type VacancyStatus = 'OPEN' | 'CLOSED'
 export type ApplicationStatus = 'NEW' | 'VIEWED' | 'INVITED' | 'REJECTED'
 export const VACANCY_SEATS_MAX = 1000
 export const VACANCY_DIRECTIONS_MAX = 10
+/** «Разослать студентам»: broadcasts per institution in 24 hours (ТЗ «Студенты у компании, Вакансии у учреждения», 3.2). */
+export const VACANCY_BROADCASTS_PER_DAY = 20
+/** Years of study a broadcast can choose (a school class goes up to 11). */
+export const BROADCAST_COURSE_MAX = 11
+/** Cards per page in the company's «Студенты» section. */
+export const STUDENTS_PAGE_SIZE = 20
 
 /** A vacancy as a student sees it (approved companies, open, deadline not passed). */
 export interface VacancyDto {
@@ -925,8 +931,11 @@ export interface VacancyDto {
   address: string | null
   format: WorkFormat
   paid: boolean
-  /** Monthly stipend, so'm, when stated. */
+  /** Monthly stipend, so'm, when stated (practice, internship). */
   stipend: number | null
+  /** «Работа»: the monthly salary, so'm, from–to; one amount is `salaryFrom` alone. */
+  salaryFrom: number | null
+  salaryTo: number | null
   duration: string | null
   seats: number
   requirements: string | null
@@ -952,6 +961,83 @@ export interface VacancyApplicationDto {
   createdAt: string
   statusChangedAt: string | null
   student: StudentFullCardDto & { id: string }
+}
+
+/**
+ * «Вакансии компаний» in the institution's workspace (ТЗ «Студенты у компании, Вакансии у учреждения», 3.1): open
+ * vacancies of approved companies in the industries of the institution's directions. `hasDirections` false — the
+ * passport has no directions yet, the list is empty and the web asks to add them.
+ */
+export interface InstitutionVacanciesDto {
+  hasDirections: boolean
+  items: InstitutionVacancyDto[]
+}
+
+/** A vacancy as an institution sees it: the vacancy and how many of its students it has sent it to. */
+export interface InstitutionVacancyDto extends Omit<VacancyDto, 'myApplication'> {
+  /** Students of this institution the vacancy was sent to. */
+  sentTo: number
+}
+
+/** «Разослать студентам» — before sending: how many students get it now (those who already got it are not counted). */
+export interface VacancyBroadcastPreviewDto {
+  recipients: number
+  /** Students on the chosen directions and years who already got this vacancy. */
+  alreadySent: number
+  /** Broadcasts left today (24 hours) for this institution. */
+  leftToday: number
+}
+
+/** One broadcast in the institution's journal. */
+export interface VacancyBroadcastDto {
+  id: string
+  vacancyId: string
+  directions: DirectionDto[]
+  courses: number[]
+  recipientsCount: number
+  createdAt: string
+  /** Set by the queue after the last batch; null while it is being sent. */
+  finishedAt: string | null
+}
+
+/**
+ * The company's «Студенты» section (ТЗ «Студенты у компании», 2.2): an institution with the number of students who
+ * match — studying, confirmed, consented to «companies of my industry», of the company's industries.
+ */
+export interface StudentsBlockDto {
+  institution: { id: string; name: string; type: RegistryInstitutionType; region: PlaceRefDto | null }
+  students: number
+}
+
+/**
+ * A student's card in «Студенты» (2.3): the same as a graduate card in an announcement. `cardId` is this company's own id
+ * for the card, not the student's account id (as graduate cards, №127); «Запросить контакты» takes it.
+ */
+export interface CompanyStudentCardDto {
+  cardId: string
+  name: string
+  institution: { id: string; name: string; type: RegistryInstitutionType }
+  direction: DirectionDto | null
+  course: number | null
+  graduationYear: number | null
+  region: PlaceRefDto | null
+  about: string | null
+  /** Titles only; the files open after an accepted contact request. */
+  certificates: string[]
+  ilmoraCourses: L[]
+  studyConfirmed: true
+  /**
+   * This company's contact request to the student by name — from an announcement or from here; a request from an
+   * anonymous contract-help card is never shown (№126).
+   */
+  contactRequest: MatchStatus | null
+}
+
+export interface CompanyStudentsPageDto {
+  items: CompanyStudentCardDto[]
+  total: number
+  page: number
+  pageSize: number
 }
 
 /** The student's application with the vacancy. */

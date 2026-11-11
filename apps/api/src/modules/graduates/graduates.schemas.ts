@@ -23,7 +23,22 @@ export const ResponseInput = z
 export const InviteInput = z.object({ announcementId: id }).strict()
 export const AnnouncementsQuery = z.object({ year: z.coerce.number().int().min(2000).max(2100).optional() })
 
+/**
+ * The company's «Студенты» filters (ТЗ «Студенты у компании», 2.2): a direction (an alias stands for its main one), the
+ * institution's type and region, the year of study and the year of graduation.
+ */
+export const CompanyStudentsQuery = z.object({
+  direction: id.optional(),
+  type: z.enum(['TECHNIKUM', 'COLLEGE', 'LYCEUM', 'SCHOOL', 'UNIVERSITY', 'TRAINING_CENTER']).optional(),
+  region: z.string().trim().max(64).optional(),
+  course: z.coerce.number().int().min(1).max(11).optional(),
+  graduationYear: z.coerce.number().int().min(2000).max(2100).optional(),
+})
+export const CompanyStudentsPageQuery = CompanyStudentsQuery.extend({ page: z.coerce.number().int().min(1).max(1000).default(1) })
+
 export type AnnouncementInput = z.infer<typeof AnnouncementInput>
+export type CompanyStudentsQuery = z.infer<typeof CompanyStudentsQuery>
+export type CompanyStudentsPageQuery = z.infer<typeof CompanyStudentsPageQuery>
 export type AnnouncementPatch = z.infer<typeof AnnouncementPatch>
 export type ResponseInput = z.infer<typeof ResponseInput>
 export type InviteInput = z.infer<typeof InviteInput>

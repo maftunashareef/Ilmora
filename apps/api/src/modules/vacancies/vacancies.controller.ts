@@ -4,7 +4,8 @@ import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { Approved } from '../../common/registry-access'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
-import { ApplicationStatusInput, ApplyInput, VacanciesQuery, VacancyInput, VacancyPatch } from './vacancies.schemas'
+import { InstitutionVacanciesService } from './institution-vacancies.service'
+import { ApplicationStatusInput, ApplyInput, BroadcastInput, InstitutionVacanciesQuery, VacanciesQuery, VacancyInput, VacancyPatch } from './vacancies.schemas'
 import { VacanciesService } from './vacancies.service'
 
 const DAY = 86_400_000
@@ -37,7 +38,7 @@ export class CompanyVacanciesController {
   @Get('vacancy-applications/:id/certificates/:certId/file') file(@CurrentActor() a: RequestActor, @Param('id') id: string, @Param('certId') certId: string) { return this.vacancies.certificateLink(a, id, certId) }
 }
 
-/** Practice and internships for students: the list, one vacancy, «Откликнуться», my applications (ТЗ 5.4). */
+/** Vacancies for students (practice, internship, «Работа»): the list, one vacancy, «Откликнуться», my applications (ТЗ 5.4). */
 @Controller()
 @Roles('STUDENT')
 export class StudentVacanciesController {
@@ -52,4 +53,26 @@ export class StudentVacanciesController {
 
   @Get('students/me/applications') mine(@CurrentActor() a: RequestActor) { return this.vacancies.myApplications(a) }
   @Delete('students/me/applications/:id') withdraw(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.withdraw(a, id) }
+}
+
+/**
+ * «Вакансии компаний» in the institution's workspace and «Разослать студентам» (ТЗ «Студенты у компании, Вакансии у
+ * учреждения», 3). An approved, unblocked institution only; the broadcasts' own daily limit is counted in the database.
+ */
+@Controller('institutions/me/vacancies')
+@Roles('INSTITUTION_ADMIN')
+@Approved('institution')
+export class InstitutionVacanciesController {
+  constructor(private readonly vacancies: InstitutionVacanciesService) {}
+
+  @Get() list(@CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(InstitutionVacanciesQuery)) q: InstitutionVacanciesQuery) { return this.vacancies.list(a, q) }
+  @Get(':id') one(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.get(a, id) }
+  @Get(':id/broadcasts') broadcasts(@CurrentActor() a: RequestActor, @Param('id') id: string) { return this.vacancies.broadcasts(a, id) }
+
+  @Post(':id/broadcast/preview')
+  preview(@CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(BroadcastInput)) dto: BroadcastInput) { return this.vacancies.preview(a, id, dto) }
+
+  @Post(':id/broadcast')
+  @Throttle({ default: { limit: 30, ttl: DAY } })
+  send(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(BroadcastInput)) dto: BroadcastInput) { return this.vacancies.send(t, a, id, dto) }
 }
