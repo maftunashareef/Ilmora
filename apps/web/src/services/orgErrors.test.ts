@@ -18,4 +18,9 @@ describe('orgErrorText', () => {
     expect(orgErrorText(new ApiError(403, 'not_approved', 'not yet'), 'ru')).not.toContain('заблокирована')
     expect(orgErrorText(new ApiError(429, 'rate_limited', 'Too many'), 'ru')).toBe('Слишком много попыток. Попробуйте позже.')
   })
+
+  it('429 adds how long to wait when the API says it', () => {
+    expect(orgErrorText(new ApiError(429, 'rate_limited', 'Too many', { retryAfterSeconds: 1800 }), 'ru', 'save')).toBe('Сохранять можно не больше 30 раз в час. Повторите через 30 мин.')
+    expect(orgErrorText(new ApiError(429, 'rate_limited', 'Too many', { retryAfterSeconds: 59 }), 'en', 'submit')).toBe('You can send for review at most 10 times an hour. Try again in 1 min.')
+  })
 })

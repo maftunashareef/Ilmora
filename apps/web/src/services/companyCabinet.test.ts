@@ -9,7 +9,7 @@ vi.mock('../lib/api', () => ({
   }),
 }))
 
-const { certificateProblem, companyApi, companyForm, companyPatch, companyReviewedChanged, emptyVacancy, tashkentToday, vacancyBody, vacancyProblems } = await import('./companyCabinet')
+const { certificateProblem, companyApi, companyForm, companyPatch, companyReviewedChanged, emptyStudentsFilters, emptyVacancy, studentsQuery, tashkentToday, vacancyBody, vacancyProblems } = await import('./companyCabinet')
 
 const it_ = { id: 'it', slug: 'it', name: { uz: 'IT', ru: 'IT', en: 'IT' } }
 const profile: CompanyProfileDto = {
@@ -78,3 +78,29 @@ describe('company workspace calls', () => {
     expect(calls[5].body).toEqual({ announcementId: 'a1' })
   })
 })
+
+describe('«Работа» in the vacancy form (ТЗ «Студенты у компании», 5)', () => {
+  const job = { ...emptyVacancy(), kind: 'JOB' as const, title: 'Duradgor', directions: [{ id: 'd1', name: 'Duradgorlik' }], region: 'kashkadarya', seats: '2' }
+  it('asks for the schedule and the experience, and a salary «to» not below «from»', () => {
+    expect(vacancyProblems(job, '2026-11-11')).toEqual(['schedule', 'experience'])
+    const ok = { ...job, schedule: 'FULL_TIME' as const, experience: 'NONE' as const }
+    expect(vacancyProblems(ok, '2026-11-11')).toEqual([])
+    expect(vacancyProblems({ ...ok, salaryTo: '5000000' }, '2026-11-11')).toEqual(['salary'])
+    expect(vacancyProblems({ ...ok, salaryFrom: '6000000', salaryTo: '5000000' }, '2026-11-11')).toEqual(['salary'])
+  })
+  it('is always paid, with a salary instead of a stipend; practice keeps no salary, schedule or experience', () => {
+    const body = vacancyBody({ ...job, paid: false, stipend: '900000', salaryFrom: '4000000', salaryTo: '6000000', schedule: 'SHIFT', experience: 'UP_TO_1' })
+    expect(body).toMatchObject({ kind: 'JOB', paid: true, stipend: null, salaryFrom: 4000000, salaryTo: 6000000, schedule: 'SHIFT', experience: 'UP_TO_1' })
+    const practice = vacancyBody({ ...job, kind: 'PRACTICE', paid: true, stipend: '900000', salaryFrom: '4000000', schedule: 'SHIFT', experience: 'NONE' })
+    expect(practice).toMatchObject({ kind: 'PRACTICE', paid: true, stipend: 900000, salaryFrom: null, salaryTo: null, schedule: null, experience: null })
+  })
+})
+
+describe('«Студенты» filters', () => {
+  it('send only what is set, and the page from 2 on', () => {
+    expect(studentsQuery(emptyStudentsFilters())).toBe('')
+    expect(studentsQuery({ ...emptyStudentsFilters(), type: 'TECHNIKUM', course: '2' }, 3)).toBe('?type=TECHNIKUM&course=2&page=3')
+    expect(studentsQuery({ ...emptyStudentsFilters(), region: 'andijan' }, 1)).toBe('?region=andijan')
+  })
+})
+

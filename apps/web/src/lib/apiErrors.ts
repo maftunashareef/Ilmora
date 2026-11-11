@@ -1,5 +1,5 @@
 import { translate, type Lang, type TKey } from '@ilmora/shared'
-import { isApiError } from './api'
+import { isApiError, REFRESH_LIMITED } from './api'
 
 /**
  * API error codes → dictionary keys. The API answers in English, so Uzbek and Russian screens show these texts instead
@@ -194,10 +194,28 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
 }
 
 /**
+ * Minutes to wait after a 429. The API puts `details.retryAfterSeconds` (also the Retry-After header) on every 429: the
+ * error's own term or the rate limiter's, 60 only when neither is known. Null when the answer carries no term.
+ */
+export function retryMinutes(err: unknown): number | null {
+  if (!isApiError(err) || err.status !== 429) return null
+  const s = (err.details as { retryAfterSeconds?: unknown } | undefined)?.retryAfterSeconds
+  return typeof s === 'number' && Number.isFinite(s) && s > 0 ? Math.max(1, Math.ceil(s / 60)) : null
+}
+
+/** «Слишком много попыток. Повторите через N мин.» — or «Попробуйте позже» when the API gave no term. */
+export function tooManyText(err: unknown, lang: Lang): string {
+  const m = retryMinutes(err)
+  return m ? translate(lang, 'apiError.retryIn', { n: m }) : translate(lang, 'auth.err.tooMany')
+}
+
+/**
  * The text to show for a failed request. English keeps the API's own (more specific) message; Uzbek and Russian get the
  * translated text for the error code, or a generic one, so no English sentence appears on those screens.
  */
 export function apiErrorText(err: unknown, lang: Lang): string {
+  // A 429 says how long to wait, in every language (the sign-in refresh has its own text: REFRESH_LIMITED).
+  if (isApiError(err) && err.status === 429 && err.code !== REFRESH_LIMITED) return tooManyText(err, lang)
   if (!isApiError(err)) {
     if (lang === 'en' && err instanceof Error && err.message) return err.message
     return translate(lang, 'apiError.generic')

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { translate } from '@ilmora/shared'
 import { describe, expect, it } from 'vitest'
 import { ApiError } from './api'
-import { API_ERROR_KEYS, apiErrorText } from './apiErrors'
+import { API_ERROR_KEYS, apiErrorText, retryMinutes } from './apiErrors'
 
 const API_SRC = join(__dirname, '..', '..', '..', 'api', 'src')
 
@@ -60,5 +60,14 @@ describe('API error texts', () => {
     expect(apiErrorText(new ApiError(400, 'http_400', 'Bad Request'), 'uz')).toBe(translate('uz', 'apiError.generic'))
     expect(apiErrorText(new Error('boom'), 'ru')).toBe(translate('ru', 'apiError.generic'))
     expect(apiErrorText(new Error('boom'), 'en')).toBe('boom')
+  })
+
+  it('say how long to wait after a 429, from the API’s retryAfterSeconds', () => {
+    expect(apiErrorText(new ApiError(429, 'rate_limited', 'Too many', { retryAfterSeconds: 125 }), 'ru')).toBe('Слишком много попыток. Повторите через 3 мин.')
+    expect(apiErrorText(new ApiError(429, 'rate_limited', 'Too many', { retryAfterSeconds: 20 }), 'en')).toBe('Too many attempts. Try again in 1 min.')
+    expect(apiErrorText(new ApiError(429, 'account_locked', 'Locked', { retryAfterSeconds: 900 }), 'uz')).toContain('15 daqiqadan')
+    expect(retryMinutes(new ApiError(429, 'rate_limited', 'Too many'))).toBeNull()
+    expect(apiErrorText(new ApiError(429, 'rate_limited', 'Too many'), 'ru')).toBe('Слишком много попыток. Попробуйте позже.')
+    expect(retryMinutes(new ApiError(500, 'internal_error', 'x', { retryAfterSeconds: 60 }))).toBeNull()
   })
 })

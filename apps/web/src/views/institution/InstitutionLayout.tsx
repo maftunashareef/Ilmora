@@ -11,6 +11,7 @@ export function InstitutionLayout() {
       { id: 'students', to: '/institution/students', label: t('inst.nav.students'), icon: 'users' },
       { id: 'requests', to: '/institution/requests', label: t('inst.nav.requests'), icon: 'briefcase' },
       { id: 'graduates', to: '/institution/graduates', label: t('inst.nav.graduates'), icon: 'cap' },
+      { id: 'vacancies', to: '/institution/vacancies', label: t('inst.nav.vacancies'), icon: 'list' },
     ]} />
   )
 }

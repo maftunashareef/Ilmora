@@ -1,6 +1,6 @@
 import { translate, type Lang } from '@ilmora/shared'
 import { isApiError } from '../lib/api'
-import { apiErrorText } from '../lib/apiErrors'
+import { apiErrorText, retryMinutes } from '../lib/apiErrors'
 
 /** What the representative was doing: saving the profile (or its directions) or sending it for review. */
 export type OrgAction = 'save' | 'submit'
@@ -9,11 +9,15 @@ export const ORG_LIMITS: Record<OrgAction, number> = { save: 30, submit: 10 }
 
 /**
  * An error of the company profile or the institution passport, in words: 403 `forbidden` there means the Super Admin
- * blocked the organization (no edits, no submission); a 429 names the hourly limit. Anything else — as everywhere.
- * The API's `Retry-After` is not shown: the error filter answers 60 seconds whatever the hourly limit has left.
+ * blocked the organization (no edits, no submission); a 429 names the hourly limit and how long to wait (the API's
+ * `retryAfterSeconds`). Anything else — as everywhere.
  */
 export function orgErrorText(err: unknown, lang: Lang, action?: OrgAction): string {
   if (isApiError(err) && err.status === 403 && err.code === 'forbidden') return translate(lang, 'org.blocked')
-  if (action && isApiError(err) && err.status === 429) return translate(lang, action === 'save' ? 'org.limit.save' : 'org.limit.submit', { n: ORG_LIMITS[action] })
+  if (action && isApiError(err) && err.status === 429) {
+    const m = retryMinutes(err)
+    const key = action === 'save' ? (m ? 'org.limit.saveIn' : 'org.limit.save') : (m ? 'org.limit.submitIn' : 'org.limit.submit')
+    return translate(lang, key, { n: ORG_LIMITS[action], m: m ?? 0 })
+  }
   return apiErrorText(err, lang)
 }
