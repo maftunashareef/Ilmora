@@ -80,7 +80,8 @@ export class MinistryRegistryService {
       if (!regionId) throw AppError.invalid('invalid_region', 'Choose a region from the list')
       where.regionId = regionId
     }
-    if (q.status === 'approved') where.approvedAt = { not: null }
+    // «Approved» is what the figures count: approved and not blocked, as for the institutions (review 11.11).
+    if (q.status === 'approved') Object.assign(where, { approvedAt: { not: null }, blockedAt: null })
     if (q.status === 'pending') where.status = 'PENDING'
     const page = q.page ?? 1
     const [total, rows] = await Promise.all([

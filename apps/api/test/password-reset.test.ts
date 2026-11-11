@@ -57,12 +57,16 @@ describe.skipIf(!DB_AVAILABLE)('Forgotten passwords', () => {
     })
   })
 
-  it('the ministry, the Super Admins and the finance admins never reset by SMS', async () => {
+  it('the ministry, the Super Admins and the finance admins never reset by SMS — with the authenticator key or without it', async () => {
     const s = await setup('pw-sms-mfa')
+    // Review 11.11: without TOTP_ENCRYPTION_KEY the SMS path used to open for the owners and finance.
+    const noKeyEnv = { ...testEnv({ REDIS_MODE: 'off' }), TOTP_ENCRYPTION_KEY: undefined }
+    const noKeyMfa = new MfaService(ctx.prisma, ctx.tokens, ctx.audit, redis, noKeyEnv)
+    const noKey = new AuthService(ctx.prisma, otp, ctx.tokens, ctx.audit, new AccountService(ctx.prisma, ctx.tokens, ctx.audit, redis, notificationsStub, noKeyEnv, noKeyMfa), noKeyEnv, noKeyMfa)
     await s.inT(async () => {
       for (const data of [{ roles: ['MINISTRY'] }, { roles: ['FINANCE_ADMIN'] }, { isOwner: true }]) {
         const acc = await s.account(`mfa${Math.floor(Math.random() * 1e6)}`, data)
-        await expect(auth.resetPasswordBySms(s.tenantId, { phone: acc.phone, code: '123456', newPassword: 'new-password-1' }, meta)).rejects.toMatchObject({ code: 'mfa_password_login' })
+        for (const a of [auth, noKey]) await expect(a.resetPasswordBySms(s.tenantId, { phone: acc.phone, code: '123456', newPassword: 'new-password-1' }, meta)).rejects.toMatchObject({ code: 'password_reset_by_admin' })
       }
     })
   })

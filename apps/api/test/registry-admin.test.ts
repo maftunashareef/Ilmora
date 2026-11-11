@@ -164,6 +164,10 @@ describe.skipIf(!DB_AVAILABLE)('Reference data for the Super Admin (ТЗ 9.2)', 
       await expect(registry.addStudentInstitution(s.tenantId, me, { name: 'Limit texnikumi 4', type: 'TECHNIKUM', regionId: s.tashkent.id })).rejects.toMatchObject({ code: 'rate_limited' })
       for (let i = 1; i <= 20; i++) await registry.addDirection(s.tenantId, me, { name: `Limit yönaliş ${i}`, industryId: s.it.id })
       await expect(registry.addDirection(s.tenantId, me, { name: 'Limit yönaliş 21', industryId: s.it.id })).rejects.toMatchObject({ code: 'rate_limited' })
+      // Saves sent at once do not slip past the limit together (review 11.11): one account, 6 at once, 3 a day.
+      const other = { id: (await ctx.prisma.client.user.create({ data: { tenantId: s.tenantId, phoneE164: '+998907770011', displayName: 'Racer', roles: ['STUDENT'] } })).id, roles: ['STUDENT'] } as RequestActor
+      const burst = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => registry.addStudentInstitution(s.tenantId, other, { name: `Poyga texnikumi ${i}`, type: 'TECHNIKUM', regionId: s.tashkent.id })))
+      expect(burst.filter((r) => r.status === 'fulfilled')).toHaveLength(3)
     })
   })
 

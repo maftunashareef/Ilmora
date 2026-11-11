@@ -62,9 +62,11 @@ export class ContactsService {
   async companyList(actor: RequestActor): Promise<CompanyContactDto[]> {
     const companyId = await this.ownCompany(actor)
     const student = { select: { id: true, displayName: true } } as const
+    // A disabled or deleted student leaves the company's contacts (relation reads skip the soft-delete scope: stated here).
+    const live = { isActive: true, deletedAt: null }
     const [requests, applications] = await Promise.all([
-      this.prisma.client.contactRequest.findMany({ where: { companyId, status: 'ACCEPTED' }, orderBy: { decidedAt: 'desc' }, take: 500, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, sharedName: true, user: student } }),
-      this.prisma.client.vacancyApplication.findMany({ where: { vacancy: { companyId } }, orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, status: true, createdAt: true, statusChangedAt: true, sharedName: true, vacancy: { select: { id: true, title: true } }, user: student } }),
+      this.prisma.client.contactRequest.findMany({ where: { companyId, status: 'ACCEPTED', user: live }, orderBy: { decidedAt: 'desc' }, take: 500, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, sharedName: true, user: student } }),
+      this.prisma.client.vacancyApplication.findMany({ where: { vacancy: { companyId }, user: live }, orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, status: true, createdAt: true, statusChangedAt: true, sharedName: true, vacancy: { select: { id: true, title: true } }, user: student } }),
     ])
     const items: (CompanyContactDto & { at: number })[] = [
       ...requests.map((r) => ({ id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.user.id, name: r.sharedName ?? r.user.displayName, full: null }, at: (r.decidedAt ?? r.createdAt).getTime() })),
@@ -73,15 +75,19 @@ export class ContactsService {
     return items.sort((a, b) => b.at - a.at).map(({ at: _at, ...dto }) => dto)
   }
 
-  /** One accepted request with the full card. */
+  /**
+   * One accepted request with the full card. Anything else — pending, declined, taken back, or the student disabled — is
+   * not found: the company learns who the student is only once the student agreed (review 11.11: the name and the id
+   * used to come back for a pending or declined request, and the anonymous «contract help» card lost its anonymity).
+   */
   async companyContact(actor: RequestActor, id: string): Promise<CompanyContactDto> {
     const companyId = await this.ownCompany(actor)
-    const r = await this.prisma.client.contactRequest.findFirst({ where: { id, companyId }, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, userId: true, sharedName: true, sharedPhone: true, sharedEmail: true, user: { select: { displayName: true } } } })
-    if (!r) throw AppError.notFound('Contact request')
-    const consent = r.status === 'ACCEPTED' ? await this.activeConsent(r.userId, companyId) : null
-    const full = consent ? await this.fullCard(r.userId, consent.givenAt, r) : null
-    if (full) await this.audit.record({ action: 'contact.view', entityType: 'User', entityId: r.userId, after: { companyId, requestId: id } })
-    return { id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.userId, name: r.sharedName ?? r.user.displayName, full } }
+    const r = await this.prisma.client.contactRequest.findFirst({ where: { id, companyId, status: 'ACCEPTED', user: { isActive: true, deletedAt: null } }, select: { id: true, source: true, status: true, createdAt: true, decidedAt: true, userId: true, sharedName: true, sharedPhone: true, sharedEmail: true } })
+    const consent = r ? await this.activeConsent(r.userId, companyId) : null
+    if (!r || !consent) throw AppError.notFound('Contact request')
+    const full = await this.fullCard(r.userId, consent.givenAt, r)
+    await this.audit.record({ action: 'contact.view', entityType: 'User', entityId: r.userId, after: { companyId, requestId: id } })
+    return { id: r.id, source: r.source, status: r.status, createdAt: r.createdAt.toISOString(), decidedAt: iso(r.decidedAt), vacancy: null, student: { id: r.userId, name: full.name, full } }
   }
 
   /** A certificate file of a student who accepted — a 5-minute link, audited (ТЗ 8 «скачал файл»). */
@@ -178,8 +184,9 @@ export class ContactsService {
   /** Full cards of many students in two queries (a company opening its applications); `shared` — their copies of the contacts. */
   async fullCards(userIds: string[], certificatesUntil?: Map<string, Date>, shared?: Map<string, SharedContacts>): Promise<Map<string, StudentFullCardDto>> {
     if (!userIds.length) return new Map()
+    // Only students who can still be reached: a disabled account is shown to no company.
     const users = await this.prisma.client.user.findMany({
-      where: { id: { in: userIds } },
+      where: { id: { in: userIds }, isActive: true },
       select: {
         id: true, displayName: true, email: true, phoneE164: true, phoneVerifiedAt: true,
         studentProfile: { select: { contactPhone: true, graduationYear: true, about: true, institution: { select: { name: true } }, direction: { select: DIRECTION_WITH_MAIN } } },

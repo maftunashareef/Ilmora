@@ -33,6 +33,8 @@ const toItem = (r: Prisma.CompanyGetPayload<{ select: typeof ITEM_SELECT }>): Co
   representative: toRep(r.representative),
 })
 const notPending = () => AppError.conflict('not_pending', 'The profile is not waiting for a decision')
+/** The representative saved another change after the reviewer read it, or another reviewer decided first (review 11.11). */
+const reviewChanged = () => AppError.conflict('review_changed', 'The change was edited or decided meanwhile; open it again')
 
 /**
  * Review of company profiles by ILMORA (ТЗ 4.3: the moderator compares the STIR and the name with the certificate,
@@ -85,22 +87,22 @@ export class CompanyReviewService {
     return this.companies.certificateLinkOf(id)
   }
 
-  async approve(tenantId: string, actor: RequestActor, id: string): Promise<CompanyProfileDto> {
-    const current = await this.pending(id)
+  async approve(tenantId: string, actor: RequestActor, id: string, seenSubmittedAt?: string): Promise<CompanyProfileDto> {
+    const current = await this.pending(id, seenSubmittedAt)
     const now = new Date()
     if (current.pendingChanges) return this.decideChange(tenantId, actor, id, { ...current, pendingChanges: current.pendingChanges }, true)
-    const moved = await this.prisma.client.company.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'APPROVED', approvedAt: current.approvedAt ?? now, reviewedAt: now, reviewedById: actor.id, rejectReason: null } })
+    const moved = await this.prisma.client.company.updateMany({ where: { id, status: 'PENDING', submittedAt: current.submittedAt }, data: { status: 'APPROVED', approvedAt: current.approvedAt ?? now, reviewedAt: now, reviewedById: actor.id, rejectReason: null } })
     if (moved.count !== 1) throw notPending()
     await this.audit.record({ action: 'company.approve', entityType: 'Company', entityId: id, before: { status: 'PENDING' }, after: { status: 'APPROVED' } })
     await this.tell(tenantId, current.representativeId, 'company.approved', { companyName: current.name, companyId: id }, `company-decision:${id}:${now.getTime()}`)
     return this.companies.profileOf(id)
   }
 
-  async reject(tenantId: string, actor: RequestActor, id: string, reason: string): Promise<CompanyProfileDto> {
-    const current = await this.pending(id)
+  async reject(tenantId: string, actor: RequestActor, id: string, reason: string, seenSubmittedAt?: string): Promise<CompanyProfileDto> {
+    const current = await this.pending(id, seenSubmittedAt)
     const now = new Date()
     if (current.pendingChanges) return this.decideChange(tenantId, actor, id, { ...current, pendingChanges: current.pendingChanges }, false, reason)
-    const moved = await this.prisma.client.company.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'REJECTED', reviewedAt: now, reviewedById: actor.id, rejectReason: reason } })
+    const moved = await this.prisma.client.company.updateMany({ where: { id, status: 'PENDING', submittedAt: current.submittedAt }, data: { status: 'REJECTED', reviewedAt: now, reviewedById: actor.id, rejectReason: reason } })
     if (moved.count !== 1) throw notPending()
     await this.audit.record({ action: 'company.reject', entityType: 'Company', entityId: id, before: { status: 'PENDING' }, after: { status: 'REJECTED' }, reason })
     await this.tell(tenantId, current.representativeId, 'company.rejected', { companyName: current.name, companyId: id, reason }, `company-decision:${id}:${now.getTime()}`)
@@ -118,19 +120,20 @@ export class CompanyReviewService {
    * record (the STIR must still be free: 409 `stir_taken`) and replaces the industries; rejection drops it. The
    * company stays APPROVED with what it had; one decision of two at once counts.
    */
-  private async decideChange(tenantId: string, actor: RequestActor, id: string, current: { name: string; representativeId: string | null; pendingChanges: CompanyPendingChanges }, accept: boolean, reason?: string): Promise<CompanyProfileDto> {
+  private async decideChange(tenantId: string, actor: RequestActor, id: string, current: { name: string; status: string; submittedAt: Date | null; representativeId: string | null; pendingChanges: CompanyPendingChanges }, accept: boolean, reason?: string): Promise<CompanyProfileDto> {
     const now = new Date()
     const { industryIds, ...fields } = current.pendingChanges
     try {
       await this.prisma.client.$transaction(async (tx) => {
         const moved = await tx.company.updateMany({
-          where: { id, pendingChanges: { not: Prisma.DbNull } },
+          where: { id, pendingChanges: { not: Prisma.DbNull }, submittedAt: current.submittedAt },
           data: {
             ...(accept ? { ...fields, ...(fields.name ? { searchKey: registrySearchKey(fields.name) } : {}) } : {}),
-            pendingChanges: Prisma.DbNull, status: 'APPROVED', reviewedAt: now, reviewedById: actor.id, rejectReason: accept ? null : (reason ?? null),
+            // A certificate waiting with the change (status PENDING) is decided with it: a rejection does not approve it (review 11.11).
+            pendingChanges: Prisma.DbNull, status: accept || current.status !== 'PENDING' ? 'APPROVED' : 'REJECTED', reviewedAt: now, reviewedById: actor.id, rejectReason: accept ? null : (reason ?? null),
           },
         })
-        if (moved.count !== 1) throw notPending()
+        if (moved.count !== 1) throw reviewChanged()
         if (accept && industryIds) {
           await tx.companyIndustry.deleteMany({ where: { companyId: id } })
           if (industryIds.length) await tx.companyIndustry.createMany({ data: industryIds.map((industryId) => ({ companyId: id, industryId })) })
@@ -161,11 +164,12 @@ export class CompanyReviewService {
     return this.companies.profileOf(id)
   }
 
-  private async pending(id: string) {
-    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, pendingChanges: true, representative: { select: { id: true } } } })
+  private async pending(id: string, seenSubmittedAt?: string) {
+    const row = await this.prisma.client.company.findFirst({ where: { id }, select: { name: true, status: true, approvedAt: true, submittedAt: true, pendingChanges: true, representative: { select: { id: true } } } })
     if (!row) throw AppError.notFound('Company')
     if (row.status !== 'PENDING' && !row.pendingChanges) throw notPending()
-    return { name: row.name, approvedAt: row.approvedAt, representativeId: row.representative?.id ?? null, pendingChanges: (row.pendingChanges as CompanyPendingChanges | null) ?? null }
+    if (seenSubmittedAt && row.submittedAt?.toISOString() !== new Date(seenSubmittedAt).toISOString()) throw reviewChanged()
+    return { name: row.name, status: row.status, approvedAt: row.approvedAt, submittedAt: row.submittedAt, representativeId: row.representative?.id ?? null, pendingChanges: (row.pendingChanges as CompanyPendingChanges | null) ?? null }
   }
 
   private async tell(tenantId: string, userId: string | null, type: 'company.approved' | 'company.rejected', params: Record<string, unknown>, dedupeKey: string) {

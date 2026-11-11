@@ -381,10 +381,13 @@ export class AccountService {
     if (!(await argon2.verify(row.passwordHash, input.currentPassword))) throw AppError.invalid('wrong_password', 'The current password is wrong')
     if (input.newPassword === input.currentPassword) throw AppError.invalid('same_password', 'Choose a password different from the current one')
     if (row.login && input.newPassword.toLowerCase() === row.login) throw AppError.invalid('password_is_login', 'The password must not be the login')
+    // An account that signs in with the authenticator code keeps the time of that sign-in: changing the password does
+    // not restart its 12 hours. With no live session to continue, the new one cannot be renewed — sign in with the code.
+    const startedAt = this.mfa.enforced(row) ? await this.mfaSessionStart(row.id) : undefined
     const updated = await this.prisma.client.user.update({ where: { id: row.id }, data: { passwordHash: await argon2.hash(input.newPassword, PASSWORD_HASH), passwordIssuedAt: null }, include: USER_INCLUDE })
     await this.tokens.revokeAllForUser(row.tenantId, row.id, 'password-changed')
     await this.audit.record({ tenantId: row.tenantId, action: 'auth.password.change', entityType: 'User', entityId: row.id })
-    return this.openSession(updated, meta)
+    return this.openSession(updated, meta, startedAt)
   }
 
   /**
@@ -398,11 +401,19 @@ export class AccountService {
     return roles
   }
 
-  async openSession(user: UserRow, meta: SessionMeta): Promise<LoginResult> {
+  /** When the newest live session of the account began (its family's first row); epoch when there is none. */
+  private async mfaSessionStart(userId: string): Promise<Date> {
+    const last = await this.prisma.client.refreshSession.findFirst({ where: { userId, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' }, select: { familyId: true } })
+    if (!last) return new Date(0)
+    const first = await this.prisma.client.refreshSession.findFirst({ where: { userId, familyId: last.familyId }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
+    return first?.createdAt ?? new Date(0)
+  }
+
+  async openSession(user: UserRow, meta: SessionMeta, startedAt?: Date): Promise<LoginResult> {
     const roles = await this.effectiveRoles(user)
     const pub = await this.publicUser(user, roles)
     const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
-    const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta)
+    const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta, undefined, startedAt)
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: pub }
   }
 

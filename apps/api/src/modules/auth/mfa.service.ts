@@ -99,16 +99,18 @@ export class MfaService {
     if (user.totpEnabledAt) throw AppError.conflict('mfa_already_enabled', 'The authenticator app is already linked; enter its code')
     if (!user.totpSecretEnc) throw AppError.conflict('mfa_setup_first', 'Scan the QR code first')
     const failKey = `mfa:fail:${user.id}`
-    await this.assertNotLocked(failKey)
+    // Counted before the code is checked: wrong codes sent at once cannot all pass a check made earlier (review 11.11).
+    await this.countAttempt(failKey)
     const step = matchTotp(decryptString(user.totpSecretEnc, this.key()), code, new Date())
-    if (step === null) {
-      await this.bump(failKey)
-      throw AppError.invalid('invalid_code', 'The code is wrong or has expired')
-    }
+    if (step === null) throw AppError.invalid('invalid_code', 'The code is wrong or has expired')
+    // The first code links the app once: a double press opens one session and shows the one set of recovery codes
+    // that stays valid (review 11.11).
+    if (!(await this.claimStep(user.id, step))) throw AppError.invalid('invalid_code', 'The code is wrong or has expired')
     const recoveryCodes = newRecoveryCodes()
     const now = new Date()
     await this.prisma.client.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: user.id }, data: { totpEnabledAt: now } })
+      const linked = await tx.user.updateMany({ where: { id: user.id, totpEnabledAt: null }, data: { totpEnabledAt: now } })
+      if (linked.count !== 1) throw AppError.conflict('mfa_already_enabled', 'The authenticator app is already linked; enter its code')
       await tx.totpRecoveryCode.deleteMany({ where: { userId: user.id } })
       await tx.totpRecoveryCode.createMany({ data: recoveryCodes.map((c) => ({ tenantId: user.tenantId, userId: user.id, codeHash: this.recoveryHash(c) })) })
     })
@@ -123,7 +125,8 @@ export class MfaService {
     const user = await this.challengeUser(challenge, 'verify')
     if (!user.totpEnabledAt || !user.totpSecretEnc) throw AppError.unauthorized('The sign-in step has expired; enter the login and password again', 'invalid_challenge')
     const failKey = `mfa:fail:${user.id}`
-    await this.assertNotLocked(failKey)
+    // Counted before the code is checked: wrong codes sent at once cannot all pass a check made earlier (review 11.11).
+    await this.countAttempt(failKey)
     const stepKey = `mfa:step:${user.id}`
     const step = matchTotp(decryptString(user.totpSecretEnc, this.key()), code, new Date())
     // A code is taken once, atomically: requests sent at once with the same code open one session (security review №27).
@@ -141,7 +144,6 @@ export class MfaService {
         return { userId: user.id, method: 'recovery_code' }
       }
     }
-    await this.bump(failKey)
     throw AppError.invalid('invalid_code', 'The code is wrong, has expired or was already used')
   }
 
@@ -172,23 +174,27 @@ export class MfaService {
     return user
   }
 
-  /** Wrong codes per account: after LOGIN_MAX_FAILURES the step is locked for LOGIN_LOCK_SECONDS (a 6-digit code cannot be guessed). */
-  private async assertNotLocked(key: string) {
-    if ((await this.recall(key)) >= this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many wrong codes; try again later', this.env.LOGIN_LOCK_SECONDS)
-  }
-
-  private async bump(key: string) {
+  /**
+   * Codes tried per account: counted first, then checked — after LOGIN_MAX_FAILURES within LOGIN_LOCK_SECONDS the step
+   * is locked (a 6-digit code cannot be guessed). A success clears the count.
+   */
+  private async countAttempt(key: string) {
+    let count = 0
     if (this.redis.off) {
       const now = Date.now()
       const cur = this.memory.get(key)
-      this.memory.set(key, cur && cur.expires > now ? { ...cur, value: cur.value + 1 } : { value: 1, expires: now + this.env.LOGIN_LOCK_SECONDS * 1000 })
-      return
+      const next = cur && cur.expires > now ? { ...cur, value: cur.value + 1 } : { value: 1, expires: now + this.env.LOGIN_LOCK_SECONDS * 1000 }
+      this.memory.set(key, next)
+      count = next.value
+    } else {
+      try {
+        count = await this.redis.cache.incr(key)
+        if (count === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
+      } catch {
+        /* counting must never turn a code into a 500; the route throttle still applies */
+      }
     }
-    try {
-      if ((await this.redis.cache.incr(key)) === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
-    } catch {
-      /* counting must never turn a wrong code into a 500; the route throttle still applies */
-    }
+    if (count > this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many wrong codes; try again later', this.env.LOGIN_LOCK_SECONDS)
   }
 
   /**

@@ -29,6 +29,19 @@ describe('Refund count of the offer, 6.4 (security review 10.11 №42)', () => {
     expect(refundShare(80_000_00n, c.total, c.held)).toBe(50_000_00n) // 5 of 8 lessons not held
   })
 
+  it('a lesson moved past the period end is held, not refunded; a one-off lesson far ahead does not end the weekly schedule (review 11.11)', () => {
+    const s = (id: string, iso: string, status = 'COMPLETED', from: string | null = null) => ({ id, startsAt: at(iso), status, rescheduledFromId: from })
+    const moved = countLessons({
+      periodStart: at('2026-11-01T19:00:00Z'), periodEnd: at('2026-11-08T19:00:00Z'), at: at('2026-11-20T00:00:00Z'),
+      sessions: [s('a', '2026-11-02T13:00:00Z'), s('b', '2026-11-04T13:00:00Z', 'CANCELLED'), s('b2', '2026-12-03T13:00:00Z', 'SCHEDULED', 'b')],
+      lastCalendarDate: '2026-11-30', weekly,
+    })
+    expect(moved).toEqual({ total: 1, held: 1, notHeld: 0 })
+    // The calendar ends on 16 November; a one-off on 20 December does not hide the weekly lessons in between.
+    const ahead = countLessons({ periodStart: at('2026-11-15T19:00:00Z'), periodEnd: at('2026-12-15T19:00:00Z'), at: at('2026-11-10T00:00:00Z'), sessions: [s('x', '2026-11-16T13:00:00Z', 'SCHEDULED')], lastCalendarDate: '2026-11-16', weekly })
+    expect(ahead.total).toBe(9) // 16, 18, 23, 25, 30 Nov and 2, 7, 9, 14 Dec
+  })
+
   it('returns a period paid ahead whole, and everything when the period has no lesson', () => {
     const c = countLessons({ periodStart: at('2026-12-01T00:00:00Z'), periodEnd: at('2027-01-01T00:00:00Z'), at: at('2026-11-20T00:00:00Z'), sessions: [], lastCalendarDate: null, weekly })
     expect(c.held).toBe(0)
@@ -228,6 +241,63 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
       expect(lines.map((l) => l.priceMinor).sort()).toEqual([30_000_00n, 50_000_00n])
       expect(out.requests[0].requestedMinor).toBe(s.payment.amountMinor.toString())
     })
+  })
+
+  it('an old payment without lines is split over the courses it paid for, even after one was refused (review 11.11)', async () => {
+    const s = await paid('rf-old2')
+    await s.inT(() => db.paymentLine.deleteMany({ where: { paymentId: s.payment.id } }))
+    const first = await file(s, { enrollmentIds: [s.byCourse(s.course2.id).id], reason: 'GROUP_CLOSED' })
+    expect(first.requests[0].requestedMinor).toBe((30_000_00n).toString())
+    await s.inT(async () => {
+      await refunds.approve(s.tenantId, s.finance.id, first.requests[0].id, 30_000_00n)
+      await refunds.markPaid(s.tenantId, s.finance.id, first.requests[0].id, 'bank-3')
+    })
+    // The second course keeps its own part (50 000), not the whole payment.
+    const second = await file(s, { reason: 'REFUSAL' })
+    const line = await s.inT(() => db.refundRequestLine.findFirstOrThrow({ where: { refundRequestId: second.requests[0].id } }))
+    expect(line.priceMinor).toBe(50_000_00n)
+    expect(line.amountMinor).toBe(refundShare(50_000_00n, line.lessonsTotal, line.lessonsHeld))
+  })
+
+  it('an earlier refund comes off by what was actually paid; a payment by the test key is not refunded', async () => {
+    const s = await paid('rf-paid-amount')
+    const e2 = s.byCourse(s.course2.id)
+    const r1 = await file(s, { enrollmentIds: [e2.id], reason: 'LESSONS_NOT_HELD' })
+    expect(r1.requests).toHaveLength(0) // no lesson was cancelled: nothing to return, the course goes on
+    const r2 = await file(s, { enrollmentIds: [e2.id], reason: 'PLATFORM_FAULT', reasonText: 'no access for a week' })
+    await s.inT(async () => {
+      await refunds.approve(s.tenantId, s.finance.id, r2.requests[0].id, 5_000_00n)
+      await refunds.markPaid(s.tenantId, s.finance.id, r2.requests[0].id, 'bank-4')
+    })
+    const r3 = await file(s, { enrollmentIds: [e2.id], reason: 'GROUP_CLOSED' })
+    expect(r3.requests[0].requestedMinor).toBe((25_000_00n).toString()) // 30 000 less the 5 000 already returned
+    const t = await paid('rf-sandbox')
+    await t.inT(() => db.paymentTransaction.updateMany({ where: { paymentId: t.payment.id }, data: { sandbox: true } }))
+    expect((await file(t, { reason: 'GROUP_CLOSED' })).requests).toHaveLength(0)
+  })
+
+  it('a lesson package refunds the lessons carried from the earlier payment too', async () => {
+    const s = await paid('rf-carry', { accessKind: 'LESSONS', lessonCount: 8 })
+    await s.inT(async () => {
+      await db.subscription.update({ where: { id: s.subscription.id }, data: { lessonsUsed: 4 } })
+      const { payment: renewal } = await ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')
+      await ctx.payments.manualSettle(renewal.id, s.student.id, 'test')
+      expect(await db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } })).toMatchObject({ lessonsTotal: 12, lessonsUsed: 0 })
+      const out = await refunds.refuse(s.tenantId, s.student.id, { reason: 'REFUSAL' }, { source: 'CABINET', actorId: s.student.id })
+      // 12 unused: 8 from the renewal (all of it) and 4 from the first payment (half of it).
+      expect(out.requests.find((r) => r.paymentId === renewal.id)?.requestedMinor).toBe(renewal.amountMinor.toString())
+      expect(out.requests.find((r) => r.paymentId === s.payment.id)?.requestedMinor).toBe((s.payment.amountMinor / 2n).toString())
+    })
+  })
+
+  it('a withdrawal and an approval at once: one wins, the other gets refund_state, never a 500', async () => {
+    const s = await paid('rf-race')
+    const out = await file(s, { reason: 'REFUSAL' })
+    const id = out.requests[0].id
+    const results = await s.inT(() => Promise.allSettled([refunds.withdraw(s.tenantId, s.student.id, id), refunds.approve(s.tenantId, s.finance.id, id, 1_000_00n)]))
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult
+    expect(failed.reason).toMatchObject({ code: 'refund_state' })
   })
 
   it('reminds the finance admins of a request near its due date', async () => {
