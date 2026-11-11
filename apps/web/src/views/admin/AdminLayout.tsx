@@ -2,6 +2,7 @@
 import { useEffect } from 'react'
 import { useLocation, useNavigate } from '@/lib/router'
 import { DashboardShell } from '../../components/layout/DashboardShell'
+import { Button, Icon, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
 
@@ -10,6 +11,8 @@ export function AdminLayout() {
   const roles = useStore((s) => s.auth.user?.roles ?? [])
   const finance = roles.includes('FINANCE_ADMIN') || roles.includes('PLATFORM_ADMIN')
   const platform = roles.includes('PLATFORM_ADMIN')
+  // The current site settings did not load: edits are refused until the page is refreshed (useStore.patchSite).
+  const siteLoadFailed = useStore((s) => s.siteLoadFailed)
   // A finance admin (without the Super Admin role) only gets the finance page of this workspace.
   const financeOnly = finance && !platform
   const { pathname } = useLocation()
@@ -21,7 +24,9 @@ export function AdminLayout() {
     return <DashboardShell role="admin" title={t('dash.admin')} subtitle={t('finance.title')} items={[{ id: 'finance', to: '/admin/finance', label: t('finance.title'), icon: 'package' }]} />
   }
   return (
-    <DashboardShell role="admin" title={t('dash.admin')} subtitle={t('admin.overview.hello')} items={[
+    <DashboardShell role="admin" title={t('dash.admin')} subtitle={t('admin.overview.hello')}
+      notice={platform && siteLoadFailed ? <Notice tone="warn"><span className="flex flex-wrap items-center justify-between gap-3">{t('admin.siteNotLoaded')}<Button size="sm" variant="secondary" onClick={() => window.location.reload()}><Icon name="refresh" className="h-3.5 w-3.5" />{t('common.refresh')}</Button></span></Notice> : undefined}
+      items={[
       { id: 'overview', to: '/admin', end: true, label: t('dash.overview'), icon: 'grid' },
       { id: 'notifications', to: '/admin/notifications', label: t('notif.title'), icon: 'bell' },
       { id: 'pages', to: '/admin/pages', label: t('admin.pages'), icon: 'layers' },

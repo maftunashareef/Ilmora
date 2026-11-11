@@ -66,6 +66,25 @@ export function Field({ label, hint, children, required, className }: { label: R
   )
 }
 
+/**
+ * `Field` for several controls — chips, a list of rows, the direction picker. Not a `<label>`: a click inside a label
+ * is passed on to its first control, so picking a suggestion or clicking the caption would press the first chip's
+ * remove button. `htmlFor` ties the caption to one control (it focuses it, as a label would).
+ */
+export function FieldGroup({ label, hint, children, required, className, htmlFor }: { label: ReactNode; hint?: ReactNode; children: ReactNode; required?: boolean; className?: string; htmlFor?: string }) {
+  const id = useId()
+  const caption = <>{label}{required && <span className="ml-0.5 text-champagne">*</span>}</>
+  return (
+    <div role="group" aria-labelledby={id} className={cx('block', className)}>
+      <span className="mb-1.5 flex items-baseline justify-between gap-3 text-xs font-medium text-charcoal/70">
+        {htmlFor ? <label id={id} htmlFor={htmlFor}>{caption}</label> : <span id={id}>{caption}</span>}
+        {hint && <span className="text-[11px] font-normal text-charcoal/45">{hint}</span>}
+      </span>
+      {children}
+    </div>
+  )
+}
+
 /** Three-language text field (UZ / RU / EN) editing a single L value. */
 export function LField({ label, value, onChange, multiline, required, hint }: { label: ReactNode; value: L; onChange: (v: L) => void; multiline?: boolean; required?: boolean; hint?: ReactNode }) {
   return (

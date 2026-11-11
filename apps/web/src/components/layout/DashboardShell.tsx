@@ -11,7 +11,7 @@ import { LangSwitcher, RoleSwitcher } from './Switchers'
 
 export interface DashNavItem { id: string; to: string; label: string; icon: string; end?: boolean }
 
-export function DashboardShell({ title, subtitle, items, role, extra }: { title: string; subtitle?: string; items: DashNavItem[]; role: Role; extra?: ReactNode }) {
+export function DashboardShell({ title, subtitle, items, role, extra, notice }: { title: string; subtitle?: string; items: DashNavItem[]; role: Role; extra?: ReactNode; notice?: ReactNode }) {
   const { t, lang } = useT()
   const site = useStore((s) => s.site)
   // The admin workspace may live on its own host; "back to the site" then has to leave it.
@@ -89,6 +89,7 @@ export function DashboardShell({ title, subtitle, items, role, extra }: { title:
         )}
         <main id="dash-main" className="flex-1 px-4 py-6 md:px-8 md:py-8">
           <div className="mx-auto w-full max-w-6xl animate-fade">
+            {notice && <div className="mb-6">{notice}</div>}
             <Outlet />
           </div>
         </main>

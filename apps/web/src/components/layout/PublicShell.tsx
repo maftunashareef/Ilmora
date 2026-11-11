@@ -8,7 +8,7 @@ import { useStore } from '../../store/useStore'
 import { cx, Icon } from '../ui'
 import { LangSwitcher, RoleSwitcher } from './Switchers'
 
-const WORKSPACE = { student: '/student', teacher: '/teacher', center: '/center', admin: '/admin', ministry: '/ministry' } as const
+const WORKSPACE = { student: '/student', teacher: '/teacher', center: '/center', admin: '/admin', ministry: '/ministry', institution: '/institution', company: '/company' } as const
 
 /** Saved courses and the cart, side by side. Counts appear after mount because visitors' lists live in localStorage. */
 function HeaderShortcuts({ overlay }: { overlay: boolean }) {
