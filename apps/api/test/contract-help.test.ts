@@ -236,6 +236,24 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
     })
   })
 
+  it('Н-2: «Пригласить» and «Заинтересованы» share one limit — 50 a day per company; older ones do not count', async () => {
+    const s = await setup('ch-daily')
+    await s.inT(async () => {
+      const me = await s.student(s.studying())
+      const req = await service.create(s.tenantId, me, INPUT)
+      const db = ctx.prisma.client
+      // 49 requests today (from either channel) and many older ones.
+      const row = (createdAt: Date) => ({ tenantId: s.tenantId, companyId: s.softCo.row.id, userId: me.id, source: 'CONTRACT_HELP' as const, createdAt })
+      await db.contactRequest.createMany({ data: Array.from({ length: 49 }, () => row(new Date())) })
+      await db.contactRequest.createMany({ data: Array.from({ length: 30 }, () => row(new Date(Date.now() - 2 * 86_400_000))) })
+      // The 50th goes through by name; the 51st on the anonymous card is refused — the limit is the company's, not a route's.
+      await contacts.request(s.tenantId, { id: s.softCo.row.id, name: 'Soft Co' }, me.id, 'GRADUATE', {})
+      await expect(service.interest(s.tenantId, s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'rate_limited', status: 429 })
+      // Another company has its own 50.
+      expect(await service.interest(s.tenantId, s.otherIt.actor, req.id)).toMatchObject({ contactRequest: 'PENDING' })
+    })
+  })
+
   it('a minor needs the parent’s consent, and the card shows only with it', async () => {
     const s = await setup('ch-minor')
     await s.inT(async () => {

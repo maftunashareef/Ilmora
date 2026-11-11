@@ -36,7 +36,7 @@ export function InstitutionStudents() {
   const decide = async (s: InstitutionStudentDto, confirm: boolean) => {
     setBusy(s.id)
     try {
-      await (confirm ? institutionApi.confirm(s.id) : institutionApi.reject(s.id))
+      await (confirm ? institutionApi.confirm(s) : institutionApi.reject(s))
       notify(t(confirm ? 'inst.s.confirmed' : 'inst.s.rejected', { name: s.name }))
       setRound((r) => r + 1)
     } catch (e) {

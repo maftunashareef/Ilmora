@@ -12,12 +12,12 @@ export const RejectInput = z
   .strict()
 
 /**
- * The review decision may carry `submittedAt` of the change the reviewer looked at (review 11.11): if the
- * representative saved another change since, the decision is refused with 409 `review_changed` instead of approving
- * values nobody has seen. Without it the decision still applies only to the change as it was when read.
+ * The review decision carries `submittedAt` of the change the reviewer looked at (review 11.11; required since the
+ * cybersecurity check 9.4, Н-7): if the representative saved another change since, the decision is refused with 409
+ * `review_changed` instead of approving values nobody has seen.
  */
-const SubmittedAt = z.string().datetime({ offset: true }).optional()
-export const DecideInput = z.object({ submittedAt: SubmittedAt }).strict().default({})
+const SubmittedAt = z.string().datetime({ offset: true })
+export const DecideInput = z.object({ submittedAt: SubmittedAt }).strict()
 export type DecideInput = z.infer<typeof DecideInput>
 export const ReviewRejectInput = RejectInput.extend({ submittedAt: SubmittedAt }).strict()
 export type ReviewRejectInput = z.infer<typeof ReviewRejectInput>

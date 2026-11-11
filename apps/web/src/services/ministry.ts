@@ -70,11 +70,18 @@ export function cellText(v: StatsTableDto['rows'][number][string], lang: Lang): 
   return String(v)
 }
 
-/** The total of a numeric column (shown under tables with several rows); percentages and years are not summed. */
+/**
+ * The total of a numeric column (shown under tables with several rows); percentages and years are not summed. A column
+ * with a hidden small count («<5», the API hides counts of people below 5) has no total: a sum without it would be wrong.
+ */
 export function columnTotal(t: StatsTableDto, key: string): number | null {
   if (key === 'coverage' || key === 'year') return null
   let sum = 0
-  for (const r of t.rows) { const v = r[key]; if (typeof v === 'number') sum += v }
+  for (const r of t.rows) {
+    const v = r[key]
+    if (typeof v === 'number') sum += v
+    else if (typeof v === 'string' && v.startsWith('<')) return null
+  }
   return sum
 }
 

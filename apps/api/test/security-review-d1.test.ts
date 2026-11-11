@@ -11,7 +11,7 @@ import { RedisService } from '../src/infra/redis/redis.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { AccountService, PASSWORD_HASH } from '../src/modules/auth/account.service'
 import { AuthService } from '../src/modules/auth/auth.service'
-import { MfaService } from '../src/modules/auth/mfa.service'
+import { MFA_MAX_FAILURES, MfaService } from '../src/modules/auth/mfa.service'
 import { EnrollmentController } from '../src/modules/enrollment/enrollment.controller'
 import { SavedController } from '../src/modules/enrollment/saved.controller'
 import { ManageService } from '../src/modules/manage/manage.service'
@@ -176,7 +176,7 @@ describe.skipIf(!DB_AVAILABLE)('Small fixes of the security review 10.11: sign-i
   it('review 11.11: wrong codes sent at once are counted before they are checked — the lock holds', async () => {
     const m = await ministry('d1-burst')
     const challenge = await m.login()
-    const burst = await Promise.allSettled(Array.from({ length: env.LOGIN_MAX_FAILURES + 5 }, () => m.inT(() => auth.mfaVerify(challenge, '000001', meta))))
+    const burst = await Promise.allSettled(Array.from({ length: MFA_MAX_FAILURES + 5 }, () => m.inT(() => auth.mfaVerify(challenge, '000001', meta))))
     const limited = burst.filter((r) => r.status === 'rejected' && (r.reason as { code?: string }).code === 'rate_limited')
     expect(limited.length).toBeGreaterThanOrEqual(5)
   })

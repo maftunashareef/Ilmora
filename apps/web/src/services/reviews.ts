@@ -46,7 +46,7 @@ export type Seen = { submittedAt: string | null | undefined }
  * «Одобряю то, что видел» (review 11.11): approve and reject carry the card's `submittedAt`; if the representative sent
  * another version since, the API answers 409 `review_changed` instead of deciding on values nobody has seen.
  */
-export const decideBody = (seen?: Seen) => (seen?.submittedAt ? { submittedAt: seen.submittedAt } : {})
+export const decideBody = (seen?: Seen) => ({ submittedAt: seen?.submittedAt ?? undefined })
 
 /**
  * Super Admin review of institution and company profiles (decision of 10.11: the Super Admin decides, not the ministry).

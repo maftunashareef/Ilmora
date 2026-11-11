@@ -153,14 +153,23 @@ export class StudentsService {
     return rows.map((r) => ({ id: r.userId, name: r.user.displayName, course: r.course, graduationYear: r.graduationYear, direction: r.direction ? mainOf(r.direction) : null, confirmation: r.studyConfirmation as InstitutionStudentDto['confirmation'] }))
   }
 
-  async decideStudy(tenantId: string, actor: RequestActor, studentId: string, confirm: boolean): Promise<InstitutionStudentDto[]> {
+  /**
+   * Confirms or rejects what the institution saw (Н-8): the direction (the list shows the main one of an alias) and the
+   * year must still be the student's, checked in the same update; otherwise 409 `study_changed` and the list is re-read.
+   */
+  async decideStudy(tenantId: string, actor: RequestActor, studentId: string, confirm: boolean, seen: { directionId: string | null; graduationYear: number | null }): Promise<InstitutionStudentDto[]> {
     const institutionId = await this.ownInstitution(actor)
     const status = confirm ? 'CONFIRMED' : 'REJECTED'
-    const moved = await this.prisma.client.studentProfile.updateMany({
-      where: { userId: studentId, institutionId, mode: 'STUDYING', studyConfirmation: { in: ['PENDING', 'CONFIRMED', 'REJECTED'] } },
-      data: { studyConfirmation: status, studyConfirmedAt: new Date(), studyConfirmedById: actor.id },
-    })
-    if (moved.count !== 1) throw AppError.notFound('Student')
+    const mine: Prisma.StudentProfileWhereInput = { userId: studentId, institutionId, mode: 'STUDYING', studyConfirmation: { in: ['PENDING', 'CONFIRMED', 'REJECTED'] } }
+    const asSeen: Prisma.StudentProfileWhereInput = {
+      graduationYear: seen.graduationYear,
+      ...(seen.directionId ? { OR: [{ directionId: seen.directionId }, { direction: { mergedIntoId: seen.directionId } }] } : { directionId: null }),
+    }
+    const moved = await this.prisma.client.studentProfile.updateMany({ where: { ...mine, ...asSeen }, data: { studyConfirmation: status, studyConfirmedAt: new Date(), studyConfirmedById: actor.id } })
+    if (moved.count !== 1) {
+      if (await this.prisma.client.studentProfile.count({ where: mine })) throw AppError.conflict('study_changed', 'The student changed the direction or the year meanwhile; check the list again')
+      throw AppError.notFound('Student')
+    }
     await this.audit.record({ action: confirm ? 'student.study.confirm' : 'student.study.reject', entityType: 'StudentProfile', entityId: studentId, after: { institutionId, status } })
     const type = confirm ? 'student.studyConfirmed' : 'student.studyRejected'
     const inst = await this.prisma.client.institution.findFirstOrThrow({ where: { id: institutionId }, select: { name: true } })

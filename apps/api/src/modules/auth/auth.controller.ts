@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Inject, Patch, Post, Req, Res } from '@nestjs/common'
 import type { Request, Response } from 'express'
-import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, SessionThrottle, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
+import { AllowWithIssuedPassword, AuthThrottle, ClientInfo, RegisterThrottle, SessionThrottle, type ClientInfoValue, CurrentActor, CurrentTenantId, Public } from '../../common/decorators'
 import { AppError } from '../../common/errors'
 import { ENV, type Env } from '../../config/env'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -16,6 +16,7 @@ export class AuthController {
   /** Student/Teacher self-registration with a login and password; opens a session on success. */
   @Public()
   @AuthThrottle(10)
+  @RegisterThrottle()
   @Post('register')
   async register(@Req() req: Request, @CurrentTenantId() tenantId: string, @Body() dto: RegisterDto, @ClientInfo() ci: ClientInfoValue, @Headers('x-requested-with') requestedWith: string | undefined, @Res({ passthrough: true }) res: Response) {
     this.assertSameSite(req, requestedWith)

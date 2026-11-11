@@ -60,6 +60,11 @@ export const EnvSchema = z.object({
    * finance admins would sign in with the password alone. A deliberate exception (a demo machine) sets this to true.
    */
   TOTP_ALLOW_MISSING_IN_PRODUCTION: bool(false),
+  /**
+   * The key of graduate cards' ids for companies (cybersecurity check 9.4, Н-6): its own secret, not the sign-in one.
+   * Changing it only changes the ids on cards already open. Unset: derived from JWT_ACCESS_SECRET (a warning in production).
+   */
+  CARD_ID_SECRET: z.string().min(32).optional(),
 
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   OTP_LENGTH: z.coerce.number().int().min(4).max(8).default(6),
@@ -129,6 +134,9 @@ export const EnvSchema = z.object({
   RATE_LIMIT_AUTH_PER_MINUTE: z.coerce.number().int().positive().default(6),
   /** Session refreshes per minute from one address, all sessions together (a classroom on one Wi-Fi), №19. */
   RATE_LIMIT_REFRESH_PER_IP_MINUTE: z.coerce.number().int().positive().default(600),
+  /** New accounts from one address (Н-4): wide — a technikum registers a class from one Wi-Fi. */
+  RATE_LIMIT_REGISTER_PER_IP_HOUR: z.coerce.number().int().positive().default(60),
+  RATE_LIMIT_REGISTER_PER_IP_DAY: z.coerce.number().int().positive().default(300),
   /** Password sign-in: after this many failures for one login the login is locked for LOGIN_LOCK_SECONDS. */
   LOGIN_MAX_FAILURES: z.coerce.number().int().positive().default(10),
   LOGIN_LOCK_SECONDS: z.coerce.number().int().positive().default(900),
@@ -161,6 +169,7 @@ export function validateEnv(raw: Record<string, unknown>): Env {
       if (!env.TOTP_ALLOW_MISSING_IN_PRODUCTION) throw new Error('TOTP_ENCRYPTION_KEY must be set in production (openssl rand -base64 32): without it the Super Admins and the finance admins sign in with the password alone. A deliberate exception sets TOTP_ALLOW_MISSING_IN_PRODUCTION=true')
       console.warn('TOTP_ENCRYPTION_KEY is not set: the ministry cannot sign in, the Super Admins sign in without the authenticator code')
     }
+    if (!env.CARD_ID_SECRET) console.warn('CARD_ID_SECRET is not set: graduate card ids are keyed with a key derived from JWT_ACCESS_SECRET (openssl rand -base64 32)')
     // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
     if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
     if (env.PAYME_SANDBOX_PAYMENT_IDS.length) console.warn(`PAYME_SANDBOX_PAYMENT_IDS is set: the Payme test key is accepted for ${env.PAYME_SANDBOX_PAYMENT_IDS.length} test order(s). Clear it once Payme's tests pass.`)
