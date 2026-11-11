@@ -1579,6 +1579,7 @@ export const dict = {
   'q.districtPlaceholder': d('Masalan: Çilonzor tumani', 'Например: Чиланзарский район', 'e.g. Chilonzor district'),
   'q.email': d('Email', 'Email', 'Email'),
   'q.about': d('Özingiz haqingizda', 'О себе', 'About you'),
+  'q.aboutPrivacy': d('Bu yerga telefon va e-poçtani yozmang: bu matnni kompaniyalar kontaktlarni oçişga roziligingizsiz ham köradi.', 'Не пишите сюда телефон и почту: этот текст компании видят без вашего согласия на контакты.', 'Do not put your phone or e-mail here: companies see this text without your consent to share contacts.'),
   'q.aboutPlaceholder': d('Nimaga qiziqasiz, qanday tajribangiz bor, qanday iş yoki amaliyot izlayapsiz', 'Чем интересуетесь, какой есть опыт, какую работу или практику ищете', 'What interests you, what experience you have, what job or internship you are looking for'),
   'q.count': d('{n} / {max}', '{n} / {max}', '{n} / {max}'),
   'q.guardianTitle': d('Ota-ona yoki qonuniy vakil', 'Родитель или законный представитель', 'Parent or legal guardian'),
