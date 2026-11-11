@@ -11,6 +11,9 @@ export function StudentLayout() {
   const all: DashNavItem[] = [
     { id: 'overview', to: '/student', end: true, label: t('dash.overview'), icon: 'grid' },
     { id: 'questionnaire', to: '/student/questionnaire', label: t('q.title'), icon: 'edit' },
+    { id: 'contract-help', to: '/student/contract-help', label: t('st.h.title'), icon: 'shield' },
+    { id: 'vacancies', to: '/student/vacancies', label: t('st.v.title'), icon: 'briefcase' },
+    { id: 'requests', to: '/student/requests', label: t('st.r.title'), icon: 'chat' },
     { id: 'notifications', to: '/student/notifications', label: t('notif.title'), icon: 'bell' },
     { id: 'subscription', to: '/student/subscription', label: t('student.subscription'), icon: 'package' },
     { id: 'courses', to: '/student/courses', label: t('student.courses'), icon: 'book' },

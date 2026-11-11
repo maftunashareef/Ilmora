@@ -33,4 +33,9 @@ describe('notification links', () => {
     expect(dashboardRole('visitor')).toBeNull()
     expect(dashboardRole('teacher')).toBe('teacher')
   })
+
+  it('opens a company’s contact request and a vacancy sent by the institution in the student’s sections', () => {
+    expect(notificationHref({ type: 'contact.request', params: { companyName: 'X', requestId: 'r1' } }, 'student')).toBe('/student/requests')
+    expect(notificationHref({ type: 'vacancy.broadcast', params: { vacancyTitle: 'Y' } }, 'student')).toBe('/student/vacancies')
+  })
 })
