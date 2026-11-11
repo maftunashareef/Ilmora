@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { securityHeaders } from './security-headers'
+import { contentSecurityPolicy, newNonce, securityHeaders } from './security-headers'
 
-const header = (key: string) => securityHeaders.find((h) => h.key === key)?.value ?? ''
+const header = (key: string) => (key === 'Content-Security-Policy' ? contentSecurityPolicy('n0nce') : (securityHeaders.find((h) => h.key === key)?.value ?? ''))
+const directive = (policy: string, name: string) => policy.split('; ').find((d) => d.startsWith(`${name} `)) ?? ''
 
 describe('security headers', () => {
   it('lets the site ask for the location (center check-in with a radius), and only for itself', () => {
@@ -16,6 +17,31 @@ describe('security headers', () => {
     expect(header('Content-Security-Policy')).toContain("frame-ancestors 'none'")
   })
 
+  describe('scripts (М-3)', () => {
+    it('a page runs only scripts with its nonce: no unsafe-inline', () => {
+      const scripts = directive(contentSecurityPolicy('abc123'), 'script-src')
+      expect(scripts).toContain("'nonce-abc123'")
+      expect(scripts).toContain("'strict-dynamic'")
+      expect(scripts).not.toContain('unsafe-inline')
+    })
+
+    it('a static file gets no nonce and nothing inline either', () => {
+      const scripts = directive(contentSecurityPolicy(), 'script-src')
+      expect(scripts).not.toContain('nonce-')
+      expect(scripts).not.toContain('unsafe-inline')
+    })
+
+    it('every page request gets its own nonce', () => {
+      const nonces = new Set(Array.from({ length: 50 }, () => newNonce()))
+      expect(nonces.size).toBe(50)
+      for (const n of nonces) expect(n).toMatch(/^[A-Za-z0-9+/]{22}==$/)
+    })
+
+    it('no Content-Security-Policy among the headers of every response: it is set per page', () => {
+      expect(securityHeaders.some((h) => h.key === 'Content-Security-Policy')).toBe(false)
+    })
+  })
+
   describe('object storage', () => {
     afterEach(() => {
       vi.unstubAllEnvs()
@@ -24,8 +50,8 @@ describe('security headers', () => {
     const csp = async (mediaBase?: string) => {
       if (mediaBase) vi.stubEnv('NEXT_PUBLIC_MEDIA_BASE_URL', mediaBase)
       vi.resetModules()
-      const { securityHeaders: headers } = await import('./security-headers')
-      const value = headers.find((h) => h.key === 'Content-Security-Policy')?.value ?? ''
+      const { contentSecurityPolicy: policy } = await import('./security-headers')
+      const value = policy('n0nce')
       return (name: string) => value.split('; ').find((d) => d.startsWith(`${name} `)) ?? ''
     }
 
