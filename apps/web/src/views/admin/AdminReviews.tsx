@@ -182,12 +182,16 @@ function RecordBadges({ item }: { item: { status?: string; blocked?: boolean } }
   return <><Badge tone={tone}>{t(`rev.status.${item.status as RegistryInstitutionStatus}`)}</Badge>{item.blocked && <Badge tone="danger"><Icon name="lock" className="mr-1 h-3 w-3" />{t('rev.blocked')}</Badge>}</>
 }
 
-/** In the queue: which reviewed fields the representative changed after approval (the new values wait for a decision). */
+/**
+ * In the queue: which reviewed fields the representative changed after approval (the new values wait for a decision),
+ * and a company's new certificate waiting the same way (`pendingChanges.certificate`, re-check 11.11 №106).
+ */
 function ChangedLine({ changes }: { changes: InstitutionPendingChanges | CompanyPendingChanges | null | undefined }) {
   const { t } = useT()
-  const keys = changedKeys(changes)
-  if (!keys.length) return null
-  return <p className="mt-1 flex items-center gap-1.5 text-xs text-charcoal/75"><Icon name="edit" className="h-3.5 w-3.5 text-champagne" />{t('rev.changedFields', { fields: keys.map((k) => t(CHANGE_LABELS[k])).join(', ') })}</p>
+  const fields = changedKeys(changes).map((k) => t(CHANGE_LABELS[k]))
+  if ((changes as CompanyPendingChanges | null | undefined)?.certificate) fields.push(t('rev.newCertificate'))
+  if (!fields.length) return null
+  return <p className="mt-1 flex items-center gap-1.5 text-xs text-charcoal/75"><Icon name="edit" className="h-3.5 w-3.5 text-champagne" />{t('rev.changedFields', { fields: fields.join(', ') })}</p>
 }
 
 function InstitutionRow({ item: it, onOpen }: { item: InstitutionReviewItemDto & { status?: string; blocked?: boolean }; onOpen: () => void }) {
@@ -287,7 +291,9 @@ function ReviewCard({ open, onClose, onChanged }: { open: Open; onClose: () => v
   const status = inst?.passport.status ?? comp?.profile.status
   const name = inst?.passport.name ?? comp?.profile.name ?? ''
   const representative = inst ? inst.representative : comp?.representative ?? null
-  const pending = status === 'PENDING'
+  // A first review (PENDING), or a change of an approved record waiting in `pendingChanges` — its status stays APPROVED
+  // (security review №13; a new certificate, №106): approve and reject decide that change.
+  const pending = status === 'PENDING' || !!(inst?.passport.pendingChanges ?? comp?.profile.pendingChanges)
 
   // The version on the screen: approve and reject apply only to it (409 review_changed if another one was sent since).
   const seen = { submittedAt: inst?.passport.submittedAt ?? comp?.profile.submittedAt ?? null }
@@ -414,7 +420,10 @@ function CompanyFacts({ review }: { review: CompanyReviewDto }) {
         <Fact label={t('rev.approvedBefore')}>{p.approvedAt ? formatDate(p.approvedAt, lang) : null}</Fact>
         <Fact label={t('rev.lastRejectReason')}>{p.rejectReason}</Fact>
       </dl>
+      {/* A new certificate waits for this decision: the link opens it; the approved one stays in force until then. */}
+      {p.pendingChanges?.certificate && <Notice className="mt-4 text-xs">{t('rev.newCertificateHint')}</Notice>}
       <div className="mt-4 flex flex-wrap items-center gap-2">
+        {p.pendingChanges?.certificate && <Badge tone="champagne">{t('co.p.certPending')}</Badge>}
         {p.certificateUploaded
           ? (link
             ? <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm font-medium text-forest underline"><Icon name="external" className="h-4 w-4" />{t('rev.certificateOpen')}</a>
