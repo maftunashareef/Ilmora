@@ -15,7 +15,7 @@ import type { ClaimInput, DirectionsInput, InstitutionPatch } from './institutio
 const PASSPORT_SELECT = {
   id: true, type: true, ownership: true, name: true, nameRu: true, formerName: true, stir: true, address: true, phone: true, email: true, website: true, directorName: true,
   status: true, rejectReason: true, submittedAt: true, approvedAt: true, regionId: true, districtId: true,
-  pendingChanges: true, blockedAt: true, blockReason: true,
+  pendingChanges: true, blockedAt: true, blockReason: true, source: true,
   ...PLACE_SELECT,
   directions: { select: { id: true, department: true, studentsCount: true, direction: { select: DIRECTION_WITH_MAIN } }, orderBy: { createdAt: 'asc' } },
   representative: { select: { displayName: true, jobTitle: true } },
@@ -27,6 +27,10 @@ const iso = (d: Date | null) => d?.toISOString() ?? null
 const sortKeys = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)))
 /** While the first review is pending the reviewer looks at exactly this version: nothing changes under it. */
 const isLocked = (r: { status: string; approvedAt: Date | null }) => r.status === 'PENDING' && !r.approvedAt
+/** A record from the ministry's list keeps its official name until its representative is approved (re-check 11.11 №105). */
+const isNameLocked = (r: { source: string; approvedAt: Date | null }) => r.source === 'IMPORT' && r.approvedAt === null
+/** A record from the ministry's list keeps the STIR the list gives it (security review №18). */
+const isStirLocked = (r: { source: string; stir: string | null }) => r.source === 'IMPORT' && !!r.stir
 
 function toPassport(r: PassportRow): InstitutionPassportDto {
   const directions = r.directions.map((d) => ({ id: d.id, direction: mainOf(d.direction), department: d.department, studentsCount: d.studentsCount }))
@@ -37,6 +41,9 @@ function toPassport(r: PassportRow): InstitutionPassportDto {
     status: r.status, rejectReason: r.rejectReason, submittedAt: iso(r.submittedAt), approvedAt: iso(r.approvedAt),
     workspaceOpen: r.approvedAt !== null && r.blockedAt === null,
     editable: !isLocked(r),
+    inRegistry: r.source === 'IMPORT',
+    nameLocked: isNameLocked(r),
+    stirLocked: isStirLocked(r),
     directions,
     totals: { students: directions.reduce((n, d) => n + d.studentsCount, 0), directions: directions.length },
     representative: { name: r.representative?.displayName ?? '', jobTitle: r.representative?.jobTitle ?? null },
@@ -195,7 +202,7 @@ export class InstitutionsService {
     // A record from the ministry's list keeps its official name until its representative is approved: whoever claimed it
     // first could otherwise rename it for everyone, and it would no longer be found by that name (re-check 11.11 №105).
     // After approval a rename waits for the Super Admin like any other key field.
-    if (input.name !== undefined && input.name !== current.name && current.source === 'IMPORT' && current.approvedAt === null) {
+    if (input.name !== undefined && input.name !== current.name && isNameLocked(current)) {
       throw AppError.conflict('name_locked', 'The name of a record from the ministry list changes after the review: send it as it is, then rename')
     }
     if (input.type !== undefined) data.type = input.type
@@ -204,7 +211,7 @@ export class InstitutionsService {
     if (input.name !== undefined) Object.assign(data, { name: input.name, searchKey: registrySearchKey(input.name), searchText: registrySearchText(input.name, current.nameRu, current.formerName) })
     if (input.stir !== undefined) {
       // The ministry's list fixes the STIR of its records: whoever claimed one cannot swap it for another (security review №18).
-      if (current.source === 'IMPORT' && current.stir && input.stir !== current.stir) throw AppError.conflict('stir_locked', 'The STIR of a record from the ministry list cannot be changed')
+      if (isStirLocked(current) && input.stir !== current.stir) throw AppError.conflict('stir_locked', 'The STIR of a record from the ministry list cannot be changed')
       data.stir = input.stir
     }
     if (input.address !== undefined) data.address = input.address || null
