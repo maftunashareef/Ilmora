@@ -1898,6 +1898,8 @@ export const dict = {
   'inst.p.status.APPROVED': d('Anketa tasdiqlangan: talabalar, kompaniyalar arizalari va bitiruv oçiq.', 'Анкета одобрена: студенты, заявки компаний и выпуск открыты.', 'The profile is approved: students, company requests and graduation are open.'),
   'inst.p.pendingChanges': d('Asosiy maydonlar özgarişi Super Admin qarorini kutmoqda; qarorgaça tasdiqlangan qiymatlar körinadi.', 'Изменения ключевых полей ждут решения Super Admin; до решения видны одобренные значения.', 'The change of key fields waits for the Super Admin; until then the approved values are shown.'),
   'inst.p.name': d('Nomi', 'Название', 'Name'),
+  'inst.p.nameLocked': d('Vazirlik röyxatidan — tekşiruvdan keyin özgartiriş mumkin', 'Из списка министерства — изменить можно после проверки', 'From the ministry list — can be changed after the review'),
+  'inst.p.stirLocked': d('Vazirlik röyxatidan — özgarmaydi', 'Из списка министерства — не меняется', 'From the ministry list — cannot be changed'),
   'inst.p.district': d('Tuman', 'Район', 'District'),
   'inst.p.chooseDistrict': d('Tumanni tanlang', 'Выберите район', 'Choose a district'),
   'inst.p.regionFirst': d('Avval hududni tanlang', 'Сначала выберите регион', 'Choose a region first'),

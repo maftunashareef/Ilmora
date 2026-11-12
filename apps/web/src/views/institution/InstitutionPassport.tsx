@@ -109,8 +109,8 @@ export function InstitutionPassport() {
         : passport.approvedAt ? { tone: 'ok' as const, text: t('inst.p.status.APPROVED') }
           : { tone: 'info' as const, text: t('inst.p.status.DRAFT') }
   const canSubmit = editable && (passport.status === 'DRAFT' || passport.status === 'REJECTED')
-  const input = (k: keyof PassportForm, props: { type?: string; maxLength?: number; placeholder?: string; inputMode?: 'tel' | 'email' | 'url' | 'numeric' } = {}) => (
-    <Input value={form[k]} disabled={!editable} aria-invalid={miss(k)} onChange={(e) => set(k, e.target.value as never)} {...props} />
+  const input = (k: keyof PassportForm, props: { type?: string; maxLength?: number; placeholder?: string; inputMode?: 'tel' | 'email' | 'url' | 'numeric' } = {}, locked = false) => (
+    <Input value={form[k]} disabled={!editable || locked} aria-invalid={miss(k)} onChange={(e) => set(k, e.target.value as never)} {...props} />
   )
 
   return (
@@ -123,7 +123,8 @@ export function InstitutionPassport() {
 
       <Card className="mb-6">
         <div className="grid gap-4 md:grid-cols-2">
-          <Row label={t('inst.p.name')} required wide>{input('name', { maxLength: 200 })}</Row>
+          {/* A record from the ministry list keeps its official name until approved (№105) and its STIR for good (№18). */}
+          <Row label={t('inst.p.name')} required wide hint={passport.nameLocked ? t('inst.p.nameLocked') : undefined}>{input('name', { maxLength: 200 }, passport.nameLocked)}</Row>
           <Row label={t('rev.type')} required>
             <Select value={form.type} disabled={!editable} onChange={(e) => set('type', e.target.value as PassportForm['type'])}>
               {INSTITUTION_TYPES.map((x) => <option key={x} value={x}>{t(`inst.type.${x}`)}</option>)}
@@ -135,7 +136,7 @@ export function InstitutionPassport() {
               {OWNERSHIPS.map((x) => <option key={x} value={x}>{t(`min.own.${x}`)}</option>)}
             </Select>
           </Row>
-          <Row label={t('auth.org.stir')} required>{input('stir', { inputMode: 'numeric', maxLength: 9 })}</Row>
+          <Row label={t('auth.org.stir')} required hint={passport.stirLocked ? t('inst.p.stirLocked') : undefined}>{input('stir', { inputMode: 'numeric', maxLength: 9 }, passport.stirLocked)}</Row>
           <Row label={t('inst.c.phone')} required>{input('phone', { inputMode: 'tel', maxLength: 30, placeholder: '+998 71 123 45 67' })}</Row>
           <Row label={t('min.filter.region')} required>
             <Select value={form.regionId} disabled={!editable} aria-invalid={miss('regionId')} onChange={(e) => set('regionId', e.target.value)}>
@@ -217,6 +218,6 @@ export function InstitutionPassport() {
   )
 }
 
-function Row({ label, required, wide, children }: { label: string; required?: boolean; wide?: boolean; children: ReactNode }) {
-  return <Field label={label} required={required} className={wide ? 'md:col-span-2' : undefined}>{children}</Field>
+function Row({ label, required, wide, hint, children }: { label: string; required?: boolean; wide?: boolean; hint?: string; children: ReactNode }) {
+  return <Field label={label} required={required} hint={hint} className={wide ? 'md:col-span-2' : undefined}>{children}</Field>
 }
