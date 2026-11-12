@@ -81,7 +81,11 @@ export function CompanyProfile() {
     const problem = certificateProblem(f)
     if (problem) { setCertError(t(problem === 'type' ? 'co.p.certType' : 'co.p.certSize')); return }
     setCertError(null); setBusy('cert')
-    try { setCompany(await companyApi.uploadCertificate(f)); notify(t('co.p.certDone')) } catch (e) { setCertError(orgErrorText(e, lang)) } finally { setBusy(null) }
+    try {
+      // After approval a new certificate waits for the Super Admin; the approved one stays in force until then.
+      const updated = await companyApi.uploadCertificate(f)
+      setCompany(updated); notify(t(updated.pendingChanges?.certificate ? 'co.p.certPending' : 'co.p.certDone'))
+    } catch (e) { setCertError(orgErrorText(e, lang)) } finally { setBusy(null) }
   }
   const openCertificate = async () => {
     setBusy('open')
@@ -170,6 +174,7 @@ export function CompanyProfile() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={profile.certificateUploaded ? 'forest' : 'muted'}>{t(profile.certificateUploaded ? 'co.p.certUploaded' : 'co.p.certNone')}</Badge>
+            {profile.pendingChanges?.certificate && <Badge tone="champagne">{t('co.p.certPending')}</Badge>}
             {profile.certificateUploaded && <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void openCertificate()}><Icon name="external" className="h-3.5 w-3.5" />{t('co.p.certOpen')}</Button>}
             {editable && (
               <>

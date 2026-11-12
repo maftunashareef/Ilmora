@@ -2127,6 +2127,7 @@ export const dict = {
   'co.p.certType': d('Faqat PDF, JPG yoki PNG', 'Только PDF, JPG или PNG', 'PDF, JPG or PNG only'),
   'co.p.certSize': d('Fayl 10 MB dan katta', 'Файл больше 10 МБ', 'The file is larger than 10 MB'),
   'co.p.certDone': d('Guvohnoma yuklandi', 'Свидетельство загружено', 'The certificate was uploaded'),
+  'co.p.certPending': d('Yangi guvohnoma tekşiruvda', 'Новое свидетельство на проверке', 'New certificate under review'),
   'co.p.reviewedHint': d('Tasdiqlangandan keyin nom, STIR yoki sohalar özgarişi Super Admin tekşiruviga ketadi; kabinet işlayveradi.', 'После одобрения смена названия, СТИР или отраслей уходит на проверку Super Admin; кабинет продолжает работать.', 'After approval, a change of the name, STIR or industries goes to the Super Admin for review; the workspace keeps working.'),
   'co.r.title': d('Öqitiş arizalari', 'Заявки под обучение', 'Training requests'),
   'co.r.hint': d('Qaysi mutaxassislar va qaysi yilgaça kerakligini yozing — sohangizdagi muassasalar tayyorlaşni taklif qiladi. Taklifni qabul qilganingizda muassasa bilan aloqa ma’lumotlari oçiladi.', 'Опишите, каких специалистов и к какому году вам нужно, — учреждения ваших отраслей предложат подготовку. Контакты учреждения откроются, когда вы примете предложение.', 'Describe which specialists you need and by which year — institutions of your industries offer to train them. The institution’s contacts open once you accept an offer.'),
