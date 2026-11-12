@@ -108,7 +108,7 @@ describe('settlement of a closed subscription', () => {
   it('is refused, so a late provider callback never re-enrolls a student who left', async () => {
     for (const subStatus of ['CANCELLED', 'EXPIRED']) {
       const { subscriptions, tx, calls } = setup({ subStatus })
-      const payment = { id: 'pay-late', tenantId: 't', subscriptionId: 'sub-draft', periodStart: new Date(), periodEnd: new Date() }
+      const payment = { id: 'pay-late', tenantId: 't', subscriptionId: 'sub-draft', periodStart: new Date(), periodEnd: new Date(), lessonsBought: null }
       await expect(subscriptions.applySettlement(tx as unknown as TransactionClient, payment)).rejects.toMatchObject({ code: 'subscription_closed' })
       expect(calls['enrollment.updateMany']).toBeUndefined()
       expect(calls['subscription.update']).toBeUndefined()

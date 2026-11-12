@@ -141,6 +141,15 @@ export class SubscriptionService {
   }
 
   /**
+   * Lessons a payment for this package buys (Payment.lessonsBought, re-check 11.11 №78): written when the payment is
+   * made, so the settlement adds — and a cancellation takes back — the same number even if the center changes the package
+   * meanwhile. Null for a period package.
+   */
+  private lessonsBought(pkg: PackageAccess): number | null {
+    return pkg?.accessKind === 'LESSONS' ? (pkg.lessonCount ?? 0) : null
+  }
+
+  /**
    * Checkout: turns the draft into a PENDING_PAYMENT subscription with seat holds and creates the payment
    * the provider adapters will settle. Group rows are locked so capacity is re-checked atomically.
    */
@@ -198,7 +207,7 @@ export class SubscriptionService {
       })
       const enrollmentOf = new Map(holds.map((e) => [e.groupId, e.id]))
       const lines = priced.map(({ groupId, ...l }) => ({ ...l, enrollmentId: enrollmentOf.get(groupId)! }))
-      const payment = await this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd, amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId }, lines)
+      const payment = await this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart: now, periodEnd, amountMinor, currency: 'UZS', provider, expiresAt, createdById: studentId, lessonsBought: this.lessonsBought(pkg) }, lines)
       await this.audit.record({ tx, action: 'subscription.checkout', entityType: 'Subscription', entityId: sub.id, after: { provider: payment.provider, free: payment.state === 'PAID', amountMinor: amountMinor.toString(), listAmountMinor: listMinor.toString(), discountMinor: (listMinor - amountMinor).toString(), groupIds: draft.draftGroupIds, packageId: draft.packageId, kind: sub.kind, lessonsTotal: sub.lessonsTotal } })
       return { subscription: sub, payment }
     })
@@ -215,7 +224,7 @@ export class SubscriptionService {
    * confirm, so the payment is recorded as paid without a provider and the subscription starts on the spot.
    * `lines`: what it pays for each course (PaymentLine), adding up to the amount; a course's refund is counted from them.
    */
-  private async createPayment(tx: TransactionClient, now: Date, data: { tenantId: string; studentId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor: bigint; currency: string; provider: PaymentProvider; expiresAt: Date; createdById: string }, lines: PaymentLineInput[]) {
+  private async createPayment(tx: TransactionClient, now: Date, data: { tenantId: string; studentId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor: bigint; currency: string; provider: PaymentProvider; expiresAt: Date; createdById: string; lessonsBought: number | null }, lines: PaymentLineInput[]) {
     if (lines.reduce((sum, l) => sum + l.amountMinor, 0n) !== data.amountMinor) throw new Error('Payment lines do not add up to the payment amount')
     const free = data.amountMinor === 0n
     // A provider that is not connected could never confirm the payment: refuse before any seat is held (Н12). The
@@ -263,7 +272,7 @@ export class SubscriptionService {
       await this.lockSubscription(tx, sub.id)
       const waiting = await tx.payment.findFirst({ where: { tenantId, subscriptionId: sub.id, state: 'PENDING' } })
       if (waiting) return { payment: waiting, fresh: false }
-      const payment = await this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId }, lines)
+      const payment = await this.createPayment(tx, now, { tenantId, studentId, subscriptionId: sub.id, periodStart, periodEnd: this.periodEnd(periodStart, sub.package), amountMinor, currency: sub.currency, provider, expiresAt: new Date(now.getTime() + this.env.PAYMENT_EXPIRES_HOURS * 3_600_000), createdById: studentId, lessonsBought: this.lessonsBought(sub.package) }, lines)
       return { payment, fresh: true }
     })
     if (created.fresh) await this.audit.record({ action: 'subscription.renew', entityType: 'Subscription', entityId: sub.id, after: { paymentId: created.payment.id, amountMinor: amountMinor.toString(), previousAmountMinor: sub.amountMinor.toString() } })
@@ -275,7 +284,7 @@ export class SubscriptionService {
    * the subscription, confirms pending seats, resets a lesson balance, and notifies the student and the staff of newly
    * joined groups.
    */
-  async applySettlement(tx: TransactionClient, payment: { id: string; tenantId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor?: bigint }) {
+  async applySettlement(tx: TransactionClient, payment: { id: string; tenantId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor?: bigint; lessonsBought: number | null }) {
     const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId }, include: { package: true, student: { select: { displayName: true } } } })
     if (!sub) throw new Error(`Subscription ${payment.subscriptionId} missing for payment ${payment.id}`)
     // Money arriving for a subscription that was cancelled or expired meanwhile must be refused (and refunded), never
@@ -284,7 +293,8 @@ export class SubscriptionService {
     const now = new Date()
     const joining = await tx.enrollment.findMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, include: { group: { select: { id: true, name: true, course: { select: { id: true, title: true, teacherId: true, centerId: true } } } } } })
     await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, data: { status: 'ACTIVE', enrolledAt: now } })
-    const access = this.accessColumns(sub.package)
+    // What this payment bought, as written when it was made (№78): the package may have changed since.
+    const access = payment.lessonsBought != null ? { kind: 'LESSONS' as const, lessonsTotal: payment.lessonsBought } : { kind: 'PERIOD' as const, lessonsTotal: null }
     const carryLessons = sub.status === 'ACTIVE' && sub.kind === 'LESSONS' && sub.lessonsTotal !== null ? Math.max(0, sub.lessonsTotal - sub.lessonsUsed) : 0
     const periodEnd = sub.kind === 'LESSONS' || payment.periodEnd > (sub.currentPeriodEnd ?? new Date(0)) ? payment.periodEnd : sub.currentPeriodEnd
     await tx.subscription.update({
@@ -298,10 +308,10 @@ export class SubscriptionService {
         blockReason: null,
         graceEndsAt: null,
         expiryReminderAt: null,
-        // A payment buys a lesson balance (LESSONS) or a period (PERIOD); the kind follows the package. A renewal of an
-        // active lesson package adds to what is left — paid lessons are never burnt (security review №7).
+        // A payment buys a lesson balance (LESSONS) or a period (PERIOD), as the package was when it was made. A renewal
+        // of an active lesson package adds to what is left — paid lessons are never burnt (security review №7).
         kind: access.kind,
-        lessonsTotal: access.kind === 'LESSONS' ? (access.lessonsTotal ?? 0) + carryLessons : access.lessonsTotal,
+        lessonsTotal: access.kind === 'LESSONS' ? access.lessonsTotal + carryLessons : null,
         lessonsUsed: 0,
       },
     })

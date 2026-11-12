@@ -347,6 +347,26 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
     })
   })
 
+  it('№78: a lesson package counts each payment by the lessons it bought, not by the package now', async () => {
+    const s = await paid('rf-bought', { accessKind: 'LESSONS', lessonCount: 8 })
+    await s.inT(async () => {
+      const pkg = (await db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } })).packageId!
+      await db.subscription.update({ where: { id: s.subscription.id }, data: { lessonsUsed: 4 } })
+      // The renewal is bought at 12 lessons; then the center makes the package 4.
+      await db.package.update({ where: { id: pkg }, data: { lessonCount: 12 } })
+      const { payment: renewal } = await ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')
+      await ctx.payments.manualSettle(renewal.id, s.student.id, 'test')
+      await db.package.update({ where: { id: pkg }, data: { lessonCount: 4 } })
+      expect(await db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } })).toMatchObject({ lessonsTotal: 16, lessonsUsed: 0 })
+      const out = await refunds.refuse(s.tenantId, s.student.id, { reason: 'REFUSAL' }, { source: 'CABINET', actorId: s.student.id })
+      // 16 unused: the renewal's 12 (all of it) and 4 of the first payment's 8 (half of it).
+      expect(out.requests.find((r) => r.paymentId === renewal.id)?.requestedMinor).toBe(renewal.amountMinor.toString())
+      expect(out.requests.find((r) => r.paymentId === s.payment.id)?.requestedMinor).toBe((s.payment.amountMinor / 2n).toString())
+      const lines = await db.refundRequestLine.findMany({ where: { refundRequestId: { in: out.requests.map((r) => r.id) } }, select: { lessonsTotal: true } })
+      expect(lines.map((l) => l.lessonsTotal).sort((a, b) => a - b)).toEqual([8, 8, 12, 12])
+    })
+  })
+
   it('a withdrawal and an approval at once: one wins, the other gets refund_state, never a 500', async () => {
     const s = await paid('rf-race')
     // The platform's fault keeps the courses, so the request can be withdrawn (a refusal's cannot — №79).

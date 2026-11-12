@@ -95,6 +95,83 @@ describe.skipIf(!DB_AVAILABLE)('Payme fixes of the security review 10.11 (Н2, �
     })
   })
 
+  it('№78: a payment adds the lessons written on it when it was made, whatever the package says at settlement', async () => {
+    const t = await ctx.makeTenant('pm-lessons-bought')
+    const student = await ctx.makeStudent(t.tenantId)
+    const pkg = await TenantContext.forTenant(t.tenantId, () => db.package.create({ data: { tenantId: t.tenantId, code: 'p-bought', name: {}, description: {}, perks: [], maxCourses: 2, accessKind: 'LESSONS', lessonCount: 8 } }))
+    const { payment, subscription } = await ctx.checkout(t.tenantId, student.id, pkg.id, [t.group.id, t.group2.id])
+    await TenantContext.forTenant(t.tenantId, async () => {
+      expect(payment.lessonsBought).toBe(8)
+      // The center changes the package while the student is paying: the payment still buys 8.
+      await db.package.update({ where: { id: pkg.id }, data: { lessonCount: 12 } })
+      await ctx.payments.manualSettle(payment.id, student.id, 'test')
+      expect(await db.subscription.findUniqueOrThrow({ where: { id: subscription.id } })).toMatchObject({ kind: 'LESSONS', lessonsTotal: 8 })
+
+      const { payment: renewal } = await ctx.subscriptions.renew(t.tenantId, student.id, 'PAYME')
+      expect(renewal.lessonsBought).toBe(12)
+      await db.package.update({ where: { id: pkg.id }, data: { lessonCount: 5 } })
+      await ctx.payments.manualSettle(renewal.id, student.id, 'test')
+      expect(await db.subscription.findUniqueOrThrow({ where: { id: subscription.id } })).toMatchObject({ lessonsTotal: 20, lessonsUsed: 0 })
+    })
+    // A period package writes nothing.
+    const s = await paid('pm-lessons-bought-period')
+    expect(s.payment.lessonsBought).toBeNull()
+  })
+
+  it('№78: Payme cancels a renewal — its lessons go, the first payment’s stay', async () => {
+    const s = await paid('pm-78-renewal', { accessKind: 'LESSONS', lessonCount: 8 })
+    await s.inT(async () => {
+      // 8 bought, 6 attended, renewed: 2 + 8 = 10; one more attended — 9 left.
+      await db.subscription.update({ where: { id: s.subscription.id }, data: { lessonsUsed: 6 } })
+      const { payment: renewal } = await ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')
+      await ctx.payments.manualSettle(renewal.id, s.student.id, 'test')
+      await db.subscription.update({ where: { id: s.subscription.id }, data: { lessonsUsed: 1 } })
+
+      expect(await ctx.prisma.tx((tx) => ctx.payments.refundPaid(tx, renewal.id, 'test'))).toBe(true)
+      // The renewal's 8 go; the 1 left of the first payment stays.
+      expect(await db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } })).toMatchObject({ status: 'ACTIVE', lessonsTotal: 2, lessonsUsed: 1 })
+      expect(await db.enrollment.count({ where: { subscriptionId: s.subscription.id, status: 'ACTIVE' } })).toBe(2)
+      const audit = await db.auditEvent.findFirstOrThrow({ where: { action: 'payment.refunded', entityId: renewal.id } })
+      expect(audit.after).toMatchObject({ lessonsTaken: 8 })
+
+      // Then the first payment too: its last lesson goes and nothing is left — the subscription ends.
+      expect(await ctx.prisma.tx((tx) => ctx.payments.refundPaid(tx, s.payment.id, 'test'))).toBe(true)
+      expect((await db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } })).status).toBe('CANCELLED')
+    })
+  })
+
+  it('№78: Payme cancels the first payment — only its unused lessons go, the renewal’s stay', async () => {
+    const s = await paid('pm-78-first', { accessKind: 'LESSONS', lessonCount: 8 })
+    await s.inT(async () => {
+      await db.subscription.update({ where: { id: s.subscription.id }, data: { lessonsUsed: 6 } })
+      const { payment: renewal } = await ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')
+      await ctx.payments.manualSettle(renewal.id, s.student.id, 'test')
+      // 10 left: 8 of the renewal and 2 of the first payment.
+      expect(await ctx.prisma.tx((tx) => ctx.payments.refundPaid(tx, s.payment.id, 'test'))).toBe(true)
+      expect(await db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } })).toMatchObject({ status: 'ACTIVE', lessonsTotal: 8, lessonsUsed: 0 })
+      const audit = await db.auditEvent.findFirstOrThrow({ where: { action: 'payment.refunded', entityId: s.payment.id } })
+      expect(audit.after).toMatchObject({ lessonsTaken: 2 })
+    })
+  })
+
+  it('№78: a payment whose lessons were all attended takes nothing back; the only payment cancelled ends the subscription', async () => {
+    const s = await paid('pm-78-used', { accessKind: 'LESSONS', lessonCount: 8 })
+    await s.inT(async () => {
+      // All 8 attended, then renewed: the balance is the renewal's 8.
+      await db.subscription.update({ where: { id: s.subscription.id }, data: { lessonsUsed: 8 } })
+      const { payment: renewal } = await ctx.subscriptions.renew(s.tenantId, s.student.id, 'PAYME')
+      await ctx.payments.manualSettle(renewal.id, s.student.id, 'test')
+      expect(await ctx.prisma.tx((tx) => ctx.payments.refundPaid(tx, s.payment.id, 'test'))).toBe(true)
+      expect(await db.subscription.findUniqueOrThrow({ where: { id: s.subscription.id } })).toMatchObject({ status: 'ACTIVE', lessonsTotal: 8, lessonsUsed: 0 })
+    })
+    const only = await paid('pm-78-only', { accessKind: 'LESSONS', lessonCount: 8 })
+    await only.inT(async () => {
+      await db.subscription.update({ where: { id: only.subscription.id }, data: { lessonsUsed: 3 } })
+      expect(await ctx.prisma.tx((tx) => ctx.payments.refundPaid(tx, only.payment.id, 'test'))).toBe(true)
+      expect((await db.subscription.findUniqueOrThrow({ where: { id: only.subscription.id } })).status).toBe('CANCELLED')
+    })
+  })
+
   it('№10: a refund of the month paid ahead shortens the subscription; of the current one — the month ahead starts now', async () => {
     const s = await paid('pm-refund')
     await s.inT(async () => {
