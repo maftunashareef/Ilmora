@@ -313,6 +313,12 @@ export interface InstitutionPassportDto {
   workspaceOpen: boolean
   /** False only while the first review is pending: the ministry is looking at exactly this version. */
   editable: boolean
+  /** The record comes from the ministry's list (the Super Admin sees the same as `inRegistry` in the review). */
+  inRegistry: boolean
+  /** The name cannot be changed now: a record from the list keeps its official name until approved (409 `name_locked`, №105). */
+  nameLocked: boolean
+  /** The STIR cannot be changed: a record from the list keeps the one the list gives (409 `stir_locked`, №18). */
+  stirLocked: boolean
   directions: InstitutionDirectionDto[]
   /** «Всего студентов» and «Всего направлений» are computed, not typed in. */
   totals: { students: number; directions: number }
