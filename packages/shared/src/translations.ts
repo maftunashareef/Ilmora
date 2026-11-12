@@ -79,6 +79,7 @@ export const dict = {
   'common.enabled': d('Yoqilgan', 'Включено', 'Enabled'),
   'common.disabled': d('Öçirilgan', 'Отключено', 'Disabled'),
   'common.name': d('Nomi', 'Название', 'Name'),
+  'common.personName': d('Ism va familiya', 'Имя и фамилия', 'Full name'),
   'common.actions': d('Amallar', 'Действия', 'Actions'),
   'common.empty': d('Hozirça heç narsa yöq', 'Пока ничего нет', 'Nothing here yet'),
   'common.loading': d('Yuklanmoqda…', 'Загрузка…', 'Loading…'),

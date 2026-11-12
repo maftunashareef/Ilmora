@@ -342,7 +342,7 @@ export function BuilderPage() {
         </aside>
       </div>
 
-      <Modal open={!!picker} onClose={() => setPicker(null)} title={picker ? `${t('courses.chooseGroup')} — ${tr(picker.title)}` : ''}>
+      <Modal closeOnBackdrop open={!!picker} onClose={() => setPicker(null)} title={picker ? `${t('courses.chooseGroup')} — ${tr(picker.title)}` : ''}>
         {picker && (
           <ul className="space-y-2">
             {picker.groups.map((g) => {

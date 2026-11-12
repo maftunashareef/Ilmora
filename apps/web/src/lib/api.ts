@@ -173,7 +173,14 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   if (res.status === 204) return undefined as T
   if (opts.responseType === 'blob' && res.ok) return (await res.blob()) as T
   const text = await res.text()
-  const data = text ? (JSON.parse(text) as unknown) : undefined
+  let data: unknown
+  try {
+    data = text ? (JSON.parse(text) as unknown) : undefined
+  } catch (cause) {
+    // Not JSON: a proxy or gateway answered in place of the API (a plain-text or HTML error page while the API is
+    // down or restarting). That is the server being unreachable, not a bug in the caller.
+    throw new ApiError(res.status, 'network_error', 'Server bilan aloqa örnatib bölmadi', { cause })
+  }
   if (!res.ok) {
     const err = (data as { error?: { code?: string; message?: string; details?: unknown; requestId?: string } } | undefined)?.error
     if (res.status === 403 && err?.code === 'password_change_required') onPasswordChangeRequired?.()
