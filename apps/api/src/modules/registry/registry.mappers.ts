@@ -18,6 +18,12 @@ export const mainOf = (d: DirectionRow & { mergedInto: DirectionRow | null }): D
 
 export const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === 'P2002'
 
+/** When anything was last written about a record in the audit log (its edits, directions, certificate), in ms; 0 if never. */
+export async function lastEdit(prisma: PrismaService, entityType: 'Institution' | 'Company', entityId: string): Promise<number> {
+  const row = await prisma.client.auditEvent.findFirst({ where: { entityType, entityId }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
+  return row?.createdAt.getTime() ?? 0
+}
+
 /** Region and district as an institution or company refers to them. */
 export const PLACE_SELECT = {
   region: { select: { id: true, slug: true, name: true } },

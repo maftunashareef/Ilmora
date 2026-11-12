@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { type AdminCompanyItemDto, type AdminPage, type CompanyPendingChanges, type CompanyProfileDto, type CompanyReviewDto, type CompanyReviewItemDto, type L, registrySearchKey } from '@ilmora/shared'
+import { type AdminCompanyItemDto, type AdminPage, type CompanyProfileDto, type CompanyReviewDto, type CompanyReviewItemDto, type L, registrySearchKey } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../infra/prisma/prisma.service'
@@ -8,7 +8,7 @@ import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { INDUSTRY_SELECT, isUniqueViolation, toIndustry } from '../registry/registry.mappers'
 import type { AdminCompaniesQuery } from '../institutions/institutions-admin.controller'
-import { CompaniesService } from './companies.service'
+import { CompaniesService, pendingView, type StoredCompanyChanges } from './companies.service'
 
 const iso = (d: Date | null) => d?.toISOString() ?? null
 const HISTORY_ACTIONS = ['company.create', 'company.takeover', 'company.submit', 'company.update.review', 'company.certificate.review', 'company.approve', 'company.reject', 'company.change.approve', 'company.change.reject', 'company.block', 'company.unblock', 'company.release']
@@ -29,7 +29,7 @@ const toItem = (r: Prisma.CompanyGetPayload<{ select: typeof ITEM_SELECT }>): Co
   region: r.region ? { id: r.region.id, slug: r.region.slug, name: r.region.name as L } : null,
   industries: r.industries.map((i) => i.industry).sort((a, b) => a.sortOrder - b.sortOrder).map(toIndustry),
   submittedAt: iso(r.submittedAt), reReview: r.approvedAt !== null, certificateUploaded: r.certificateFileKey !== null,
-  pendingChanges: (r.pendingChanges as CompanyPendingChanges | null) ?? null,
+  pendingChanges: pendingView(r.pendingChanges),
   representative: toRep(r.representative),
 })
 const notPending = () => AppError.conflict('not_pending', 'The profile is not waiting for a decision')
@@ -116,13 +116,15 @@ export class CompanyReviewService {
   }
 
   /**
-   * A change of an approved company — name, STIR, industries (security review №13, №46). Approval moves it into the
-   * record (the STIR must still be free: 409 `stir_taken`) and replaces the industries; rejection drops it. The
-   * company stays APPROVED with what it had; one decision of two at once counts.
+   * A change of an approved company — name, STIR, industries, a new certificate (security review №13, №46; re-check
+   * 11.11 №106). Approval moves it into the record (the STIR must still be free: 409 `stir_taken`), replaces the
+   * industries and the certificate (the old file is deleted); rejection drops it with the new file. The company stays
+   * APPROVED with what it had; one decision of two at once counts.
    */
-  private async decideChange(tenantId: string, actor: RequestActor, id: string, current: { name: string; status: string; submittedAt: Date | null; representativeId: string | null; pendingChanges: CompanyPendingChanges }, accept: boolean, reason?: string): Promise<CompanyProfileDto> {
+  private async decideChange(tenantId: string, actor: RequestActor, id: string, current: { name: string; status: string; submittedAt: Date | null; representativeId: string | null; pendingChanges: StoredCompanyChanges }, accept: boolean, reason?: string): Promise<CompanyProfileDto> {
     const now = new Date()
     const { industryIds, ...fields } = current.pendingChanges
+    const liveCertificate = fields.certificateFileKey ? (await this.prisma.client.company.findFirst({ where: { id }, select: { certificateFileKey: true } }))?.certificateFileKey ?? null : null
     try {
       await this.prisma.client.$transaction(async (tx) => {
         const moved = await tx.company.updateMany({
@@ -143,7 +145,10 @@ export class CompanyReviewService {
       if (isUniqueViolation(err)) throw AppError.conflict('stir_taken', 'Another company is registered with this STIR')
       throw err
     }
-    await this.audit.record({ action: accept ? 'company.change.approve' : 'company.change.reject', entityType: 'Company', entityId: id, after: { change: current.pendingChanges }, reason })
+    // The file that is no longer the company's: the replaced one on approval, the new one on rejection.
+    const dropped = !fields.certificateFileKey ? null : accept ? liveCertificate : fields.certificateFileKey
+    if (dropped && dropped !== (accept ? fields.certificateFileKey : liveCertificate)) await this.companies.removeCertificateFile(dropped)
+    await this.audit.record({ action: accept ? 'company.change.approve' : 'company.change.reject', entityType: 'Company', entityId: id, after: { change: pendingView(current.pendingChanges) }, reason })
     const type = accept ? 'company.approved' : 'company.rejected'
     await this.tell(tenantId, current.representativeId, type, { companyName: fields.name ?? current.name, companyId: id, ...(reason ? { reason } : {}) }, `company-decision:${id}:${now.getTime()}`)
     return this.companies.profileOf(id)
@@ -169,7 +174,7 @@ export class CompanyReviewService {
     if (!row) throw AppError.notFound('Company')
     if (row.status !== 'PENDING' && !row.pendingChanges) throw notPending()
     if (seenSubmittedAt && row.submittedAt?.toISOString() !== new Date(seenSubmittedAt).toISOString()) throw reviewChanged()
-    return { name: row.name, status: row.status, approvedAt: row.approvedAt, submittedAt: row.submittedAt, representativeId: row.representative?.id ?? null, pendingChanges: (row.pendingChanges as CompanyPendingChanges | null) ?? null }
+    return { name: row.name, status: row.status, approvedAt: row.approvedAt, submittedAt: row.submittedAt, representativeId: row.representative?.id ?? null, pendingChanges: (row.pendingChanges as StoredCompanyChanges | null) ?? null }
   }
 
   private async tell(tenantId: string, userId: string | null, type: 'company.approved' | 'company.rejected', params: Record<string, unknown>, dedupeKey: string) {

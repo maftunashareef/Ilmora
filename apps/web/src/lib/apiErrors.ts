@@ -131,6 +131,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   refund_amount: 'apiError.refundAmount',
   refund_courses_removed: 'apiError.refundCoursesRemoved',
   refund_above_requested: 'apiError.refundAboveRequested',
+  name_locked: 'apiError.nameLocked',
+  center_code_invalid: 'attend.center.invalid',
   refund_reason_text: 'apiError.refundReasonText',
   full: 'capacity.full',
   duplicate: 'builder.duplicate',

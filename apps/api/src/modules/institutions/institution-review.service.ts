@@ -175,11 +175,17 @@ export class InstitutionReviewService {
    * representative is told.
    */
   async setBlocked(tenantId: string, actor: RequestActor, id: string, blocked: boolean, reason?: string): Promise<InstitutionPassportDto> {
-    const row = await this.prisma.client.institution.findFirst({ where: { id, mergedIntoId: null }, select: { name: true, blockedAt: true, representative: { select: { id: true } } } })
+    const row = await this.prisma.client.institution.findFirst({ where: { id, mergedIntoId: null }, select: { name: true, blockedAt: true, approvedAt: true, representative: { select: { id: true } } } })
     if (!row) throw AppError.notFound('Institution')
     if (!!row.blockedAt === blocked) throw AppError.conflict(blocked ? 'already_blocked' : 'not_blocked', blocked ? 'Already blocked' : 'Not blocked')
-    await this.prisma.client.institution.update({ where: { id }, data: blocked ? { blockedAt: new Date(), blockReason: reason ?? null, blockedById: actor.id } : { blockedAt: null, blockReason: null, blockedById: null } })
-    await this.audit.record({ action: blocked ? 'institution.block' : 'institution.unblock', entityType: 'Institution', entityId: id, reason })
+    const toConfirm = await this.prisma.client.$transaction(async (tx) => {
+      await tx.institution.update({ where: { id }, data: blocked ? { blockedAt: new Date(), blockReason: reason ?? null, blockedById: actor.id } : { blockedAt: null, blockReason: null, blockedById: null } })
+      // Students who named it while it was blocked had no one to confirm them: unblocked and approved, it does now, as
+      // after an approval (re-check 11.11 №107).
+      if (blocked || !row.approvedAt) return 0
+      return (await tx.studentProfile.updateMany({ where: { institutionId: id, mode: 'STUDYING', studyConfirmation: 'NONE' }, data: { studyConfirmation: 'PENDING' } })).count
+    })
+    await this.audit.record({ action: blocked ? 'institution.block' : 'institution.unblock', entityType: 'Institution', entityId: id, reason, ...(toConfirm ? { after: { studentsToConfirm: toConfirm } } : {}) })
     const userId = row.representative?.id
     if (userId) {
       const type = blocked ? 'registry.blocked' : 'registry.unblocked'

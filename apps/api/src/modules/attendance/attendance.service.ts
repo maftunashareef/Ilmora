@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import { attendanceUrl, checkInWindow, checkLocation, requiresLocation, type CenterCheckInFailure, type CheckInWindowState } from '@ilmora/shared'
 import { randomToken, sha256 } from '../../common/crypto'
 import { AppError } from '../../common/errors'
@@ -263,7 +263,10 @@ export class AttendanceService {
   /** Public look-up of a scanned center code: enough to show the student which center it is, nothing personal. */
   async describeCenterCode(code: string) {
     const center = await this.centerByCode(code)
-    if (!center || center.status === 'BLOCKED' || center.status === 'REJECTED') return null
+    // An unknown or changed code (an old poster after «Сменить код») is 404, a blocked center 403 — never an empty 200
+    // the page waits on forever (re-check 11.11 №86).
+    if (!center) throw new AppError('center_code_invalid', 'This QR code is not valid any more: ask the center for its current one', HttpStatus.NOT_FOUND)
+    if (center.status === 'BLOCKED' || center.status === 'REJECTED') throw new AppError('center_blocked', 'This center is blocked', HttpStatus.FORBIDDEN)
     return { center: { id: center.id, name: center.name, address: center.address }, requiresLocation: requiresLocation(center), window: { beforeMin: center.checkInBeforeMin, afterMin: center.absenceAfterMin } }
   }
 

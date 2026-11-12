@@ -9,7 +9,7 @@ import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { DIRECTION_WITH_MAIN, isUniqueViolation, mainOf, PLACE_SELECT, regionIdByRef, toPlace, changedKey } from '../registry/registry.mappers'
+import { DIRECTION_WITH_MAIN, isUniqueViolation, lastEdit, mainOf, PLACE_SELECT, regionIdByRef, toPlace, changedKey } from '../registry/registry.mappers'
 import type { ClaimInput, DirectionsInput, InstitutionPatch } from './institutions.schemas'
 
 const PASSPORT_SELECT = {
@@ -68,7 +68,9 @@ function missingFields(r: PassportRow, regionHasDistricts: boolean): Institution
  */
 /** The record goes back to the registry unclaimed (Super Admin's «Отвязать», or its representative's account deleted — №84). */
 export const unclaimInstitution = (tx: TransactionClient, id: string) =>
-  tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null, claimedAt: null, pendingChanges: Prisma.DbNull } })
+  // A block set because of the one who held it goes with them: the next representative starts from a review, not from
+  // a record still closed (re-check 11.11 №112).
+  tx.institution.update({ where: { id }, data: { status: 'UNCLAIMED', approvedAt: null, submittedAt: null, rejectReason: null, claimedAt: null, pendingChanges: Prisma.DbNull, blockedAt: null, blockReason: null, blockedById: null } })
 
 const bindRepresentative = async (tx: TransactionClient, userId: string, institutionId: string) => {
   const bound = await tx.user.updateMany({ where: { id: userId, institutionId: null }, data: { institutionId } })
@@ -141,14 +143,16 @@ export class InstitutionsService {
 
   /**
    * Abandoned: never approved, still a draft (or rejected) and untouched for REGISTRY_DRAFT_HOLD_DAYS since it was
-   * claimed, created or reviewed.
+   * claimed, created, reviewed or last edited by its representative — every edit, the directions too, is in the audit log
+   * (re-check 11.11 №110: a draft edited yesterday was released 14 days after its claim).
    */
   private async isAbandoned(id: string): Promise<boolean> {
     const row = await this.prisma.client.institution.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true, claimedAt: true } })
     if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
     // `claimedAt` (Timur's #46); a record claimed before it has the time of that release, or the claim in the journal.
     const claimed = row.claimedAt ?? (await this.prisma.client.auditEvent.findFirst({ where: { entityType: 'Institution', entityId: id, action: { in: ['institution.claim', 'institution.create'] } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }))?.createdAt
-    const last = Math.max(row.createdAt.getTime(), claimed?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
+    const edited = await lastEdit(this.prisma, 'Institution', id)
+    const last = Math.max(row.createdAt.getTime(), claimed?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0, edited)
     return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
   }
 
@@ -188,6 +192,12 @@ export class InstitutionsService {
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
 
     const data: Prisma.InstitutionUncheckedUpdateInput = {}
+    // A record from the ministry's list keeps its official name until its representative is approved: whoever claimed it
+    // first could otherwise rename it for everyone, and it would no longer be found by that name (re-check 11.11 №105).
+    // After approval a rename waits for the Super Admin like any other key field.
+    if (input.name !== undefined && input.name !== current.name && current.source === 'IMPORT' && current.approvedAt === null) {
+      throw AppError.conflict('name_locked', 'The name of a record from the ministry list changes after the review: send it as it is, then rename')
+    }
     if (input.type !== undefined) data.type = input.type
     if (input.ownership !== undefined) data.ownership = input.ownership
     // Renamed: the official Russian and former names stay searchable (PR #22, docs/registry/data-model.md «Поиск учреждений»).

@@ -46,6 +46,20 @@ describe.skipIf(!DB_AVAILABLE)('attendance: sessions, tokens, check-in rules', (
     await expect(TenantContext.forTenant(t.tenantId, () => attendance.open(session.id, owner))).resolves.toBeTruthy()
   })
 
+  it('re-check 11.11 №86: a scanned center code that is unknown or changed is 404, a blocked center 403 — never an empty 200', async () => {
+    const t = await ctx.makeTenant('att-86')
+    await TenantContext.forTenant(t.tenantId, async () => {
+      const db = ctx.prisma.client
+      const center = await db.center.update({ where: { id: t.center.id }, data: { checkInCode: `poster-${t.tenantId}` } })
+      expect(await attendance.describeCenterCode(center.checkInCode!)).toMatchObject({ center: { id: center.id } })
+      const status = (p: Promise<unknown>) => p.then(() => 200, (e: { code: string; getStatus: () => number }) => `${e.getStatus()} ${e.code}`)
+      expect(await status(attendance.describeCenterCode('old-poster-code'))).toBe('404 center_code_invalid')
+      await expect(attendance.describeCenterCode('')).rejects.toMatchObject({ code: 'center_code_invalid' })
+      await db.center.update({ where: { id: center.id }, data: { status: 'BLOCKED' } })
+      expect(await status(attendance.describeCenterCode(center.checkInCode!))).toBe('403 center_blocked')
+    })
+  })
+
   it('session generation is idempotent and never creates attendance', async () => {
     const { t, group } = await setup()
     const before = await TenantContext.forTenant(t.tenantId, () => ctx.prisma.client.lessonSession.count({ where: { groupId: group.id } }))

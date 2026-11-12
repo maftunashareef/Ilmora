@@ -133,7 +133,8 @@ export class RegistryService {
     const rows = await this.prisma.client.institution.findMany({
       where: {
         AND: [
-          { OR: [{ searchText: { contains: key } }, { searchKey: { contains: key } }] },
+          // Also by the official name from the ministry's list, whatever the record is called now (re-check 11.11 №105).
+          { OR: [{ searchText: { contains: key } }, { searchKey: { contains: key } }, { officialName: { contains: q.q.trim(), mode: 'insensitive' } }] },
           // The ministry's list, the approved ones and the student-added (marked so); not a self-registered name nobody approved (security review №45).
           { OR: [{ source: { in: ['IMPORT', 'STUDENT'] } }, { approvedAt: { not: null } }] },
         ],

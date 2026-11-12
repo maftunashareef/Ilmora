@@ -162,21 +162,26 @@ export class ContactsService {
   /**
    * «Отозвать доступ» (ТЗ 8): the student takes back the contacts opened to one company. The consent row gets its
    * revocation date, the request becomes WITHDRAWN (the company does not ask again); what the company already saw stays
-   * with it — the student is warned about that on the screen.
+   * with it — the student is warned about that on the screen. The student's applications to this company's vacancies go
+   * too, as with «Отозвать отклик»: each carries the contacts (re-check 11.11 №114).
    */
   async revoke(actor: RequestActor, id: string): Promise<StudentContactRequestDto[]> {
     const r = await this.prisma.client.contactRequest.findFirst({ where: { id, userId: actor.id }, select: { companyId: true } })
     if (!r) throw AppError.notFound('Contact request')
     const now = new Date()
-    await this.prisma.client.$transaction(async (tx) => {
+    const withdrawn = await this.prisma.client.$transaction(async (tx) => {
       // The copy of the contacts is personal data: it goes with the consent.
       const moved = await tx.contactRequest.updateMany({ where: { id, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
       if (moved.count !== 1) throw AppError.conflict('contact_not_open', 'Only opened contacts can be taken back')
       // The consent is to the company, not to one request: its other accepted requests (another source) close with it.
       await tx.contactRequest.updateMany({ where: { userId: actor.id, companyId: r.companyId, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
       await tx.studentConsent.updateMany({ where: { userId: actor.id, kind: 'COMPANY_CONTACTS', companyId: r.companyId, revokedAt: null }, data: { revokedAt: now } })
+      const applications = await tx.vacancyApplication.findMany({ where: { userId: actor.id, vacancy: { companyId: r.companyId } }, select: { id: true, vacancyId: true, status: true } })
+      if (applications.length) await tx.vacancyApplication.deleteMany({ where: { id: { in: applications.map((a) => a.id) } } })
+      return applications
     })
-    await this.audit.record({ action: 'contact.revoke', entityType: 'ContactRequest', entityId: id, after: { companyId: r.companyId } })
+    for (const a of withdrawn) await this.audit.record({ action: 'vacancy.application.withdraw', entityType: 'VacancyApplication', entityId: a.id, before: { vacancyId: a.vacancyId, status: a.status }, reason: 'contact.revoke' })
+    await this.audit.record({ action: 'contact.revoke', entityType: 'ContactRequest', entityId: id, after: { companyId: r.companyId, applicationsWithdrawn: withdrawn.length } })
     return this.studentList(actor)
   }
 

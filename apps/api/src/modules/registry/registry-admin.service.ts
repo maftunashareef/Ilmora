@@ -30,6 +30,11 @@ const toAdminDirection = (d: AdminDirectionRow): AdminDirectionDto => ({
  * the registry record). A merge moves every reference in one transaction and keeps the merged row as an alias, so the
  * old name still finds the main record. Everything is in the audit log.
  */
+/** Row locks on two records of one table, always in the same order, for the rest of the transaction. */
+async function lockRows(tx: TransactionClient, table: 'Direction' | 'Institution', a: string, b: string) {
+  await tx.$queryRawUnsafe(`SELECT id FROM "${table}" WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE`, [a, b])
+}
+
 @Injectable()
 export class RegistryAdminService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
@@ -123,6 +128,11 @@ export class RegistryAdminService {
     if (!from || !into) throw AppError.notFound('Direction')
     if (from.mergedIntoId || into.mergedIntoId) throw AppError.invalid('invalid_merge', 'Merge a main direction into a main direction')
     const moved = await this.prisma.client.$transaction(async (tx) => {
+      // Both rows locked, in one order, and read again: two opposite merges at once (A→B and B→A) run one after the
+      // other, and the second finds its record merged — no loop, no direction merged into itself (re-check 11.11 №108).
+      await lockRows(tx, 'Direction', fromId, intoId)
+      const fresh = await tx.direction.findMany({ where: { id: { in: [fromId, intoId] } }, select: { mergedIntoId: true } })
+      if (fresh.length !== 2 || fresh.some((d) => d.mergedIntoId)) throw AppError.invalid('invalid_merge', 'Merge a main direction into a main direction')
       const out: Record<string, number> = {}
       out.institutions = await this.moveInstitutionDirections(tx, fromId, intoId)
       out.students = (await tx.studentProfile.updateMany({ where: { directionId: fromId }, data: { directionId: intoId } })).count
@@ -181,6 +191,9 @@ export class RegistryAdminService {
     if (from.source !== 'STUDENT' || from.representative || from._count.announcements || from._count.trainingOffers) throw AppError.invalid('invalid_merge', 'Only an unclaimed record added by a student is merged')
     if (from.mergedIntoId || into.mergedIntoId) throw AppError.invalid('invalid_merge', 'The record is already merged')
     const moved = await this.prisma.client.$transaction(async (tx) => {
+      await lockRows(tx, 'Institution', fromId, intoId)
+      const fresh = await tx.institution.findMany({ where: { id: { in: [fromId, intoId] } }, select: { mergedIntoId: true } })
+      if (fresh.length !== 2 || fresh.some((d) => d.mergedIntoId)) throw AppError.invalid('invalid_merge', 'The record is already merged')
       const base = { institutionId: intoId, institutionType: into.type, studyConfirmedAt: null, studyConfirmedById: null }
       const toConfirm = into.approvedAt
         ? (await tx.studentProfile.updateMany({ where: { institutionId: fromId, mode: 'STUDYING' }, data: { ...base, studyConfirmation: 'PENDING' } })).count
@@ -188,8 +201,11 @@ export class RegistryAdminService {
       const rest = (await tx.studentProfile.updateMany({ where: { institutionId: fromId }, data: { ...base, studyConfirmation: 'NONE' } })).count
       const branches = (await tx.institution.updateMany({ where: { parentId: fromId }, data: { parentId: intoId } })).count
       await tx.institutionDirection.deleteMany({ where: { institutionId: fromId } })
+      // Records merged into this one before follow it, so a student choosing one of them lands on the live record, not on
+      // a merged one that is hidden everywhere (re-check 11.11 №113).
+      const aliases = (await tx.institution.updateMany({ where: { mergedIntoId: fromId }, data: { mergedIntoId: intoId } })).count
       await tx.institution.update({ where: { id: fromId }, data: { mergedIntoId: intoId } })
-      return { students: toConfirm + rest, toConfirm, branches }
+      return { students: toConfirm + rest, toConfirm, branches, aliases }
     })
     await this.audit.record({ action: 'registry.institution.merge', entityType: 'Institution', entityId: fromId, before: { name: from.name }, after: { intoId, intoName: into.name, moved } })
     return { fromId, intoId, moved }

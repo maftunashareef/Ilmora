@@ -181,6 +181,24 @@ describe.skipIf(!DB_AVAILABLE)('Ministry figures match a hand-counted data set (
     })
   })
 
+  it('re-check 11.11 №111: deleted and disabled accounts are nobody\'s students any more', async () => {
+    const s = await setup('st-111')
+    await TenantContext.forTenant(s.tenantId, async () => {
+      const db = ctx.prisma.client
+      const ids: string[] = []
+      for (let i = 0; i < 10; i++) {
+        const u = await ctx.makeStudent(s.tenantId)
+        await db.studentProfile.create({ data: { tenantId: s.tenantId, userId: u.id, mode: 'STUDYING', institutionType: 'COLLEGE', institutionId: s.C.id } })
+        ids.push(u.id)
+      }
+      const colleges = async () => row(table((await stats.all({})).tables, 'ilmora_students'), 'type', 'Колледж').studying
+      expect(await colleges()).toBe(10)
+      await db.user.updateMany({ where: { id: { in: ids.slice(0, 3) } }, data: { deletedAt: new Date() } })
+      await db.user.updateMany({ where: { id: { in: ids.slice(3, 5) } }, data: { isActive: false } })
+      expect(await colleges()).toBe(5)
+    })
+  })
+
   it('registry view: filters by status, region, industry; companies without the certificate', async () => {
     const s = await setup('st-registry')
     await TenantContext.forTenant(s.tenantId, async () => {
