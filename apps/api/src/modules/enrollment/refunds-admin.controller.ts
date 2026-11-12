@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
-import { RefundApproveDto, RefundFromLetterDto, RefundListQuery, RefundStudentQuery, RefundPaidDto, RefundRejectDto, toRefundInput } from './refunds.dto'
+import { RefundApproveDto, RefundFromLetterDto, RefundListQuery, RefundStudentQuery, RefundPaidDto, RefundRejectDto, RefundReopenDto, toRefundInput } from './refunds.dto'
 import { RefundsService } from './refunds.service'
 
 /** The finance admins' queue of refund requests (offer 6.6: a decision within 10 days, money within 5 working days). */
@@ -29,7 +29,13 @@ export class RefundsAdminController {
 
   @Post(':id/approve')
   approve(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Param('id') id: string, @Body() dto: RefundApproveDto) {
-    return this.refunds.approve(tenantId, actor.id, id, BigInt(dto.approvedMinor), dto.note)
+    return this.refunds.approve(tenantId, actor.id, id, BigInt(dto.approvedMinor), dto.note, dto.aboveRequested ?? false)
+  }
+
+  /** «Вернуть на рассмотрение»: a rejected or withdrawn request waits for a decision again (№79). */
+  @Post(':id/reopen')
+  reopen(@CurrentTenantId() tenantId: string, @CurrentActor() actor: RequestActor, @Param('id') id: string, @Body() dto: RefundReopenDto) {
+    return this.refunds.reopen(tenantId, actor.id, id, dto.note)
   }
 
   @Post(':id/reject')

@@ -135,11 +135,16 @@ export class RefundsService {
     return rows.map((r) => requestDto(r))
   }
 
-  /** The student takes a request back while it waits for the decision. Freed seats are not given back. */
+  /**
+   * The student takes a request back while it waits for the decision. Not one whose courses this refusal already took
+   * off (security review 11.11, №79): withdrawn, it would leave the student with neither the courses nor the money, and
+   * no way to ask again — the subscription is gone. Such a request waits for the finance admin's decision.
+   */
   async withdraw(tenantId: string, studentId: string, id: string) {
     const done = await this.prisma.tx(async (tx) => {
       const head = await tx.refundRequest.findFirst({ where: { tenantId, id, studentId }, select: { paymentId: true } })
       if (head) await tx.$queryRawUnsafe(`SELECT id FROM "Payment" WHERE id = $1 FOR UPDATE`, head.paymentId)
+      if (await this.coursesTakenOff(tx, id)) throw AppError.conflict('refund_courses_removed', 'The courses of this request are already taken off: it cannot be withdrawn, the finance admin decides it')
       return tx.refundRequest.updateMany({ where: { tenantId, id, studentId, status: 'PENDING' }, data: { status: 'WITHDRAWN', openKey: null } })
     })
     if (done.count !== 1) throw AppError.conflict('refund_state', 'This request can no longer be withdrawn')
@@ -226,16 +231,28 @@ export class RefundsService {
   }
 
   /** Approved with the amount to return: up to what is left of the payment; it may differ from the count (decisionNote). */
-  async approve(tenantId: string, actorId: string, id: string, approvedMinor: bigint, note?: string) {
+  /**
+   * Approves an amount. More than the request asked (by 6.4, for its courses) only with `aboveRequested` and a note
+   * saying why (security review 11.11, №101: the whole rest of the payment could be approved for one course, silently).
+   */
+  async approve(tenantId: string, actorId: string, id: string, approvedMinor: bigint, note?: string, aboveRequested = false) {
     return this.prisma.tx(async (tx) => {
       const r = await this.lockedRequest(tx, tenantId, id)
       if (r.status !== 'PENDING') throw AppError.conflict('refund_state', 'Only a request waiting for the decision can be approved')
       const left = r.payment.amountMinor - r.payment.refundedMinor
       if (approvedMinor <= 0n || approvedMinor > left) throw AppError.invalid('refund_amount', `The amount must be more than 0 and at most ${left}`, { maxMinor: left.toString() })
+      // What the request covers: its sum by 6.4 — or, for the operator's fault (6.5 e), where the sum is the finance admin's
+      // to decide and counted as 0, the part of the payment its courses make up.
+      const covered = r.reason === 'PLATFORM_FAULT'
+        ? (await tx.refundRequestLine.aggregate({ where: { refundRequestId: id }, _sum: { priceMinor: true } }))._sum.priceMinor ?? 0n
+        : r.requestedMinor
+      if (approvedMinor > covered && (!aboveRequested || !note?.trim())) {
+        throw AppError.invalid('refund_above_requested', 'More than the request asks for: confirm it and say why in the note', { requestedMinor: covered.toString(), maxMinor: left.toString() })
+      }
       // Conditional: a withdrawal committed meanwhile wins, the approval is refused (no APPROVED row without its openKey).
       const done = await tx.refundRequest.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'APPROVED', approvedMinor, decidedAt: new Date(), decidedById: actorId, decisionNote: note?.trim() || null } })
       if (done.count !== 1) throw AppError.conflict('refund_state', 'Only a request waiting for the decision can be approved')
-      await this.audit.record({ tx, tenantId, action: 'refund.approved', entityType: 'RefundRequest', entityId: id, after: { approvedMinor: approvedMinor.toString(), requestedMinor: r.requestedMinor.toString() }, reason: note })
+      await this.audit.record({ tx, tenantId, action: 'refund.approved', entityType: 'RefundRequest', entityId: id, after: { approvedMinor: approvedMinor.toString(), requestedMinor: r.requestedMinor.toString(), aboveRequested: approvedMinor > covered }, reason: note })
       await this.notifications.notify({ tenantId, userIds: [r.studentId], type: 'refund.approved', params: { amountMinor: approvedMinor.toString(), requestId: id }, dedupeKey: `refund-approved:${id}` }, tx)
       return { ok: true }
     })
@@ -251,6 +268,33 @@ export class RefundsService {
       await this.notifications.notify({ tenantId, userIds: [r.studentId], type: 'refund.rejected', params: { requestId: id, note: note.trim() }, dedupeKey: `refund-rejected:${id}` }, tx)
       return { ok: true }
     })
+  }
+
+  /**
+   * «Вернуть на рассмотрение» (security review 11.11, №79): a rejected or withdrawn request waits for a decision again —
+   * a refusal whose courses were taken off cannot be filed anew (the subscription is gone), so a wrong rejection is put
+   * right here. Only while the payment has money left and no other request on it is open; the student is told.
+   */
+  async reopen(tenantId: string, actorId: string, id: string, note: string, now = new Date()) {
+    return this.prisma.tx(async (tx) => {
+      const r = await this.lockedRequest(tx, tenantId, id)
+      if (r.status !== 'REJECTED' && r.status !== 'WITHDRAWN') throw AppError.conflict('refund_state', 'Only a rejected or withdrawn request can be reopened')
+      if (r.payment.amountMinor - r.payment.refundedMinor <= 0n) throw AppError.conflict('refund_amount', 'Nothing is left of the payment to return', { maxMinor: '0' })
+      if (await tx.refundRequest.findFirst({ where: { paymentId: r.paymentId, status: { in: OPEN } }, select: { id: true } })) throw AppError.conflict('refund_open', 'A refund request for this payment is already waiting for a decision')
+      const done = await tx.refundRequest.updateMany({
+        where: { id, status: { in: ['REJECTED', 'WITHDRAWN'] } },
+        data: { status: 'PENDING', openKey: r.paymentId, decisionDueAt: new Date(now.getTime() + REFUND_DECISION_DAYS * DAY_MS), decidedAt: null, decidedById: null, decisionNote: null, approvedMinor: null },
+      })
+      if (done.count !== 1) throw AppError.conflict('refund_state', 'Only a rejected or withdrawn request can be reopened')
+      await this.audit.record({ tx, tenantId, action: 'refund.reopened', entityType: 'RefundRequest', entityId: id, before: { status: r.status }, reason: note })
+      await this.notifications.notify({ tenantId, userIds: [r.studentId], type: 'refund.reopened', params: { requestId: id }, dedupeKey: `refund-reopened:${id}:${now.getTime()}` }, tx)
+      return { ok: true }
+    })
+  }
+
+  /** The courses of a request that its refusal already took off (their enrollments cancelled). */
+  private async coursesTakenOff(tx: TransactionClient, id: string) {
+    return (await tx.refundRequestLine.count({ where: { refundRequestId: id, enrollment: { status: 'CANCELLED' } } })) > 0
   }
 
   /**
