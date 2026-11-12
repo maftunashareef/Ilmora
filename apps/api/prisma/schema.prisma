@@ -968,6 +968,9 @@ model Payment {
   /// Returned so far (partial refunds by RefundRequest add up here). Checked by the database: 0 <= refundedMinor <=
   /// amountMinor, and state = REFUNDED only with refundedMinor = amountMinor (everything returned).
   refundedMinor  BigInt          @default(0)
+  /// LESSONS packages: the lessons this payment buys (№78, re-check 11.11), so cancelling one payment takes back exactly
+  /// its lessons. Null for PERIOD subscriptions. Never negative: CHECK "Payment_lessonsBought_check" (20261123000000).
+  lessonsBought  Int?
   expiresAt      DateTime
   createdById    String?
   createdAt      DateTime        @default(now())

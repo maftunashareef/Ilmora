@@ -75,6 +75,12 @@ Everything here is enforced on the server; the web app only reflects it.
   amounts, a line returns no more than was paid for its course and counts no more lessons held than in the period; a
   request is open (`PENDING`, `APPROVED`) exactly while `openKey` = its `paymentId` — set it to null when closing the
   request.
+- **Lessons a payment buys** (`Payment.lessonsBought`, migration `20261123000000`, re-check 11.11 №78): for a «per
+  lessons» package, the lessons this payment adds; null for PERIOD subscriptions; never negative (CHECK). Write it at
+  checkout and renewal from the package, and let the settlement add exactly this number — the package may change between
+  checkout and payment. Cancelling one payment takes back its own lessons, not the whole subscription. Payments made
+  before the migration: exact when the subscription had a single settled payment (its `lessonsTotal`), otherwise the
+  package's count at migration time.
 - **One unpaid payment per subscription** (partial unique index `Payment_one_pending_per_subscription`, migration
   `20261118000000`; «Доработки Ilmora» Н6, re-check 11.11 №80): a second `PENDING` payment of the same subscription fails
   with P2002 (409), whatever path creates it. Cancelled, expired and paid payments do not count.
