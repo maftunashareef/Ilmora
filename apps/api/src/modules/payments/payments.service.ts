@@ -151,6 +151,7 @@ export class PaymentsService {
     })
     const sub = await tx.subscription.findFirst({ where: { id: payment.subscriptionId } })
     const now = new Date()
+    let lessonsTaken: number | null = null
     const cancelSub = async (subId: string) => {
       await tx.enrollment.updateMany({ where: { subscriptionId: subId, status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'CANCELLED', cancelledAt: now } })
       await tx.subscription.update({ where: { id: subId }, data: { status: 'CANCELLED', cancelledAt: now } })
@@ -168,15 +169,42 @@ export class PaymentsService {
           await tx.payment.update({ where: { id: next.id }, data: { periodStart: now, periodEnd: end } })
           await tx.subscription.update({ where: { id: sub.id }, data: { currentPeriodStart: now, currentPeriodEnd: end } })
         } else await cancelSub(sub.id)
+      } else if (sub.kind === 'LESSONS' && payment.lessonsBought != null) {
+        // A lesson package (re-check 11.11 №78): the lessons of this payment still unused go, the rest of the balance — what
+        // other payments bought — stays. The subscription ends only when no lesson is left.
+        const taken = await this.unusedLessonsOf(tx, sub, payment)
+        lessonsTaken = taken.lessons
+        const left = Math.max(0, (sub.lessonsTotal ?? 0) - sub.lessonsUsed) - taken.lessons
+        if (left <= 0 && (taken.lessons > 0 || taken.newest)) await cancelSub(sub.id)
+        else if (taken.lessons > 0) await tx.subscription.update({ where: { id: sub.id }, data: { lessonsTotal: (sub.lessonsTotal ?? 0) - taken.lessons } })
       } else if (sub.kind !== 'PERIOD' && (!sub.currentPeriodEnd || payment.periodEnd >= sub.currentPeriodEnd)) {
-        // A lesson package: only the payment that bought the current balance takes the subscription down.
+        // A lesson payment from before Payment.lessonsBought: only the payment that bought the current balance takes the
+        // subscription down.
         await cancelSub(sub.id)
       }
       // A period already over: nothing to take back.
     }
     await this.outbox.enqueue(tx, { tenantId: payment.tenantId, type: 'payment.refunded', dedupeKey: `refund:${payment.id}`, payload: { paymentId: payment.id, reason } })
-    await this.audit.record({ tx, tenantId: payment.tenantId, action: 'payment.refunded', entityType: 'Payment', entityId: payment.id, reason })
+    await this.audit.record({ tx, tenantId: payment.tenantId, action: 'payment.refunded', entityType: 'Payment', entityId: payment.id, reason, ...(lessonsTaken !== null ? { after: { lessonsTaken } } : {}) })
     return true
+  }
+
+  /**
+   * How many of `payment`'s lessons are still in the subscription's balance. Lessons are used up oldest payment first —
+   * a renewal adds its lessons to those left — so the balance is the newest payments' lessons, back to the oldest; the
+   * refund request counts the same way. `newest`: this payment bought the latest lessons.
+   */
+  private async unusedLessonsOf(tx: TransactionClient, sub: { id: string; lessonsTotal: number | null; lessonsUsed: number }, payment: { id: string; paidAt: Date | null; createdAt: Date; lessonsBought: number | null }) {
+    const others = await tx.payment.findMany({ where: { subscriptionId: sub.id, state: 'PAID', id: { not: payment.id }, lessonsBought: { not: null } }, select: { id: true, paidAt: true, createdAt: true, lessonsBought: true } })
+    const at = (p: { paidAt: Date | null; createdAt: Date }) => (p.paidAt ?? p.createdAt).getTime()
+    const newestFirst = [...others, payment].sort((a, b) => at(b) - at(a) || b.createdAt.getTime() - a.createdAt.getTime())
+    let unused = Math.max(0, (sub.lessonsTotal ?? 0) - sub.lessonsUsed)
+    for (const p of newestFirst) {
+      const mine = Math.min(unused, p.lessonsBought ?? 0)
+      if (p.id === payment.id) return { lessons: mine, newest: newestFirst[0].id === payment.id }
+      unused -= mine
+    }
+    return { lessons: 0, newest: false }
   }
 
   /** Finance admin records an out-of-band payment (cash/bank transfer). Audited; uses the same settlement path. */

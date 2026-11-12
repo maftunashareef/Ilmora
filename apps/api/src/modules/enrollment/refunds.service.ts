@@ -378,7 +378,8 @@ export class RefundsService {
     // Lesson packages: the unused lessons are returned from the newest payment back — a renewal adds its lessons to
     // those left, so the balance can hold lessons bought by two payments.
     let unusedLessons = Math.max(0, (sub.lessonsTotal ?? 0) - sub.lessonsUsed)
-    const boughtPerPayment = Math.max(1, sub.package?.lessonCount ?? sub.lessonsTotal ?? 1)
+    // The lessons each payment bought (№78); a payment from before Payment.lessonsBought — the package's count.
+    const boughtBy = (p: { lessonsBought: number | null }) => Math.max(1, p.lessonsBought ?? sub.package?.lessonCount ?? sub.lessonsTotal ?? 1)
 
     const requests: PlannedRequest[] = []
     for (const p of payments) {
@@ -411,6 +412,7 @@ export class RefundsService {
       const returned = (enrollmentId: string) => returnedBy.get(enrollmentId) ?? 0n
 
       // A lesson package: this payment's lessons and how many of them are still unused.
+      const boughtPerPayment = boughtBy(p)
       const packageTake = Math.min(unusedLessons, boughtPerPayment)
       if (sub.kind === 'LESSONS') unusedLessons -= packageTake
 

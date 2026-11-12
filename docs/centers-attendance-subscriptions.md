@@ -78,7 +78,10 @@ Everything here is enforced on the server; the web app only reflects it.
 - **Lessons a payment buys** (`Payment.lessonsBought`, migration `20261123000000`, re-check 11.11 №78): for a «per
   lessons» package, the lessons this payment adds; null for PERIOD subscriptions; never negative (CHECK). Write it at
   checkout and renewal from the package, and let the settlement add exactly this number — the package may change between
-  checkout and payment. Cancelling one payment takes back its own lessons, not the whole subscription. Payments made
+  checkout and payment. Cancelling one payment takes back its own lessons, not the whole subscription: lessons are used
+  up oldest payment first, so the balance belongs to the newest payments; a cancellation takes the cancelled payment's
+  share of it (audit `payment.refunded`, `after.lessonsTaken`), and the subscription ends only when no lesson is left.
+  The refund request counts each payment's lessons the same way. Payments made
   before the migration: exact when the subscription had a single settled payment (its `lessonsTotal`), otherwise the
   package's count at migration time.
 - **One unpaid payment per subscription** (partial unique index `Payment_one_pending_per_subscription`, migration
