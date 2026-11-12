@@ -320,6 +320,8 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
 
       // A record from the ministry's list keeps its official name until it is approved (re-check 11.11 №105); the same
       // name sent again is no change.
+      // The passport says so, so the site closes the field instead of answering 409 on save.
+      expect(await service.passport(rep)).toMatchObject({ inRegistry: true, nameLocked: true, stirLocked: true })
       await expect(service.update(tenantId, rep, { name: 'Yangi nom texnikumi' })).rejects.toMatchObject({ code: 'name_locked' })
       await service.update(tenantId, rep, { name: imported.name })
       expect((await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id: imported.id } })).name).toBe('Toşkent axborot texnikumi')
@@ -329,6 +331,7 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
 
       const fresh = await representative()
       const created = await service.claim(tenantId, fresh, { stir: '066666666', type: 'COLLEGE', name: 'Kollej Bir' })
+      expect(created.institution).toMatchObject({ inRegistry: false, nameLocked: false, stirLocked: false })
       expect((await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id: created.institution.id } })).searchText).toBe('kollej bir')
     })
   })
@@ -356,7 +359,8 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
         expect(queue).toEqual([expect.objectContaining({ id, inRegistry: true, reReview: false, representative: expect.objectContaining({ name: 'Aziz Karimov', jobTitle: 'Direktor örinbosari' }) })])
         sent.length = 0
         const p = await review.approve(tenantId, admin, id)
-        expect(p).toMatchObject({ status: 'APPROVED', workspaceOpen: true, editable: true })
+        // Approved: the name of a record from the list is renamed through the review now, the STIR stays fixed.
+        expect(p).toMatchObject({ status: 'APPROVED', workspaceOpen: true, editable: true, inRegistry: true, nameLocked: false, stirLocked: true })
         expect(sent).toEqual([expect.objectContaining({ userIds: [rep.id], type: 'institution.approved' })])
         expect(await review.queue()).toEqual([])
         await expect(review.approve(tenantId, admin, id)).rejects.toMatchObject({ code: 'not_pending' })

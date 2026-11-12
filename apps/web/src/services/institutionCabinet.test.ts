@@ -20,7 +20,7 @@ const passport: InstitutionPassportDto = {
   id: 'i1', type: 'TECHNIKUM', ownership: 'STATE', name: 'Andijon texnikumi', nameRu: null, formerName: null, stir: '200237474',
   region: { id: 'r-and', name: { uz: 'Andijon', ru: 'Андижан', en: 'Andijan' }, slug: 'andijan' }, district: { id: 'd1', name: { uz: 'A', ru: 'А', en: 'A' } },
   districtName: null, address: 'Navoiy 1', phone: '+998901234567', email: null, website: null, directorName: 'Karimov', status: 'DRAFT', rejectReason: null,
-  submittedAt: null, approvedAt: null, workspaceOpen: false, editable: true,
+  submittedAt: null, approvedAt: null, workspaceOpen: false, editable: true, inRegistry: false, nameLocked: false, stirLocked: false,
   directions: [{ id: 'x1', direction: { id: 'dir1', name: 'Dasturlash', industry, official: true, code: null } as never, department: null, studentsCount: 120 }],
   totals: { students: 120, directions: 1 }, representative: { name: 'Vakil', jobTitle: 'Direktor örinbosari' }, pendingChanges: null, blocked: null,
 }
