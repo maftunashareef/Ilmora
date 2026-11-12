@@ -13,10 +13,15 @@ import { StudentsService } from '../src/modules/students/students.service'
 import { CompanyVacanciesController, StudentVacanciesController } from '../src/modules/vacancies/vacancies.controller'
 import { ApplyInput, VacancyInput, type VacancyInput as VacancyInputT } from '../src/modules/vacancies/vacancies.schemas'
 import { VacanciesService } from '../src/modules/vacancies/vacancies.service'
+import { addDays, todayLocal } from '../src/common/time'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 
 const Y = new Date().getUTCFullYear()
-const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+/**
+ * A day counted from today in Tashkent, as the API counts the deadline. Counted on UTC it was «yesterday» for the API from
+ * 19:00 to 24:00 UTC (00:00–05:00 in Tashkent), and the CI runs at midnight in Tashkent failed.
+ */
+const day = (offset: number) => addDays(todayLocal(), offset)
 
 describe('Practice and internships: access and input', () => {
   it('approved companies publish; students see and apply', () => {

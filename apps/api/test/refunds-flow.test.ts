@@ -202,6 +202,10 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
       const row = (await new ReconciliationService(ctx.prisma).list(s.tenantId, {})).items.find((i) => i.paymentId === s.payment.id)!
       expect(row.discrepancy).toBeNull()
       expect(row.ledger.refunded).toBe(true)
+      // №77: returned in full by transfer — a later cancellation of the same payment in Payme's cabinet is refused, not
+      // answered «cancelled» (Payme would pay the card a second time).
+      expect(await ctx.prisma.tx((tx) => ctx.payments.refundPaid(tx, s.payment.id, 'payme-cancel:5'))).toBe(false)
+      expect(await db.payment.findUniqueOrThrow({ where: { id: s.payment.id } })).toMatchObject({ state: 'REFUNDED', refundedMinor: s.payment.amountMinor })
     })
   })
 
@@ -218,10 +222,59 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
       await refunds.reject(s2.tenantId, s2.finance.id, r2.requests[0].id, 'all lessons were held')
       expect(await db.refundRequest.findUniqueOrThrow({ where: { id: r2.requests[0].id } })).toMatchObject({ status: 'REJECTED', openKey: null, decisionNote: 'all lessons were held' })
       // Closed: a new request for the same payment can be filed.
-      const r3 = await refunds.refuse(s2.tenantId, s2.student.id, { enrollmentIds: [s2.byCourse(s2.course2.id).id], reason: 'REFUSAL' }, { source: 'EMAIL', actorId: s2.finance.id })
+      // A request that keeps the courses (the platform's fault) can be withdrawn; one whose courses were taken off cannot (№79).
+      const r3 = await refunds.refuse(s2.tenantId, s2.student.id, { enrollmentIds: [s2.byCourse(s2.course2.id).id], reason: 'PLATFORM_FAULT' }, { source: 'EMAIL', actorId: s2.finance.id })
       await expect(refunds.withdraw(s2.tenantId, 'someone-else', r3.requests[0].id)).rejects.toMatchObject({ code: 'refund_state' })
       await refunds.withdraw(s2.tenantId, s2.student.id, r3.requests[0].id)
       expect(await db.refundRequest.findUniqueOrThrow({ where: { id: r3.requests[0].id } })).toMatchObject({ status: 'WITHDRAWN', openKey: null, source: 'EMAIL' })
+    })
+  })
+
+  it('№79: a refusal whose courses were taken off cannot be withdrawn; the finance admin can put a rejected one back to review', async () => {
+    const s = await paid('rf-reopen')
+    sent.length = 0
+    const out = await file(s, { reason: 'REFUSAL', reasonText: 'moving away' })
+    const id = out.requests[0].id
+    await s.inT(async () => {
+      // The courses are off and the subscription ended: withdrawn now, the student would have neither courses nor money.
+      await expect(refunds.withdraw(s.tenantId, s.student.id, id)).rejects.toMatchObject({ code: 'refund_courses_removed', status: 409 })
+      expect((await db.refundRequest.findUniqueOrThrow({ where: { id } })).status).toBe('PENDING')
+      // A wrong rejection is put right: back to review, a fresh 10 days, the student told.
+      await refunds.reject(s.tenantId, s.finance.id, id, 'wrong rejection')
+      await expect(file(s, { reason: 'REFUSAL' })).rejects.toMatchObject({ code: 'not_found' })
+      await refunds.reopen(s.tenantId, s.finance.id, id, 'rejected by mistake')
+      const r = await db.refundRequest.findUniqueOrThrow({ where: { id } })
+      expect(r).toMatchObject({ status: 'PENDING', openKey: s.payment.id, decidedAt: null, decisionNote: null })
+      expect(r.decisionDueAt.getTime() - Date.now()).toBeGreaterThan(9.9 * DAY)
+      expect(sent.map((n) => n.type)).toContain('refund.reopened')
+      expect(await db.auditEvent.count({ where: { action: 'refund.reopened', entityId: id } })).toBe(1)
+      // Only a closed request, and not twice; then it is decided as usual.
+      await expect(refunds.reopen(s.tenantId, s.finance.id, id, 'again')).rejects.toMatchObject({ code: 'refund_state' })
+      await refunds.approve(s.tenantId, s.finance.id, id, BigInt(out.requests[0].requestedMinor))
+      expect((await db.refundRequest.findUniqueOrThrow({ where: { id } })).status).toBe('APPROVED')
+    })
+  })
+
+  it('№101: approving more than the request asks needs a confirmation and a note saying why', async () => {
+    const s = await paid('rf-above')
+    const out = await file(s, { enrollmentIds: [s.byCourse(s.course2.id).id], reason: 'REFUSAL' })
+    const id = out.requests[0].id
+    const asked = BigInt(out.requests[0].requestedMinor)
+    await s.inT(async () => {
+      await expect(refunds.approve(s.tenantId, s.finance.id, id, s.payment.amountMinor)).rejects.toMatchObject({ code: 'refund_above_requested', details: { requestedMinor: asked.toString() } })
+      await expect(refunds.approve(s.tenantId, s.finance.id, id, asked + 1n, '', true)).rejects.toMatchObject({ code: 'refund_above_requested' })
+      await expect(refunds.approve(s.tenantId, s.finance.id, id, asked + 1n, 'center asked for the whole sum')).rejects.toMatchObject({ code: 'refund_above_requested' })
+      await refunds.approve(s.tenantId, s.finance.id, id, asked + 1n, 'center asked for the whole sum', true)
+      const audit = await db.auditEvent.findFirstOrThrow({ where: { action: 'refund.approved', entityId: id } })
+      expect(audit.after).toMatchObject({ aboveRequested: true })
+    })
+    // The operator's fault: the sum is the finance admin's, up to the part of its courses; above that — confirmed.
+    const t = await paid('rf-above-platform')
+    const pf = await file(t, { enrollmentIds: [t.byCourse(t.course2.id).id], reason: 'PLATFORM_FAULT', reasonText: 'no access' })
+    await t.inT(async () => {
+      expect(pf.requests[0].requestedMinor).toBe('0')
+      await expect(refunds.approve(t.tenantId, t.finance.id, pf.requests[0].id, t.payment.amountMinor)).rejects.toMatchObject({ code: 'refund_above_requested', details: { requestedMinor: (30_000_00n).toString() } })
+      await refunds.approve(t.tenantId, t.finance.id, pf.requests[0].id, 30_000_00n)
     })
   })
 
@@ -296,7 +349,8 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
 
   it('a withdrawal and an approval at once: one wins, the other gets refund_state, never a 500', async () => {
     const s = await paid('rf-race')
-    const out = await file(s, { reason: 'REFUSAL' })
+    // The platform's fault keeps the courses, so the request can be withdrawn (a refusal's cannot — №79).
+    const out = await file(s, { reason: 'PLATFORM_FAULT' })
     const id = out.requests[0].id
     const results = await s.inT(() => Promise.allSettled([refunds.withdraw(s.tenantId, s.student.id, id), refunds.approve(s.tenantId, s.finance.id, id, 1_000_00n)]))
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)

@@ -134,11 +134,12 @@ export class PaymentsService {
   async refundPaid(tx: TransactionClient, paymentId: string, reason: string, actorId?: string) {
     const payment = await this.lockPayment(tx, paymentId)
     if (!payment) return false
-    if (payment.state === 'REFUNDED') return true
+    // Any of it already returned through a refund request — part or all (then the payment is REFUNDED): a cancellation by
+    // the provider would return that money a second time. Refused in every state (security review 11.11, №77: a fully
+    // refunded payment used to answer «cancelled», and Payme paid the card again); the rest goes back through a request.
+    // A transaction the provider already cancelled never gets here: Payme's CancelTransaction answers it from its own row.
+    if (payment.refundedMinor > 0n || payment.state === 'REFUNDED') return false
     if (payment.state !== 'PAID') return false
-    // Part of it was already returned by a refund request: a whole cancellation would return that part a second time.
-    // The provider is refused; the rest goes back through a request (security review 10.11 №42, Timur's note 4).
-    if (payment.refundedMinor > 0n) return false
     const journal = await tx.ledgerJournal.findUnique({ where: { tenantId_kind_referenceType_referenceId: { tenantId: payment.tenantId, kind: 'PAYMENT_SETTLED', referenceType: 'Payment', referenceId: payment.id } } })
     if (journal) await this.ledger.reverse(tx, journal.id, 'PAYMENT_REFUNDED', reason, actorId)
     // The whole payment is returned (the database checks that REFUNDED means refundedMinor = amountMinor).

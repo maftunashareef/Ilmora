@@ -26,6 +26,12 @@ export const toRefundInput = (d: RefundDto): RefundInput => ({ enrollmentIds: d.
 export class RefundApproveDto {
   @IsString() @Matches(/^\d{1,15}$/) approvedMinor!: string
   @IsOptional() @IsString() @Length(0, 1000) note?: string
+  /** More than the request asks for (№101): only with this and a note saying why. */
+  @IsOptional() @IsBoolean() aboveRequested?: boolean
+}
+/** «Вернуть на рассмотрение» (№79): why. */
+export class RefundReopenDto {
+  @IsString() @Length(3, 1000) note!: string
 }
 export class RefundRejectDto {
   @IsString() @Length(3, 1000) note!: string
