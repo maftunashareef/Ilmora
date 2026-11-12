@@ -75,7 +75,7 @@ export function CenterTeachers() {
       <Modal open={!!draft} onClose={() => setDraft(null)} title={draft?.id ? t('center.editTeacher') : t('center.addTeacher')} footer={<><Button variant="ghost" onClick={() => setDraft(null)}>{t('common.cancel')}</Button><Button disabled={busy || !draft?.name.trim()} onClick={() => void save()}>{t('common.save')}</Button></>}>
         {draft && (
           <div className="space-y-4">
-            <Field label={t('common.name')} required><Input maxLength={120} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+            <Field label={t('common.personName')} required><Input maxLength={120} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
             {!draft.id && (
               <Field label={t('center.linkLogin')} hint={t('center.linkLoginHint')}><Input autoCapitalize="none" spellCheck={false} maxLength={32} value={draft.login} onChange={(e) => setDraft({ ...draft, login: e.target.value })} /></Field>
             )}

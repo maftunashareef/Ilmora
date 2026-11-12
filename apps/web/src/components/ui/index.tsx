@@ -214,25 +214,40 @@ export function Stat({ label, value, hint }: { label: ReactNode; value: ReactNod
 }
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
-export function Modal({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+const MODAL_FIELDS = 'input:not([type="hidden"]):not(:disabled), select:not(:disabled), textarea:not(:disabled)'
+
+/**
+ * A dialog closes only on a deliberate action: its close button, a footer button or Escape. A click on the backdrop
+ * closes it only with `closeOnBackdrop`, which is for pickers and confirmations that hold nothing typed, so a form
+ * is never lost to a stray click.
+ */
+export function Modal({ open, onClose, title, children, footer, wide, closeOnBackdrop }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; closeOnBackdrop?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const { t } = useT()
+  // Escape reads the latest onClose from a ref. Callers pass a new function on every render, so with onClose as a
+  // dependency the effect below re-ran on each keystroke and moved focus from the field being typed in to the close button.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current() }
     document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const first = ref.current?.querySelector<HTMLElement>('input, select, textarea, button')
+    // Focus once, when the dialog opens: the first form field with a mouse or trackpad (a phone would raise its
+    // keyboard unasked), otherwise the first control.
+    const dialog = ref.current
+    const field = window.matchMedia('(hover: hover) and (pointer: fine)').matches ? dialog?.querySelector<HTMLElement>(MODAL_FIELDS) : null
+    const first = field ?? dialog?.querySelector<HTMLElement>('input, select, textarea, button')
     first?.focus()
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  }, [open, onClose])
+  }, [open])
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-charcoal/40 p-0 backdrop-blur-[2px] sm:items-center sm:p-6" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-charcoal/40 p-0 backdrop-blur-[2px] sm:items-center sm:p-6" onMouseDown={(e) => closeOnBackdrop && e.target === e.currentTarget && onClose()}>
       <div ref={ref} role="dialog" aria-modal="true" className={cx('animate-rise flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-card bg-paper shadow-lift sm:rounded-card', wide ? 'sm:max-w-4xl' : 'sm:max-w-2xl')}>
         <div className="flex items-center justify-between gap-4 border-b border-charcoal/10 px-6 py-4">
           <h2 className="font-display text-2xl text-charcoal">{title}</h2>

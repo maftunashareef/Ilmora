@@ -640,6 +640,7 @@ export function CourseFinderPage() {
       )}
 
       <Modal
+        closeOnBackdrop
         open={!!pending}
         onClose={() => setPending(null)}
         title={t('finder.replace.title')}

@@ -125,7 +125,7 @@ export function AdminPeople() {
       <Modal open={!!teacher} onClose={() => setTeacher(null)} title={teacher?.name || t('admin.people.addTeacher')} footer={<><Button variant="ghost" onClick={() => setTeacher(null)}>{t('common.cancel')}</Button><Button disabled={saving} onClick={() => void saveTeacher()}>{t('common.save')}</Button></>}>
         {teacher && (
           <div className="space-y-4">
-            <Field label={t('common.name')} required><Input value={teacher.name} onChange={(e) => setTeacher({ ...teacher, name: e.target.value })} /></Field>
+            <Field label={t('common.personName')} required><Input value={teacher.name} onChange={(e) => setTeacher({ ...teacher, name: e.target.value })} /></Field>
             <LField label={t('studio.channel.titleField')} value={teacher.title} onChange={(v) => setTeacher({ ...teacher, title: v })} />
             <LField label={t('studio.channel.bio')} multiline value={teacher.bio} onChange={(v) => setTeacher({ ...teacher, bio: v })} />
             <div className="grid gap-4 sm:grid-cols-2">
