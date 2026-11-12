@@ -387,8 +387,12 @@ export class MinistryStatsService {
     return { company: { approvedAt: { not: null }, blockedAt: null }, ...(ctx.f.regionDbId ? { OR: [{ regionId: ctx.f.regionDbId }, { regionId: null, company: { regionId: ctx.f.regionDbId } }] } : {}), ...(ctx.f.year ? { byYear: ctx.f.year } : {}) }
   }
 
+  /**
+   * Students of ILMORA: living accounts only — a deleted or disabled account is nobody's student any more (re-check 11.11
+   * №111). The relation filter is not covered by the soft-delete scope of top-level queries, so it is stated here.
+   */
   private studentWhere(ctx: Ctx): Prisma.StudentProfileWhereInput {
-    return { ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}), ...(ctx.f.type ? { institutionType: ctx.f.type } : {}) }
+    return { user: { deletedAt: null, isActive: true }, ...(ctx.f.regionDbId ? { regionId: ctx.f.regionDbId } : {}), ...(ctx.f.type ? { institutionType: ctx.f.type } : {}) }
   }
 
 }

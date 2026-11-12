@@ -300,9 +300,21 @@ describe.skipIf(!DB_AVAILABLE)('Graduation announcements and contact requests (�
       await ctx.prisma.client.user.update({ where: { id: s.aziz.id }, data: { isActive: true } })
       expect(await contacts.companyList(s.softCo.actor)).toHaveLength(1)
 
+      // Applications to vacancies carry the contacts too: those to this company go with the revocation, another
+      // company's stay (re-check 11.11 №114).
+      const region = await ctx.prisma.client.region.findFirstOrThrow({ select: { id: true } })
+      const vacancyOf = (companyId: string) => ctx.prisma.client.vacancy.create({ data: { tenantId: s.tenantId, companyId, kind: 'PRACTICE', title: 'Amaliyot', regionId: region.id, format: 'ONSITE', seats: 1 } })
+      const ownVacancy = await vacancyOf(s.softCo.row.id)
+      const otherVacancy = await vacancyOf(s.mebelCo.row.id)
+      const ownApplication = await ctx.prisma.client.vacancyApplication.create({ data: { tenantId: s.tenantId, vacancyId: ownVacancy.id, userId: s.aziz.id, sharedName: 'Aziz', sharedPhone: '+998935554433' } })
+      const otherApplication = await ctx.prisma.client.vacancyApplication.create({ data: { tenantId: s.tenantId, vacancyId: otherVacancy.id, userId: s.aziz.id } })
+
       // «Отозвать доступ»: the card and the files close at once, the consent row gets its date, the company does not ask again.
       await expect(contacts.revoke(s.bobur, req.id)).rejects.toMatchObject({ code: 'not_found' })
       const [revoked] = await contacts.revoke(s.aziz, req.id)
+      expect(await ctx.prisma.client.vacancyApplication.findUnique({ where: { id: ownApplication.id } })).toBeNull()
+      expect(await ctx.prisma.client.vacancyApplication.findUnique({ where: { id: otherApplication.id } })).not.toBeNull()
+      expect(await ctx.prisma.client.auditEvent.count({ where: { action: 'vacancy.application.withdraw', entityId: ownApplication.id } })).toBe(1)
       expect(revoked).toMatchObject({ status: 'WITHDRAWN', contacts: null })
       // After «Отозвать» the company sees nothing of the student — not the name either (review 11.11).
       await expect(contacts.companyContact(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })

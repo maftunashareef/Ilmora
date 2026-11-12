@@ -7,7 +7,7 @@ import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/privat
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, mainOf, regionIdByRef, toIndustry, changedKey } from '../registry/registry.mappers'
+import { DIRECTION_WITH_MAIN, INDUSTRY_SELECT, isUniqueViolation, lastEdit, mainOf, regionIdByRef, toIndustry, changedKey } from '../registry/registry.mappers'
 import type { CertificateConfirmInput, CertificateUploadInput, CompanyCreateInput, CompanyPatch } from './companies.schemas'
 
 export const PROFILE_SELECT = {
@@ -28,6 +28,16 @@ const sortKeys = (o: Record<string, unknown>) => Object.fromEntries(Object.entri
 const isLocked = (r: { status: string; approvedAt: Date | null }) => r.status === 'PENDING' && !r.approvedAt
 const certPrefix = (tenantId: string, companyId: string) => `company-certs/${tenantId}/${companyId}/`
 
+/** What waits in `Company.pendingChanges`: the fields shown to people, and the storage key of a new certificate. */
+export type StoredCompanyChanges = Omit<CompanyPendingChanges, 'certificate'> & { certificateFileKey?: string }
+
+/** The waiting change as the company and the reviewer see it: a new certificate as a flag, never its storage key. */
+export function pendingView(raw: unknown): CompanyPendingChanges | null {
+  if (!raw) return null
+  const { certificateFileKey, ...rest } = raw as StoredCompanyChanges
+  return { ...rest, ...(certificateFileKey ? { certificate: true } : {}) }
+}
+
 export function toProfile(r: ProfileRow): CompanyProfileDto {
   const directions = [...new Map(r.directions.map((d) => mainOf(d.direction)).map((d) => [d.id, d])).values()]
   return {
@@ -42,7 +52,7 @@ export function toProfile(r: ProfileRow): CompanyProfileDto {
     workspaceOpen: r.approvedAt !== null && r.blockedAt === null,
     editable: !isLocked(r),
     representative: { name: r.representative?.displayName ?? '', jobTitle: r.representative?.jobTitle ?? null, email: r.representative?.email ?? null },
-    pendingChanges: (r.pendingChanges as CompanyPendingChanges | null) ?? null,
+    pendingChanges: pendingView(r.pendingChanges),
     blocked: r.blockedAt ? { at: r.blockedAt.toISOString(), reason: r.blockReason } : null,
   }
 }
@@ -75,7 +85,8 @@ export async function closeCompanyData(tx: TransactionClient, id: string, now: D
 
 /** The company goes back to a draft nobody holds, and none of its data stays (release, or the account deleted — №84). */
 export async function unclaimCompany(tx: TransactionClient, id: string, now: Date) {
-  await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull, claimedAt: null } })
+  // A block set because of the one who held it goes with them (re-check 11.11 №112).
+  await tx.company.update({ where: { id }, data: { status: 'DRAFT', approvedAt: null, submittedAt: null, rejectReason: null, pendingChanges: Prisma.DbNull, claimedAt: null, blockedAt: null, blockReason: null, blockedById: null } })
   return closeCompanyData(tx, id, now)
 }
 
@@ -142,7 +153,8 @@ export class CompaniesService {
   private async isAbandoned(id: string): Promise<boolean> {
     const row = await this.prisma.client.company.findFirst({ where: { id }, select: { status: true, approvedAt: true, reviewedAt: true, createdAt: true, claimedAt: true } })
     if (!row || row.approvedAt || !['DRAFT', 'REJECTED'].includes(row.status)) return false
-    const last = Math.max(row.createdAt.getTime(), row.claimedAt?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0)
+    // Also the last edit (audit log): a draft worked on yesterday is not abandoned (re-check 11.11 №110).
+    const last = Math.max(row.createdAt.getTime(), row.claimedAt?.getTime() ?? 0, row.reviewedAt?.getTime() ?? 0, await lastEdit(this.prisma, 'Company', id))
     return Date.now() - last > REGISTRY_DRAFT_HOLD_DAYS * 86_400_000
   }
 
@@ -272,22 +284,34 @@ export class CompaniesService {
 
   /**
    * Step 2: the server checks what was uploaded — under the company's prefix, at most 10 MB, a real PDF/JPEG/PNG by its
-   * first bytes — and only then attaches it; anything else is deleted. After approval a new certificate goes to review.
+   * first bytes — and only then attaches it; anything else is deleted. Before approval it is part of the profile. After
+   * approval it waits in `pendingChanges` like the other key fields (re-check 11.11 №106): the approved certificate stays
+   * in force and is replaced only when the Super Admin approves the new one; a rejection drops the new one.
    */
   async confirmCertificate(tenantId: string, actor: RequestActor, input: CertificateConfirmInput): Promise<CompanyProfileDto> {
     const id = await this.editableId(actor)
-    const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { name: true, status: true, approvedAt: true, certificateFileKey: true } })
+    const current = await this.prisma.client.company.findFirstOrThrow({ where: { id }, select: { name: true, status: true, approvedAt: true, certificateFileKey: true, pendingChanges: true } })
     if (isLocked(current)) throw AppError.conflict('under_review', 'The profile is under review; wait for the decision')
     const { type, size, key } = await this.docs.verifyUpload(input.key, certPrefix(tenantId, id))
-    const backToReview = current.approvedAt !== null && current.status !== 'PENDING'
     const now = new Date()
-    // After approval every new certificate is a new version for the reviewer (submittedAt), even while one waits: the
-    // reviewer approves the file they looked at (review 11.11).
-    await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: key, ...(current.approvedAt !== null ? { status: 'PENDING', submittedAt: now, rejectReason: null } : {}) } })
-    if (current.certificateFileKey && current.certificateFileKey !== key) await this.docs.remove(current.certificateFileKey).catch(() => undefined)
-    await this.audit.record({ action: backToReview ? 'company.certificate.review' : 'company.certificate', entityType: 'Company', entityId: id, after: { type, size } })
-    if (backToReview) await this.notifyReviewers(tenantId, id, current.name, 'company.changed', changedKey('company', id, now))
+    if (current.approvedAt === null) {
+      await this.prisma.client.company.update({ where: { id }, data: { certificateFileKey: key } })
+      if (current.certificateFileKey && current.certificateFileKey !== key) await this.removeCertificateFile(current.certificateFileKey)
+      await this.audit.record({ action: 'company.certificate', entityType: 'Company', entityId: id, after: { type, size } })
+      return this.profileOf(id)
+    }
+    const was = (current.pendingChanges ?? {}) as StoredCompanyChanges
+    // Every new file is a new version for the reviewer (submittedAt): they approve the file they looked at (review 11.11).
+    await this.prisma.client.company.update({ where: { id }, data: { pendingChanges: { ...was, certificateFileKey: key }, submittedAt: now, rejectReason: null } })
+    if (was.certificateFileKey && was.certificateFileKey !== key) await this.removeCertificateFile(was.certificateFileKey)
+    await this.audit.record({ action: 'company.certificate.review', entityType: 'Company', entityId: id, after: { type, size } })
+    await this.notifyReviewers(tenantId, id, current.name, 'company.changed', changedKey('company', id, now))
     return this.profileOf(id)
+  }
+
+  /** Deletes a certificate file that is no longer the company's (replaced, or a rejected new one); a failure is left to the bucket. */
+  async removeCertificateFile(key: string): Promise<void> {
+    await this.docs.remove(key).catch(() => undefined)
   }
 
   /** The company's own certificate, through a 5-minute link. */
@@ -297,9 +321,11 @@ export class CompaniesService {
 
   /** A 5-minute link to a company's certificate (the company itself and the Super Admin — ТЗ 9.4); every link is audited. */
   async certificateLinkOf(companyId: string): Promise<DocumentLinkDto> {
-    const row = await this.prisma.client.company.findFirst({ where: { id: companyId }, select: { certificateFileKey: true } })
-    if (!row?.certificateFileKey) throw AppError.notFound('Certificate')
-    const url = await this.docs.downloadUrl(row.certificateFileKey)
+    const row = await this.prisma.client.company.findFirst({ where: { id: companyId }, select: { certificateFileKey: true, pendingChanges: true } })
+    // The newest certificate: the one waiting for review if there is one — what the company sent and the reviewer decides on.
+    const key = ((row?.pendingChanges ?? {}) as StoredCompanyChanges).certificateFileKey ?? row?.certificateFileKey
+    if (!key) throw AppError.notFound('Certificate')
+    const url = await this.docs.downloadUrl(key)
     await this.audit.record({ action: 'company.certificate.download', entityType: 'Company', entityId: companyId })
     return { url, expiresInSeconds: DOC_LINK_SECONDS }
   }

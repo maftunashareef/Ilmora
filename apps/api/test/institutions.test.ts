@@ -84,6 +84,26 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
     })
   })
 
+  it('re-check 11.11 №110: a draft edited lately is not abandoned, whenever it was claimed', async () => {
+    const { tenantId, inT, imported, representative } = await setup('inst-110')
+    await inT(async () => {
+      const db = ctx.prisma.client
+      const holder = await representative()
+      await service.claim(tenantId, holder, { stir: '011111111' })
+      const old = new Date(Date.now() - 15 * 86_400_000)
+      await db.institution.update({ where: { id: imported.id }, data: { createdAt: old, claimedAt: old } })
+      await db.auditEvent.updateMany({ where: { entityId: imported.id }, data: { createdAt: old } })
+      // Edited yesterday — the directions count too.
+      await service.setDirections(tenantId, holder, { directions: [] })
+      await db.auditEvent.updateMany({ where: { entityId: imported.id, action: 'institution.directions' }, data: { createdAt: new Date(Date.now() - 86_400_000) } })
+      const other = await representative()
+      await expect(service.claim(tenantId, other, { stir: '011111111' })).rejects.toMatchObject({ code: 'already_claimed' })
+      // Two weeks without a touch: released to the next one.
+      await db.auditEvent.updateMany({ where: { entityId: imported.id }, data: { createdAt: old } })
+      expect((await service.claim(tenantId, other, { stir: '011111111' })).institution).toMatchObject({ id: imported.id, status: 'DRAFT' })
+    })
+  })
+
   it('the Super Admin search takes a 9-digit STIR, known statuses and types only', () => {
     const pipe = new ZodValidationPipe(AdminInstitutionsQuery)
     expect(pipe.transform({ stir: '011111111', q: ' axborot ', status: 'APPROVED', page: '2' })).toMatchObject({ stir: '011111111', q: 'axborot', status: 'APPROVED', page: 2 })
@@ -298,9 +318,11 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       expect(moved).toMatchObject({ region: { id: andijan.id, slug: 'andijan' }, district: null, districtName: 'Asaka tumani', nameRu: 'Ташкентский техникум', formerName: 'Eski nom' })
       await expect(service.update(tenantId, rep, { regionId: 'nowhere' })).rejects.toMatchObject({ code: 'invalid_region' })
 
-      await service.update(tenantId, rep, { name: 'Yangi nom texnikumi' })
-      const row = await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id: imported.id } })
-      expect(row.searchText).toBe(registrySearchText('Yangi nom texnikumi', 'Ташкентский техникум', 'Eski nom'))
+      // A record from the ministry's list keeps its official name until it is approved (re-check 11.11 №105); the same
+      // name sent again is no change.
+      await expect(service.update(tenantId, rep, { name: 'Yangi nom texnikumi' })).rejects.toMatchObject({ code: 'name_locked' })
+      await service.update(tenantId, rep, { name: imported.name })
+      expect((await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id: imported.id } })).name).toBe('Toşkent axborot texnikumi')
       // No district codes in Andijan, the official list's district text is there: the profile goes.
       await service.setDirections(tenantId, rep, { directions: [{ directionId: dasturlash.id, studentsCount: 3 }] })
       expect((await service.submit(tenantId, rep)).status).toBe('PENDING')
@@ -447,6 +469,32 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
         expect(await review.setBlocked(tenantId, admin, id, false)).toMatchObject({ workspaceOpen: true, blocked: null })
         await expect(guard.canActivate(ctxFor)).resolves.toBe(true)
         expect(await ctx.prisma.client.auditEvent.count({ where: { entityId: id, action: { in: ['institution.block', 'institution.unblock'] } } })).toBe(2)
+      })
+    })
+
+    it('re-check 11.11 №107: students who named it while it was blocked are asked about when it is unblocked', async () => {
+      const { tenantId, inT, id, admin } = await submitted('rev-107')
+      await inT(async () => {
+        const db = ctx.prisma.client
+        await review.approve(tenantId, admin, id)
+        await review.setBlocked(tenantId, admin, id, true, 'Documents are forged')
+        const u = await ctx.makeStudent(tenantId)
+        // Named while blocked: nobody to confirm (StudentsService.confirmationFor).
+        await db.studentProfile.create({ data: { tenantId, userId: u.id, mode: 'STUDYING', institutionId: id, studyConfirmation: 'NONE' } })
+        await review.setBlocked(tenantId, admin, id, false)
+        expect((await db.studentProfile.findUniqueOrThrow({ where: { userId: u.id } })).studyConfirmation).toBe('PENDING')
+      })
+    })
+
+    it('re-check 11.11 №112: a record released from the one it was blocked for is open to the next representative', async () => {
+      const { tenantId, inT, id, admin, representative } = await submitted('rev-112')
+      await inT(async () => {
+        await review.approve(tenantId, admin, id)
+        await review.setBlocked(tenantId, admin, id, true, 'Not the real representative')
+        await review.release(tenantId, id, 'Not the institution representative')
+        expect(await ctx.prisma.client.institution.findUniqueOrThrow({ where: { id } })).toMatchObject({ blockedAt: null, blockReason: null, status: 'UNCLAIMED' })
+        const next = await representative()
+        expect((await service.claim(tenantId, next, { stir: '011111111' })).institution).toMatchObject({ id, status: 'DRAFT', blocked: null })
       })
     })
 

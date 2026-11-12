@@ -154,6 +154,51 @@ describe.skipIf(!DB_AVAILABLE)('Reference data for the Super Admin (ТЗ 9.2)', 
     })
   })
 
+  it('re-check 11.11 №105: the public search finds a record of the ministry list by its official name, whatever it is called now', async () => {
+    const s = await setup('ra-official')
+    await s.inT(async () => {
+      const db = ctx.prisma.client
+      const rec = await s.inst('Boşqa nom', 'IMPORT')
+      await db.institution.update({ where: { id: rec.id }, data: { officialName: 'Samarqand qurilish texnikumi' } })
+      expect((await registry.searchInstitutions({ q: 'samarqand qurilish' })).map((i) => i.id)).toEqual([rec.id])
+    })
+  })
+
+  it('re-check 11.11 №108: two opposite merges of directions at once — one wins, no loop, nothing merged into itself', async () => {
+    const s = await setup('ra-108')
+    await s.inT(async () => {
+      const db = ctx.prisma.client
+      for (let round = 0; round < 5; round++) {
+        const a = await s.dir(`Yönaliş A ${round}`)
+        const b = await s.dir(`Yönaliş B ${round}`)
+        const results = await Promise.allSettled([service.mergeDirection(sa, a.id, b.id), service.mergeDirection(sa, b.id, a.id)])
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+        expect((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason).toMatchObject({ code: 'invalid_merge' })
+        const rows = await db.direction.findMany({ where: { id: { in: [a.id, b.id] } }, select: { id: true, mergedIntoId: true } })
+        // Exactly one is the main direction; the other points at it — never at itself, never both merged.
+        expect(rows.filter((r) => r.mergedIntoId === null)).toHaveLength(1)
+        for (const r of rows) expect(r.mergedIntoId).not.toBe(r.id)
+      }
+    })
+  })
+
+  it('re-check 11.11 №113: merging a record that others were merged into before carries them along — no student is lost', async () => {
+    const s = await setup('ra-113')
+    await s.inT(async () => {
+      const db = ctx.prisma.client
+      const real = await s.inst('Zanjir texnikumi', 'IMPORT', true)
+      const middle = await s.inst('Zanjir texnikumi talaba', 'STUDENT')
+      const first = await s.inst('Zanjir texn', 'STUDENT')
+      await service.mergeInstitution(sa, first.id, middle.id)
+      const res = await service.mergeInstitution(sa, middle.id, real.id)
+      expect(res.moved).toMatchObject({ aliases: 1 })
+      expect((await db.institution.findUniqueOrThrow({ where: { id: first.id } })).mergedIntoId).toBe(real.id)
+      // A student who picks the oldest name now lands on the live record.
+      const me = { id: (await ctx.makeStudent(s.tenantId)).id, roles: ['STUDENT'] } as RequestActor
+      expect(await registry.addStudentInstitution(s.tenantId, me, { name: 'Zanjir texn', type: 'TECHNIKUM', regionId: s.tashkent.id })).toMatchObject({ created: false, institution: { id: real.id } })
+    })
+  })
+
   it('a student adds at most 3 institutions and 20 directions a day — the questionnaire path included (security review №44)', async () => {
     const s = await setup('ra-limit')
     await s.inT(async () => {
@@ -188,7 +233,7 @@ describe.skipIf(!DB_AVAILABLE)('Reference data for the Super Admin (ТЗ 9.2)', 
       await expect(service.mergeInstitution(sa, claimed.id, real.id)).rejects.toMatchObject({ code: 'invalid_merge' })
 
       const res = await service.mergeInstitution(sa, typed.id, real.id)
-      expect(res.moved).toEqual({ students: 2, toConfirm: 1, branches: 0 })
+      expect(res.moved).toEqual({ students: 2, toConfirm: 1, branches: 0, aliases: 0 })
       expect(await db.studentProfile.findUniqueOrThrow({ where: { userId: studying.id }, select: { institutionId: true, institutionType: true, studyConfirmation: true } })).toEqual({ institutionId: real.id, institutionType: 'TECHNIKUM', studyConfirmation: 'PENDING' })
       expect((await db.studentProfile.findUniqueOrThrow({ where: { userId: applying.id } })).studyConfirmation).toBe('NONE')
       expect(await service.studentInstitutions({ q: '' })).toEqual([expect.objectContaining({ id: claimed.id })])

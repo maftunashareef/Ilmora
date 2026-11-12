@@ -169,8 +169,9 @@ describe.skipIf(!DB_AVAILABLE)('The 11.11 recheck residues: password reset, sand
       const again = await account('hijacker2')
       await expect(companies.create(t.tenantId, again as never, { stir: '409999993', name: 'Soxta' })).rejects.toMatchObject({ code: 'company_registered' })
       expect((await db.user.findUniqueOrThrow({ where: { id: owner.id } })).companyId).toBe(co.id)
-      // A draft its representative really left: abandoned 14 days after the claim, not before.
+      // A draft its representative really left: abandoned 14 days after the claim and the last edit (№110), not before.
       await db.company.update({ where: { id: co.id }, data: { claimedAt: new Date(Date.now() - 15 * 86_400_000) } })
+      await db.auditEvent.updateMany({ where: { entityType: 'Company', entityId: co.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000) } })
       await companies.create(t.tenantId, again as never, { stir: '409999993', name: 'Yangi' })
       expect((await db.user.findUniqueOrThrow({ where: { id: again.id } })).companyId).toBe(co.id)
     })

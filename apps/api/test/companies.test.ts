@@ -168,8 +168,9 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       await service.update(s.tenantId, squatter, { about: 'Squatter text', industryIds: [s.furniture.id] })
       const real = await s.representative()
       await expect(service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })).rejects.toMatchObject({ code: 'company_registered' })
-      // Abandoned counts from the latest of creation, claim and review (№83): the squatter's own claim aged too.
+      // Abandoned counts from the latest of creation, claim, review (№83) and the last edit (№110): all aged.
       await db.company.update({ where: { id: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000), claimedAt: new Date(Date.now() - 15 * 86_400_000) } })
+      await db.auditEvent.updateMany({ where: { entityType: 'Company', entityId: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000) } })
       sent.length = 0
       const taken = await service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })
       expect(taken).toMatchObject({ id: first.id, name: 'Haqiqiy', status: 'DRAFT', about: null, industries: [] })
@@ -291,12 +292,27 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       await expect(guard.canActivate(ctxFor)).rejects.toMatchObject({ code: 'not_approved' })
       await review.setBlocked(s.tenantId, s.admin, item.id, false)
       await expect(guard.canActivate(ctxFor)).resolves.toBe(true)
-      // A new certificate goes back to the first-review path; the workspace stays open.
-      expect((await s.upload(rep, PNG, 'image/png')).profile).toMatchObject({ status: 'PENDING', workspaceOpen: true })
+      // A new certificate waits for review like the other key fields (re-check 11.11 №106): the approved one stays in
+      // force, the workspace stays open.
+      const liveKey = (await ctx.prisma.client.company.findUniqueOrThrow({ where: { id: item.id } })).certificateFileKey
+      expect((await s.upload(rep, PNG, 'image/png')).profile).toMatchObject({ status: 'APPROVED', workspaceOpen: true, pendingChanges: { certificate: true } })
+      expect((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id: item.id } })).certificateFileKey).toBe(liveKey)
+      expect(removed).not.toContain(liveKey)
+      const waitingKey = ((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id: item.id } })).pendingChanges as { certificateFileKey: string }).certificateFileKey
+      expect(JSON.stringify(await review.queue())).not.toContain(waitingKey) // the storage key is never shown
+      expect((await review.certificate(item.id)).url).toContain(waitingKey) // the reviewer opens the new one
 
-      // Review 11.11: a rejection of the re-review with a waiting change does not approve the waiting certificate.
+      // Rejected with a waiting change: both go, the new file with them; the approved certificate stays.
       await service.update(s.tenantId, rep, { name: 'Mebel Plus Pro' })
-      expect(await review.reject(s.tenantId, s.admin, item.id, 'The certificate is not readable')).toMatchObject({ status: 'REJECTED', name: 'Mebel Plus Group', pendingChanges: null })
+      expect(await review.reject(s.tenantId, s.admin, item.id, 'The certificate is not readable')).toMatchObject({ status: 'APPROVED', name: 'Mebel Plus Group', pendingChanges: null, workspaceOpen: true })
+      expect((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id: item.id } })).certificateFileKey).toBe(liveKey)
+      expect(removed).toContain(waitingKey)
+      // Approved: the new certificate replaces the old one, the old file is deleted.
+      await s.upload(rep, PNG, 'image/png')
+      const nextKey = ((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id: item.id } })).pendingChanges as { certificateFileKey: string }).certificateFileKey
+      await review.approve(s.tenantId, s.admin, item.id)
+      expect((await ctx.prisma.client.company.findUniqueOrThrow({ where: { id: item.id } })).certificateFileKey).toBe(nextKey)
+      expect(removed).toContain(liveKey)
 
       // A change saved after the reviewer opened it is not approved blindly: the decision carries what was seen.
       await s.upload(rep, PDF)

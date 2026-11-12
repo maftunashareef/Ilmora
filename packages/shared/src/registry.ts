@@ -341,6 +341,8 @@ export interface CompanyPendingChanges {
   name?: string
   stir?: string
   industryIds?: string[]
+  /** A new certificate waits for the Super Admin; the approved one stays in force until then (re-check 11.11 №106). */
+  certificate?: boolean
 }
 
 export interface InstitutionClaimResult {
