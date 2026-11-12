@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { PAYME, PaymeError, PaymeService } from '../src/modules/payments/payme/payme.service'
+import { ReconciliationService } from '../src/modules/payments/reconciliation.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 
 describe.skipIf(!DB_AVAILABLE)('payments: Payme settlement', () => {
@@ -67,6 +68,33 @@ describe.skipIf(!DB_AVAILABLE)('payments: Payme settlement', () => {
     })
     const repeat = (await run(() => payme.handle('CancelTransaction', { id: first, reason: 3 }, false))) as { state: number }
     expect(repeat.state).toBe(-1)
+  })
+
+  it('№77: a payment refunded through a request — fully or in part — is not cancelled again by Payme (no second refund)', async () => {
+    const t = await ctx.makeTenant('pay-double')
+    const run = <T>(fn: () => Promise<T>) => TenantContext.system(fn, { tenantId: t.tenantId })
+    const performed = async (refundedMinor: (amount: bigint) => bigint) => {
+      const student = await ctx.makeStudent(t.tenantId)
+      const { payment } = await ctx.checkout(t.tenantId, student.id, t.pkg.id, [t.group.id, t.group2.id])
+      const id = `dbl-${payment.id}`
+      await run(() => payme.handle('CreateTransaction', { id, time: Date.now(), amount: Number(payment.amountMinor), account: { payment_id: payment.id } }, false))
+      await run(() => payme.handle('PerformTransaction', { id }, false))
+      // The finance admin returned money by a bank transfer through a refund request (the request flow is in refunds-flow).
+      const back = refundedMinor(payment.amountMinor)
+      await run(() => ctx.prisma.client.payment.update({ where: { id: payment.id }, data: { refundedMinor: back, ...(back === payment.amountMinor ? { state: 'REFUNDED', refundedAt: new Date() } : {}) } }))
+      return { payment, id }
+    }
+    for (const [label, part] of [['whole', (a: bigint) => a], ['part', (a: bigint) => a / 4n]] as const) {
+      const { payment, id } = await performed(part)
+      await expect(run(() => payme.handle('CancelTransaction', { id, reason: 5 }, false)), label).rejects.toMatchObject({ code: PAYME.CANNOT_CANCEL })
+      await run(async () => {
+        // Payme still sees the transaction performed; nothing was reversed a second time.
+        expect((await ctx.prisma.client.paymentTransaction.findFirstOrThrow({ where: { providerTransactionId: id } })).state).toBe('PERFORMED')
+        expect(await ctx.prisma.client.ledgerJournal.count({ where: { kind: 'PAYMENT_REFUNDED', reversalOf: { referenceId: payment.id } } })).toBe(0)
+        const row = (await new ReconciliationService(ctx.prisma).list(t.tenantId, {})).items.find((i) => i.paymentId === payment.id)!
+        expect(row.refundedOutsideProvider).toBe(true)
+      })
+    }
   })
 
   it('authenticates Payme with the live key and refuses bad credentials', () => {

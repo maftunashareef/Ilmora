@@ -202,6 +202,10 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: the student, the finance admin,
       const row = (await new ReconciliationService(ctx.prisma).list(s.tenantId, {})).items.find((i) => i.paymentId === s.payment.id)!
       expect(row.discrepancy).toBeNull()
       expect(row.ledger.refunded).toBe(true)
+      // №77: returned in full by transfer — a later cancellation of the same payment in Payme's cabinet is refused, not
+      // answered «cancelled» (Payme would pay the card a second time).
+      expect(await ctx.prisma.tx((tx) => ctx.payments.refundPaid(tx, s.payment.id, 'payme-cancel:5'))).toBe(false)
+      expect(await db.payment.findUniqueOrThrow({ where: { id: s.payment.id } })).toMatchObject({ state: 'REFUNDED', refundedMinor: s.payment.amountMinor })
     })
   })
 

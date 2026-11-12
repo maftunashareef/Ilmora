@@ -74,6 +74,9 @@ export class ReconciliationService {
           cancelledAt: r.cancelledAt,
           ledger: { settled, refunded, journalIds: js.map((j) => j.id) },
           discrepancy: this.discrepancy(r, r.payment, settled, refunded) ?? (!r.sandbox && r.payment.refundedMinor !== refundedLedgerMinor ? 'refund_amount_mismatch' : null),
+          // Money returned by our own transfer while the provider still shows the payment as performed (№77): a cancellation
+          // in the provider's cabinet would pay the card again, so the API refuses it — the finance admin sees why here.
+          refundedOutsideProvider: r.state === 'PERFORMED' && r.payment.refundedMinor > 0n,
           sandbox: r.sandbox,
         }
       }),
