@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Sse, type MessageEvent } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, Req, Sse, type MessageEvent } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { IsIn, IsNumber, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator'
 import { map, type Observable } from 'rxjs'
-import { ClientInfo, type ClientInfoValue, CurrentActor, Public, Roles } from '../../common/decorators'
+import { type AuthenticatedRequest, ClientInfo, type ClientInfoValue, CurrentActor, Public, Roles } from '../../common/decorators'
+import { sessionBound } from '../../common/live-stream'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AttendanceEvents } from './attendance.events'
 import { AttendanceService } from './attendance.service'
@@ -136,8 +137,8 @@ export class AttendanceController {
   /** Server-sent events for one session (ownership checked before subscribing). Clients also poll as a fallback. */
   @Roles('TEACHER', 'CENTER_ADMIN', 'PLATFORM_ADMIN')
   @Sse('teacher/sessions/:id/stream')
-  async stream(@Param('id') id: string, @CurrentActor() actor: RequestActor): Promise<Observable<MessageEvent>> {
+  async stream(@Param('id') id: string, @CurrentActor() actor: RequestActor, @Req() req: AuthenticatedRequest): Promise<Observable<MessageEvent>> {
     await this.attendance.sessionForTeacher(id, actor)
-    return this.events.stream(id).pipe(map((event) => ({ data: event, type: event.type }) as MessageEvent))
+    return sessionBound(req, 'attendance', this.events.stream(id)).pipe(map((event) => ({ data: event, type: event.type }) as MessageEvent))
   }
 }

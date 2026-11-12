@@ -20,6 +20,8 @@ export interface AccessClaims {
   coid?: string | null
   /** The password was issued by the Super Admin and not changed yet: everything but the change answers 403. */
   pwc?: boolean
+  /** Fingerprint of the password the token was signed under (TokenService.passwordVersion): a changed password ends it. */
+  pwv?: string
   iat: number
   exp: number
 }
@@ -41,26 +43,36 @@ export const REFRESH_RACE_MS = 30_000
 export class TokenService {
   constructor(private readonly jwt: JwtService, @Inject(ENV) private readonly env: Env, private readonly prisma: PrismaService) {}
 
-  signAccess(user: { id: string; tenantId: string; roles: Role[]; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null; passwordChangeRequired?: boolean }): Promise<string> {
+  signAccess(user: { id: string; tenantId: string; roles: Role[]; passwordHash: string | null; centerId?: string | null; teacherProfileId?: string | null; institutionId?: string | null; companyId?: string | null; passwordChangeRequired?: boolean }): Promise<string> {
     return this.jwt.signAsync(
-      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined, pwc: user.passwordChangeRequired || undefined },
+      { tid: user.tenantId, roles: user.roles, cid: user.centerId ?? undefined, tpid: user.teacherProfileId ?? undefined, iid: user.institutionId ?? undefined, coid: user.companyId ?? undefined, pwc: user.passwordChangeRequired || undefined, pwv: this.passwordVersion(user.passwordHash) },
       { subject: user.id, expiresIn: this.env.JWT_ACCESS_TTL_SECONDS },
     )
   }
 
   /**
-   * The pass between a correct password and the authenticator code (5 minutes). Signed with a key derived from the
-   * access secret and a different audience, so it can never be used as an access token.
+   * A short fingerprint of the account's password (re-check 11.11 №89, №90). Access tokens and the authenticator step
+   * carry it; once the password is changed or reset, the ones signed before no longer match and are refused. Keyed with
+   * the access secret, so it says nothing about the password. Accounts without a password share one value.
    */
-  signMfaChallenge(user: { id: string; tenantId: string }, stage: MfaStage): Promise<string> {
-    return this.jwt.signAsync({ tid: user.tenantId, stage }, { subject: user.id, expiresIn: MFA_CHALLENGE_SECONDS, secret: this.mfaSecret(), audience: 'ilmora-mfa' })
+  passwordVersion(passwordHash: string | null): string {
+    return hmacSha256(this.env.JWT_ACCESS_SECRET, `pwv:${passwordHash ?? ''}`).slice(0, 16)
   }
 
-  async verifyMfaChallenge(token: string): Promise<{ userId: string; tenantId: string; stage: MfaStage }> {
+  /**
+   * The pass between a correct password and the authenticator code (5 minutes). Signed with a key derived from the
+   * access secret and a different audience, so it can never be used as an access token. It carries the password's
+   * fingerprint: a pass from before a reset no longer links an app (№89).
+   */
+  signMfaChallenge(user: { id: string; tenantId: string; passwordHash: string | null }, stage: MfaStage): Promise<string> {
+    return this.jwt.signAsync({ tid: user.tenantId, stage, pwv: this.passwordVersion(user.passwordHash) }, { subject: user.id, expiresIn: MFA_CHALLENGE_SECONDS, secret: this.mfaSecret(), audience: 'ilmora-mfa' })
+  }
+
+  async verifyMfaChallenge(token: string): Promise<{ userId: string; tenantId: string; stage: MfaStage; pwv: string }> {
     try {
-      const c = await this.jwt.verifyAsync<{ sub: string; tid: string; stage: MfaStage }>(token, { secret: this.mfaSecret(), audience: 'ilmora-mfa' })
-      if (!c.sub || !c.tid || (c.stage !== 'setup' && c.stage !== 'verify')) throw new Error('bad claims')
-      return { userId: c.sub, tenantId: c.tid, stage: c.stage }
+      const c = await this.jwt.verifyAsync<{ sub: string; tid: string; stage: MfaStage; pwv?: string }>(token, { secret: this.mfaSecret(), audience: 'ilmora-mfa' })
+      if (!c.sub || !c.tid || !c.pwv || (c.stage !== 'setup' && c.stage !== 'verify')) throw new Error('bad claims')
+      return { userId: c.sub, tenantId: c.tid, stage: c.stage, pwv: c.pwv }
     } catch {
       throw AppError.unauthorized('The sign-in step has expired; enter the login and password again', 'invalid_challenge')
     }

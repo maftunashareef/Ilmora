@@ -43,7 +43,7 @@ export class RefundPaidDto {
 export class RefundListQuery {
   @IsOptional() @IsIn(REFUND_STATUSES) status?: RefundRequestStatus
   @IsOptional() @IsIn(['true', 'false']) overdue?: 'true' | 'false'
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000) page?: number
   @IsOptional() @Type(() => Number) @IsInt() @Min(10) @Max(100) pageSize?: number
 }
 

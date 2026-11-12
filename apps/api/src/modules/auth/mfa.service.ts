@@ -22,7 +22,7 @@ export const MFA_LOCK_MAX_SECONDS = 24 * 3600
 /** How long a session opened with the authenticator code lives, however often it is renewed. */
 const MFA_SESSION_HOURS = 12
 
-type MfaUser = { id: string; tenantId: string; roles: Role[]; isOwner: boolean; totpEnabledAt: Date | null }
+type MfaUser = { id: string; tenantId: string; roles: Role[]; isOwner: boolean; totpEnabledAt: Date | null; passwordHash: string | null }
 
 /**
  * Second factor — a code from an authenticator app (TOTP, RFC 6238) — for the ministry and the Super Admins
@@ -172,9 +172,10 @@ export class MfaService {
     const c = await this.tokens.verifyMfaChallenge(challenge)
     const user = await this.prisma.client.user.findFirst({
       where: { id: c.userId, tenantId: c.tenantId, isActive: true },
-      select: { id: true, tenantId: true, login: true, roles: true, isOwner: true, totpSecretEnc: true, totpEnabledAt: true },
+      select: { id: true, tenantId: true, login: true, roles: true, isOwner: true, totpSecretEnc: true, totpEnabledAt: true, passwordHash: true },
     })
-    if (!user || c.stage !== stage || !this.enforced(user)) throw AppError.unauthorized('The sign-in step has expired; enter the login and password again', 'invalid_challenge')
+    // A pass issued before the password was changed or reset: whoever signed in with the old password stops here (№89).
+    if (!user || c.stage !== stage || !this.enforced(user) || this.tokens.passwordVersion(user.passwordHash) !== c.pwv) throw AppError.unauthorized('The sign-in step has expired; enter the login and password again', 'invalid_challenge')
     this.key()
     return user
   }

@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Post, Query, Sse, type MessageEvent } from '@nestjs/common'
+import { Body, Controller, Get, Post, Query, Req, Sse, type MessageEvent } from '@nestjs/common'
 import { map, type Observable } from 'rxjs'
 import { z } from 'zod'
-import { CurrentActor } from '../../common/decorators'
+import { type AuthenticatedRequest, CurrentActor } from '../../common/decorators'
+import { sessionBound } from '../../common/live-stream'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { NotificationsService } from './notifications.service'
@@ -24,9 +25,12 @@ export class NotificationsController {
     return this.notifications.markRead(actor.id, dto)
   }
 
-  /** Server-sent events: a ping per new notification (the client then reloads the list). */
+  /**
+   * Server-sent events: a ping per new notification (the client then reloads the list). Lives as long as the session
+   * that opened it, at most a few per account (sessionBound, №92).
+   */
   @Sse('stream')
-  stream(@CurrentActor() actor: RequestActor): Observable<MessageEvent> {
-    return this.notifications.stream(actor.id).pipe(map((event) => ({ data: event, type: event.type }) as MessageEvent))
+  stream(@CurrentActor() actor: RequestActor, @Req() req: AuthenticatedRequest): Observable<MessageEvent> {
+    return sessionBound(req, 'notifications', this.notifications.stream(actor.id)).pipe(map((event) => ({ data: event, type: event.type }) as MessageEvent))
   }
 }

@@ -86,7 +86,7 @@ describe.skipIf(!DB_AVAILABLE)('refresh token rotation and reuse detection', () 
   })
 
   it('signs and verifies access tokens with tenant and role claims', async () => {
-    const token = await ctx.tokens.signAccess({ id: 'u1', tenantId: 't1', roles: ['STUDENT'] })
+    const token = await ctx.tokens.signAccess({ id: 'u1', tenantId: 't1', roles: ['STUDENT'], passwordHash: null })
     const claims = await ctx.tokens.verifyAccess(token)
     expect(claims).toMatchObject({ sub: 'u1', tid: 't1', roles: ['STUDENT'] })
     await expect(ctx.tokens.verifyAccess(`${token}x`)).rejects.toMatchObject({ code: 'invalid_token' })

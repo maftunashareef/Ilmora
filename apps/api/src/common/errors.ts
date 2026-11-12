@@ -36,3 +36,14 @@ export class AppError extends HttpException {
     return new AppError('unavailable', message, HttpStatus.SERVICE_UNAVAILABLE)
   }
 }
+
+/**
+ * The unique constraint a P2002 hit, as text: its index name or fields. Prisma 7 with the PostgreSQL adapter puts it in
+ * `meta.driverAdapterError.cause.constraint` and no longer fills `meta.target` (re-check 11.11 №35); both are read.
+ * Empty when the error does not say.
+ */
+export function uniqueConstraintOf(err: unknown): string {
+  const meta = (err as { meta?: { target?: unknown; driverAdapterError?: { cause?: { constraint?: { index?: string; fields?: string[] } } } } }).meta
+  const constraint = meta?.driverAdapterError?.cause?.constraint
+  return [meta?.target, constraint?.index, constraint?.fields].flat().filter((x) => typeof x === 'string').join(' ')
+}

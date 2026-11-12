@@ -20,6 +20,8 @@ export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles)
 export interface AuthenticatedRequest extends Request {
   actor?: RequestActor
   tenantId?: string
+  /** The access token's session: when it expires and whether the account still matches it (live streams, №92). */
+  session?: { expiresAt: number; stillCurrent: () => Promise<boolean> }
 }
 
 /** pino-http assigns `req.id`; normalise it to a string for audit/log correlation. */
