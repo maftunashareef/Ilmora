@@ -3,6 +3,7 @@ import type { MinistryAccountCreatedDto, MinistryAccountDto } from '@ilmora/shar
 import argon2 from 'argon2'
 import { randomBytes } from 'node:crypto'
 import { AppError } from '../../common/errors'
+import { forgetAccountState } from '../../common/request-context.middleware'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
@@ -74,6 +75,7 @@ export class MinistryAccountsService {
     await this.ministryAccount(id)
     const row = await this.prisma.client.user.update({ where: { id }, data: { isActive: active }, select: SELECT })
     if (!active) await this.tokens.revokeAllForUser(tenantId, id, 'disabled-by-admin')
+    forgetAccountState(id)
     await this.audit.record({ action: active ? 'ministry.account.enable' : 'ministry.account.disable', entityType: 'User', entityId: id })
     return toDto(row)
   }
@@ -84,6 +86,7 @@ export class MinistryAccountsService {
     const password = temporaryPassword()
     const row = await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date() }, select: SELECT })
     await this.tokens.revokeAllForUser(tenantId, id, 'password-reset-by-admin')
+    forgetAccountState(id)
     await this.audit.record({ action: 'ministry.account.reset_password', entityType: 'User', entityId: id })
     return { account: toDto(row), temporaryPassword: password }
   }
@@ -102,6 +105,7 @@ export class MinistryAccountsService {
     const password = temporaryPassword()
     await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date() } })
     await this.tokens.revokeAllForUser(tenantId, id, 'password-reset-by-admin')
+    forgetAccountState(id)
     await this.audit.record({ action: 'account.reset_password', entityType: 'User', entityId: id })
     return { temporaryPassword: password }
   }

@@ -2,6 +2,7 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { formatUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { AppError } from '../../common/errors'
+import { forgetAccountState } from '../../common/request-context.middleware'
 import { ENV, type Env } from '../../config/env'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
@@ -38,6 +39,7 @@ export class AuthService {
     const now = new Date()
     let user = await this.prisma.client.user.findUnique({ where: { tenantId_phoneE164: { tenantId, phoneE164 } }, include: USER_INCLUDE })
     if (!user) {
+      await this.accounts.countNewAccount(meta)
       user = await this.prisma.client.user.create({
         data: { tenantId, phoneE164, phoneVerifiedAt: now, lastLoginAt: now, displayName: input.displayName?.trim() || formatUzPhone(phoneE164), preferredLang: input.lang ?? 'uz', roles: ['STUDENT'] },
         include: USER_INCLUDE,
@@ -85,6 +87,7 @@ export class AuthService {
       include: USER_INCLUDE,
     })
     await this.tokens.revokeAllForUser(tenantId, user.id, 'password-reset-by-sms')
+    forgetAccountState(user.id)
     await this.audit.record({ tenantId, action: 'auth.password.reset', entityType: 'User', entityId: user.id, after: { method: 'sms' } })
     return this.accounts.openSession(updated, meta)
   }
@@ -100,7 +103,7 @@ export class AuthService {
     }
     const roles = await this.accounts.effectiveRoles(user)
     const pub = await this.accounts.publicUser(user, roles)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, passwordHash: user.passwordHash, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: rotated.raw, expiresAt: rotated.expiresAt }, user: pub }
   }
 

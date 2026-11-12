@@ -3,6 +3,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@
 import type { Queue } from 'bullmq'
 import { z } from 'zod'
 import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
+import { AppError } from '../../common/errors'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import { QUEUES } from '../../infra/queue/queues'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -19,7 +20,6 @@ const body = <T>(schema: z.ZodType<T>) => new ZodValidationPipe(schema)
 const GenerateDto = z.object({ days: z.number().int().min(1).max(90).default(28) }).strict()
 /** `version`: the one the admin loaded — required, so a save never overwrites changes it has not seen (Н18). */
 const SiteDto = z.object({ data: z.unknown(), version: z.number().int().positive() }).strict()
-const QueueParam = z.enum([QUEUES.sms, QUEUES.notifications, QUEUES.sessions, QUEUES.outbox, QUEUES.maintenance])
 
 /** Teacher Studio and Super Admin write API. */
 @Controller()
@@ -108,8 +108,9 @@ export class ManageController {
 
   @Roles('PLATFORM_ADMIN') @Post('admin/jobs/:queue/:id/retry')
   async retry(@Param('queue') queue: string, @Param('id') id: string) {
-    const name = QueueParam.parse(queue)
-    const q = name === QUEUES.sms ? this.smsQueue : name === QUEUES.sessions ? this.sessionsQueue : this.outboxQueue
+    // Only the queues the list above shows; any other name is «no such queue», not a 500 (re-check 11.11 №97).
+    const q = [this.smsQueue, this.sessionsQueue, this.outboxQueue].find((x) => x.name === queue)
+    if (!q) throw AppError.notFound('Queue')
     const job = await q.getJob(id)
     if (!job) return { ok: false }
     await job.retry()

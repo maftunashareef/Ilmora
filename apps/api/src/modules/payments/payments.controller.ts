@@ -12,7 +12,7 @@ class ReconQuery {
   // A date that does not parse is a 400, not a 500 from the database (security review 10.11 №43).
   @IsOptional() @IsDateString({ strict: true }) from?: string
   @IsOptional() @IsDateString({ strict: true }) to?: string
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000) page?: number
   @IsOptional() @Type(() => Number) @IsInt() @Min(10) @Max(200) pageSize?: number
 }
 class ManualSettleDto {

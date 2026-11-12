@@ -2,7 +2,8 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { type Lang, type MfaChallengeDto, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { randomToken } from '../../common/crypto'
-import { AppError } from '../../common/errors'
+import { AppError, uniqueConstraintOf } from '../../common/errors'
+import { forgetAccountState } from '../../common/request-context.middleware'
 import { ENV, type Env } from '../../config/env'
 import type { Role } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
@@ -50,7 +51,7 @@ export type UserRow = {
   id: string
   tenantId: string
   login: string | null
-  passwordHash?: string | null
+  passwordHash: string | null
   phoneE164: string | null
   displayName: string
   district: string | null
@@ -153,6 +154,7 @@ export class AccountService {
       contactPhone = parsed.e164
     }
 
+    if (attempt === 1) await this.countNewAccount(meta)
     const passwordHash = await argon2.hash(input.password, PASSWORD_HASH)
     const displayName = input.displayName?.trim() || login
     const now = new Date()
@@ -191,7 +193,7 @@ export class AccountService {
         return created
       })
     } catch (err) {
-      const target = String((err as { meta?: { target?: unknown } }).meta?.target ?? '')
+      const target = uniqueConstraintOf(err)
       // Two centers (or teachers) of one name registered at once collide on the slug, not the login: try once more,
       // the free-slug lookup then sees the other one (security review №35).
       if ((err as { code?: string }).code === 'P2002' && target.includes('slug') && attempt < 3) return this.register(tenantId, input, meta, attempt + 1)
@@ -232,7 +234,7 @@ export class AccountService {
     }
     // The failure counter follows the account — its login and its phone share one lock — and is counted before the
     // password is checked: attempts sent at once cannot all slip under the limit (security review 10.11 №3).
-    const key = `login:fail:${tenantId}:${user ? `user:${user.id}` : phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
+    const key = user ? this.failureKey(tenantId, user.id) : `login:fail:${tenantId}:${phoneParsed.ok ? `phone:${phoneParsed.e164}` : login}`
     await this.countAttempt(key)
 
     // Verify against a dummy hash when the login is unknown so response time does not reveal which logins exist.
@@ -277,6 +279,7 @@ export class AccountService {
     if (!user) {
       const role = profile.role ?? 'STUDENT'
       const roles = SELF_SERVICE_ROLES[role]
+      await this.countNewAccount(meta)
       const login = await this.freeUserLogin(tenantId, loginCandidate)
       const now = new Date()
       let created: UserRow
@@ -378,7 +381,12 @@ export class AccountService {
     const row = await this.prisma.client.user.findFirst({ where: { id: user.id }, include: USER_INCLUDE })
     if (!row?.isActive) throw AppError.unauthorized('Authentication required')
     if (!row.passwordHash) throw AppError.invalid('no_password', 'This account signs in without a password')
+    // Guessing the current password here counts against the same lock as the sign-in (re-check 11.11 №91): past
+    // LOGIN_MAX_FAILURES wrong ones both answer 429 until the lock ends.
+    const failures = this.failureKey(row.tenantId, row.id)
+    await this.countAttempt(failures)
     if (!(await argon2.verify(row.passwordHash, input.currentPassword))) throw AppError.invalid('wrong_password', 'The current password is wrong')
+    await this.clearFailures(failures)
     if (input.newPassword === input.currentPassword) throw AppError.invalid('same_password', 'Choose a password different from the current one')
     if (row.login && input.newPassword.toLowerCase() === row.login) throw AppError.invalid('password_is_login', 'The password must not be the login')
     // An account that signs in with the authenticator code keeps the time of that sign-in: changing the password does
@@ -386,6 +394,7 @@ export class AccountService {
     const startedAt = this.mfa.enforced(row) ? await this.mfaSessionStart(row.id) : undefined
     const updated = await this.prisma.client.user.update({ where: { id: row.id }, data: { passwordHash: await argon2.hash(input.newPassword, PASSWORD_HASH), passwordIssuedAt: null }, include: USER_INCLUDE })
     await this.tokens.revokeAllForUser(row.tenantId, row.id, 'password-changed')
+    forgetAccountState(row.id)
     await this.audit.record({ tenantId: row.tenantId, action: 'auth.password.change', entityType: 'User', entityId: row.id })
     return this.openSession(updated, meta, startedAt)
   }
@@ -412,7 +421,7 @@ export class AccountService {
   async openSession(user: UserRow, meta: SessionMeta, startedAt?: Date): Promise<LoginResult> {
     const roles = await this.effectiveRoles(user)
     const pub = await this.publicUser(user, roles)
-    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
+    const accessToken = await this.tokens.signAccess({ id: user.id, tenantId: user.tenantId, roles, passwordHash: user.passwordHash, centerId: user.centerId, teacherProfileId: user.teacherProfile?.id ?? null, institutionId: user.institutionId, companyId: user.companyId, passwordChangeRequired: pub.passwordChangeRequired })
     const refresh = await this.tokens.issueRefresh(user.id, user.tenantId, meta, undefined, startedAt)
     return { accessToken, expiresInSeconds: this.env.JWT_ACCESS_TTL_SECONDS, refresh: { raw: refresh.raw, expiresAt: refresh.expiresAt }, user: pub }
   }
@@ -456,32 +465,52 @@ export class AccountService {
     return `user_${Date.now().toString(36)}`
   }
 
-  // ── failed-attempt lock per login (shared across replicas through Redis; per process when REDIS_MODE=off) ──
+  // ── counters shared across replicas through Redis; per process when REDIS_MODE=off ──
+  /** One more in a window of `seconds` that starts with the first: the count so far and the seconds the window has left. */
+  private async bump(key: string, seconds: number): Promise<{ count: number; ttl: number }> {
+    if (this.redis.off) {
+      const now = Date.now()
+      const rec = this.memoryFailures.get(key)
+      const cur = rec && rec.expires > now ? rec : { count: 0, expires: now + seconds * 1000 }
+      cur.count += 1
+      this.memoryFailures.set(key, cur)
+      return { count: cur.count, ttl: Math.ceil((cur.expires - now) / 1000) }
+    }
+    try {
+      const count = await this.redis.cache.incr(key)
+      if (count === 1) await this.redis.cache.expire(key, seconds)
+      return { count, ttl: count === 1 ? seconds : Math.max(1, await this.redis.cache.ttl(key)) }
+    } catch {
+      throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
+    }
+  }
+
   /**
    * One attempt, counted atomically before the password is checked; past LOGIN_MAX_FAILURES attempts in the window
    * the account is locked (429) whatever the password. A successful sign-in clears the count.
    */
   private async countAttempt(key: string) {
-    let count: number
-    let ttl = this.env.LOGIN_LOCK_SECONDS
-    if (this.redis.off) {
-      const now = Date.now()
-      const rec = this.memoryFailures.get(key)
-      const cur = rec && rec.expires > now ? rec : { count: 0, expires: now + this.env.LOGIN_LOCK_SECONDS * 1000 }
-      cur.count += 1
-      this.memoryFailures.set(key, cur)
-      count = cur.count
-      ttl = Math.ceil((cur.expires - now) / 1000)
-    } else {
-      try {
-        count = await this.redis.cache.incr(key)
-        if (count === 1) await this.redis.cache.expire(key, this.env.LOGIN_LOCK_SECONDS)
-        else ttl = Math.max(1, await this.redis.cache.ttl(key))
-      } catch {
-        throw AppError.unavailable('Sign-in is temporarily unavailable, please try again shortly')
-      }
-    }
+    const { count, ttl } = await this.bump(key, this.env.LOGIN_LOCK_SECONDS)
     if (count > this.env.LOGIN_MAX_FAILURES) throw AppError.tooMany('Too many failed sign-in attempts; try again later', ttl)
+  }
+
+  /**
+   * A new account from this address — by password, Google or SMS, one budget (cybersecurity check 9.4 Н-4; re-check
+   * 11.11: Google and SMS used to create accounts without it). Counted only when an account is about to be created, so
+   * signing in to an existing one never uses it up: a whole technikum signs in from one Wi-Fi. Limits —
+   * RATE_LIMIT_REGISTER_PER_IP_HOUR / _DAY.
+   */
+  async countNewAccount(meta: SessionMeta) {
+    if (!meta.ip) return
+    for (const [window, seconds, limit] of [['hour', 3_600, this.env.RATE_LIMIT_REGISTER_PER_IP_HOUR], ['day', 86_400, this.env.RATE_LIMIT_REGISTER_PER_IP_DAY]] as const) {
+      const { count, ttl } = await this.bump(`register:ip:${window}:${meta.ip}`, seconds)
+      if (count > limit) throw AppError.tooMany('Too many new accounts from this network; try again later', ttl)
+    }
+  }
+
+  /** The failure counter of one account: the sign-in and «Сменить пароль» share it. */
+  private failureKey(tenantId: string, userId: string): string {
+    return `login:fail:${tenantId}:user:${userId}`
   }
 
   private async clearFailures(key: string) {

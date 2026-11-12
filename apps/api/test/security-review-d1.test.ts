@@ -5,7 +5,7 @@ import type { NextFunction, Response } from 'express'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ROLES_KEY, type AuthenticatedRequest } from '../src/common/decorators'
 import { sha256 } from '../src/common/crypto'
-import { RequestContextMiddleware } from '../src/common/request-context.middleware'
+import { forgetAccountState, RequestContextMiddleware } from '../src/common/request-context.middleware'
 import { normalizeRecoveryCode, stepOf, totpAt } from '../src/common/totp'
 import { RedisService } from '../src/infra/redis/redis.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
@@ -117,12 +117,13 @@ describe.skipIf(!DB_AVAILABLE)('Small fixes of the security review 10.11: sign-i
       await mw.use(req, {} as Response, ((err?: unknown) => { error = err }) as NextFunction)
       return error
     }
-    const token = await ctx.tokens.signAccess({ id: student.id, tenantId: t.tenantId, roles: ['STUDENT'] })
+    const token = await ctx.tokens.signAccess({ id: student.id, tenantId: t.tenantId, roles: ['STUDENT'], passwordHash: null })
     expect(await run(middleware(), token)).toBeUndefined()
     // A token claiming more than the account has.
-    const forged = await ctx.tokens.signAccess({ id: student.id, tenantId: t.tenantId, roles: ['STUDENT', 'CENTER_ADMIN'] })
+    const forged = await ctx.tokens.signAccess({ id: student.id, tenantId: t.tenantId, roles: ['STUDENT', 'CENTER_ADMIN'], passwordHash: null })
     expect(await run(middleware(), forged)).toMatchObject({ code: 'invalid_token' })
     await TenantContext.system(() => db.user.update({ where: { id: student.id }, data: { isActive: false } }))
+    forgetAccountState(student.id) // ACTOR_CHECK_MS later
     expect(await run(middleware(), token)).toMatchObject({ code: 'invalid_token' })
   })
 
@@ -135,20 +136,22 @@ describe.skipIf(!DB_AVAILABLE)('Small fixes of the security review 10.11: sign-i
       await mw.use({ headers: { authorization: `Bearer ${token}` }, url: '/v1/me', originalUrl: '/v1/me' } as unknown as AuthenticatedRequest, {} as Response, ((err?: unknown) => { error = err }) as NextFunction)
       return error
     }
-    const sign = (extra: object = {}) => ctx.tokens.signAccess({ id: student.id, tenantId: t.tenantId, roles: ['STUDENT'], ...extra })
+    const sign = (extra: object = {}) => ctx.tokens.signAccess({ id: student.id, tenantId: t.tenantId, roles: ['STUDENT'], passwordHash: null, ...extra })
     expect(await run(await sign())).toBeUndefined()
     // Roles granted: the cached state says STUDENT, the new token says STUDENT + TEACHER — read again, not refused.
     await TenantContext.system(() => db.user.update({ where: { id: student.id }, data: { roles: ['STUDENT', 'TEACHER'] } }))
     expect(await run(await sign({ roles: ['STUDENT', 'TEACHER'] }))).toBeUndefined()
-    // Another center than the token says (the account is read again within ACTOR_CHECK_MS — a fresh process here).
+    // Another center than the token says (the account is read again within ACTOR_CHECK_MS — forgotten here).
     await TenantContext.system(() => db.user.update({ where: { id: student.id }, data: { centerId: t.center.id } }))
     let stale: unknown = 'none'
+    forgetAccountState(student.id)
     await new RequestContextMiddleware(ctx.tokens, {} as TenantsService, ctx.prisma).use({ headers: { authorization: `Bearer ${await sign({ roles: ['STUDENT', 'TEACHER'] })}` }, url: '/v1/me', originalUrl: '/v1/me' } as unknown as AuthenticatedRequest, {} as Response, ((e?: unknown) => { stale = e }) as NextFunction)
     expect(stale).toMatchObject({ code: 'invalid_token' })
     expect(await run(await sign({ roles: ['STUDENT', 'TEACHER'], centerId: t.center.id }))).toBeUndefined()
     // The Super Admin reset the password: a token without «change it first» no longer works.
     await TenantContext.system(() => db.user.update({ where: { id: student.id }, data: { passwordIssuedAt: new Date() } }))
     const fresh = new RequestContextMiddleware(ctx.tokens, {} as TenantsService, ctx.prisma)
+    forgetAccountState(student.id)
     let err: unknown = 'none'
     await fresh.use({ headers: { authorization: `Bearer ${await sign({ roles: ['STUDENT', 'TEACHER'], centerId: t.center.id })}` }, url: '/v1/me', originalUrl: '/v1/me' } as unknown as AuthenticatedRequest, {} as Response, ((e?: unknown) => { err = e }) as NextFunction)
     expect(err).toMatchObject({ code: 'invalid_token' })
