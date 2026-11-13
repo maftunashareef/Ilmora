@@ -139,8 +139,9 @@ const denyReason = (item: Publishable) => (item.status === 'DRAFT' ? 'draft' : i
 
 const lower = <T extends string>(v: T) => v.toLowerCase()
 
-export const toCenter = (c: { id: string; slug: string; name: string; district: unknown; description: unknown; tone: string; status?: string; address?: string | null; phoneE164?: string | null }) => ({
-  id: c.id, slug: c.slug, name: c.name, district: c.district, description: c.description, tone: c.tone, ...(c.status ? { status: c.status } : {}), ...(c.address !== undefined ? { address: c.address } : {}), ...(c.phoneE164 !== undefined ? { phone: c.phoneE164 } : {}),
+export const toCenter = (c: { id: string; slug: string; name: string; district: unknown; description: unknown; tone: string; kind: string; status?: string; address?: string | null; phoneE164?: string | null }) => ({
+  // `kind`: a learning center, a university, a college… — the «Центры» page groups and filters by it.
+  id: c.id, slug: c.slug, name: c.name, district: c.district, description: c.description, tone: c.tone, kind: c.kind, ...(c.status ? { status: c.status } : {}), ...(c.address !== undefined ? { address: c.address } : {}), ...(c.phoneE164 !== undefined ? { phone: c.phoneE164 } : {}),
 })
 export const toCategory = (c: { id: string; slug: string; name: unknown; glyph: string }) => ({ id: c.id, slug: c.slug, name: c.name, glyph: c.glyph })
 export const toTeacher = (t: { id: string; slug: string; name: string; title: unknown; bio: unknown; expertise: string[]; centerId: string | null; avatarSeed: number; bannerTone: string; avatarUrl: string | null; bannerUrl: string | null; tagline: unknown; channelActive: boolean; featuredType: string | null; featuredId: string | null }) => ({

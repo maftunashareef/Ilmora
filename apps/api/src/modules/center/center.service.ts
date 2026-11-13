@@ -56,9 +56,9 @@ export class CenterService {
     if (center.status !== 'ACTIVE' && !this.isPlatformAdmin(actor)) throw AppError.forbidden('The center is not approved yet', { code: 'center_not_approved' })
   }
 
-  private profile(c: { id: string; slug: string; name: string; pendingName?: string | null; district: unknown; description: unknown; tone: string; address: string | null; phoneE164: string | null; status: string; approvedAt: Date | null; blockedAt: Date | null; blockReason: string | null; lat: number | null; lng: number | null; geoRadiusM: number | null; checkInBeforeMin: number; absenceAfterMin: number; createdAt: Date }) {
+  private profile(c: { id: string; slug: string; name: string; kind: string; pendingName?: string | null; district: unknown; description: unknown; tone: string; address: string | null; phoneE164: string | null; status: string; approvedAt: Date | null; blockedAt: Date | null; blockReason: string | null; lat: number | null; lng: number | null; geoRadiusM: number | null; checkInBeforeMin: number; absenceAfterMin: number; createdAt: Date }) {
     return {
-      id: c.id, slug: c.slug, name: c.name, pendingName: c.pendingName ?? null, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
+      id: c.id, slug: c.slug, name: c.name, kind: c.kind, pendingName: c.pendingName ?? null, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
       status: c.status, approvedAt: c.approvedAt, blockedAt: c.blockedAt, blockReason: c.blockReason, createdAt: c.createdAt,
       checkIn: { lat: c.lat, lng: c.lng, geoRadiusM: c.geoRadiusM, checkInBeforeMin: c.checkInBeforeMin, absenceAfterMin: c.absenceAfterMin },
     }
@@ -110,7 +110,7 @@ export class CenterService {
     const center = await this.own(tenantId, actor)
     this.assertWritable(center)
     const data: Record<string, unknown> = {}
-    for (const k of ['tone', 'address', 'lat', 'lng', 'geoRadiusM', 'checkInBeforeMin', 'absenceAfterMin'] as const) if (input[k] !== undefined) data[k] = input[k]
+    for (const k of ['kind', 'tone', 'address', 'lat', 'lng', 'geoRadiusM', 'checkInBeforeMin', 'absenceAfterMin'] as const) if (input[k] !== undefined) data[k] = input[k]
     // After approval the public name is part of what the Super Admin vouched for: a new name waits for approval (the
     // current one stays on the site), so an approved center cannot rename itself into a well-known one.
     let renameRequested = false

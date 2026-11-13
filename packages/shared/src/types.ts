@@ -38,6 +38,8 @@ export interface UploadMeta {
 
 /** PENDING: registered by the center, waiting for approval (not public). ACTIVE: listed. BLOCKED: hidden, workspace locked. */
 export type CenterStatus = 'PENDING' | 'ACTIVE' | 'BLOCKED' | 'REJECTED'
+/** Same values as `RegistryInstitutionType` (registry.ts) and the database enum `InstitutionType`. */
+export type CenterKind = 'TRAINING_CENTER' | 'UNIVERSITY' | 'COLLEGE' | 'TECHNIKUM' | 'LYCEUM' | 'SCHOOL'
 
 export interface Center {
   id: string
@@ -47,6 +49,11 @@ export interface Center {
   district: L
   description: L
   tone: string // hex accent used in generated covers
+  /**
+   * What it is — a learning center, a university, a college, a technikum, a lyceum or a school (the registry's types,
+   * `REGISTRY_INSTITUTION_TYPES`). The «Центры» page groups by it; absent in sample data (read as a learning center).
+   */
+  kind?: CenterKind
   /** Absent in sample data (every sample center is listed). */
   status?: CenterStatus
   address?: string | null

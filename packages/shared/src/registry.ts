@@ -178,6 +178,8 @@ export function matchDistrict<T extends { name: L }>(name: string, candidates: r
 /** Institution types — the same values as the database enum `InstitutionType` (the API checks they match). */
 export type RegistryInstitutionType = 'TECHNIKUM' | 'COLLEGE' | 'LYCEUM' | 'SCHOOL' | 'UNIVERSITY' | 'TRAINING_CENTER'
 export type RegistryOwnership = 'STATE' | 'PRIVATE'
+/** Every type, in the order the site lists them. A center offering courses has one too (`Center.kind`, «Центры»). */
+export const REGISTRY_INSTITUTION_TYPES = ['TRAINING_CENTER', 'UNIVERSITY', 'COLLEGE', 'TECHNIKUM', 'LYCEUM', 'SCHOOL'] as const satisfies readonly RegistryInstitutionType[]
 
 /** Institution types a student may pick (ТЗ 3.3): «уже учусь» and «хочу поступить». */
 export const STUDENT_INSTITUTION_TYPES = {

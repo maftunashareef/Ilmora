@@ -635,7 +635,7 @@ export class ManageService {
 
   // ───────── admin: centers, categories, teachers, packages, users ─────────
   async upsertCenter(tenantId: string, input: z.infer<typeof import('./manage.schemas').CenterInput>, id?: string) {
-    const data = { name: input.name, district: input.district as Json, description: input.description as Json, tone: input.tone, address: input.address ?? null }
+    const data = { name: input.name, ...(input.kind ? { kind: input.kind } : {}), district: input.district as Json, description: input.description as Json, tone: input.tone, address: input.address ?? null }
     if (id) return this.prisma.client.center.update({ where: { id }, data })
     return this.prisma.client.center.create({ data: { tenantId, slug: await this.uniqueSlug('center', tenantId, slugify(input.name)), ...data } })
   }
@@ -663,7 +663,7 @@ export class ManageService {
     return rows.map((c) => {
       const owner = c.ownerUserId ? ownerOf.get(c.ownerUserId) : undefined
       return {
-        id: c.id, slug: c.slug, name: c.name, pendingName: c.pendingName, pendingNameAt: c.pendingNameAt, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
+        id: c.id, slug: c.slug, name: c.name, kind: c.kind, pendingName: c.pendingName, pendingNameAt: c.pendingNameAt, district: c.district, description: c.description, tone: c.tone, address: c.address, phone: c.phoneE164,
         status: c.status, approvedAt: c.approvedAt, blockedAt: c.blockedAt, blockReason: c.blockReason, createdAt: c.createdAt,
         counts: { courses: c._count.courses, teachers: c._count.teachers, admins: c._count.staff },
         owner: owner ? { id: owner.id, login: owner.login, displayName: owner.displayName, phoneMasked: owner.phoneE164 ? owner.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null } : null,
