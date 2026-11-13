@@ -1752,6 +1752,7 @@ model Company {
   consents              StudentConsent[]
   vacancies             Vacancy[]
   signedContractHelp    ContractHelpRequest[]
+  studentCardViews      CompanyStudentCardView[]
 
   @@unique([tenantId, stir])
   @@index([tenantId, status])
@@ -2150,6 +2151,22 @@ model VacancyApplication {
   @@unique([vacancyId, userId])
   @@index([tenantId, userId])
   @@index([tenantId, vacancyId, status])
+}
+
+/// One page of the «Студенты» section shown to a company: how many student cards it held and when. The daily limit of
+/// cards (STUDENT_CARDS_PER_DAY) sums `cards` by (companyId, createdAt) over the last 24 hours — by company, not by
+/// account, so a new representative does not reset it, and in the database, so a restart does not either. Who saw whom
+/// is in the audit log (`student.card.view`), written in the same transaction; this table only counts. No `tenantId`:
+/// rows are reached only through the company.
+model CompanyStudentCardView {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /** Cards on the page shown, at least one: CHECK "CompanyStudentCardView_cards_check". */
+  cards     Int
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
 }
 
 /// An institution sent a company's vacancy to its own students (ТЗ «Студенты у компании», 3.2): by hand, only to students

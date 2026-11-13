@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { type CompanyStudentCardDto, type CompanyStudentsPageDto, type L, type MatchStatus, STUDENTS_PAGE_SIZE, type StudentsBlockDto } from '@ilmora/shared'
+import { type CompanyStudentCardDto, type CompanyStudentsPageDto, type L, type MatchStatus, STUDENT_CARDS_PER_DAY, STUDENTS_PAGE_SIZE, type StudentsBlockDto } from '@ilmora/shared'
 import { companyCardId } from '../../common/card-id'
 import { AppError } from '../../common/errors'
 import { isoToDateColumn, todayLocal } from '../../common/time'
@@ -15,14 +15,20 @@ import type { CompanyStudentsQuery } from './graduates.schemas'
 const place = (r: { id: string; name: unknown } | null) => (r ? { id: r.id, name: r.name as L } : null)
 /** The place a «Студенты» card is shown, for its id (the announcements use their own id). */
 const SCOPE = 'students'
+const DAY_MS = 86_400_000
 
 /**
  * The company's «Студенты» section (ТЗ «Студенты у компании, Вакансии у учреждения», 2). A student is listed only if
- * all hold (2.1): studies («уже учусь»), the institution confirmed it, the consent «show my card to companies of my
- * industry» (INDUSTRY_CARD) is in force, 18 or older or with the parent's consent in force (checked on every read, as on
- * the graduate cards), an account neither disabled nor deleted, and the industry of the student's direction (its main
- * one for an alias) is one of the company's. A revoked consent hides the card at once. The cards carry no contacts;
- * «Запросить контакты» is a contact request by name (STUDENTS), shared with the announcements' «Пригласить».
+ * all hold (2.1): studies («уже учусь»), the institution confirmed it, the institution is approved, not blocked and
+ * not merged into another (the confirmations are kept: unblocked, its students show again by themselves), the consent
+ * «show my card to companies of my industry» (INDUSTRY_CARD) is in force, 18 or older or with the parent's consent in
+ * force (checked on every read, as on the graduate cards), an account neither disabled nor deleted, and the industry of
+ * the student's direction (its main one for an alias) is one of the company's. A revoked consent hides the card at
+ * once. The cards carry no contacts; «Запросить контакты» is a contact request by name (STUDENTS), shared with the
+ * announcements' «Пригласить».
+ *
+ * Every card shown is in the audit log (`student.card.view`), and a company is shown at most STUDENT_CARDS_PER_DAY
+ * cards in 24 hours, counted in the database (CompanyStudentCardView) — see `account`.
  */
 @Injectable()
 export class CompanyStudentsService {
@@ -48,7 +54,11 @@ export class CompanyStudentsService {
       .map(({ i, n }) => ({ institution: { id: i.id, name: i.name, type: i.type, region: place(i.region) }, students: n }))
   }
 
-  /** One institution's matching students, a page at a time (2.2); each page shown is in the audit log. */
+  /**
+   * One institution's matching students, a page at a time (2.2). Every card shown is counted in the company's daily
+   * limit and written to the audit log before the answer leaves: a page that does not fit in the limit, or whose
+   * audit rows could not be written, is not given at all. An empty page costs nothing and leaves no rows.
+   */
   async page(actor: RequestActor, institutionId: string, q: CompanyStudentsQuery, page: number): Promise<CompanyStudentsPageDto> {
     const company = await this.ownCompany(actor)
     const where = await this.listed(company.industries, q)
@@ -59,7 +69,7 @@ export class CompanyStudentsService {
       this.prisma.client.studentProfile.findMany({ where: mine, orderBy: [{ user: { displayName: 'asc' } }, { userId: 'asc' }], skip: (page - 1) * STUDENTS_PAGE_SIZE, take: STUDENTS_PAGE_SIZE, select: CARD_SELECT }),
     ])
     const items = await this.cards(company.id, rows)
-    if (items.length) await this.audit.record({ action: 'students.page.view', entityType: 'Institution', entityId: institutionId, after: { companyId: company.id, page, shown: items.length } })
+    await this.account(company.id, institutionId, page, rows.map((r) => r.userId))
     return { items, total, page, pageSize: STUDENTS_PAGE_SIZE }
   }
 
@@ -81,6 +91,31 @@ export class CompanyStudentsService {
 
   // ───────────── helpers ─────────────
 
+  /**
+   * Counts the cards of a page about to be shown and writes one audit row per card, in one transaction under a lock per
+   * company — pages asked for at once (from any of the company's accounts or servers) are counted one at a time and
+   * cannot all see «under the limit». The count is the sum of `cards` over the company's CompanyStudentCardView rows of
+   * the last 24 hours: by company, so a new representative does not reset it; a card shown again counts again. A page
+   * that does not fit whole is refused (429 `rate_limited`) with the time until the oldest counted page leaves the
+   * window. Nothing is written when it is refused or when an audit row fails.
+   */
+  private async account(companyId: string, institutionId: string, page: number, userIds: string[]): Promise<void> {
+    if (!userIds.length) return
+    await this.prisma.tx(async (tx) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `student-cards:${companyId}`)
+      // The clock is read after the lock is taken: a request that waited for it counts what the ones before it wrote.
+      const now = Date.now()
+      const shown = await tx.companyStudentCardView.aggregate({ where: { companyId, createdAt: { gt: new Date(now - DAY_MS) } }, _sum: { cards: true }, _min: { createdAt: true } })
+      if ((shown._sum.cards ?? 0) + userIds.length > STUDENT_CARDS_PER_DAY) {
+        const oldest = shown._min.createdAt?.getTime() ?? now
+        throw AppError.tooMany(`At most ${STUDENT_CARDS_PER_DAY} student cards a day`, Math.max(1, Math.ceil((oldest + DAY_MS - now) / 1000)))
+      }
+      await tx.companyStudentCardView.create({ data: { companyId, cards: userIds.length, createdAt: new Date(now) } })
+      // One row per card, in this transaction (AuditService.recordMany writes outside it): at most STUDENTS_PAGE_SIZE rows.
+      for (const userId of userIds) await this.audit.record({ tx, action: 'student.card.view', entityType: 'User', entityId: userId, after: { companyId, institutionId, page } })
+    })
+  }
+
   /** The conditions of 2.1 and the filters of 2.2; null when a filter names nothing (no such region or direction). */
   private async listed(industries: string[], q: CompanyStudentsQuery): Promise<Prisma.StudentProfileWhereInput | null> {
     if (!industries.length) return null
@@ -91,6 +126,8 @@ export class CompanyStudentsService {
     const adultBorn = isoToDateColumn(`${y}-${md}`)
     const and: Prisma.StudentProfileWhereInput[] = [
       { mode: 'STUDYING', studyConfirmation: 'CONFIRMED', institutionId: { not: null } },
+      // The institution itself is in the registry: approved, not blocked, not merged into another (as on the announcements).
+      { institution: { is: { approvedAt: { not: null }, blockedAt: null, mergedIntoId: null } } },
       { direction: { OR: [{ mergedIntoId: null, industryId: { in: industries } }, { mergedInto: { industryId: { in: industries } } }] } },
       { user: { isActive: true, deletedAt: null, studentConsents: { some: { kind: 'INDUSTRY_CARD', revokedAt: null, companyId: null } } } },
       // A minor's card needs the parent's consent in force (ТЗ 8; 2.1 п. 4); an unknown birth date is treated as an adult's, as on the other cards.

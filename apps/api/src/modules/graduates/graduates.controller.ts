@@ -9,6 +9,7 @@ import { AnnouncementInput, AnnouncementPatch, AnnouncementsQuery, CompanyStuden
 import { GraduatesService } from './graduates.service'
 
 const DAY = 86_400_000
+const MINUTE = 60_000
 
 /** The institution's graduation announcements and the companies' answers (ТЗ 5.1). Approved institutions only. */
 @Controller('institutions/me')
@@ -53,7 +54,9 @@ export class CompanyAnnouncementsController {
 /**
  * The company's «Студенты» section (ТЗ «Студенты у компании, Вакансии у учреждения», 2): institutions with matching
  * students, one institution's cards a page at a time, «Запросить контакты». Approved, unblocked companies only; nothing
- * can be downloaded, a page holds STUDENTS_PAGE_SIZE cards.
+ * can be downloaded, a page holds STUDENTS_PAGE_SIZE cards. Reading is limited twice: 60 requests a minute on each
+ * address here (against scripts), and STUDENT_CARDS_PER_DAY cards a day per company, counted in the database
+ * (CompanyStudentsService.page).
  */
 @Controller('companies/me/students')
 @Roles('COMPANY_ADMIN')
@@ -61,16 +64,22 @@ export class CompanyAnnouncementsController {
 export class CompanyStudentsController {
   constructor(private readonly students: CompanyStudentsService) {}
 
-  @Get('institutions') blocks(@CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(CompanyStudentsQuery)) q: CompanyStudentsQuery) { return this.students.blocks(a, q) }
+  @Get('institutions')
+  @Throttle({ default: { limit: 60, ttl: MINUTE } })
+  blocks(@CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(CompanyStudentsQuery)) q: CompanyStudentsQuery) { return this.students.blocks(a, q) }
 
   @Get('institutions/:institutionId')
+  @Throttle({ default: { limit: 60, ttl: MINUTE } })
   page(@CurrentActor() a: RequestActor, @Param('institutionId') institutionId: string, @Query(new ZodValidationPipe(CompanyStudentsPageQuery)) q: CompanyStudentsPageQuery) {
     const { page, ...filters } = q
     return this.students.page(a, institutionId, filters, page)
   }
 
-  /** Counted with «Пригласить» and «Заинтересованы» in the company's daily limit (in the database). */
+  /**
+   * The real limit — 50 a day per company, together with «Пригласить» and «Заинтересованы» — is counted in the database
+   * (ContactsService.request). The throttle here only stops a burst of clicks: 20 a minute.
+   */
   @Post('institutions/:institutionId/:cardId/request')
-  @Throttle({ default: { limit: 50, ttl: DAY } })
+  @Throttle({ default: { limit: 20, ttl: MINUTE } })
   request(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('institutionId') institutionId: string, @Param('cardId') cardId: string) { return this.students.request(t, a, institutionId, cardId) }
 }
