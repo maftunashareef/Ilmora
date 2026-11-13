@@ -316,7 +316,7 @@ describe.skipIf(!DB_AVAILABLE)('ТЗ «Студенты у компании, В�
     })
   })
 
-  it('the questionnaire stores the new consent «companies of my industry» in the journal', async () => {
+  it('the consent «companies of my industry» goes to the journal by its own action; the questionnaire reports it', async () => {
     const s = await setup('st-consent')
     await s.inT(async () => {
       const me = { id: (await ctx.makeStudent(s.tenantId)).id, roles: ['STUDENT'] } as RequestActor
@@ -325,10 +325,12 @@ describe.skipIf(!DB_AVAILABLE)('ТЗ «Студенты у компании, В�
         course: 2, direction: { id: s.dasturlash.id, name: 'Dasturlaş' }, studyForm: 'GRANT', graduationYear: Y + 2,
         fullName: 'Aziz Karimov', birthDate: `${Y - 20}-05-01`, region: 'tashkent-city', district: 'Çilonzor', phone: '+998 93 555 44 33', email: '', about: '', consents: { INDUSTRY_CARD: true },
       }
-      const saved = await studentsSvc.save(s.tenantId, me, q as never, '10.0.0.9')
-      expect(saved.questionnaire!.consents).toMatchObject({ INDUSTRY_CARD: true, GRADUATE_CARD: false })
+      // Saving the questionnaire gives no consent, whatever `consents` it carries (test/student-consents.test.ts).
+      expect((await studentsSvc.save(s.tenantId, me, q as never, '10.0.0.9')).questionnaire!.consents).toMatchObject({ INDUSTRY_CARD: false, GRADUATE_CARD: false })
+      await studentsSvc.giveConsent(s.tenantId, me, 'INDUSTRY_CARD', '10.0.0.9')
+      expect((await studentsSvc.questionnaire(me)).questionnaire!.consents).toMatchObject({ INDUSTRY_CARD: true, GRADUATE_CARD: false })
       expect(await ctx.prisma.client.studentConsent.findMany({ where: { userId: me.id }, select: { kind: true, ip: true, revokedAt: true } })).toEqual([{ kind: 'INDUSTRY_CARD', ip: '10.0.0.9', revokedAt: null }])
-      await studentsSvc.save(s.tenantId, me, { ...q, consents: { INDUSTRY_CARD: false } } as never)
+      await studentsSvc.revokeConsent(s.tenantId, me, 'INDUSTRY_CARD')
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'INDUSTRY_CARD', revokedAt: null } })).toBe(0)
     })
   })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { findInstitutionByInn, INSTITUTION_REGISTRY } from './institutions.js'
-import { ageOn, EMPTY_QUESTIONNAIRE, firstIncompleteStep, isMinor, validateQuestionnaireStep, type StudentQuestionnaire } from './questionnaire.js'
+import { ageOn, consentGiveBlock, EMPTY_QUESTIONNAIRE, firstIncompleteStep, isMinor, validateQuestionnaireStep, type StudentQuestionnaire } from './questionnaire.js'
 import { searchInstitutions } from './registry-search.js'
 
 const TODAY = new Date(Date.UTC(2026, 10, 9)) // 2026-11-09
@@ -66,6 +66,28 @@ describe('student questionnaire', () => {
     expect(isMinor(minor, TODAY)).toBe(true)
     expect(validateQuestionnaireStep(3, minor, TODAY)).toEqual({ guardianName: 'q.err.guardianName', guardianPhone: 'auth.err.phone', guardianConsent: 'q.err.guardianConsent' })
     expect(validateQuestionnaireStep(3, { ...minor, guardianName: 'Aliyeva Malika', guardianPhone: '901234568', guardianConsent: true }, TODAY)).toEqual({})
+    // The parent's consent already in the journal (in force or taken back): the details are still asked for, the mark is not.
+    expect(validateQuestionnaireStep(3, minor, TODAY, [], true)).toEqual({ guardianName: 'q.err.guardianName', guardianPhone: 'auth.err.phone' })
+    expect(firstIncompleteStep({ ...minor, guardianName: 'Aliyeva Malika', guardianPhone: '901234568' }, TODAY, [], true)).toBeNull()
+    expect(firstIncompleteStep({ ...minor, guardianName: 'Aliyeva Malika', guardianPhone: '901234568' }, TODAY)).toBe(3)
+  })
+
+  it('a consent is given with a questionnaire; a minor — with the parent’s details and consent; «my industry» — by those who study', () => {
+    const adult = { status: 'STUDYING' as const, birthDate: '2007-03-15', hasGuardian: false, parentConsent: false }
+    const minor = { status: 'STUDYING' as const, birthDate: '2010-05-01', hasGuardian: true, parentConsent: true }
+    for (const kind of ['GRADUATE_CARD', 'CONTRACT_HELP_CARD', 'INDUSTRY_CARD'] as const) {
+      expect(consentGiveBlock(kind, null, TODAY)).toBe('questionnaire_required')
+      expect(consentGiveBlock(kind, { ...adult, birthDate: '' }, TODAY)).toBe('questionnaire_required')
+      expect(consentGiveBlock(kind, adult, TODAY)).toBeNull()
+      expect(consentGiveBlock(kind, minor, TODAY)).toBeNull()
+      expect(consentGiveBlock(kind, { ...minor, parentConsent: false }, TODAY)).toBe('parent_consent_required')
+      expect(consentGiveBlock(kind, { ...minor, hasGuardian: false }, TODAY)).toBe('guardian_details_required')
+    }
+    expect(consentGiveBlock('INDUSTRY_CARD', { ...adult, status: 'APPLYING' }, TODAY)).toBe('consent_studying_only')
+    expect(consentGiveBlock('GRADUATE_CARD', { ...adult, status: 'APPLYING' }, TODAY)).toBeNull()
+    expect(consentGiveBlock('PARENT_CONSENT', { ...minor, parentConsent: false }, TODAY)).toBeNull()
+    expect(consentGiveBlock('PARENT_CONSENT', { ...minor, hasGuardian: false }, TODAY)).toBe('guardian_details_required')
+    expect(consentGiveBlock('PARENT_CONSENT', adult, TODAY)).toBe('parent_consent_adult')
   })
 
   it('counts age in full years and rejects impossible or future dates', () => {

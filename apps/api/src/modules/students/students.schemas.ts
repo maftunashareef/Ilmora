@@ -1,4 +1,4 @@
-import { ABOUT_MAX, hasMarkup, STUDENT_CONSENT_KEYS } from '@ilmora/shared'
+import { ABOUT_MAX, hasMarkup, STUDENT_CONSENT_ACTION_KINDS, STUDENT_CONSENT_KEYS } from '@ilmora/shared'
 import { z } from 'zod'
 
 const noMarkup = (max: number) => z.string().max(max).refine((s) => !hasMarkup(s), { message: 'Must not contain < or >' })
@@ -30,9 +30,15 @@ export const QuestionnaireInput = z
     about: noMarkup(ABOUT_MAX),
     guardianName: noMarkup(120),
     guardianPhone: z.string().max(30),
+    // The mark of a minor's first questionnaire; ignored once the parent's consent is in the journal (StudentsService.syncParentConsent).
     guardianConsent: z.boolean(),
+    // Accepted, because the questionnaire is sent back whole, and not read: consents change only by their own actions below.
     consents: z.partialRecord(z.enum(STUDENT_CONSENT_KEYS), z.boolean()),
   })
   .strict()
 
 export type QuestionnaireInput = z.infer<typeof QuestionnaireInput>
+
+/** `:kind` of `POST students/me/consents/:kind/give | revoke`: the consents a student gives and takes back themselves. */
+export const ConsentKindParam = z.enum(STUDENT_CONSENT_ACTION_KINDS)
+export type ConsentKindParam = z.infer<typeof ConsentKindParam>

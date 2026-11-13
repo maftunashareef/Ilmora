@@ -669,12 +669,19 @@ export interface PageDto<T> {
 // ───────────── Student questionnaire: consents and the institution's view (ТЗ 4.1, 8) ─────────────
 
 /**
- * Keys of `StudentQuestionnaire.consents` the API stores (ТЗ 8): show my card in my institution's graduation
- * announcements; send my anonymous card to companies (help with the contract). Contacts for one company are a
- * per-request decision, not a questionnaire mark.
+ * Keys of `StudentQuestionnaire.consents` (ТЗ 8): show my card in my institution's graduation announcements; send my
+ * anonymous card to companies (help with the contract); show my card to companies of my industry («Студенты»). Contacts
+ * for one company are a per-request decision. The questionnaire only reports which of them are in force: they are given
+ * and taken back by separate actions (`STUDENT_CONSENT_ACTION_KINDS`); saving the questionnaire does not change them.
  */
 export const STUDENT_CONSENT_KEYS = ['GRADUATE_CARD', 'CONTRACT_HELP_CARD', 'INDUSTRY_CARD'] as const
 export type StudentConsentKey = (typeof STUDENT_CONSENT_KEYS)[number]
+/**
+ * Consents the student gives and takes back on «Мои согласия»: `POST /v1/students/me/consents/:kind/give | revoke`.
+ * The parent's consent of a minor is one of them; contacts for one company are answered per request elsewhere.
+ */
+export const STUDENT_CONSENT_ACTION_KINDS = [...STUDENT_CONSENT_KEYS, 'PARENT_CONSENT'] as const
+export type StudentConsentActionKind = (typeof STUDENT_CONSENT_ACTION_KINDS)[number]
 /** Edition of the consent texts the marks refer to; a new edition (after the lawyer's review) gets a new version. */
 export const STUDENT_CONSENT_TEXT_VERSION = '2026-11-10'
 

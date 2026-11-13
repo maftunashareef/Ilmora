@@ -85,6 +85,12 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   offer_decided: 'apiError.offerDecided',
   offer_exists: 'apiError.offerExists',
   questionnaire_incomplete: 'apiError.questionnaireIncomplete',
+  // «Мои согласия»: why a consent cannot be given (the codes are `ConsentGiveBlock`, @ilmora/shared)
+  questionnaire_required: 'st.c.block.questionnaire_required',
+  parent_consent_required: 'st.c.block.parent_consent_required',
+  guardian_details_required: 'st.c.block.guardian_details_required',
+  consent_studying_only: 'st.c.block.consent_studying_only',
+  parent_consent_adult: 'st.c.block.parent_consent_adult',
   certificates_limit: 'apiError.certificatesLimit',
   certificate_exists: 'apiError.certificateExists',
   // graduation announcements and contact requests

@@ -1,5 +1,5 @@
 import type { InstitutionType } from './institutions.js'
-import { STUDENT_INSTITUTION_TYPES } from './registry.js'
+import { STUDENT_INSTITUTION_TYPES, type StudentConsentActionKind } from './registry.js'
 import { isUzRegion } from './organization.js'
 import { normalizeUzPhone } from './phone.js'
 import type { TKey } from './i18n.js'
@@ -56,8 +56,15 @@ export interface StudentQuestionnaire {
   about: string
   guardianName: string
   guardianPhone: string
+  /**
+   * From the API: the parent's consent is in force. To the API: the mark «согласие родителя получено» of a minor's first
+   * questionnaire; once that consent is on record it is given and taken back on «Мои согласия» and the mark is ignored.
+   */
   guardianConsent: boolean
-  /** Section 8 consents by key; every mark starts unticked. */
+  /**
+   * Section 8 consents in force, by key — read-only: they are given and taken back by separate actions
+   * (`POST /v1/students/me/consents/:kind/give | revoke`); what a saved questionnaire carries here is ignored.
+   */
   consents: Record<string, boolean>
 }
 
@@ -102,8 +109,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 /**
  * Errors of one step (1–4) as dictionary keys; an empty object means the step is complete.
  * `requiredConsents` are the section 8 marks that must be ticked (the list itself lives with the texts).
+ * `parentConsentOnRecord`: the minor's parent consent is already in the journal (in force or taken back) — the mark of
+ * step 3 is then not asked for: that consent is managed on «Мои согласия», and taking it back must not block the questionnaire.
  */
-export function validateQuestionnaireStep(step: number, q: StudentQuestionnaire, today: Date, requiredConsents: readonly string[] = []): QuestionnaireErrors {
+export function validateQuestionnaireStep(step: number, q: StudentQuestionnaire, today: Date, requiredConsents: readonly string[] = [], parentConsentOnRecord = false): QuestionnaireErrors {
   const e: QuestionnaireErrors = {}
   const year = today.getUTCFullYear()
   if (step === 1) {
@@ -139,7 +148,7 @@ export function validateQuestionnaireStep(step: number, q: StudentQuestionnaire,
     if (age !== null && age < 18) {
       if (q.guardianName.trim().length < 5 || !q.guardianName.trim().includes(' ')) e.guardianName = 'q.err.guardianName'
       if (!normalizeUzPhone(q.guardianPhone).ok) e.guardianPhone = 'auth.err.phone'
-      if (!q.guardianConsent) e.guardianConsent = 'q.err.guardianConsent'
+      if (!q.guardianConsent && !parentConsentOnRecord) e.guardianConsent = 'q.err.guardianConsent'
     }
   } else if (step === 4) {
     if (requiredConsents.some((k) => !q.consents[k])) e.consents = 'q.err.consents'
@@ -148,7 +157,37 @@ export function validateQuestionnaireStep(step: number, q: StudentQuestionnaire,
 }
 
 /** The first step (1–4) that still has errors, or null when the whole questionnaire is complete. */
-export function firstIncompleteStep(q: StudentQuestionnaire, today: Date, requiredConsents: readonly string[] = []): number | null {
-  for (let s = 1; s <= QUESTIONNAIRE_STEPS; s++) if (Object.keys(validateQuestionnaireStep(s, q, today, requiredConsents)).length) return s
+export function firstIncompleteStep(q: StudentQuestionnaire, today: Date, requiredConsents: readonly string[] = [], parentConsentOnRecord = false): number | null {
+  for (let s = 1; s <= QUESTIONNAIRE_STEPS; s++) if (Object.keys(validateQuestionnaireStep(s, q, today, requiredConsents, parentConsentOnRecord)).length) return s
+  return null
+}
+
+/** Why a consent cannot be given now — also the API's error code of `POST /v1/students/me/consents/:kind/give`. */
+export type ConsentGiveBlock = 'questionnaire_required' | 'consent_studying_only' | 'parent_consent_required' | 'guardian_details_required' | 'parent_consent_adult'
+
+/** What the rule looks at: the saved questionnaire and the parent's consent in force. */
+export interface ConsentGiveState {
+  status: StudyStatus | null
+  /** YYYY-MM-DD */
+  birthDate: string
+  /** The parent's or guardian's name and phone are in the questionnaire. */
+  hasGuardian: boolean
+  parentConsent: boolean
+}
+
+/**
+ * Whether the student may give a consent (ТЗ 8), by the same rule on the screen and in the API; null — yes.
+ * A consent needs a saved questionnaire with a birth date (`s` is null without one). A minor gives the card consents only
+ * with the parent's details in the questionnaire and the parent's consent in force; the parent's consent itself is a
+ * minor's only. «Компании моей отрасли» is for those who study, not for applicants. Taking a consent back has no conditions.
+ */
+export function consentGiveBlock(kind: StudentConsentActionKind, s: ConsentGiveState | null, today: Date): ConsentGiveBlock | null {
+  const age = s ? ageOn(s.birthDate, today) : null
+  if (!s || age === null) return 'questionnaire_required'
+  const minor = age < 18
+  if (kind === 'PARENT_CONSENT') return !minor ? 'parent_consent_adult' : !s.hasGuardian ? 'guardian_details_required' : null
+  if (kind === 'INDUSTRY_CARD' && s.status !== 'STUDYING') return 'consent_studying_only'
+  if (minor && !s.hasGuardian) return 'guardian_details_required'
+  if (minor && !s.parentConsent) return 'parent_consent_required'
   return null
 }

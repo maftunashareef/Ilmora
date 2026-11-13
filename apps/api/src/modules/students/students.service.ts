@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import {
-  type InstitutionStudentDto, isMinor, type StudentConsentDto, normalizeUzPhone, QUESTIONNAIRE_STEPS, registrySearchKey, STUDENT_CONSENT_KEYS, STUDENT_CONSENT_TEXT_VERSION,
-  type StudentConsentKey, type StudentQuestionnaire, validateQuestionnaireStep,
+  type ConsentGiveBlock, consentGiveBlock, type InstitutionStudentDto, isMinor, type StudentConsentActionKind, type StudentConsentDto, normalizeUzPhone, QUESTIONNAIRE_STEPS, registrySearchKey,
+  STUDENT_CONSENT_KEYS, STUDENT_CONSENT_TEXT_VERSION, type StudentQuestionnaire, validateQuestionnaireStep,
 } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import type { ConsentKind, InstitutionType, Prisma } from '../../generated/prisma/client'
@@ -19,8 +19,21 @@ export interface QuestionnaireState {
   questionnaire: StudentQuestionnaire | null
   complete: boolean
   studyConfirmed: 'CONFIRMED' | 'PENDING' | 'REJECTED' | null
+  /**
+   * The parent's consent is in the journal, in force or taken back: the questionnaire no longer asks for the mark of
+   * step 3 — the consent is given and taken back on «Мои согласия». `complete` still needs it in force for a minor.
+   */
+  parentConsentOnRecord: boolean
 }
 
+/** Why `POST students/me/consents/:kind/give` refuses (the code is the `ConsentGiveBlock` itself). */
+const GIVE_REFUSED: Record<ConsentGiveBlock, string> = {
+  questionnaire_required: 'Fill in the questionnaire first',
+  consent_studying_only: 'This consent is for students who already study',
+  parent_consent_required: 'A minor needs the parent’s consent in force',
+  guardian_details_required: 'The questionnaire needs the parent’s or guardian’s name and phone',
+  parent_consent_adult: 'The parent’s consent is for students under 18',
+}
 
 const PROFILE_SELECT = {
   mode: true, institutionType: true, institutionId: true, course: true, enrollYear: true, graduationYear: true, studyForm: true, contractAmountMinor: true,
@@ -31,7 +44,7 @@ const PROFILE_SELECT = {
   user: { select: { displayName: true, district: true, email: true, phoneE164: true, phoneVerifiedAt: true } },
 } as const satisfies Prisma.StudentProfileSelect
 
-/** One writer of a student's consent journal at a time (the questionnaire, the contract-help form). */
+/** One writer of a student's consent journal at a time (the consent actions, the questionnaire, the contract-help form, the deletion of the account). */
 export const lockConsents = (tx: TransactionClient, userId: string) => tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `consents:${userId}`)
 
 /**
@@ -39,6 +52,10 @@ export const lockConsents = (tx: TransactionClient, userId: string) => tx.$execu
  * the institution's confirmation that a student studies there. Saved whole, after the same step rules the wizard uses.
  * An institution or a direction the student typed goes to the shared registry (ТЗ 3.2, 3.5). Consents (ТЗ 8) are rows
  * of the StudentConsent journal: giving one adds a row, taking it back stamps `revokedAt`; nothing is overwritten.
+ * They are given and taken back by their own actions (`giveConsent`, `revokeConsent`), never by saving the questionnaire:
+ * a student whose questionnaire no longer passes the step rules must still be able to take a consent back, and a tab
+ * opened before a revocation must not give the consent again. The one exception is the parent's consent of a minor's
+ * first questionnaire (`syncParentConsent`).
  */
 @Injectable()
 export class StudentsService {
@@ -51,7 +68,7 @@ export class StudentsService {
 
   async questionnaire(actor: RequestActor): Promise<QuestionnaireState> {
     const row = await this.prisma.client.studentProfile.findFirst({ where: { userId: actor.id }, select: PROFILE_SELECT })
-    if (!row) return { questionnaire: null, complete: false, studyConfirmed: null }
+    if (!row) return { questionnaire: null, complete: false, studyConfirmed: null, parentConsentOnRecord: false }
     const consents = await this.activeConsents(actor.id)
     const q: StudentQuestionnaire = {
       status: row.mode,
@@ -76,13 +93,15 @@ export class StudentsService {
       guardianConsent: consents.has('PARENT_CONSENT'),
       consents: Object.fromEntries(STUDENT_CONSENT_KEYS.map((k) => [k, consents.has(k)])),
     }
-    return { questionnaire: q, complete: this.missing(q).length === 0, studyConfirmed: row.studyConfirmation === 'NONE' ? null : row.studyConfirmation }
+    // `complete` is strict: a minor's questionnaire is complete only with the parent's consent in force (help with the contract and applications rely on it).
+    return { questionnaire: q, complete: this.missing(q).length === 0, studyConfirmed: row.studyConfirmation === 'NONE' ? null : row.studyConfirmation, parentConsentOnRecord: consents.has('PARENT_CONSENT') || (await this.parentConsentOnRecord(actor.id)) }
   }
 
   async save(tenantId: string, actor: RequestActor, input: QuestionnaireInput, ip?: string): Promise<QuestionnaireState> {
     if (!actor.roles.includes('STUDENT')) throw AppError.forbidden('Only a student fills in the questionnaire')
     const q = input as StudentQuestionnaire
-    const errors = this.missing(q)
+    // The mark «согласие родителя получено» is asked for only until that consent is in the journal: taken back later, it must not block the questionnaire.
+    const errors = this.missing(q, await this.parentConsentOnRecord(actor.id))
     if (errors.length) throw AppError.invalid('questionnaire_incomplete', 'Fill in the questionnaire', { step: errors[0].step, errors: Object.fromEntries(errors.map((e) => [e.field, e.key])) })
     const now = new Date()
     const studying = q.status === 'STUDYING'
@@ -124,7 +143,8 @@ export class StudentsService {
     await this.prisma.client.$transaction(async (tx) => {
       await tx.studentProfile.upsert({ where: { userId: actor.id }, create: { tenantId, userId: actor.id, ...data }, update: data })
       await tx.user.update({ where: { id: actor.id }, data: { displayName: fullName, district: q.district.trim(), email: q.email.trim() || null } })
-      await this.syncConsents(tx, tenantId, actor.id, { GRADUATE_CARD: !!q.consents.GRADUATE_CARD, CONTRACT_HELP_CARD: !!q.consents.CONTRACT_HELP_CARD, INDUSTRY_CARD: !!q.consents.INDUSTRY_CARD, PARENT_CONSENT: minor && q.guardianConsent }, ip, now)
+      // `q.consents` is not read: the card consents change only by their own actions (a tab opened before a revocation would give them back).
+      await this.syncParentConsent(tx, tenantId, actor.id, minor, q.guardianConsent, ip, now)
     })
     await this.audit.record({ action: before ? 'student.questionnaire.update' : 'student.questionnaire.create', entityType: 'StudentProfile', entityId: actor.id, after: { mode: data.mode, institutionId, directionId, studyConfirmation: confirmation.studyConfirmation ?? before?.studyConfirmation } })
     if (confirmation.studyConfirmation === 'PENDING' && institutionId) await this.askInstitution(tenantId, institutionId, q.fullName)
@@ -138,6 +158,42 @@ export class StudentsService {
       select: { id: true, kind: true, textVersion: true, givenAt: true, revokedAt: true, company: { select: { id: true, name: true } } },
     })
     return rows.map((r) => ({ id: r.id, kind: r.kind, company: r.company, textVersion: r.textVersion, givenAt: r.givenAt.toISOString(), revokedAt: r.revokedAt?.toISOString() ?? null, active: r.revokedAt === null }))
+  }
+
+  /**
+   * «Дать согласие» (ТЗ 8): a new journal row with the text version, the time and the IP — unless one of the kind is in
+   * force already. Needs a saved questionnaire; the rule for minors and for «компании моей отрасли» is `consentGiveBlock`,
+   * checked under the journal lock with the questionnaire and the parent's consent as they are now. Audited in the same transaction.
+   */
+  async giveConsent(tenantId: string, actor: RequestActor, kind: StudentConsentActionKind, ip?: string): Promise<StudentConsentDto[]> {
+    if (!actor.roles.includes('STUDENT')) throw AppError.forbidden('Only a student gives these consents')
+    const now = new Date()
+    await this.prisma.client.$transaction(async (tx) => {
+      await lockConsents(tx, actor.id)
+      const profile = await tx.studentProfile.findFirst({ where: { userId: actor.id, user: { deletedAt: null } }, select: { mode: true, birthDate: true, parentName: true, parentPhone: true } })
+      const active = new Set((await tx.studentConsent.findMany({ where: { userId: actor.id, revokedAt: null, companyId: null }, select: { kind: true } })).map((r) => r.kind))
+      const block = consentGiveBlock(kind, profile && { status: profile.mode, birthDate: profile.birthDate ? dateColumnToIso(profile.birthDate) : '', hasGuardian: !!profile.parentName && !!profile.parentPhone, parentConsent: active.has('PARENT_CONSENT') }, now)
+      if (block) throw AppError.invalid(block, GIVE_REFUSED[block], { kind })
+      if (active.has(kind)) return
+      const row = await tx.studentConsent.create({ data: { tenantId, userId: actor.id, kind, textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now }, select: { id: true } })
+      await this.audit.record({ tx, tenantId, action: 'student.consent.give', entityType: 'StudentConsent', entityId: row.id, after: { kind, userId: actor.id, textVersion: STUDENT_CONSENT_TEXT_VERSION } })
+    })
+    return this.consents(actor)
+  }
+
+  /**
+   * «Отозвать» (ТЗ 8): works at once and asks nothing of the questionnaire — a student whose questionnaire no longer
+   * passes the step rules (the graduation year has passed, a parent changed their mind) takes a consent back all the
+   * same. Every row of the kind in force gets `revokedAt`; nothing is deleted. Cards are hidden by the readers, which
+   * check the consent at every read; contact requests already sent and contacts already opened stay as they are.
+   */
+  async revokeConsent(tenantId: string, actor: RequestActor, kind: StudentConsentActionKind): Promise<StudentConsentDto[]> {
+    const now = new Date()
+    await this.prisma.client.$transaction(async (tx) => {
+      await lockConsents(tx, actor.id)
+      await this.closeConsents(tx, tenantId, actor.id, kind, now)
+    })
+    return this.consents(actor)
   }
 
   // ───────────── the institution confirms its students (ТЗ 4.1 «Подтверждение учёбы») ─────────────
@@ -188,11 +244,11 @@ export class StudentsService {
   }
 
   /** Step errors of the questionnaire (steps 1–3, the rules of the web wizard). */
-  private missing(q: StudentQuestionnaire) {
+  private missing(q: StudentQuestionnaire, parentConsentOnRecord = false) {
     const today = new Date()
     const out: { step: number; field: string; key: string }[] = []
     for (let s = 1; s < QUESTIONNAIRE_STEPS; s++) {
-      for (const [field, key] of Object.entries(validateQuestionnaireStep(s, q, today))) {
+      for (const [field, key] of Object.entries(validateQuestionnaireStep(s, q, today, [], parentConsentOnRecord))) {
         out.push({ step: s, field, key: key as string })
       }
     }
@@ -242,20 +298,33 @@ export class StudentsService {
     return new Set(rows.map((r) => r.kind))
   }
 
-  /** The journal (ТЗ 8): a new row for a consent given, `revokedAt` on the active row of one taken back. */
+  /** The parent's consent is in the journal at all — in force or taken back. */
+  private async parentConsentOnRecord(userId: string): Promise<boolean> {
+    return !!(await this.prisma.client.studentConsent.findFirst({ where: { userId, kind: 'PARENT_CONSENT', companyId: null }, select: { id: true } }))
+  }
+
   /**
-   * Serialized per student (cybersecurity check 9.4, 11.11): two saves at once both saw «no consent in force» and wrote
-   * two rows; taking the tick off then revoked one of them, and the card stayed visible to companies. A revocation closes
-   * every row of the kind in force, so older duplicates go too.
+   * What saving the questionnaire does to the parent's consent — and to no other consent:
+   * - a minor's questionnaire with no parent consent in the journal yet: the mark of step 3 (required then) gives it;
+   * - once it is in the journal, the mark is ignored: taken back on «Мои согласия», it comes back only from there — not
+   *   from a tab opened before the revocation, and not as a condition of saving;
+   * - the student is of age: the consent in force is closed.
+   * Serialized per student (cybersecurity check 9.4, 11.11): two saves at once both saw «no consent in force» and wrote two rows.
    */
-  private async syncConsents(tx: TransactionClient, tenantId: string, userId: string, want: Record<StudentConsentKey | 'PARENT_CONSENT', boolean>, ip: string | undefined, now: Date) {
+  private async syncParentConsent(tx: TransactionClient, tenantId: string, userId: string, minor: boolean, marked: boolean, ip: string | undefined, now: Date) {
     await lockConsents(tx, userId)
-    const active = await tx.studentConsent.findMany({ where: { userId, revokedAt: null, companyId: null }, select: { id: true, kind: true } })
-    for (const [kind, on] of Object.entries(want) as [ConsentKind, boolean][]) {
-      const inForce = active.some((a) => a.kind === kind)
-      if (on && !inForce) await tx.studentConsent.create({ data: { tenantId, userId, kind, textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now } })
-      if (!on && inForce) await tx.studentConsent.updateMany({ where: { userId, kind, companyId: null, revokedAt: null }, data: { revokedAt: now } })
-    }
+    if (!minor) return this.closeConsents(tx, tenantId, userId, 'PARENT_CONSENT', now, 'of_age')
+    if (!marked || (await tx.studentConsent.findFirst({ where: { userId, kind: 'PARENT_CONSENT', companyId: null }, select: { id: true } }))) return
+    const row = await tx.studentConsent.create({ data: { tenantId, userId, kind: 'PARENT_CONSENT', textVersion: STUDENT_CONSENT_TEXT_VERSION, ip: ip ?? null, givenAt: now }, select: { id: true } })
+    await this.audit.record({ tx, tenantId, action: 'student.consent.give', entityType: 'StudentConsent', entityId: row.id, after: { kind: 'PARENT_CONSENT', userId, textVersion: STUDENT_CONSENT_TEXT_VERSION }, reason: 'questionnaire' })
+  }
+
+  /** Stamps `revokedAt` on every row of the kind in force (older duplicates go too) and audits each; the caller holds the journal lock. */
+  private async closeConsents(tx: TransactionClient, tenantId: string, userId: string, kind: ConsentKind, now: Date, reason?: string) {
+    const rows = await tx.studentConsent.findMany({ where: { userId, kind, companyId: null, revokedAt: null }, select: { id: true } })
+    if (!rows.length) return
+    await tx.studentConsent.updateMany({ where: { id: { in: rows.map((r) => r.id) }, revokedAt: null }, data: { revokedAt: now } })
+    for (const r of rows) await this.audit.record({ tx, tenantId, action: 'student.consent.revoke', entityType: 'StudentConsent', entityId: r.id, after: { kind, userId }, reason })
   }
 
   private async askInstitution(tenantId: string, institutionId: string, studentName: string) {
