@@ -18,14 +18,16 @@ const DAY_MS = 86_400_000
 /**
  * Who a broadcast reaches (ТЗ «Студенты у компании, Вакансии у учреждения», 3.2): the institution's own students who
  * study there and whose study it confirmed, on the chosen directions (an alias counts as its main direction) and years,
- * with an account neither disabled nor deleted, who have not got this vacancy yet. No consent is needed: the
- * institution writes to its own students, nothing leaves (3.2, п. 3).
+ * with an account neither disabled nor deleted, who have not got this vacancy yet. No year chosen (an empty list) —
+ * every year: all such students of the directions, those with no year in the questionnaire (`course` null) too; with
+ * years chosen a student without one is left out. No consent is needed: the institution writes to its own students,
+ * nothing leaves (3.2, п. 3).
  */
 export const broadcastAudience = (institutionId: string, vacancyId: string, directionIds: string[], courses: number[]): Prisma.StudentProfileWhereInput => ({
   institutionId,
   mode: 'STUDYING',
   studyConfirmation: 'CONFIRMED',
-  course: { in: courses },
+  ...(courses.length ? { course: { in: courses } } : {}),
   OR: [{ directionId: { in: directionIds } }, { direction: { mergedIntoId: { in: directionIds } } }],
   user: { isActive: true, deletedAt: null, vacancyBroadcasts: { none: { vacancyId } } },
 })

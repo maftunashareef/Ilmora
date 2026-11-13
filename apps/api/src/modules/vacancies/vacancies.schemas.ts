@@ -85,10 +85,13 @@ export const InstitutionVacanciesQuery = z.object({
   experience: z.enum(['NONE', 'UP_TO_1', 'ONE_TO_3', 'OVER_3']).optional(),
 })
 
-/** «Разослать студентам» (3.2): the institution's own directions of the vacancy's industry, and years of study. */
+/**
+ * «Разослать студентам» (3.2): the institution's own directions of the vacancy's industry (required), and years of study
+ * (optional: none given or an empty list — every year, students with no year in the questionnaire too).
+ */
 export const BroadcastInput = z.object({
   directionIds: z.array(id).min(1).max(VACANCY_DIRECTIONS_MAX),
-  courses: z.array(z.number().int().min(1).max(BROADCAST_COURSE_MAX)).min(1).max(BROADCAST_COURSE_MAX).transform((c) => [...new Set(c)].sort((a, b) => a - b)),
+  courses: z.array(z.number().int().min(1).max(BROADCAST_COURSE_MAX)).max(BROADCAST_COURSE_MAX).default([]).transform((c) => [...new Set(c)].sort((a, b) => a - b)),
 }).strict()
 
 /** «Откликнуться»: a covering note; the button says «Компания увидит ваши ФИО, контакты и сертификаты». */

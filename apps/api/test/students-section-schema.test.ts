@@ -110,7 +110,7 @@ describe.skipIf(!DB_AVAILABLE)('students section and vacancy broadcasts: databas
       const broadcast = (courses: number[], recipientsCount = 1) =>
         db.vacancyBroadcast.create({ data: { tenantId: s.tenantId, vacancyId: s.vacancy.id, institutionId: s.institution.id, courses, createdById: s.student.id, recipientsCount, directions: { create: [{ directionId: s.direction.id }] } } })
 
-      for (const bad of [[], [0], [12], [2, 12]]) await expect(broadcast(bad)).rejects.toThrow(/VacancyBroadcast_courses_check/)
+      for (const bad of [[0], [12], [2, 12]]) await expect(broadcast(bad)).rejects.toThrow(/VacancyBroadcast_courses_check/)
       await expect(broadcast([1], -1)).rejects.toThrow(/VacancyBroadcast_recipientsCount_check/)
 
       const first = await broadcast([2, 3])

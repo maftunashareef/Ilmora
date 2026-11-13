@@ -2153,7 +2153,7 @@ model VacancyApplication {
 }
 
 /// An institution sent a company's vacancy to its own students (ТЗ «Студенты у компании», 3.2): by hand, only to students
-/// whose study it confirmed, on the chosen directions and courses. A row is the journal entry of one send; the queue
+/// whose study it confirmed, on the chosen directions and courses (no course chosen — all of them). A row is the journal entry of one send; the queue
 /// delivers it in batches and sets `finishedAt`. The daily limit counts rows by (institutionId, createdAt).
 model VacancyBroadcast {
   id              String      @id @default(cuid())
@@ -2163,7 +2163,7 @@ model VacancyBroadcast {
   vacancy         Vacancy     @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
   institutionId   String
   institution     Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
-  /** Years of study chosen (1–11, at least one): CHECK "VacancyBroadcast_courses_check". */
+  /** Years of study chosen (each 1–11); empty — every year, students with no year given too: CHECK "VacancyBroadcast_courses_check". */
   courses         Int[]
   /** The institution's representative who sent it. */
   createdById     String

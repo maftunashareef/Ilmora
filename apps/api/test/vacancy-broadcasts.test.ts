@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { registrySearchKey, VACANCY_BROADCASTS_PER_DAY } from '@ilmora/shared'
 import { seedRegistryReference } from '../prisma/registry-reference'
+import { ZodValidationPipe } from '../src/common/zod.pipe'
 import { PrivateDocsService } from '../src/infra/storage/private-docs.service'
 import { TenantContext, type RequestActor } from '../src/infra/tenancy/tenant-context'
 import { ContactsService } from '../src/modules/contacts/contacts.service'
@@ -8,11 +9,22 @@ import { NotificationsService } from '../src/modules/notifications/notifications
 import { RegistryService } from '../src/modules/registry/registry.service'
 import { StudentsService } from '../src/modules/students/students.service'
 import { deliverBroadcast, InstitutionVacanciesService } from '../src/modules/vacancies/institution-vacancies.service'
+import { BroadcastInput } from '../src/modules/vacancies/vacancies.schemas'
 import { VacanciesService } from '../src/modules/vacancies/vacancies.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 
 const Y = new Date().getUTCFullYear()
 const HOUR_MS = 3_600_000
+
+describe('«Разослать студентам»: input', () => {
+  it('years of study are optional — none given or an empty list means every year; directions stay required', () => {
+    const pipe = new ZodValidationPipe(BroadcastInput)
+    expect(pipe.transform({ directionIds: ['d'], courses: [] })).toEqual({ directionIds: ['d'], courses: [] })
+    expect(pipe.transform({ directionIds: ['d'] })).toEqual({ directionIds: ['d'], courses: [] })
+    expect(pipe.transform({ directionIds: ['d'], courses: [3, 1, 3] })).toEqual({ directionIds: ['d'], courses: [1, 3] })
+    for (const bad of [{ courses: [] }, { directionIds: [], courses: [] }, { directionIds: ['d'], courses: [0] }, { directionIds: ['d'], courses: [12] }, { directionIds: ['d'], courses: null }]) expect(() => pipe.transform(bad)).toThrow()
+  })
+})
 
 /**
  * «Разослать студентам» — reliability of the delivery and of the limits: a batch's recipients and notifications commit
@@ -64,12 +76,12 @@ describe.skipIf(!DB_AVAILABLE)('«Разослать студентам»: deliv
       }
       const college = await institution('Toşkent kolleji', [dasturlash.id, kiber.id, mebel.id])
       const itOnly = await institution('IT texnikumi', [dasturlash.id])
-      /** A confirmed second-year student of programming, unless said otherwise. */
-      const student = async (name: string, inst: { row: { id: string } } = college) => {
+      /** A confirmed second-year student of programming, unless said otherwise; `course` null — no year in the questionnaire. */
+      const student = async (name: string, inst: { row: { id: string } } = college, course: number | null = 2) => {
         const u = await db.user.create({ data: { tenantId, displayName: name, phoneE164: `+99890${String(++n).padStart(3, '0')}${String(Math.floor(Math.random() * 10_000)).padStart(4, '0')}`, phoneVerifiedAt: new Date(), roles: ['STUDENT'] } })
         await db.studentProfile.create({
           data: {
-            tenantId, userId: u.id, mode: 'STUDYING', institutionType: 'COLLEGE', institutionId: inst.row.id, course: 2, graduationYear: Y + 2,
+            tenantId, userId: u.id, mode: 'STUDYING', institutionType: 'COLLEGE', institutionId: inst.row.id, course, graduationYear: Y + 2,
             directionId: dasturlash.id, birthDate: new Date(`${Y - 20}-05-01T00:00:00Z`), regionId: tashkent.id, studyConfirmation: 'CONFIRMED',
           },
         })
@@ -217,6 +229,43 @@ describe.skipIf(!DB_AVAILABLE)('«Разослать студентам»: deliv
       expect((await db().vacancyBroadcastRecipient.findMany({ where: { broadcastId: b.id }, select: { userId: true } })).map((r) => r.userId)).toEqual([stays])
       // The journal: six when sent, one delivered.
       expect(await journal(s.college.actor, b.id)).toMatchObject({ recipientsCount: 6, deliveredCount: 1, finishedAt: expect.any(String) })
+    })
+  })
+
+  it('no years chosen: every confirmed student of the directions gets it, one with no year given too; with years chosen that one does not', async () => {
+    const s = await setup('vb-courses')
+    await s.inT(async () => {
+      const second = await s.student('Second year')
+      const third = await s.student('Third year', s.college, 3)
+      const noYear = await s.student('No year', s.college, null)
+      await s.student('Other institution', s.itOnly, null)
+
+      // Years chosen: the student without a year is not in the audience, nor is the third-year one.
+      const byYear = await s.vacancy(s.softCo, { title: 'Kurs böyiça' })
+      expect(await instVacancies.preview(s.college.actor, byYear.id, s.input)).toMatchObject({ recipients: 1, alreadySent: 0 })
+      const b1 = await instVacancies.send(s.tenantId, s.college.actor, byYear.id, s.input)
+      expect(b1).toMatchObject({ courses: [2], recipientsCount: 1 })
+      expect(await deliverBroadcast(ctx.prisma, notifications, b1.id)).toEqual({ sent: 1 })
+      expect((await told(byYear.id)).map((n) => n.userId)).toEqual([second])
+
+      // No years (an empty list, as the input schema gives when the field is left out): all three.
+      const everyYear = await s.vacancy(s.softCo, { title: 'Barça kurslar' })
+      const all = new ZodValidationPipe(BroadcastInput).transform({ directionIds: [s.dasturlash.id] }) as BroadcastInput
+      expect(all.courses).toEqual([])
+      expect(await instVacancies.preview(s.college.actor, everyYear.id, all)).toMatchObject({ recipients: 3, alreadySent: 0 })
+      const b2 = await instVacancies.send(s.tenantId, s.college.actor, everyYear.id, all)
+      expect(b2).toMatchObject({ courses: [], recipientsCount: 3 })
+      expect((await db().auditEvent.findFirstOrThrow({ where: { action: 'vacancy.broadcast', entityId: b2.id } })).after).toMatchObject({ courses: [], recipients: 3 })
+      expect(await deliverBroadcast(ctx.prisma, notifications, b2.id)).toEqual({ sent: 3 })
+      expect((await told(everyYear.id)).map((n) => n.userId).sort()).toEqual([second, third, noYear].sort())
+      expect(await journal(s.college.actor, b2.id)).toMatchObject({ courses: [], recipientsCount: 3, deliveredCount: 3, finishedAt: expect.any(String) })
+      expect(await instVacancies.preview(s.college.actor, everyYear.id, all)).toMatchObject({ recipients: 0, alreadySent: 3 })
+
+      // After a broadcast by year, one without years reaches the rest — nobody twice.
+      const b3 = await instVacancies.send(s.tenantId, s.college.actor, byYear.id, all)
+      expect(b3.recipientsCount).toBe(2)
+      expect(await deliverBroadcast(ctx.prisma, notifications, b3.id)).toEqual({ sent: 2 })
+      expect((await told(byYear.id)).map((n) => n.userId).sort()).toEqual([second, third, noYear].sort())
     })
   })
 

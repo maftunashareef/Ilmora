@@ -1011,6 +1011,7 @@ export interface VacancyBroadcastDto {
   /** The institution's representative who sent it; null if that account is gone. */
   sentBy: { name: string } | null
   directions: DirectionDto[]
+  /** Years of study it was limited to, ascending; empty — every year (students with no year given too). */
   courses: number[]
   /** Students it was addressed to when sent — the number the sender confirmed. */
   recipientsCount: number
