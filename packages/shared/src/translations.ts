@@ -1889,6 +1889,7 @@ export const dict = {
   'inst.v.journalEmpty': d('Hali yuborişlar yöq', 'Рассылок пока не было', 'No broadcasts yet'),
   'inst.v.sentByGone': d('akkaunt öçirilgan', 'аккаунт удалён', 'account removed'),
   'inst.v.recipients': d('Talabalar: {n}', 'Студентов: {n}', 'Students: {n}'),
+  'inst.v.delivered': d('Yetkazildi: {n}', 'Доставлено: {n}', 'Delivered: {n}'),
   'inst.v.finished': d('Yuborildi', 'Разослано', 'Sent'),
   'inst.v.sending': d('Yuborilmoqda', 'Рассылается', 'Sending'),
   'inst.closed': d('Bölim anketa tasdiqlangandan keyin oçiladi', 'Раздел откроется после одобрения анкеты', 'This section opens once the profile is approved'),

@@ -16,7 +16,8 @@ type Tab = VacancyKind | 'journal'
  * «Вакансии компаний» (ТЗ «Студенты у компании, Вакансии у учреждения», 3): open vacancies of approved companies in the
  * industries of the institution's directions — a tab per kind, filters; «Разослать студентам» sends a vacancy to the
  * institution's confirmed students on chosen directions and years (no consent needed: the institution writes to its own
- * students), with the number of recipients before sending; the journal of broadcasts.
+ * students), with the number of recipients before sending; the journal of broadcasts, with the number delivered when it
+ * differs from the number at sending.
  */
 export function InstitutionVacancies() {
   const { t } = useT()
@@ -224,6 +225,8 @@ function Journal() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge tone="sage">{t('inst.v.recipients', { n: b.recipientsCount })}</Badge>
+                {/* The number at sending and, once the queue is done, the number that actually got it — when they differ. */}
+                {b.finishedAt && b.deliveredCount !== b.recipientsCount && <Badge tone="champagne">{t('inst.v.delivered', { n: b.deliveredCount })}</Badge>}
                 <Badge tone={b.finishedAt ? 'forest' : 'champagne'}>{t(b.finishedAt ? 'inst.v.finished' : 'inst.v.sending')}</Badge>
               </div>
             </div>
