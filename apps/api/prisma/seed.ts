@@ -76,12 +76,18 @@ async function main() {
   console.log(`Seed complete (${SEED_DEMO ? 'demo' : 'production'} mode${SEED_CATALOG ? '' : ', no sample catalog'})`)
 }
 
+/** Sample centers of every kind, so the «Центры» page shows all its tabs (the same as migration 20261125000000). */
+const DEMO_CENTER_KIND: Record<string, 'LYCEUM' | 'COLLEGE' | 'SCHOOL' | 'UNIVERSITY' | 'TECHNIKUM'> = {
+  'ce-tafakkur': 'LYCEUM', 'ce-chilonzor': 'COLLEGE', 'ce-nova': 'SCHOOL', 'ce-mezon': 'UNIVERSITY', 'ce-ustoz': 'TECHNIKUM',
+}
+
 /** Sample centers, teachers, subjects, courses with groups, videos, playlists and resources (SEED_CATALOG=true). */
 async function seedCatalog() {
   const { centers, teachers, subjects, courses, videos, playlists, resources } = sampleData
 
   for (const c of centers) {
-    await prisma.center.upsert({ where: { id: c.id }, update: { name: c.name, district: json(c.district), description: json(c.description), tone: c.tone }, create: { id: c.id, tenantId: TENANT_ID, slug: slugOf(c.id), name: c.name, district: json(c.district), description: json(c.description), tone: c.tone } })
+    const kind = DEMO_CENTER_KIND[c.id] ?? 'TRAINING_CENTER'
+    await prisma.center.upsert({ where: { id: c.id }, update: { name: c.name, district: json(c.district), description: json(c.description), tone: c.tone, kind }, create: { id: c.id, tenantId: TENANT_ID, slug: slugOf(c.id), name: c.name, district: json(c.district), description: json(c.description), tone: c.tone, kind } })
   }
   for (const t of teachers) {
     const data = { name: t.name, title: json(t.title), bio: json(t.bio), expertise: t.expertise, centerId: t.centerId, avatarSeed: t.avatarSeed, avatarUrl: t.avatarUrl ?? null, bannerTone: t.bannerTone, tagline: json(t.tagline), channelActive: t.channelActive, featuredType: t.featured?.type ?? null, featuredId: t.featured?.id ?? null }
