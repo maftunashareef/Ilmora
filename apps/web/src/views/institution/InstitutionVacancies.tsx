@@ -15,8 +15,9 @@ type Tab = VacancyKind | 'journal'
 /**
  * «Вакансии компаний» (ТЗ «Студенты у компании, Вакансии у учреждения», 3): open vacancies of approved companies in the
  * industries of the institution's directions — a tab per kind, filters; «Разослать студентам» sends a vacancy to the
- * institution's confirmed students on chosen directions and years (no consent needed: the institution writes to its own
- * students), with the number of recipients before sending; the journal of broadcasts.
+ * institution's confirmed students on chosen directions and, optionally, years (no consent needed: the institution writes to its own
+ * students), with the number of recipients before sending; the journal of broadcasts, with the number delivered when it
+ * differs from the number at sending.
  */
 export function InstitutionVacancies() {
   const { t } = useT()
@@ -143,7 +144,8 @@ function BroadcastForm({ vacancy, onClose, onSent }: { vacancy: InstitutionVacan
   const [dirs, setDirs] = useState<string[]>([])
   const [years, setYears] = useState<number[]>([])
   const body = { directionIds: dirs, courses: years }
-  const ready = dirs.length > 0 && years.length > 0
+  // Directions are required; years are not — none chosen means every year.
+  const ready = dirs.length > 0
   const key = ready ? JSON.stringify(body) : ''
   const [preview, setPreview] = useState<{ key: string; data?: VacancyBroadcastPreviewDto; error?: unknown } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -174,12 +176,15 @@ function BroadcastForm({ vacancy, onClose, onSent }: { vacancy: InstitutionVacan
           </div>
           <div className="mt-3 text-xs font-medium text-charcoal/70">{t('inst.v.courses')}</div>
           <div className="mt-1.5 flex flex-wrap gap-2">
+            <button type="button" aria-pressed={years.length === 0} onClick={() => setYears([])}
+              className={`rounded-full border px-3 py-1.5 text-xs transition ${years.length === 0 ? 'border-forest bg-forest text-ivory' : 'border-charcoal/15 text-charcoal/70 hover:border-forest/50'}`}>{t('inst.v.allCourses')}</button>
             {courses.map((n) => {
               const on = years.includes(n)
               return <button key={n} type="button" aria-pressed={on} onClick={() => setYears(toggle(years, n))}
                 className={`min-w-[2.5rem] rounded-full border px-3 py-1.5 text-xs transition ${on ? 'border-forest bg-forest text-ivory' : 'border-charcoal/15 text-charcoal/70 hover:border-forest/50'}`}>{t('co.st.courseN', { n })}</button>
             })}
           </div>
+          {years.length === 0 && <p className="mt-1.5 text-xs text-charcoal/55">{t('inst.v.allCoursesHint')}</p>}
         </>
       )}
       {ready && !current && <p className="mt-3 text-sm text-charcoal/55" role="status">{t('common.loading')}</p>}
@@ -219,11 +224,13 @@ function Journal() {
               <div className="min-w-0">
                 <div className="font-medium text-charcoal">{b.vacancyTitle} <span className="text-charcoal/55">· {b.companyName}</span></div>
                 <div className="mt-1 text-xs text-charcoal/60">
-                  {formatDate(b.createdAt, lang)} · {b.sentBy?.name ?? t('inst.v.sentByGone')} · {b.directions.map((d) => d.name).join(', ')} · {b.courses.map((n) => t('co.st.courseN', { n })).join(', ')}
+                  {formatDate(b.createdAt, lang)} · {b.sentBy?.name ?? t('inst.v.sentByGone')} · {b.directions.map((d) => d.name).join(', ')} · {b.courses.length ? b.courses.map((n) => t('co.st.courseN', { n })).join(', ') : t('inst.v.allCourses')}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge tone="sage">{t('inst.v.recipients', { n: b.recipientsCount })}</Badge>
+                {/* The number at sending and, once the queue is done, the number that actually got it — when they differ. */}
+                {b.finishedAt && b.deliveredCount !== b.recipientsCount && <Badge tone="champagne">{t('inst.v.delivered', { n: b.deliveredCount })}</Badge>}
                 <Badge tone={b.finishedAt ? 'forest' : 'champagne'}>{t(b.finishedAt ? 'inst.v.finished' : 'inst.v.sending')}</Badge>
               </div>
             </div>

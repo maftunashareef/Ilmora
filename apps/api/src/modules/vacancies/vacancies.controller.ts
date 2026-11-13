@@ -9,6 +9,7 @@ import { ApplicationStatusInput, ApplyInput, BroadcastInput, InstitutionVacancie
 import { VacanciesService } from './vacancies.service'
 
 const DAY = 86_400_000
+const MINUTE = 60_000
 
 /** The company's practice and internship vacancies and the applications with full cards (ТЗ 5.4). */
 @Controller('companies/me')
@@ -57,7 +58,8 @@ export class StudentVacanciesController {
 
 /**
  * «Вакансии компаний» in the institution's workspace and «Разослать студентам» (ТЗ «Студенты у компании, Вакансии у
- * учреждения», 3). An approved, unblocked institution only; the broadcasts' own daily limit is counted in the database.
+ * учреждения», 3). An approved, unblocked institution only. The limit of broadcasts a day is counted in the database
+ * (`InstitutionVacanciesService.send`); the throttle on sending only holds back a burst of requests.
  */
 @Controller('institutions/me')
 @Roles('INSTITUTION_ADMIN')
@@ -75,6 +77,6 @@ export class InstitutionVacanciesController {
   preview(@CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(BroadcastInput)) dto: BroadcastInput) { return this.vacancies.preview(a, id, dto) }
 
   @Post('vacancies/:id/broadcast')
-  @Throttle({ default: { limit: 30, ttl: DAY } })
+  @Throttle({ default: { limit: 10, ttl: MINUTE } })
   send(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(new ZodValidationPipe(BroadcastInput)) dto: BroadcastInput) { return this.vacancies.send(t, a, id, dto) }
 }

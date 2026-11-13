@@ -43,10 +43,12 @@ describe('ТЗ «Студенты у компании, Вакансии у уч�
     expect(() => pipe.transform({ ...job, kind: 'PRACTICE', salaryFrom: 1_000 })).toThrow()
   })
 
-  it('a broadcast names at least one direction and year 1–11', () => {
+  it('a broadcast names at least one direction; years 1–11 are optional — none means all', () => {
     const pipe = new ZodValidationPipe(BroadcastInput)
     expect(pipe.transform({ directionIds: ['d'], courses: [3, 1, 3] })).toEqual({ directionIds: ['d'], courses: [1, 3] })
-    for (const bad of [{ directionIds: [], courses: [1] }, { directionIds: ['d'], courses: [] }, { directionIds: ['d'], courses: [12] }, { directionIds: ['d'], courses: [0] }]) expect(() => pipe.transform(bad)).toThrow()
+    expect(pipe.transform({ directionIds: ['d'], courses: [] })).toEqual({ directionIds: ['d'], courses: [] })
+    expect(pipe.transform({ directionIds: ['d'] })).toEqual({ directionIds: ['d'], courses: [] })
+    for (const bad of [{ directionIds: [], courses: [1] }, { courses: [1] }, { directionIds: ['d'], courses: [12] }, { directionIds: ['d'], courses: [0] }]) expect(() => pipe.transform(bad)).toThrow()
   })
 })
 

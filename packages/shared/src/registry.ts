@@ -1013,8 +1013,15 @@ export interface VacancyBroadcastDto {
   /** The institution's representative who sent it; null if that account is gone. */
   sentBy: { name: string } | null
   directions: DirectionDto[]
+  /** Years of study it was limited to, ascending; empty — every year (students with no year given too). */
   courses: number[]
+  /** Students it was addressed to when sent — the number the sender confirmed. */
   recipientsCount: number
+  /**
+   * Students it has actually reached so far; final once `finishedAt` is set. Lower than `recipientsCount` when students
+   * left the audience before delivery, or the vacancy or the institution stopped qualifying and the broadcast was closed.
+   */
+  deliveredCount: number
   createdAt: string
   /** Set by the queue after the last batch; null while it is being sent. */
   finishedAt: string | null

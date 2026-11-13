@@ -124,7 +124,7 @@ export function broadcastDirections(passport: InstitutionPassportDto, vacancy: P
   const industries = new Set(vacancy.directions.map((d) => d.industry.id))
   return passport.directions.filter((d) => industries.has(d.direction.industry.id))
 }
-/** Years of study a broadcast can choose: a school up to the 11th class, the others up to the 6th year. */
+/** Years of study a broadcast can choose (none chosen — every year): a school up to the 11th class, the others up to the 6th year. */
 export const broadcastCourses = (type: RegistryInstitutionType) => Array.from({ length: type === 'SCHOOL' ? 11 : 6 }, (_, i) => i + 1)
 
 export const institutionApi = {
