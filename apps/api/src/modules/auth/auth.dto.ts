@@ -1,4 +1,5 @@
 import { Equals, IsIn, IsOptional, IsString, Length, Matches, ValidateIf } from 'class-validator'
+import { REGISTRY_INSTITUTION_TYPES, type RegistryInstitutionType } from '@ilmora/shared'
 
 export class RequestOtpDto {
   @IsString()
@@ -62,6 +63,11 @@ export class RegisterDto {
   @IsString()
   @Length(2, 120)
   centerName?: string
+
+  /** Educational Center only: what it is — a learning center (the default), a university, a college… (`Center.kind`). */
+  @ValidateIf((o: RegisterDto) => o.role === 'CENTER' && o.centerKind !== undefined)
+  @IsIn(REGISTRY_INSTITUTION_TYPES)
+  centerKind?: RegistryInstitutionType
 
   /** Institution or company representative only: their position (ТЗ 4.2 step 1, 4.3). */
   @ValidateIf((o: RegisterDto) => o.role === 'INSTITUTION' || o.role === 'COMPANY')

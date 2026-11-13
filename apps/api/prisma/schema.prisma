@@ -455,6 +455,12 @@ model Center {
   address     String?
   phoneE164   String?
   status      CenterStatus @default(ACTIVE)
+  /**
+   * What the center is — a learning center, a university, a college, a technikum, a lyceum or a school — so a student
+   * can look for the courses of one kind of school (the «Центры» page). The registry's type; a center linked to a
+   * registry record has that record's type.
+   */
+  kind        InstitutionType @default(TRAINING_CENTER)
   /** Account that registered the center (its first administrator); null for centers created by the Super Admin. */
   ownerUserId String?
   approvedAt  DateTime?
@@ -487,6 +493,7 @@ model Center {
   @@unique([tenantId, slug])
   @@index([tenantId, deletedAt])
   @@index([tenantId, status])
+  @@index([tenantId, kind])
 }
 
 model Category {

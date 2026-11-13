@@ -1,4 +1,4 @@
-import { checkDiscount, isSafeExternalUrl, MAX_DISCOUNT_PERCENT } from '@ilmora/shared'
+import { checkDiscount, isSafeExternalUrl, MAX_DISCOUNT_PERCENT, REGISTRY_INSTITUTION_TYPES } from '@ilmora/shared'
 import { z } from 'zod'
 
 export const L = z.object({ uz: z.string().max(2000), ru: z.string().max(2000), en: z.string().max(2000) }).strict()
@@ -104,7 +104,9 @@ export const ResourceInput = z.object({
 export const ResourcePatch = ResourceInput.partial()
 
 export const SubjectInput = z.object({ teacherId: id.optional(), name: L, description: L }).strict()
-export const CenterInput = z.object({ name: z.string().min(1).max(120), district: L, description: L, tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), address: z.string().max(300).nullable().optional() }).strict()
+/** What a center is (`Center.kind`): a learning center, a university, a college, a technikum, a lyceum or a school. */
+export const CenterKind = z.enum(REGISTRY_INSTITUTION_TYPES)
+export const CenterInput = z.object({ name: z.string().min(1).max(120), kind: CenterKind.optional(), district: L, description: L, tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), address: z.string().max(300).nullable().optional() }).strict()
 /** Super Admin: approval state of a center. */
 export const CenterStatusInput = z.object({ status: z.enum(['PENDING', 'ACTIVE', 'BLOCKED', 'REJECTED']), reason: z.string().trim().max(300).optional() }).strict()
 export type CenterStatusInput = z.infer<typeof CenterStatusInput>
@@ -114,6 +116,8 @@ export const DeleteUserInput = z.object({ reason: z.string().trim().min(3).max(3
 /** Center workspace: the center's own profile and check-in settings (all optional; only sent fields change). */
 export const CenterProfileInput = z.object({
   name: z.string().trim().min(2).max(120).optional(),
+  /** What the center is; it says so itself, the Super Admin can correct it (audited). */
+  kind: CenterKind.optional(),
   district: L.optional(),
   description: L.optional(),
   tone: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
