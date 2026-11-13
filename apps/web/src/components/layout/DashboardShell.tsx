@@ -1,12 +1,14 @@
 import Image from 'next/image'
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, NavLink, Outlet, useLocation } from '@/lib/router'
+import { Link, NavLink, Outlet } from '@/lib/router'
+import { useLocation } from '@/lib/routerHooks'
 import { useT } from '../../i18n/useT'
 import { siteHref } from '../../lib/siteUrl'
 import { useStore } from '../../store/useStore'
 import type { Role } from '../../types'
 import { NotificationBell } from '../NotificationBell'
-import { cx, Icon } from '../ui'
+import { Icon } from '../ui'
+import { cx } from '../ui/helpers'
 import { LangSwitcher, RoleSwitcher } from './Switchers'
 
 export interface DashNavItem { id: string; to: string; label: string; icon: string; end?: boolean }

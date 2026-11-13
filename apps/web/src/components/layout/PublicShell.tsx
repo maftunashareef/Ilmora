@@ -1,11 +1,13 @@
 import { OPERATOR } from '@ilmora/shared'
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation } from '@/lib/router'
+import { Link, NavLink, Outlet } from '@/lib/router'
+import { useLocation } from '@/lib/routerHooks'
 import { useT } from '../../i18n/useT'
 import { useCanSaveCourses, useHydrated } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
-import { cx, Icon } from '../ui'
+import { Icon } from '../ui'
+import { cx } from '../ui/helpers'
 import { LangSwitcher, RoleSwitcher } from './Switchers'
 
 const WORKSPACE = { student: '/student', teacher: '/teacher', center: '/center', admin: '/admin', ministry: '/ministry', institution: '/institution', company: '/company' } as const

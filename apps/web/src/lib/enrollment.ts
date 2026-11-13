@@ -31,3 +31,12 @@ export const isGroupFull = (group: Group, students: Student[], excludeStudentId?
   enrolledCount(students, group.id, excludeStudentId) >= group.capacity
 
 export const validateCapacity = (capacity: number, enrolled: number): CapacityCheck => sharedValidateCapacity(capacity, enrolled)
+
+/** First group whose capacity is invalid or below its current enrollment, if any. */
+export const groupsCapacityError = (groups: Group[], students: Student[]) => {
+  for (const g of groups) {
+    const check = validateCapacity(g.capacity, enrolledCount(students, g.id))
+    if (!check.ok) return { group: g, check }
+  }
+  return null
+}

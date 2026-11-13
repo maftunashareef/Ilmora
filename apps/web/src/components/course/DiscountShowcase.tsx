@@ -5,7 +5,8 @@ import { useT } from '../../i18n/useT'
 import { formatDate, formatSom } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 import type { Course } from '../../types'
-import { cx, Icon, LinkButton } from '../ui'
+import { Icon, LinkButton } from '../ui'
+import { cx } from '../ui/helpers'
 import { getCoursePhotoUrl } from './courseImage'
 
 /** Fewer courses than this are shown as a still row: a loop of two or three cards looks repetitive. */

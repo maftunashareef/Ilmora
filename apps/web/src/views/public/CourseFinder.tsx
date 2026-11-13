@@ -24,10 +24,12 @@ import {
   type FinderWarning,
   type Lang,
 } from '@ilmora/shared'
-import { Link, useSearchParams } from '@/lib/router'
+import { Link } from '@/lib/router'
+import { useSearchParams } from '@/lib/routerHooks'
 import { FormatBadge, PriceNow, SaveButton, ScheduleChips } from '../../components/course/CourseCard'
 import { getCoursePhotoUrl } from '../../components/course/courseImage'
-import { Badge, Button, Card, cx, EmptyState, Eyebrow, Icon, LinkButton, Modal, Notice, PageTitle, Segmented } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Eyebrow, Icon, LinkButton, Modal, Notice, PageTitle, Segmented } from '../../components/ui'
+import { cx } from '../../components/ui/helpers'
 import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'

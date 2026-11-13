@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@/lib/router'
-import { GroupsEditor, groupsCapacityError } from '../../components/course/CourseForm'
+import { GroupsEditor } from '../../components/course/CourseForm'
+import { groupsCapacityError } from '../../lib/enrollment'
 import { ScheduleChips } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { Badge, Button, Card, Eyebrow, Icon, Modal, Notice, PageTitle } from '../../components/ui'

@@ -8,7 +8,8 @@ import { apiErrorText } from '../../lib/apiErrors'
 import { Link } from '../../lib/router'
 import { uid, useStore } from '../../store/useStore'
 import { CenterAdminsModal } from './CenterAdmins'
-import { centerStatusTone, PendingCentersPanel, useAdminCenters, type AdminCenterRow } from './PendingCenters'
+import { PendingCentersPanel } from './PendingCenters'
+import { centerStatusTone, useAdminCenters, type AdminCenterRow } from './adminCenters'
 import type { Category, Center } from '../../types'
 
 /** Super Admin: approval requests first, then every center with its status actions, editing and administrators; plus the categories. */

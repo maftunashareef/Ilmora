@@ -1,4 +1,5 @@
-import { Button, Card, cx, Field, Icon, Input, LField, Notice, PageTitle, Select, Toggle } from '../../components/ui'
+import { Button, Card, Field, Icon, Input, LField, Notice, PageTitle, Select, Toggle } from '../../components/ui'
+import { cx } from '../../components/ui/helpers'
 import { emptyL, useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
 import type { Package } from '../../types'

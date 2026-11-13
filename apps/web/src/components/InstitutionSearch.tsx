@@ -7,7 +7,8 @@ import {
 import { useT } from '@/i18n/useT'
 import { apiErrorText } from '../lib/apiErrors'
 import { registryApi, useSuggestions } from '../services/registry'
-import { Badge, Button, cx, Icon, Input, Select } from './ui'
+import { Badge, Button, Icon, Input, Select } from './ui'
+import { cx } from './ui/helpers'
 
 const SHOWN = 50
 

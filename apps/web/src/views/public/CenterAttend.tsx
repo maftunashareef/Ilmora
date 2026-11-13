@@ -5,7 +5,8 @@ import { Badge, Button, Card, Eyebrow, Icon, LinkButton, Notice } from '../../co
 import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
 import { formatTime } from '../../lib/format'
-import { Link, useNavigate, useParams } from '../../lib/router'
+import { Link } from '../../lib/router'
+import { useNavigate, useParams } from '../../lib/routerHooks'
 import { type CenterCheckInOutcome, useStore } from '../../store/useStore'
 
 interface CenterInfo { center: { id: string; name: string; address: string | null }; requiresLocation: boolean; window: { beforeMin: number; afterMin: number } }

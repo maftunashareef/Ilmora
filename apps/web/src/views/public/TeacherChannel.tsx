@@ -1,6 +1,7 @@
 import { foldForSearch } from '@ilmora/shared'
 import { useState } from 'react'
-import { Link, useParams, useSearchParams } from '@/lib/router'
+import { Link } from '@/lib/router'
+import { useParams, useSearchParams } from '@/lib/routerHooks'
 import { NotFound } from '../../components/AccessGate'
 import { VisibilityBadge } from '../../components/course/badges'
 import { CourseCard } from '../../components/course/CourseCard'

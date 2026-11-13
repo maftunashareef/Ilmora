@@ -1,7 +1,7 @@
 import { useT } from '../i18n/useT'
 import { expandLessons, toMin, todayIndex, type Conflict } from '../lib/schedule'
 import type { Course, Group } from '../types'
-import { cx } from './ui'
+import { cx } from './ui/helpers'
 
 const START = 8 * 60
 const END = 22 * 60

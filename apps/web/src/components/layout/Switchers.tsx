@@ -2,14 +2,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useT } from '../../i18n/useT'
-import { useLocation, useNavigate } from '../../lib/router'
-import { stripLocale, useLocale } from '../../lib/router'
+import { useLocation, useNavigate } from '../../lib/routerHooks'
+import { stripLocale, useLocale } from '../../lib/routerHooks'
 import { useStore } from '../../store/useStore'
 import type { Role } from '../../types'
 import { PasswordChangeDialog } from '../PasswordChange'
-import { Button, cx, Icon } from '../ui'
+import { Button, Icon } from '../ui'
+import { cx } from '../ui/helpers'
 
-export const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: string; short: 'UZ' | 'RU' | 'EN' }[] = [
+const LANGUAGE_OPTIONS: readonly { code: 'uz' | 'ru' | 'en'; label: string; short: 'UZ' | 'RU' | 'EN' }[] = [
   { code: 'uz', label: 'Özbekça', short: 'UZ' },
   { code: 'ru', label: 'Русский', short: 'RU' },
   { code: 'en', label: 'English', short: 'EN' },

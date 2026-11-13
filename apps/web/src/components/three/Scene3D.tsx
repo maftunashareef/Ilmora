@@ -1,7 +1,8 @@
 import { lazy, Suspense, type MutableRefObject } from 'react'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
-import { cx, Icon } from '../ui'
+import { Icon } from '../ui'
+import { cx } from '../ui/helpers'
 import { useInView, useReducedMotion, useWebGL } from './useMedia'
 
 const MiniStudio = lazy(() => import('./MiniStudio'))

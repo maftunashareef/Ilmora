@@ -5,7 +5,8 @@ import { countLabel, NOUNS } from '@ilmora/shared'
 import { api } from '../../lib/api'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'
-import { PendingCentersPanel, useAdminCenters } from './PendingCenters'
+import { PendingCentersPanel } from './PendingCenters'
+import { useAdminCenters } from './adminCenters'
 
 type AdminStats = { students: number; activeSubscriptions: number; teachers: number }
 

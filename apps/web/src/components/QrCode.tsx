@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
-import { cx } from './ui'
+import { cx } from './ui/helpers'
 
 /** Real QR code (qrcode library) rendered as an image; `value` is the full attendance URL. */
 export function QrCode({ value, size = 280, className, label }: { value: string; size?: number; className?: string; label?: string }) {

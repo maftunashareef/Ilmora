@@ -5,7 +5,8 @@ import { Badge, Card, EmptyState, Icon, Notice, PageTitle } from '../../componen
 import { useT } from '../../i18n/useT'
 import { isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
-import { Link, useParams } from '../../lib/router'
+import { Link } from '../../lib/router'
+import { useParams } from '../../lib/routerHooks'
 import { formatCount, ministry } from '../../services/ministry'
 import { StatusBadge } from './common'
 

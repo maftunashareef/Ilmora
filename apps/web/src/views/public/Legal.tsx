@@ -1,6 +1,7 @@
 'use client'
 import { LANGS, OFFER_STATUS, OFFER_TEXT, OFFER_VERSION, OPERATOR, pick, type LegalBlock } from '@ilmora/shared'
-import { Card, Eyebrow, langName, Notice, PageTitle } from '../../components/ui'
+import { Card, Eyebrow, Notice, PageTitle } from '../../components/ui'
+import { langName } from '../../components/ui/helpers'
 import { useT } from '../../i18n/useT'
 import { Link } from '../../lib/router'
 import type { Lang } from '../../types'

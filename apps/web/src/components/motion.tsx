@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useReducedMotion } from './three/useMedia'
-import { cx, Icon } from './ui'
+import { Icon } from './ui'
+import { cx } from './ui/helpers'
 
 /** Counts from 0 to `value` when scrolled into view. Reduced motion → static value. */
 export function CountUp({ value, duration = 1400, className }: { value: number; duration?: number; className?: string }) {

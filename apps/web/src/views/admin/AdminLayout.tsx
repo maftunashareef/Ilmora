@@ -1,6 +1,6 @@
 'use client'
 import { useEffect } from 'react'
-import { useLocation, useNavigate } from '@/lib/router'
+import { useLocation, useNavigate } from '@/lib/routerHooks'
 import { DashboardShell } from '../../components/layout/DashboardShell'
 import { Button, Icon, Notice } from '../../components/ui'
 import { useT } from '../../i18n/useT'

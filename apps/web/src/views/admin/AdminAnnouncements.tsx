@@ -1,4 +1,5 @@
-import { Button, Card, cx, Eyebrow, Field, Icon, LField, PageTitle, Select, Toggle } from '../../components/ui'
+import { Button, Card, Eyebrow, Field, Icon, LField, PageTitle, Select, Toggle } from '../../components/ui'
+import { cx } from '../../components/ui/helpers'
 import { emptyL, useT } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
 import type { Announcement, FaqItem } from '../../types'

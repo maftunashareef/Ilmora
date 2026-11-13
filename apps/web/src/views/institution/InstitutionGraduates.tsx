@@ -4,7 +4,7 @@ import { formatDate, type AnnouncementDto, type AnnouncementResponseDto, type An
 import { Badge, Button, Card, EmptyState, Field, FieldGroup, Icon, Input, Notice, PageTitle, Select } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
-import { useSearchParams } from '../../lib/router'
+import { useSearchParams } from '../../lib/routerHooks'
 import { announcementLines, announcementYears, institutionApi } from '../../services/institutionCabinet'
 import { useStore } from '../../store/useStore'
 import { ClosedNotice, CompanyLine, Contacts } from './common'

@@ -5,7 +5,7 @@ import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatTime } from '../../lib/format'
-import { useSearchParams } from '../../lib/router'
+import { useSearchParams } from '../../lib/routerHooks'
 import { AdminRefunds } from './AdminRefunds'
 import { useStore } from '../../store/useStore'
 

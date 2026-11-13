@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@/lib/router'
-import { Badge, Button, Card, cx, Field, Icon, Input, LField, Notice, PageTitle, Segmented, Select, Toggle } from '../../components/ui'
+import { Badge, Button, Card, Field, Icon, Input, LField, Notice, PageTitle, Segmented, Select, Toggle } from '../../components/ui'
+import { cx } from '../../components/ui/helpers'
 import { emptyL, useT } from '../../i18n/useT'
 import { uid, useStore, type PageKey } from '../../store/useStore'
 import type { Section, SectionType } from '../../types'

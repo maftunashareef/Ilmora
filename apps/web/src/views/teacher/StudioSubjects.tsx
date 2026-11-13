@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from '@/lib/router'
+import { Link } from '@/lib/router'
+import { useSearchParams } from '@/lib/routerHooks'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { ScheduleChips } from '../../components/course/CourseCard'
 import { CourseForm } from '../../components/course/CourseForm'
