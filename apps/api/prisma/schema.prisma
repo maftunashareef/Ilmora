@@ -1232,6 +1232,12 @@ model AuditEvent {
   requestId  String?
   createdAt  DateTime @default(now())
 
+  // Append-only, held by the database (migration 20261125000100): triggers "AuditEvent_append_only" (BEFORE UPDATE OR
+  // DELETE) and "AuditEvent_no_truncate" with the function "AuditEvent_refuse_change" refuse any change of a row. Let
+  // through: the actor's foreign key clearing "actorId" when the account is hard-deleted, and a transaction that set
+  // `SET LOCAL ilmora.audit_maintenance = 'on'` (the demo purge, src/cli/purge-demo.ts). Also there, for the log read
+  // by company (GET admin/audit?companyId=): the partial index "AuditEvent_tenantId_after_companyId_createdAt_idx" on
+  // ("tenantId", "after"->>'companyId', "createdAt"). Prisma describes neither triggers nor expression indexes.
   @@index([tenantId, entityType, entityId, createdAt])
   @@index([tenantId, createdAt])
   @@index([tenantId, actorId, createdAt])

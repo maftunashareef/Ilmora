@@ -188,6 +188,29 @@ APPROVED → правка названия / СТИР / типа / собств�
 - `User.passwordIssuedAt` — пароль выдал Super Admin (аккаунт министерства, сброс), владелец его ещё не сменил:
   при входе — смена пароля. Сменил — поле пустое. У старых аккаунтов пусто (на переходное время API смотрит журнал).
 
+**Журнал аудита (`AuditEvent`)**
+- Кто, что, когда: `actorId`, `action`, `entityType` + `entityId`, `before` / `after`, `reason`, `ip`, `createdAt`. По
+  студентам и компаниям: `contact.request` (`after`: `companyId`, `userId`, `source` — `GRADUATE` / `STUDENTS` /
+  `CONTRACT_HELP`), `contact.accept` и `contact.decline` (`companyId`, `userId` — студент), `contact.view` (запись о
+  студенте: `entityType=User`, `entityId` — его id; `after.companyId`), `contact.certificate.download`,
+  `students.page.view`, `student.card.view` (`entityType=User`, `after.companyId`).
+- **Запись и действие — одна транзакция** у запроса контакта и решения студента (`contacts.service.ts`): не записалось
+  в журнал — нет ни запроса, ни принятия.
+- **Только дополняется — это держит база** (миграция `20261125000100`): триггеры `AuditEvent_append_only`
+  (`BEFORE UPDATE OR DELETE`) и `AuditEvent_no_truncate` отклоняют правку и удаление строки. Проходят два случая:
+  полное удаление аккаунта актора (связь `ON DELETE SET NULL` сама обнуляет `actorId`; вручную, пока аккаунт есть,
+  актора не убрать) и транзакция, где выставлено `SET LOCAL ilmora.audit_maintenance = 'on'`, — так делает только
+  очистка демо-данных (`purge-demo`) и тесты, которые «состаривают» записи (`ageAudit` в `test/helpers.ts`). В коде API
+  этой настройки нет. Это защита от ошибки в коде и правки через ORM; от того, кто выполняет в базе произвольный SQL
+  под ролью приложения, она не спасает — для этого нужна отдельная роль базы без прав на `UPDATE` / `DELETE` журнала.
+  Триггеров и индекса по выражению в `schema.prisma` нет — там комментарий у модели.
+- **Чтение** — `GET /admin/audit`, Super Admin (финансовый админ — только `Payment`, `Subscription`, `RefundRequest`,
+  с любыми фильтрами). Фильтры: `entityType`, `entityId`, `action`, `actorId`, `companyId` (события, где компания
+  записана в `after.companyId`; индекс `AuditEvent_tenantId_after_companyId_createdAt_idx`), период `from` / `to` —
+  момент ISO 8601 с зоной или день `ГГГГ-ММ-ДД` по Ташкенту (`to`-день включается), `page`, `pageSize` (10–200).
+  «Какие компании и когда видели карточку студента X» — `?entityType=User&entityId=X`; «что делала компания Y за
+  период» — `?companyId=Y&from=…&to=…`. Экрана нет, только API.
+
 ## Справочники и тестовые данные
 
 - **Отрасли, регионы и районы** — `REGISTRY_INDUSTRIES`, `REGISTRY_REGIONS`, `REGISTRY_DISTRICTS` в

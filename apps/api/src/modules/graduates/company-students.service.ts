@@ -10,6 +10,7 @@ import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
 import { ContactsService, NAMED_CONTACT_SOURCES } from '../contacts/contacts.service'
 import { DIRECTION_WITH_MAIN, mainOf, regionIdByRef } from '../registry/registry.mappers'
+import { lockConsents } from '../students/students.service'
 import type { CompanyStudentsQuery } from './graduates.schemas'
 
 const place = (r: { id: string; name: unknown } | null) => (r ? { id: r.id, name: r.name as L } : null)
@@ -74,7 +75,12 @@ export class CompanyStudentsService {
     const ids = where ? await this.prisma.client.studentProfile.findMany({ where: { AND: [where, { institutionId }] }, select: { userId: true } }) : []
     const userId = ids.find((r) => companyCardId(this.env, company.id, SCOPE, r.userId) === cardId)?.userId
     if (!userId) throw AppError.notFound('Student')
-    await this.contacts.request(tenantId, company, userId, 'STUDENTS', {})
+    // Looked at again in the request's transaction, under the lock the student's consents are written with: a consent
+    // taken back after the look above gives no request (it used to slip between the two).
+    await this.contacts.request(tenantId, company, userId, 'STUDENTS', {}, async (tx) => {
+      await lockConsents(tx, userId)
+      if (!(await tx.studentProfile.count({ where: { AND: [where!, { institutionId, userId }] } }))) throw AppError.notFound('Student')
+    })
     const [card] = await this.cards(company.id, [await this.prisma.client.studentProfile.findUniqueOrThrow({ where: { userId }, select: CARD_SELECT })])
     return card
   }

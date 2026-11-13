@@ -326,6 +326,9 @@ async function main() {
       console.log(`Deleting ${total} row(s) in one transaction…`)
       const affected = await db.$transaction(async (tx) => {
         const done: Record<string, number> = {}
+        // The audit log is append-only in the database (migration 20261125000100). Demo rows' history goes with them and
+        // a demo actor is taken off the rows that stay: this transaction, and only it, says so to the trigger.
+        await tx.$executeRawUnsafe(`SET LOCAL ilmora.audit_maintenance = 'on'`)
         for (const s of plan.steps) {
           const n = await s.run(tx)
           if (!n) continue

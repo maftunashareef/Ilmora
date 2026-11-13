@@ -11,7 +11,7 @@ import { ClaimInput, DirectionsInput, InstitutionPatch } from '../src/modules/in
 import { InstitutionReviewService, officialName } from '../src/modules/institutions/institution-review.service'
 import { InstitutionsService } from '../src/modules/institutions/institutions.service'
 import type { NotifyInput, NotificationsService } from '../src/modules/notifications/notifications.service'
-import { DB_AVAILABLE, TestContext } from './helpers'
+import { ageAudit, DB_AVAILABLE, TestContext } from './helpers'
 import { mfaStub } from './stubs'
 import type { ExecutionContext } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
@@ -71,7 +71,7 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       const real = await representative()
       await expect(service.claim(tenantId, real, { stir: '011111111' })).rejects.toMatchObject({ code: 'already_claimed' })
       const old = new Date(Date.now() - 15 * 86_400_000)
-      await db.auditEvent.updateMany({ where: { entityId: imported.id, action: 'institution.claim' }, data: { createdAt: old } })
+      await ageAudit(ctx.prisma, { entityId: imported.id, action: 'institution.claim' }, old)
       expect((await db.institution.findUniqueOrThrow({ where: { id: imported.id } })).claimedAt).not.toBeNull()
       await db.institution.update({ where: { id: imported.id }, data: { createdAt: old, claimedAt: old } })
       sent.length = 0
@@ -92,14 +92,14 @@ describe.skipIf(!DB_AVAILABLE)('Institution profile: claim, passport, directions
       await service.claim(tenantId, holder, { stir: '011111111' })
       const old = new Date(Date.now() - 15 * 86_400_000)
       await db.institution.update({ where: { id: imported.id }, data: { createdAt: old, claimedAt: old } })
-      await db.auditEvent.updateMany({ where: { entityId: imported.id }, data: { createdAt: old } })
+      await ageAudit(ctx.prisma, { entityId: imported.id }, old)
       // Edited yesterday — the directions count too.
       await service.setDirections(tenantId, holder, { directions: [] })
-      await db.auditEvent.updateMany({ where: { entityId: imported.id, action: 'institution.directions' }, data: { createdAt: new Date(Date.now() - 86_400_000) } })
+      await ageAudit(ctx.prisma, { entityId: imported.id, action: 'institution.directions' }, new Date(Date.now() - 86_400_000))
       const other = await representative()
       await expect(service.claim(tenantId, other, { stir: '011111111' })).rejects.toMatchObject({ code: 'already_claimed' })
       // Two weeks without a touch: released to the next one.
-      await db.auditEvent.updateMany({ where: { entityId: imported.id }, data: { createdAt: old } })
+      await ageAudit(ctx.prisma, { entityId: imported.id }, old)
       expect((await service.claim(tenantId, other, { stir: '011111111' })).institution).toMatchObject({ id: imported.id, status: 'DRAFT' })
     })
   })

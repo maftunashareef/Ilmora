@@ -2,6 +2,7 @@ import { JwtService } from '@nestjs/jwt'
 import { OFFER_VERSION } from '@ilmora/shared'
 import { randomUUID } from 'node:crypto'
 import { type Env, validateEnv } from '../src/config/env'
+import type { Prisma } from '../src/generated/prisma/client'
 import { PrismaService } from '../src/infra/prisma/prisma.service'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { AuditService } from '../src/modules/audit/audit.service'
@@ -17,6 +18,17 @@ export const DB_AVAILABLE = !!process.env.TEST_DATABASE_URL || process.env.CI ==
 
 export function testEnv(overrides: Partial<Record<string, string>> = {}): Env {
   return validateEnv({ ...process.env, ...overrides })
+}
+
+/**
+ * Moves audit rows back in time («two weeks without an edit»). The audit log is append-only in the database (migration
+ * 20261125000100): a plain update is refused, so the test says «maintenance» in its transaction, as the demo purge does.
+ */
+export async function ageAudit(prisma: PrismaService, where: Prisma.AuditEventWhereInput, createdAt: Date) {
+  await prisma.client.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SET LOCAL ilmora.audit_maintenance = 'on'`)
+    await tx.auditEvent.updateMany({ where, data: { createdAt } })
+  })
 }
 
 export class TestContext {

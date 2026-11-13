@@ -1027,15 +1027,43 @@ export class ManageService {
   /**
    * The audit log. The Super Admin reads all of it; a finance admin only the money records (payments and
    * subscriptions) — never who opened a student's contacts, the reviews or the accounts (ТЗ 8, 9.4).
+   *
+   * Filters, each one narrowing (a finance admin stays within the money records whatever is asked): the entity, the
+   * action, the actor, the period (`from` included, `to` not) and the company — the events that name it in
+   * `after.companyId` (contact requests, views and downloads, pages of «Студенты», student cards). So «which companies
+   * saw student X, and when» is entityType=User&entityId=X, and «what company Y did in a period» is companyId=Y&from=…&to=….
    */
-  async audits(tenantId: string, actor: RequestActor, q: { entityType?: string; entityId?: string; page?: number; pageSize?: number }) {
+  async audits(tenantId: string, actor: RequestActor, q: { entityType?: string; entityId?: string; action?: string; actorId?: string; companyId?: string; from?: Date; to?: Date; page?: number; pageSize?: number }) {
     const page = Math.max(1, q.page ?? 1), pageSize = Math.min(200, Math.max(10, q.pageSize ?? 50))
     const financeOnly = !actor.roles.includes('PLATFORM_ADMIN')
     if (financeOnly && q.entityType && !FINANCE_AUDIT_ENTITIES.includes(q.entityType)) return { page, pageSize, total: 0, items: [] }
     const entityType = q.entityType ? q.entityType : financeOnly ? { in: FINANCE_AUDIT_ENTITIES } : undefined
-    const where = { tenantId, ...(entityType ? { entityType } : {}), ...(q.entityId ? { entityId: q.entityId } : {}) }
+    const createdAt = q.from || q.to ? { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lt: q.to } : {}) } : undefined
+    const where = { tenantId, ...(entityType ? { entityType } : {}), ...(q.entityId ? { entityId: q.entityId } : {}), ...(q.action ? { action: q.action } : {}), ...(q.actorId ? { actorId: q.actorId } : {}), ...(createdAt ? { createdAt } : {}) }
+    const include = { actor: { select: { id: true, displayName: true } } } as const
+    if (q.companyId) {
+      // By the company: the page's ids come from SQL written here, so that the filter is exactly the expression of the
+      // index "AuditEvent_tenantId_after_companyId_createdAt_idx" (migration 20261125000100); the rows are then read as usual.
+      const params: unknown[] = [tenantId, q.companyId]
+      const cond = [`"tenantId" = $1`, `("after"->>'companyId') = $2`]
+      const add = (sql: (n: string) => string, value: unknown) => { params.push(value); cond.push(sql(`$${params.length}`)) }
+      if (typeof entityType === 'string') add((n) => `"entityType" = ${n}`, entityType)
+      else if (entityType) add((n) => `"entityType" = ANY(${n}::text[])`, entityType.in)
+      if (q.entityId) add((n) => `"entityId" = ${n}`, q.entityId)
+      if (q.action) add((n) => `"action" = ${n}`, q.action)
+      if (q.actorId) add((n) => `"actorId" = ${n}`, q.actorId)
+      // "createdAt" is a timestamp without a zone holding UTC: the ISO text is read as that wall clock, whatever the session's zone.
+      if (q.from) add((n) => `"createdAt" >= ${n}::timestamp`, q.from.toISOString())
+      if (q.to) add((n) => `"createdAt" < ${n}::timestamp`, q.to.toISOString())
+      const matching = `FROM "AuditEvent" WHERE ${cond.join(' AND ')}`
+      const [{ n: total }] = await this.prisma.client.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n ${matching}`, ...params)
+      const ids = (await this.prisma.client.$queryRawUnsafe<{ id: string }[]>(`SELECT "id" ${matching} ORDER BY "createdAt" DESC, "id" DESC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`, ...params)).map((r) => r.id)
+      const rows = ids.length ? await this.prisma.client.auditEvent.findMany({ where: { tenantId, id: { in: ids } }, include }) : []
+      const at = new Map(ids.map((id, i) => [id, i]))
+      return { page, pageSize, total, items: rows.sort((x, y) => at.get(x.id)! - at.get(y.id)!) }
+    }
     const [items, total] = await Promise.all([
-      this.prisma.client.auditEvent.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { actor: { select: { id: true, displayName: true } } } }),
+      this.prisma.client.auditEvent.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include }),
       this.prisma.client.auditEvent.count({ where }),
     ])
     return { page, pageSize, total, items }
