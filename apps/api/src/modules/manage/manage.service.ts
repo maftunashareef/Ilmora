@@ -16,6 +16,7 @@ import { discountWindow, toCourse, toGroup, toPlaylist, toResource, toTeacher, t
 import { NotificationsService } from '../notifications/notifications.service'
 import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
+import { lockConsents } from '../students/students.service'
 import { ONLINE_PROVIDER } from './online-provider'
 import type { AvatarUploadUrlInput, CenterStatusInput, CourseInput, CoursePatch, GroupInput, PackageInput, PlaylistInput, PublishableInput, ResourceInput, SubjectInput, TeacherInput, TeacherPatch, UserRolesInput, VideoInput } from './manage.schemas'
 import { Role } from '../../generated/prisma/enums'
@@ -737,6 +738,11 @@ export class ManageService {
       // account forever — nobody could claim it, «Отвязать» answered 404. The company's students' data goes with it.
       if (user.institutionId) await unclaimInstitution(tx, user.institutionId)
       if (user.companyId) await unclaimCompany(tx, user.companyId, now)
+      // A student's consents in force end with the account (ТЗ 8): each row gets the date of the deletion and stays in
+      // the journal — nothing is deleted. Under the journal lock, so a consent being given at this moment is closed too
+      // or refused (giveConsent reads the account under the same lock). Disabling an account (isActive) leaves them as they are.
+      await lockConsents(tx, userId)
+      await tx.studentConsent.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } })
       await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, googleId: null, roles: [], centerId: null, institutionId: null, companyId: null } })
       await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId, institutionId: user.institutionId, companyId: user.companyId }, reason })
     })

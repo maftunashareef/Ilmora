@@ -146,10 +146,10 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
       expect(await service.feed(s.softCo.actor, {})).toEqual([])
       await expect(service.card(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })
       await ctx.prisma.client.user.update({ where: { id: me.id }, data: { isActive: true } })
-      // Consent 2 revoked in the questionnaire — the card is gone at once; withdrawn — too.
-      await students.save(s.tenantId, me, s.studying({ consents: { CONTRACT_HELP_CARD: false } }) as never)
+      // Consent 2 taken back (its own action, «Мои согласия») — the card is gone at once; withdrawn — too.
+      await students.revokeConsent(s.tenantId, me, 'CONTRACT_HELP_CARD')
       expect(await service.feed(s.softCo.actor, {})).toEqual([])
-      await students.save(s.tenantId, me, s.studying({ consents: { CONTRACT_HELP_CARD: true } }) as never)
+      await students.giveConsent(s.tenantId, me, 'CONTRACT_HELP_CARD')
       expect(await service.feed(s.softCo.actor, {})).toHaveLength(1)
       await service.withdraw(me)
       expect(await service.feed(s.softCo.actor, {})).toEqual([])
@@ -221,15 +221,16 @@ describe.skipIf(!DB_AVAILABLE)('Help with the contract fee (ТЗ 5.3)', () => {
     })
   })
 
-  it('cybersecurity 9.4: two saves at once write one consent row, and taking the tick off hides the card', async () => {
+  it('cybersecurity 9.4: consent 2 given several times at once is one row, and taking it back hides the card', async () => {
     const s = await setup('ch-consent-race')
     await s.inT(async () => {
       const me = await s.student(s.studying())
       const req = await service.create(s.tenantId, me, INPUT)
-      const on = s.studying({ consents: { CONTRACT_HELP_CARD: true } })
-      await Promise.all(Array.from({ length: 4 }, () => students.save(s.tenantId, me, on as never)))
+      // The form already gave the consent; a revocation and four «дать согласие» at once leave one row in force.
+      await students.revokeConsent(s.tenantId, me, 'CONTRACT_HELP_CARD')
+      await Promise.all(Array.from({ length: 4 }, () => students.giveConsent(s.tenantId, me, 'CONTRACT_HELP_CARD')))
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(1)
-      await students.save(s.tenantId, me, s.studying({ consents: { CONTRACT_HELP_CARD: false } }) as never)
+      await students.revokeConsent(s.tenantId, me, 'CONTRACT_HELP_CARD')
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'CONTRACT_HELP_CARD', revokedAt: null } })).toBe(0)
       expect(await service.feed(s.softCo.actor, {})).toEqual([])
       await expect(service.card(s.softCo.actor, req.id)).rejects.toMatchObject({ code: 'not_found' })

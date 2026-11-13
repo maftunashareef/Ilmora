@@ -14,6 +14,7 @@ export function StudentLayout() {
     { id: 'contract-help', to: '/student/contract-help', label: t('st.h.title'), icon: 'shield' },
     { id: 'vacancies', to: '/student/vacancies', label: t('st.v.title'), icon: 'briefcase' },
     { id: 'requests', to: '/student/requests', label: t('st.r.title'), icon: 'chat' },
+    { id: 'consents', to: '/student/consents', label: t('st.c.title'), icon: 'lock' },
     { id: 'notifications', to: '/student/notifications', label: t('notif.title'), icon: 'bell' },
     { id: 'subscription', to: '/student/subscription', label: t('student.subscription'), icon: 'package' },
     { id: 'courses', to: '/student/courses', label: t('student.courses'), icon: 'book' },

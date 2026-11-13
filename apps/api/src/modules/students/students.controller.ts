@@ -7,7 +7,7 @@ import { ZodValidationPipe } from '../../common/zod.pipe'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { CertificateInput, CertificatePatch, CertificateUploadInput } from './certificates.schemas'
 import { CertificatesService } from './certificates.service'
-import { QuestionnaireInput } from './students.schemas'
+import { ConsentKindParam, QuestionnaireInput } from './students.schemas'
 import { StudentsService } from './students.service'
 
 /** The student's questionnaire (ТЗ 4.1, the contract of apps/web/src/services/questionnaire.ts), certificates and courses (ТЗ 5.5). */
@@ -24,8 +24,21 @@ export class StudentsController {
     return this.students.save(t, a, dto, ci.ip)
   }
 
-  /** The consent journal: what is in force and the history (ТЗ 8). Consents are given and taken back with the questionnaire. */
+  /** The consent journal: what is in force and the history (ТЗ 8). */
   @Get('consents') consents(@CurrentActor() a: RequestActor) { return this.students.consents(a) }
+
+  /** «Дать согласие» / «Отозвать» — each its own action, apart from the questionnaire; both answer with the journal. */
+  @Post('consents/:kind/give')
+  @Throttle({ default: { limit: 30, ttl: 3_600_000 } })
+  giveConsent(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @ClientInfo() ci: ClientInfoValue, @Param('kind', new ZodValidationPipe(ConsentKindParam)) kind: ConsentKindParam) {
+    return this.students.giveConsent(t, a, kind, ci.ip)
+  }
+
+  /** Taking a consent back never depends on the questionnaire and is not rate-limited beyond the API's general limit. */
+  @Post('consents/:kind/revoke')
+  revokeConsent(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('kind', new ZodValidationPipe(ConsentKindParam)) kind: ConsentKindParam) {
+    return this.students.revokeConsent(t, a, kind)
+  }
 
   @Get('certificates') certificatesList(@CurrentActor() a: RequestActor) { return this.certificates.list(a) }
 

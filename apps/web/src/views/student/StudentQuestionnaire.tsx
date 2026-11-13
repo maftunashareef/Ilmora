@@ -11,21 +11,21 @@ import { Badge, Button, Card, cx, Field, Icon, Input, LinkButton, Notice, PageTi
 import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { apiErrorText } from '../../lib/apiErrors'
-import { saveQuestionnaire, useQuestionnaire, type QuestionnaireState } from '../../services/questionnaire'
+import { onlyParentConsentMissing, saveQuestionnaire, useQuestionnaire, type QuestionnaireState } from '../../services/questionnaire'
 import { useStore } from '../../store/useStore'
 
 /**
- * Section 8 consents on step 4 (ТЗ 8 and «Студенты у компании», 4): each a separate purpose, every mark starts unticked,
- * none is required to finish the questionnaire. The API keeps them in the consent journal with the text version
- * (STUDENT_CONSENT_TEXT_VERSION). The wording is the ТЗ's working text until the lawyer's version comes; then the texts
- * here and the version in @ilmora/shared change together. A minor reaches this step only with the parent's consent (step 3).
+ * Section 8 consents (ТЗ 8 and «Студенты у компании», 4): each a separate purpose, none is required to finish the
+ * questionnaire. They are not marks of this form any more: step 4 only names them, and the student gives and takes them
+ * back on «Мои согласия» (StudentConsents.tsx) — each by its own request, so a revocation works at once and never waits
+ * for the questionnaire to pass its rules. The one mark left is «согласие родителя получено» of a minor's first
+ * questionnaire (step 3). The wording is the ТЗ's working text until the lawyer's version comes.
  */
-const STUDENT_CONSENTS: readonly { key: StudentConsentKey; label: TKey; required: boolean }[] = [
-  { key: 'GRADUATE_CARD', label: 'q.consent.GRADUATE_CARD', required: false },
-  { key: 'CONTRACT_HELP_CARD', label: 'q.consent.CONTRACT_HELP_CARD', required: false },
-  { key: 'INDUSTRY_CARD', label: 'q.consent.INDUSTRY_CARD', required: false },
+const STUDENT_CONSENTS: readonly { key: StudentConsentKey; label: TKey }[] = [
+  { key: 'GRADUATE_CARD', label: 'q.consent.GRADUATE_CARD' },
+  { key: 'CONTRACT_HELP_CARD', label: 'q.consent.CONTRACT_HELP_CARD' },
+  { key: 'INDUSTRY_CARD', label: 'q.consent.INDUSTRY_CARD' },
 ]
-const REQUIRED_CONSENTS = STUDENT_CONSENTS.filter((c) => c.required).map((c) => c.key)
 const STEP_TITLES: TKey[] = ['q.step.status', 'q.step.study', 'q.step.person', 'q.step.consents']
 const STATUS_ICON: Record<StudyStatus, string> = { STUDYING: 'cap', APPLYING: 'arrowRight' }
 
@@ -56,12 +56,15 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
   const [q, setQ] = useState<Questionnaire>(() => ({ ...EMPTY_QUESTIONNAIRE, ...initial.questionnaire }))
   const [confirmed, setConfirmed] = useState(initial.studyConfirmed)
   const [step, setStep] = useState(1)
-  const [editing, setEditing] = useState(!initial.complete)
+  // A questionnaire that lacks only the parent's consent (taken back on «Мои согласия») is filled in: it opens as the summary.
+  const [editing, setEditing] = useState(() => !initial.complete && !onlyParentConsentMissing(initial, new Date()))
   const [errors, setErrors] = useState<QuestionnaireErrors>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const today = new Date()
   const year = today.getUTCFullYear()
+  /** The parent's consent is in the journal already: step 3 asks for the parent's details only, not for the mark. */
+  const parentOnRecord = !!initial.parentConsentOnRecord
 
   /** Changes fields and clears the errors shown for them. */
   const patch = (p: Partial<Questionnaire>) => {
@@ -73,16 +76,18 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
   const goTo = (s: number) => { setStep(s); setErrors({}); window.scrollTo?.({ top: 0, behavior: 'smooth' }) }
 
   const next = async () => {
-    const e = validateQuestionnaireStep(step, q, today, REQUIRED_CONSENTS)
+    const e = validateQuestionnaireStep(step, q, today, [], parentOnRecord)
     setErrors(e)
     if (Object.keys(e).length) return
     if (step < QUESTIONNAIRE_STEPS) { goTo(step + 1); return }
-    const firstBad = firstIncompleteStep(q, today, REQUIRED_CONSENTS)
+    const firstBad = firstIncompleteStep(q, today, [], parentOnRecord)
     if (firstBad) { goTo(firstBad); return }
     setSaving(true); setSaveError(null)
     try {
       const saved = await saveQuestionnaire(q)
       onSaved(saved)
+      // What the API answers is what is true now — the consents in force among it (saving changes none of them).
+      if (saved.questionnaire) setQ({ ...EMPTY_QUESTIONNAIRE, ...saved.questionnaire })
       setConfirmed(saved.studyConfirmed)
       notify(t('q.saved'))
       setEditing(false)
@@ -93,12 +98,12 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
     }
   }
 
-  if (!editing) return <Summary q={q} confirmed={confirmed} onEdit={() => { setEditing(true); goTo(1) }} />
+  const minor = isMinor(q, today)
+  if (!editing) return <Summary q={q} confirmed={confirmed} parentConsentMissing={minor && parentOnRecord && !q.guardianConsent} onEdit={() => { setEditing(true); goTo(1) }} />
 
   const studying = q.status === 'STUDYING'
   const school = q.institutionType === 'SCHOOL'
   const types = studying ? STUDYING_TYPES : APPLYING_TYPES
-  const minor = isMinor(q, today)
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -239,10 +244,15 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
                   <Input type="tel" maxLength={20} placeholder="+998 90 123 45 67" value={q.guardianPhone} onChange={(e) => set('guardianPhone', e.target.value)} aria-invalid={!!errors.guardianPhone} />
                   {err('guardianPhone')}
                 </Field>
-                <label className="flex cursor-pointer items-start gap-3 text-[13px] text-charcoal/80">
-                  <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-forest" checked={q.guardianConsent} onChange={(e) => set('guardianConsent', e.target.checked)} aria-invalid={!!errors.guardianConsent} />
-                  <span>{t('q.guardianConsent')}<span className="text-red-700"> *</span></span>
-                </label>
+                {/* The mark belongs to a minor's first questionnaire; afterwards the parent's consent is given and taken back on «Мои согласия». */}
+                {parentOnRecord
+                  ? <p className="text-[13px] leading-relaxed text-charcoal/80">{t(initial.questionnaire?.guardianConsent ? 'q.guardianConsentActive' : 'q.guardianConsentRevoked')}</p>
+                  : (
+                    <label className="flex cursor-pointer items-start gap-3 text-[13px] text-charcoal/80">
+                      <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-forest" checked={q.guardianConsent} onChange={(e) => set('guardianConsent', e.target.checked)} aria-invalid={!!errors.guardianConsent} />
+                      <span>{t('q.guardianConsent')}<span className="text-red-700"> *</span></span>
+                    </label>
+                  )}
                 {err('guardianConsent')}
               </section>
             )}
@@ -250,24 +260,18 @@ function Wizard({ initial, onSaved }: { initial: QuestionnaireState; onSaved: (s
         )}
 
         {step === 4 && (
-          <fieldset className="space-y-3">
-            <legend className="mb-1 text-sm text-charcoal/70">{t('q.consentsIntro')}</legend>
-            {STUDENT_CONSENTS.length === 0
-              ? <Notice>{t('q.consentsSoon')}</Notice>
-              : STUDENT_CONSENTS.map((c) => (
-                <label key={c.key} className="flex cursor-pointer items-start gap-3 text-[13px] leading-relaxed text-charcoal/80">
-                  <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-forest" checked={!!q.consents[c.key]}
-                    onChange={(e) => {
-                      // Taking back a consent already given: the card leaves at once, contacts companies already have stay (ТЗ 8).
-                      if (!e.target.checked && initial.questionnaire?.consents?.[c.key] && !confirm(t('q.consentRevokeConfirm'))) return
-                      set('consents', { ...q.consents, [c.key]: e.target.checked })
-                    }} />
-                  <span>{t(c.label)}{c.required && <span className="text-red-700"> *</span>}</span>
-                </label>
-              ))}
-            {err('consents')}
+          <div className="space-y-3">
+            {/* No marks here: a consent is its own action on «Мои согласия», sent at once. «Компании моей отрасли» is for those who study. */}
+            <p className="text-sm leading-relaxed text-charcoal/80">{t('q.consentsIntro')}</p>
+            <div>
+              <p className="text-xs font-medium text-charcoal/70">{t('q.consentsList')}</p>
+              <ul className="mt-1.5 list-disc space-y-1 pl-5 text-[13px] leading-relaxed text-charcoal/80">
+                {STUDENT_CONSENTS.filter((c) => c.key !== 'INDUSTRY_CARD' || studying).map((c) => <li key={c.key}>{t(c.label)}</li>)}
+              </ul>
+            </div>
+            <Notice>{t('q.consentsAfterSave')}</Notice>
             {saveError && <Notice tone="warn">{saveError}</Notice>}
-          </fieldset>
+          </div>
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-charcoal/8 pt-5">
@@ -315,7 +319,7 @@ function YearField({ label, value, from, to, onChange, error }: { label: string;
   )
 }
 
-function Summary({ q, confirmed, onEdit }: { q: Questionnaire; confirmed: 'CONFIRMED' | 'PENDING' | 'REJECTED' | null; onEdit: () => void }) {
+function Summary({ q, confirmed, parentConsentMissing, onEdit }: { q: Questionnaire; confirmed: 'CONFIRMED' | 'PENDING' | 'REJECTED' | null; parentConsentMissing: boolean; onEdit: () => void }) {
   const { t, lang } = useT()
   const region = (id: string) => UZ_REGIONS.find((r) => r.id === id)?.name[lang] ?? id
   const studying = q.status === 'STUDYING'
@@ -353,6 +357,12 @@ function Summary({ q, confirmed, onEdit }: { q: Questionnaire; confirmed: 'CONFI
             </div>
           ))}
         </dl>
+      </Card>
+      {/* Consents live on their own screen: given and taken back there, whatever the state of the questionnaire. */}
+      {parentConsentMissing && <Notice tone="warn" className="mt-4">{t('q.guardianConsentRevoked')}</Notice>}
+      <Card className="mt-4 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-7">
+        <p className="text-sm leading-relaxed text-charcoal/75">{t('q.consentsIntro')}</p>
+        <LinkButton to="/student/consents" variant="secondary" className="shrink-0"><Icon name="lock" className="h-4 w-4" />{t('q.consentsOpen')}</LinkButton>
       </Card>
     </div>
   )

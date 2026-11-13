@@ -89,8 +89,12 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
         status: 'STUDYING', institutionType: 'TECHNIKUM', institution: { id: s.approved.row.id, name: 'Toşkent IT texnikumi', region: 'tashkent-city' },
         course: 2, direction: { id: s.dasturlash.id, industryId: s.it.id }, studyForm: 'CONTRACT', contractSum: 5_000_000, graduationYear: Y + 1,
         fullName: 'Aziz Karimov', birthDate: adultBirth, region: 'tashkent-city', district: 'Çilonzor', email: 'aziz@mail.uz', about: 'Python',
-        consents: { GRADUATE_CARD: true, CONTRACT_HELP_CARD: false }, guardianConsent: false,
+        // The questionnaire carried `consents: { GRADUATE_CARD: true }`: saving it gives no consent — that is its own action.
+        consents: { GRADUATE_CARD: false, CONTRACT_HELP_CARD: false }, guardianConsent: false,
       })
+      expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id } })).toBe(0)
+      await service.giveConsent(s.tenantId, me, 'GRADUATE_CARD', '10.0.0.1')
+      expect((await service.questionnaire(me)).questionnaire?.consents).toMatchObject({ GRADUATE_CARD: true, CONTRACT_HELP_CARD: false })
       // The contact phone goes to its own field, normalized; the sign-in number stays as it was.
       expect(state.questionnaire?.phone).toBe('+998901234567')
       expect((await ctx.prisma.client.studentProfile.findUniqueOrThrow({ where: { userId: me.id } })).contactPhone).toBe('+998901234567')
@@ -160,11 +164,14 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
     await TenantContext.forTenant(s.tenantId, async () => {
       const me = await s.student()
       await expect(service.save(s.tenantId, me, s.studying({ birthDate: minorBirth }) as never)).rejects.toMatchObject({ code: 'questionnaire_incomplete', details: { step: 3, errors: { guardianName: 'q.err.guardianName', guardianConsent: 'q.err.guardianConsent' } } })
-      const minor = s.studying({ birthDate: minorBirth, guardianName: 'Karim Karimov', guardianPhone: '90 765 43 21', guardianConsent: true, consents: { GRADUATE_CARD: true, CONTRACT_HELP_CARD: true } })
+      const minor = s.studying({ birthDate: minorBirth, guardianName: 'Karim Karimov', guardianPhone: '90 765 43 21', guardianConsent: true })
       const first = await service.save(s.tenantId, me, minor as never)
-      expect(first.questionnaire).toMatchObject({ guardianConsent: true, guardianName: 'Karim Karimov', guardianPhone: '+998907654321', consents: { GRADUATE_CARD: true, CONTRACT_HELP_CARD: true } })
-      await service.save(s.tenantId, me, { ...minor, consents: { GRADUATE_CARD: false, CONTRACT_HELP_CARD: true } } as never)
-      await service.save(s.tenantId, me, { ...minor, consents: { GRADUATE_CARD: true, CONTRACT_HELP_CARD: true } } as never)
+      expect(first.questionnaire).toMatchObject({ guardianConsent: true, guardianName: 'Karim Karimov', guardianPhone: '+998907654321', consents: { GRADUATE_CARD: false, CONTRACT_HELP_CARD: false } })
+      // Consents are given and taken back by their own actions (the full rules: test/student-consents.test.ts).
+      await service.giveConsent(s.tenantId, me, 'GRADUATE_CARD')
+      await service.giveConsent(s.tenantId, me, 'CONTRACT_HELP_CARD')
+      await service.revokeConsent(s.tenantId, me, 'GRADUATE_CARD')
+      await service.giveConsent(s.tenantId, me, 'GRADUATE_CARD')
       const journal = await ctx.prisma.client.studentConsent.findMany({ where: { userId: me.id, kind: 'GRADUATE_CARD' }, orderBy: { givenAt: 'asc' } })
       expect(journal.map((r) => r.revokedAt === null)).toEqual([false, true])
       expect(await ctx.prisma.client.studentConsent.count({ where: { userId: me.id, kind: 'PARENT_CONSENT', revokedAt: null } })).toBe(1)
