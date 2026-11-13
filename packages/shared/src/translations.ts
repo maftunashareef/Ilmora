@@ -1182,6 +1182,7 @@ export const dict = {
   'auth.err.network': d('Server bilan aloqa örnatib bölmadi. Internet yoki API ulanişini tekşiring.', 'Не удалось связаться с сервером. Проверьте подключение к интернету или API.', 'Unable to connect to the server. Please check your internet or API connection.'),
   'auth.err.passwordOnly': d('Kiriş faqat login va parol bilan.', 'Вход только по логину и паролю.', 'Sign in with your login and password.'),
   'apiError.retryIn': d('Juda köp uriniş. {n} daqiqadan keyin qayta urinib köring.', 'Слишком много попыток. Повторите через {n} мин.', 'Too many attempts. Try again in {n} min.'),
+  'apiError.retryInHours': d('Juda köp uriniş. {n} soatdan keyin qayta urinib köring.', 'Слишком много попыток. Повторите через {n} ч.', 'Too many attempts. Try again in {n} h.'),
   'auth.err.tooMany': d('Juda köp uriniş. Birozdan söng qayta urinib köring.', 'Слишком много попыток. Попробуйте позже.', 'Too many attempts. Try again later.'),
   'auth.err.disabled': d('Bu hisob öçirilgan.', 'Этот аккаунт отключён.', 'This account is disabled.'),
   'auth.consent.title': d('Oferta va rozilik', 'Оферта и согласие', 'Offer and consent'),
