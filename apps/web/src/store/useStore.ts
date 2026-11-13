@@ -3,7 +3,7 @@ import { createContext, createElement, useContext, useEffect, useState, type Rea
 import { createStore, type StoreApi } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
-import { type AppNotification, type CenterCheckInFailure, type MfaChallengeDto, type MfaSetupDto, courseSaveBody, groupSaveBody, isUniversityListed, publishableSaveBody, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
+import { type AppNotification, type CenterCheckInFailure, type CenterKind, type MfaChallengeDto, type MfaSetupDto, courseSaveBody, groupSaveBody, isUniversityListed, publishableSaveBody, MAX_CART_COURSES, OFFER_VERSION, mergeCartGroups, overlaps, pickPresetGroups, presetCartPlan, sampleData, toMin as sharedToMin, translate } from '@ilmora/shared'
 import { api, ApiError, isApiError, REFRESH_LIMITED, refreshRetryAfterSeconds, refreshSessionOutcome, session, setPasswordChangeRequiredHandler } from '../lib/api'
 import { apiErrorText } from '../lib/apiErrors'
 import { fetchStorageStatus, storableUrl } from '../services/uploads'
@@ -63,7 +63,7 @@ export type RegisterRole = 'STUDENT' | 'TEACHER' | 'CENTER' | 'INSTITUTION' | 'C
  * representative with their `jobTitle`; right after, the institution is claimed by STIR (services/institutions) or the
  * company profile is started (services/companies).
  */
-export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; jobTitle?: string }
+export interface RegisterInput extends ConsentInput { role: RegisterRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; centerKind?: CenterKind; jobTitle?: string }
 
 export interface PaymentSummary {
   id: string; state: string; provider: string | null; amountMinor: string; currency: string; periodStart: string; periodEnd: string; paidAt: string | null; expiresAt: string; createdAt: string
@@ -882,7 +882,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       },
       removeSubject: async (id) => { await guard(() => api(`/manage/subjects/${id}`, { method: 'DELETE' })); set((s) => ({ subjects: s.subjects.filter((x) => x.id !== id), courses: s.courses.map((c) => (c.subjectId === id ? { ...c, subjectId: undefined } : c)) })) },
       upsertCenter: async (c) => {
-        const body = { name: c.name, district: c.district, description: c.description, tone: c.tone }
+        const body = { name: c.name, kind: c.kind, district: c.district, description: c.description, tone: c.tone }
         const saved = await guard(() => (get().centers.some((x) => x.id === c.id) ? api<Center>(`/admin/centers/${c.id}`, { method: 'PUT', body }) : api<Center>('/admin/centers', { method: 'POST', body })))
         set((s) => ({ centers: upsertIn(s.centers.filter((x) => x.id !== c.id), saved) }))
       },

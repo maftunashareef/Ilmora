@@ -1,6 +1,6 @@
 'use client'
 import { createContext, useContext } from 'react'
-import type { CenterCheckInSettings, CenterStatus, Course, L, LessonSession, SubscriptionAccess, Teacher } from '@ilmora/shared'
+import type { CenterCheckInSettings, CenterKind, CenterStatus, Course, L, LessonSession, SubscriptionAccess, Teacher } from '@ilmora/shared'
 
 /** Shapes of the center workspace API (`/v1/center/*`). */
 
@@ -19,6 +19,8 @@ export interface CenterProfile {
   id: string
   slug: string
   name: string
+  /** What the center is (`Center.kind`): the center says so itself, the Super Admin can correct it. */
+  kind: CenterKind
   /** A new name waiting for the Super Admin's approval (the public name stays until then). */
   pendingName?: string | null
   district: L

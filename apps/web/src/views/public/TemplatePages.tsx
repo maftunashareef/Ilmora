@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from '@/lib/router'
+import { useSearchParams } from '@/lib/routerHooks'
 import { carouselCourses, countLabel, finalPriceSom, isOnlineCourse, MAX_CAROUSEL_COURSES, MAX_CART_COURSES, normalizeUzPhone, NOUNS, ONLINE_PROVIDER_SLUG } from '@ilmora/shared'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText, retryMinutes, tooManyText } from '../../lib/apiErrors'
@@ -7,12 +8,13 @@ import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
 import { formatSom } from '../../lib/format'
 import { withBase } from '../../lib/url'
+import { CENTER_GROUPS, centerGroupOf, centerKindOf, centerMatches, type CenterGroup } from '../../services/centerKinds'
 import { useStore, type PageKey } from '../../store/useStore'
 import type { Section } from '../../types'
 import { CourseCard, CoursePrice, ScheduleChips } from '../../components/course/CourseCard'
 import { BackgroundVideo, CountUp, SnapTrack, SplitWords } from '../../components/motion'
 import dynamic from 'next/dynamic'
-import { Avatar, Badge, Button, Card, Eyebrow, Field, Icon, Input, LinkButton, Notice, SectionHeading, Textarea } from '../../components/ui'
+import { Avatar, Badge, Button, Card, EmptyState, Eyebrow, Field, Icon, Input, LinkButton, Notice, SectionHeading, Tabs, Textarea } from '../../components/ui'
 import { cx } from '../../components/ui/helpers'
 import { getTeacherAvatarUrl } from '../../components/teacher/teacherImage'
 import { CourseFinderTeaser } from './CourseFinder'
@@ -454,22 +456,50 @@ function TeachersSection({ s }: { s: Section }) {
 }
 
 // ─── Centers list ────────────────────────────────────────────────────────────
+/**
+ * «Центры»: search by name, district and description, and tabs by type — learning centers, universities, colleges
+ * and technikums, schools and lyceums (`Center.kind`). The tab is kept in the address (`?type=`), so «Back» from a
+ * center returns to it.
+ */
 function CentersSection({ s }: { s: Section }) {
-  const { tr, lang } = useT()
+  const { t, tr, lang } = useT()
   const centers = useStore((st) => st.centers.filter((c) => c.slug !== ONLINE_PROVIDER_SLUG))
   const courses = useStore((st) => st.courses.filter(isPublicListed))
+  const [params, setParams] = useSearchParams()
+  const raw = params.get('type')
+  const group = CENTER_GROUPS.some((g) => g.id === raw) ? (raw as CenterGroup) : 'ALL'
+  const [query, setQuery] = useState('')
+  const found = centers.filter((c) => centerMatches(c, query))
+  const shown = group === 'ALL' ? found : found.filter((c) => centerGroupOf(c) === group)
+  const setGroup = (g: CenterGroup | 'ALL') => {
+    const next = new URLSearchParams(params)
+    if (g === 'ALL') next.delete('type')
+    else next.set('type', g)
+    setParams(next)
+  }
   return (
     <section className="py-16 lg:py-24">
       <div className="container-x">
         <SectionHeading title={tr(s.title)} subtitle={tr(s.subtitle)} />
+        <div className="relative mb-4 max-w-xl">
+          <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-charcoal/40" />
+          <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('centers.searchPlaceholder')} aria-label={t('common.search')} className="pl-10" />
+        </div>
+        <Tabs<CenterGroup | 'ALL'>
+          className="mb-6"
+          value={group}
+          onChange={setGroup}
+          tabs={[{ id: 'ALL', label: t('common.all'), count: found.length }, ...CENTER_GROUPS.map((g) => ({ id: g.id, label: t(g.label), count: found.filter((c) => centerGroupOf(c) === g.id).length }))]}
+        />
+        {shown.length === 0 && <EmptyState icon={<Icon name="search" className="h-6 w-6" />} title={t('common.noResults')} />}
         <div className="reveal-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {centers.map((c) => (
-            <Link key={c.id} to={`/centers/${c.slug ?? c.id}`} className="reveal block">
+          {shown.map((c) => (
+            <Link key={c.id} to={`/centers/${c.slug ?? c.id}`} className="block">
               <Card className="flex h-full gap-4 transition hover:-translate-y-0.5 hover:shadow-md">
                 <span className="mt-1 h-10 w-1 shrink-0 rounded-full" style={{ background: c.tone }} />
                 <div>
                   <div className="font-display text-xl text-charcoal">{c.name}</div>
-                  <div className="text-xs text-charcoal/55">{tr(c.district)} · {countLabel(lang, courses.filter((x) => x.centerId === c.id).length, NOUNS.course)}</div>
+                  <div className="text-xs text-charcoal/55">{[t(`inst.type.${centerKindOf(c)}`), tr(c.district), countLabel(lang, courses.filter((x) => x.centerId === c.id).length, NOUNS.course)].filter(Boolean).join(' · ')}</div>
                   <p className="mt-2 text-sm text-charcoal/65">{tr(c.description)}</p>
                 </div>
               </Card>

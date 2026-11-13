@@ -12,6 +12,7 @@ import { useViewer } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import { CourseFinderPrompt } from './CourseFinder'
 import { UniversitiesBand } from './Universities'
+import { CENTER_GROUPS, centerGroupOf } from '../../services/centerKinds'
 
 type Sort = 'featured' | 'priceAsc' | 'priceDesc' | 'title'
 
@@ -267,11 +268,15 @@ export function CoursesPage() {
               className="w-full bg-ivory/50"
             >
               <option value="">{t('courses.anyCenter')}</option>
-              {centers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+              {/* Grouped by type, as the tabs of «Центры»: learning centers, universities, colleges, schools. */}
+              {CENTER_GROUPS.map((g) => {
+                const list = centers.filter((c) => centerGroupOf(c) === g.id)
+                return list.length > 0 && (
+                  <optgroup key={g.id} label={t(g.label)}>
+                    {list.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                )
+              })}
             </Select>
           </div>
           <div>
