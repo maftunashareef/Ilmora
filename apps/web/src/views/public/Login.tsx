@@ -1,10 +1,10 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { INSTITUTION_REGISTRY, INSTITUTION_TYPES, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, isUzRegion, type InstitutionChoice, type InstitutionType, type OrgOwnership, type MfaChallengeDto } from '@ilmora/shared'
+import { INSTITUTION_REGISTRY, INSTITUTION_TYPES, normalizeUzInn, normalizeUzPhone, ORG_OWNERSHIPS, isUzRegion, REGISTRY_INSTITUTION_TYPES, type CenterKind, type InstitutionChoice, type InstitutionType, type OrgOwnership, type MfaChallengeDto } from '@ilmora/shared'
 import { ConsentFields } from '../../components/ConsentGate'
 import { consentComplete, EMPTY_CONSENT, type ConsentState } from '../../components/consent'
 import { InstitutionSearch } from '../../components/InstitutionSearch'
-import { Button, Card, Eyebrow, Field, Icon, Input, Notice, Tabs } from '../../components/ui'
+import { Button, Card, Eyebrow, Field, Icon, Input, Notice, Select, Tabs } from '../../components/ui'
 import { cx } from '../../components/ui/helpers'
 import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
@@ -67,6 +67,8 @@ export function LoginPage() {
   const [mode, setMode] = useState<Mode>(params.get('mode') === 'register' ? 'register' : 'signin')
   const [role, setRole] = useState<RegisterRole | null>(null)
   const [centerName, setCenterName] = useState('')
+  // What the center is (`Center.kind`); a learning center unless it says otherwise. Groups the «Центры» page.
+  const [centerKind, setCenterKind] = useState<CenterKind>('TRAINING_CENTER')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [position, setPosition] = useState('')
@@ -256,6 +258,7 @@ export function LoginPage() {
           displayName: name.trim() || undefined,
           phone: phone.trim() || undefined,
           centerName: role === 'CENTER' ? centerName.trim() : undefined,
+          centerKind: role === 'CENTER' ? centerKind : undefined,
           jobTitle: isOrgRole(role) ? position.trim() : undefined,
           acceptOffer: true,
           consentPersonalData: true,
@@ -436,6 +439,13 @@ export function LoginPage() {
                   aria-invalid={!!fieldErrors.centerName}
                 />
                 {fieldErrors.centerName && <p className="mt-1.5 text-xs text-red-700" role="alert">{fieldErrors.centerName}</p>}
+              </Field>
+            )}
+            {mode === 'register' && role === 'CENTER' && (
+              <Field label={t('centers.kind')} required>
+                <Select value={centerKind} onChange={(e) => setCenterKind(e.target.value as CenterKind)}>
+                  {REGISTRY_INSTITUTION_TYPES.map((k) => <option key={k} value={k}>{t(`inst.type.${k}`)}</option>)}
+                </Select>
               </Field>
             )}
 

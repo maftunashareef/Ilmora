@@ -1,11 +1,12 @@
 'use client'
 import { useState } from 'react'
-import { Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, LinkButton, Modal, Notice, PageTitle } from '../../components/ui'
-import { countLabel, NOUNS } from '@ilmora/shared'
+import { Badge, Button, Card, Eyebrow, Field, Icon, Input, LField, LinkButton, Modal, Notice, PageTitle, Select } from '../../components/ui'
+import { countLabel, NOUNS, REGISTRY_INSTITUTION_TYPES, type CenterKind } from '@ilmora/shared'
 import { emptyL, useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { Link } from '../../lib/router'
+import { centerKindOf } from '../../services/centerKinds'
 import { uid, useStore } from '../../store/useStore'
 import { CenterAdminsModal } from './CenterAdmins'
 import { PendingCentersPanel } from './PendingCenters'
@@ -54,7 +55,7 @@ export function AdminCenters() {
                   <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: c.tone }} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2"><Link to={`/admin/centers/${c.id}`} className="truncate text-sm font-medium text-charcoal hover:text-forest">{c.name}</Link><Badge tone={centerStatusTone(c.status)}>{t(`center.status.${c.status}`)}</Badge></div>
-                    <div className="truncate text-xs text-charcoal/55">{tr(c.district)} · {countLabel(lang, c.counts.courses, NOUNS.course)} · {countLabel(lang, c.counts.teachers, NOUNS.teacher)}{c.owner ? ` · ${t('admin.centers.registeredBy', { name: c.owner.login ? `@${c.owner.login}` : c.owner.displayName })}` : ''}</div>
+                    <div className="truncate text-xs text-charcoal/55">{t(`inst.type.${centerKindOf(c)}`)} · {tr(c.district)} · {countLabel(lang, c.counts.courses, NOUNS.course)} · {countLabel(lang, c.counts.teachers, NOUNS.teacher)}{c.owner ? ` · ${t('admin.centers.registeredBy', { name: c.owner.login ? `@${c.owner.login}` : c.owner.displayName })}` : ''}</div>
                     {c.blockReason && <div className="text-xs text-red-700">{c.blockReason}</div>}
                   </div>
                   <LinkButton size="sm" variant="secondary" to={`/admin/centers/${c.id}`}><Icon name="external" className="h-3.5 w-3.5" />{t('admin.centers.openDashboard')}</LinkButton>
@@ -90,6 +91,12 @@ export function AdminCenters() {
         {center && (
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-[1fr_auto]"><Field label={t('common.name')} required><Input value={center.name} onChange={(e) => setCenter({ ...center, name: e.target.value })} /></Field><Field label={t('admin.centers.tone')}><input type="color" className="h-[42px] w-16 cursor-pointer rounded-control border border-charcoal/15 bg-paper" value={center.tone} onChange={(e) => setCenter({ ...center, tone: e.target.value })} /></Field></div>
+            {/* What the center is; the center says so itself, the Super Admin can correct it. */}
+            <Field label={t('centers.kind')}>
+              <Select value={center.kind ?? 'TRAINING_CENTER'} onChange={(e) => setCenter({ ...center, kind: e.target.value as CenterKind })}>
+                {REGISTRY_INSTITUTION_TYPES.map((k) => <option key={k} value={k}>{t(`inst.type.${k}`)}</option>)}
+              </Select>
+            </Field>
             <LField label={t('admin.centers.district')} value={center.district} onChange={(v) => setCenter({ ...center, district: v })} />
             <LField label={t('common.description')} multiline value={center.description} onChange={(v) => setCenter({ ...center, description: v })} />
           </div>

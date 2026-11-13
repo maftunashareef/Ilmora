@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { REGISTRY_INSTITUTION_TYPES, type CenterKind } from '@ilmora/shared'
 import { QrCode } from '../../components/QrCode'
-import { Button, Card, Eyebrow, Field, Icon, Input, LField, Notice, PageTitle } from '../../components/ui'
+import { Button, Card, Eyebrow, Field, Icon, Input, LField, Notice, PageTitle, Select } from '../../components/ui'
 import { PasswordCard } from '../../components/PasswordChange'
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
@@ -11,9 +12,9 @@ import { useStore } from '../../store/useStore'
 import { useCenterScope, type CenterOverview, type CenterProfile, type CenterQr } from './centerApi'
 import { CenterStatusNotice } from './CenterOverview'
 
-type Draft = { name: string; district: CenterProfile['district']; description: CenterProfile['description']; address: string; phone: string; lat: string; lng: string; geoRadiusM: string; checkInBeforeMin: string; absenceAfterMin: string }
+type Draft = { name: string; kind: CenterKind; district: CenterProfile['district']; description: CenterProfile['description']; address: string; phone: string; lat: string; lng: string; geoRadiusM: string; checkInBeforeMin: string; absenceAfterMin: string }
 const toDraft = (c: CenterProfile): Draft => ({
-  name: c.pendingName ?? c.name, district: c.district, description: c.description, address: c.address ?? '', phone: c.phone ?? '',
+  name: c.pendingName ?? c.name, kind: c.kind ?? 'TRAINING_CENTER', district: c.district, description: c.description, address: c.address ?? '', phone: c.phone ?? '',
   lat: c.checkIn.lat == null ? '' : String(c.checkIn.lat), lng: c.checkIn.lng == null ? '' : String(c.checkIn.lng), geoRadiusM: c.checkIn.geoRadiusM == null ? '' : String(c.checkIn.geoRadiusM),
   checkInBeforeMin: String(c.checkIn.checkInBeforeMin), absenceAfterMin: String(c.checkIn.absenceAfterMin),
 })
@@ -44,7 +45,7 @@ export function CenterSettings() {
     try {
       const saved = await api<CenterProfile>(`${scope.base}/profile`, {
         method: 'PATCH',
-        body: { name: draft.name.trim(), district: draft.district, description: draft.description, address: draft.address.trim() || null, phone: draft.phone.trim() || null, lat, lng, geoRadiusM, checkInBeforeMin: Number(draft.checkInBeforeMin), absenceAfterMin: Number(draft.absenceAfterMin) },
+        body: { name: draft.name.trim(), kind: draft.kind, district: draft.district, description: draft.description, address: draft.address.trim() || null, phone: draft.phone.trim() || null, lat, lng, geoRadiusM, checkInBeforeMin: Number(draft.checkInBeforeMin), absenceAfterMin: Number(draft.absenceAfterMin) },
       })
       setCenter(saved)
       setDraft(toDraft(saved))
@@ -70,6 +71,12 @@ export function CenterSettings() {
           <Card className="space-y-4 p-6">
             <Eyebrow>{t('center.profile')}</Eyebrow>
             <Field label={t('common.name')} required hint={center.pendingName ? t('center.renamePending', { name: center.name }) : undefined}><Input disabled={locked} maxLength={120} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+            {/* What the center is: the «Центры» page groups centers by it (learning centers, universities, colleges, schools). */}
+            <Field label={t('centers.kind')}>
+              <Select disabled={locked} value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as CenterKind })}>
+                {REGISTRY_INSTITUTION_TYPES.map((k) => <option key={k} value={k}>{t(`inst.type.${k}`)}</option>)}
+              </Select>
+            </Field>
             <LField label={t('admin.centers.district')} value={draft.district} onChange={(v) => setDraft({ ...draft, district: v })} />
             <LField label={t('common.description')} multiline value={draft.description} onChange={(v) => setDraft({ ...draft, description: v })} />
             <div className="grid gap-4 sm:grid-cols-2">
