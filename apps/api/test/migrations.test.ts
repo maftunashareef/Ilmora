@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
  */
 const DIR = join(__dirname, '../prisma/migrations')
 
-/** Applied in production: up to 20261117 by release 51, 20261118–19 by release 53, 20261120 by release 54 (11.11.2026). Never edit these files. */
+/** Applied in production: up to 20261117 by release 51, 20261118–19 by release 53, 20261120 by release 54 (11.11.2026), 20261121–23 by release 55 (12.11). Never edit these files. */
 const APPLIED: Record<string, string> = {
   '20261018000000_init': '9cc486172d513929dcf3e4cf645df43f06fef8fb52dc89eb9b2d821aca0b8319',
   '20261019000000_login_password_owner': '797826e75456ef423da4ed319465913c4a860c81cb1b1eb584fb713ae8d2a0e5',
@@ -46,6 +46,11 @@ const APPLIED: Record<string, string> = {
   '20261118000000_payment_one_pending_per_subscription': '9e6b19dc50530945676b9f63b4dd55adaff3faec4f337be26b19f0f83564450f',
   '20261119000000_contact_request_unique_per_channel': 'ad36adb309ba12ed416081263f830de61d0bb3a8eb2cef66ebe6bf1aae221213',
   '20261120000000_student_consent_journal': '47c9717c00ee40f85c751d90d77fe53694868ccda6186aa98df52d77cb508bcb',
+  '20261121000000_students_vacancies_enum_values': 'e13013cc7b5610ff2eaeeda557098e94a7c23badd122d6586bd99d1aa5e6079e',
+  '20261121000100_students_section_vacancy_broadcasts': 'ac3918eece20a8889bb3716006cdd232c3b618da4db031be3306c1bc5fd9e394',
+  '20261122000000_vacancy_job_schedule_experience': 'd33c372d292cea34a5a3e01c0b82abffcf267db36d2c70ff7153f2f727165a32',
+  '20261122000100_company_claimed_at': 'f6ac0f4dec2a749962d79185780582e20eea7f44214ce6bd1857c57cd8870d5f',
+  '20261123000000_payment_lessons_bought': 'a9b551482b8f0bea09aa094caf194a9a43be9ef04d60397d9ec70f93ec4fb9bc',
 }
 
 const MAX_LOCK_TIMEOUT_S = 5

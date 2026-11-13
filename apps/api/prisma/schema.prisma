@@ -2074,8 +2074,9 @@ model ContactRequest {
 
 /// Practice, internship or job offered by an approved company (published without a separate review). Checks (migration
 /// 20261121000100): a JOB is always paid ("Vacancy_job_paid_check"); a salary only on a JOB, a stipend never on one
-/// ("Vacancy_pay_by_kind_check"); a salary is positive and «to» is not below «from» ("Vacancy_salary_check"); a schedule
-/// and an experience level only on a JOB ("Vacancy_job_terms_check", migration 20261122000000).
+/// ("Vacancy_pay_by_kind_check"); a salary is positive and «to» is not below «from» ("Vacancy_salary_check"); a JOB has
+/// both a schedule and an experience level, other kinds neither ("Vacancy_job_terms_check", migrations 20261122000000,
+/// 20261124000000).
 model Vacancy {
   id           String        @id @default(cuid())
   tenantId     String
@@ -2096,7 +2097,7 @@ model Vacancy {
   /** JOB: monthly salary in tiyin, «from–to»; a single amount is «from» alone. Both optional. */
   salaryFromMinor BigInt?
   salaryToMinor   BigInt?
-  /** JOB only: the work schedule and the experience asked for. The API requires both for a JOB. */
+  /** JOB only, and required there: the work schedule and the experience asked for. */
   schedule     WorkSchedule?
   experience   ExperienceLevel?
   /** Free text, e.g. «2 месяца». */

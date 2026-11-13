@@ -64,7 +64,7 @@ describe.skipIf(!DB_AVAILABLE)('students section and vacancy broadcasts: databas
     const s = await setup('stu-job')
     await TenantContext.forTenant(s.tenantId, async () => {
       const job = (data: { paid?: boolean; salaryFromMinor?: bigint | null; salaryToMinor?: bigint | null; stipendMinor?: bigint | null }) =>
-        db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Dasturchi', regionId: s.region.id, format: 'HYBRID', seats: 1, paid: true, ...data } })
+        db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Dasturchi', regionId: s.region.id, format: 'HYBRID', seats: 1, paid: true, schedule: 'FULL_TIME', experience: 'NONE', ...data } })
       await expect(job({ paid: false })).rejects.toThrow(/Vacancy_job_paid_check/)
       await expect(job({ stipendMinor: 1_000_000_00n })).rejects.toThrow(/Vacancy_pay_by_kind_check/)
       await expect(job({ salaryFromMinor: 0n })).rejects.toThrow(/Vacancy_salary_check/)
@@ -83,13 +83,17 @@ describe.skipIf(!DB_AVAILABLE)('students section and vacancy broadcasts: databas
     })
   })
 
-  it('keeps the schedule and the experience on a JOB only (migration 20261122000000)', async () => {
+  it('requires the schedule and the experience on a JOB and keeps them off other kinds (20261122000000, 20261124000000)', async () => {
     const s = await setup('stu-terms')
     await TenantContext.forTenant(s.tenantId, async () => {
       const job = await db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Dasturchi', regionId: s.region.id, format: 'ONSITE', seats: 1, paid: true, schedule: 'FULL_TIME', experience: 'UP_TO_1' } })
       expect(job).toMatchObject({ schedule: 'FULL_TIME', experience: 'UP_TO_1' })
-      // Not required by the database yet: the backend in main creates a JOB without them until it sends both.
-      await db.vacancy.create({ data: { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB', title: 'Operator', regionId: s.region.id, format: 'REMOTE', seats: 1, paid: true } })
+      // Required on a JOB (migration 20261124000000): both, not one of them.
+      const bare = { tenantId: s.tenantId, companyId: s.company.id, kind: 'JOB' as const, title: 'Operator', regionId: s.region.id, format: 'REMOTE' as const, seats: 1, paid: true }
+      await expect(db.vacancy.create({ data: bare })).rejects.toThrow(/Vacancy_job_terms_check/)
+      await expect(db.vacancy.create({ data: { ...bare, schedule: 'FLEXIBLE' } })).rejects.toThrow(/Vacancy_job_terms_check/)
+      await expect(db.vacancy.create({ data: { ...bare, experience: 'NONE' } })).rejects.toThrow(/Vacancy_job_terms_check/)
+      await expect(db.vacancy.update({ where: { id: job.id }, data: { schedule: null } })).rejects.toThrow(/Vacancy_job_terms_check/)
 
       await expect(db.vacancy.update({ where: { id: s.vacancy.id }, data: { schedule: 'SHIFT' } })).rejects.toThrow(/Vacancy_job_terms_check/)
       await expect(db.vacancy.update({ where: { id: s.vacancy.id }, data: { experience: 'NONE' } })).rejects.toThrow(/Vacancy_job_terms_check/)
