@@ -95,7 +95,7 @@ const STATIC_TITLES: Record<string, L> = {
   '/courses': { uz: 'Kurslar', ru: 'Курсы', en: 'Courses' },
   '/teachers': { uz: 'Öqituvçilar', ru: 'Преподаватели', en: 'Teachers' },
   '/builder': { uz: 'Abonement', ru: 'Абонемент', en: 'Subscription' },
-  '/course-finder': { uz: 'Mening to’plamim', ru: 'Свой набор', en: 'My set' },
+  '/course-finder': { uz: 'Mening töplamim', ru: 'Свой набор', en: 'My set' },
   '/universities': { uz: 'Oliy ta’limga kiriş', ru: 'Поступление в вузы', en: 'University Admission' },
   '/favorites': { uz: 'Saqlangan kurslar', ru: 'Избранное', en: 'Saved courses' },
   '/how-it-works': { uz: 'Qanday işlaydi', ru: 'Как это работает', en: 'How it works' },

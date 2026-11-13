@@ -9,10 +9,10 @@ import { REGISTRY_DISTRICTS, REGISTRY_INDUSTRIES, REGISTRY_REGIONS } from './reg
 
 /**
  * ILMORA writes Uzbek with its own alphabet: Ğ ğ (for G‘ g‘), Ö ö (O‘ o‘), Ş ş (Sh sh) and Ç ç (Ch ch). English words,
- * names and links inside Uzbek text keep their own spelling. One phrase is kept exactly as the owner wrote it: the name
- * “Mening to’plamim” (course finder and custom package). See docs/uz-glossary.md.
+ * names and links inside Uzbek text keep their own spelling. The course finder and the custom package are called
+ * “Mening töplamim”; until 2026-11-13 the owner kept that one name as “Mening to’plamim”. See docs/uz-glossary.md.
  */
-const OWNER_NAME = 'Mening to’plamim'
+const MY_SET = 'Mening töplamim'
 const ENGLISH_WORDS = new Set(['Charles', 'English', 'Etch-a-Sketch', 'Michigan'])
 
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
@@ -102,12 +102,12 @@ describe('Uzbek text (ILMORA alphabet: Ğ, Ö, Ş, Ç)', () => {
     expect(formatDate('2026-11-20', 'uz')).toBe('2026-yil 20-noyabr')
   })
 
-  it('keeps “Mening to’plamim” exactly as written (not converted) and spells key words in the ILMORA alphabet', () => {
-    expect(dict['finder.title'].uz).toBe(OWNER_NAME)
-    expect(dict['builder.custom'].uz).toBe(OWNER_NAME)
-    for (const [where, s] of strings) expect(s, where).not.toMatch(/Mening t[öő]plamim|t[öő]plamingni yarat/)
+  it('calls the course finder and the custom package “Mening töplamim” and spells key words in the ILMORA alphabet', () => {
+    expect(dict['finder.title'].uz).toBe(MY_SET)
+    expect(dict['builder.custom'].uz).toBe(MY_SET)
+    for (const [where, s] of strings) expect(s, where).not.toMatch(/to’plam|tőplam|t[öő]plamingni yarat/)
     expect(dict['footer.city']).toEqual({ uz: 'Toşkent şahri', ru: 'г. Ташкент', en: 'Tashkent, Uzbekistan' })
-    expect(dict['builder.custom']).toEqual({ uz: OWNER_NAME, ru: 'Собрать свой набор', en: 'Build your own package' })
+    expect(dict['builder.custom']).toEqual({ uz: MY_SET, ru: 'Собрать свой набор', en: 'Build your own package' })
     expect(dict['common.som'].uz).toBe('söm')
   })
 

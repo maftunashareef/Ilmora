@@ -7,7 +7,7 @@ import { groupHours, overlaps } from './schedule.js'
 import type { Category, CertificateKind, Course, Group, Level, Package, Preset } from './types.js'
 
 /**
- * "My set" (Mening to’plamim): course and package suggestions built only from the live catalog. There is no AI model
+ * "My set" (Mening töplamim): course and package suggestions built only from the live catalog. There is no AI model
  * here: every suggestion comes from rules over data the catalog already holds (format, category, level, price with its
  * active discount, the group schedule and free seats), and every reason shown to the student is one of those facts.
  *

@@ -19,8 +19,9 @@ Rules:
 - Not converted: English words and names inside Uzbek text (Michigan, Charles, English), original course titles,
   provider names (Coursera, MIT OpenCourseWare), official university names, URLs, e-mail addresses, IDs and code,
   people's names typed by users, and the legal documents and the operator's registered name and address (official spelling).
-- One fixed exception: the name **Mening to’plamim** (course finder and the custom package, Build your own package) is always
-  written exactly like this, with ’, and is never converted.
+  The contact address in the footer is interface text and is written in the ILMORA alphabet: Şayxontohur tumani, Qoratoş 106.
+- The course finder and the custom package (Build your own package) are called **Mening töplamim**. Until 2026-11-13 this
+  one name was kept as “Mening to’plamim”; that spelling is no longer used.
 - Suffixes join names and acronyms directly: Clickning, APIga, DTMga.
 - After a number the noun stays singular: 3 ta kurs, 0 ta guruh.
 - Dates: 2026-yil 20-noyabr.
@@ -48,9 +49,9 @@ each other.
 | Free | Bepul |
 | Online, offline | Onlayn, oflayn |
 | Package | Paket |
-| Build your own package (RU «Собрать свой набор») | Mening to’plamim |
+| Build your own package (RU «Собрать свой набор») | Mening töplamim |
 | Tashkent (contact location; RU «г. Ташкент») | Toşkent şahri |
-| Course finder ("My set") | Mening to’plamim |
+| Course finder ("My set") | Mening töplamim |
 | Cart | Savat |
 | Payment | Tölov |
 | Sign in, sign out | Kiriş, çiqiş |
