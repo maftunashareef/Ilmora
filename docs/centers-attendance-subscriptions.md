@@ -11,6 +11,10 @@ Everything here is enforced on the server; the web app only reflects it.
 - `Center.status`: `PENDING` (workspace works, catalog not public, courses cannot be published), `ACTIVE` (approved by
   the Super Admin), `BLOCKED` (hidden from the catalog, workspace locked). The public catalog lists only `ACTIVE` centers,
   their teachers and their courses.
+- `Center.kind` (migration `20261125000000`): what the center is — `TRAINING_CENTER` (default), `UNIVERSITY`, `COLLEGE`,
+  `TECHNIKUM`, `LYCEUM` or `SCHOOL`, the registry's `InstitutionType`, so the «Центры» page can be searched and split by
+  kind (index `(tenantId, kind)`). A center linked to a registry record (`Institution.centerId`) took that record's type;
+  the sample centers cover every kind (`DEMO_CENTER_KIND` in `prisma/seed.ts`).
 - Center workspace (`/center`, API `/v1/center/*`, role `CENTER_ADMIN`, always scoped to `actor.centerId`):
   overview, courses (create / edit / publish / archive, groups and weekly schedules, per-lesson exceptions),
   teachers (profiles of the center, linking of registered teacher accounts), students (enrolled in the center's groups,
