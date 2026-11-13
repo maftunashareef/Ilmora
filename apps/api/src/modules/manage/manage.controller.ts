@@ -4,6 +4,7 @@ import type { Queue } from 'bullmq'
 import { z } from 'zod'
 import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { AppError } from '../../common/errors'
+import { addDays, isCalendarDate, LOCAL_TIMEZONE, zonedTimeToUtc } from '../../common/time'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import { QUEUES } from '../../infra/queue/queues'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -20,6 +21,25 @@ const body = <T>(schema: z.ZodType<T>) => new ZodValidationPipe(schema)
 const GenerateDto = z.object({ days: z.number().int().min(1).max(90).default(28) }).strict()
 /** `version`: the one the admin loaded — required, so a save never overwrites changes it has not seen (Н18). */
 const SiteDto = z.object({ data: z.unknown(), version: z.number().int().positive() }).strict()
+
+/**
+ * A bound of the audit log's period: a moment (ISO 8601 with its zone) or a calendar day in Tashkent. A day as `to`
+ * includes that day — the service reads `from` ≤ time < `to`.
+ */
+const auditMoment = (end: boolean) => z.string().trim().max(40).transform((v, ctx) => {
+  if (isCalendarDate(v)) return zonedTimeToUtc(end ? addDays(v, 1) : v, '00:00', LOCAL_TIMEZONE)
+  if (z.string().datetime({ offset: true }).safeParse(v).success) return new Date(v)
+  ctx.addIssue({ code: 'custom', message: 'Expected YYYY-MM-DD or an ISO 8601 date-time with its zone' })
+  return z.NEVER
+})
+const auditText = z.string().trim().max(200).optional()
+/** The audit log's filters (query string). `page` and `pageSize` stay lenient: anything but a positive integer is ignored (№34). */
+export const AuditQuery = z.object({
+  entityType: auditText, entityId: auditText, action: auditText, actorId: auditText, companyId: auditText,
+  from: auditMoment(false).optional(), to: auditMoment(true).optional(),
+  page: z.string().optional(), pageSize: z.string().optional(),
+})
+export type AuditQuery = z.infer<typeof AuditQuery>
 
 /** Teacher Studio and Super Admin write API. */
 @Controller()
@@ -92,7 +112,7 @@ export class ManageController {
   @Roles('PLATFORM_ADMIN') @Put('admin/users/:id/roles') roles(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('id') id: string, @Body(body(UserRolesInput)) dto: z.infer<typeof UserRolesInput>) { return this.manage.setRoles(t, a, id, dto) }
   @Roles('PLATFORM_ADMIN') @Patch('admin/users/:id') updateStudent(@CurrentTenantId() t: string, @Param('id') id: string, @Body(body(StudentAdminInput)) dto: z.infer<typeof StudentAdminInput>) { return this.manage.updateStudent(t, id, dto) }
   @Roles('PLATFORM_ADMIN') @Get('admin/review-queue') reviewQueue(@CurrentTenantId() t: string) { return this.manage.reviewQueue(t) }
-  @Roles('PLATFORM_ADMIN', 'FINANCE_ADMIN') @Get('admin/audit') audit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Query('entityType') entityType?: string, @Query('entityId') entityId?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.audits(t, a, { entityType, entityId, page: num(page), pageSize: num(pageSize) }) }
+  @Roles('PLATFORM_ADMIN', 'FINANCE_ADMIN') @Get('admin/audit') audit(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(AuditQuery)) q: AuditQuery) { return this.manage.audits(t, a, { ...q, page: num(q.page), pageSize: num(q.pageSize) }) }
   @Roles('PLATFORM_ADMIN') @Get('admin/inquiries') inquiries(@CurrentTenantId() t: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) { return this.manage.listInquiries(t, { page: num(page), pageSize: num(pageSize) }) }
   @Roles('PLATFORM_ADMIN') @Patch('admin/inquiries/:id/handle') handleInquiry(@CurrentTenantId() t: string, @Param('id') id: string) { return this.manage.toggleInquiryHandled(t, id) }
 

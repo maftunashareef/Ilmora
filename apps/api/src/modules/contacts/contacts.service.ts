@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import type { CompanyContactDto, ContactSource, DocumentLinkDto, L, PartyContactsDto, StudentContactRequestDto, StudentFullCardDto } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
-import { PrismaService } from '../../infra/prisma/prisma.service'
+import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { DOC_LINK_SECONDS, PrivateDocsService } from '../../infra/storage/private-docs.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
@@ -33,6 +33,7 @@ const companyContacts = (c: { website: string | null; address: string | null; re
  */
 /** «Пригласить» and «Заинтересованы» together, per company and 24 hours (ТЗ 9.4 «Лимиты»: ~50 a day). */
 export const CONTACT_REQUESTS_PER_DAY = 50
+const CONTACT_WINDOW_MS = 86_400_000
 /**
  * The channels that show the student by name — graduation announcements and the «Студенты» section: one request per
  * company and student over both (index "ContactRequest_named_once"), and their status shows on either card. The
@@ -53,22 +54,36 @@ export class ContactsService {
    * Called by the features that found the student (graduates, contract help) after their own visibility checks. At most
    * CONTACT_REQUESTS_PER_DAY in 24 hours per company over both channels, counted in the database (cybersecurity check
    * 9.4, Н-2): the two routes used to have 50 each, about 100 together, and a company could flood students.
+   *
+   * The audit row is written in the same transaction: no row — no request (it used to be written after the commit, and a
+   * failed write left a request nobody could trace). `stillVisible`, when given, runs in that transaction before the
+   * request is created and throws if the student may no longer be asked — the caller's check, repeated where a consent
+   * taken back in between cannot slip through.
    */
-  async request(tenantId: string, company: { id: string; name: string }, userId: string, source: ContactSource, ref: { announcementId?: string; contractHelpId?: string }) {
+  async request(tenantId: string, company: { id: string; name: string }, userId: string, source: ContactSource, ref: { announcementId?: string; contractHelpId?: string }, stillVisible?: (tx: TransactionClient) => Promise<void>) {
     let id: string
     try {
       id = await this.prisma.client.$transaction(async (tx) => {
         // One company's requests are counted one at a time: clicks sent at once cannot all see «under the limit».
         await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, `contact-requests:${company.id}`)
-        const today = await tx.contactRequest.count({ where: { companyId: company.id, createdAt: { gte: new Date(Date.now() - 86_400_000) } } })
-        if (today >= CONTACT_REQUESTS_PER_DAY) throw AppError.tooMany(`At most ${CONTACT_REQUESTS_PER_DAY} contact requests a day`, 3600)
-        return (await tx.contactRequest.create({ data: { tenantId, companyId: company.id, userId, source, announcementId: ref.announcementId ?? null, contractHelpId: ref.contractHelpId ?? null }, select: { id: true } })).id
+        const now = Date.now()
+        const inWindow = { companyId: company.id, createdAt: { gte: new Date(now - CONTACT_WINDOW_MS) } }
+        const today = await tx.contactRequest.count({ where: inWindow })
+        if (today >= CONTACT_REQUESTS_PER_DAY) {
+          // The real wait: until the request whose leaving the 24 hours brings the company under the limit again.
+          const [frees] = await tx.contactRequest.findMany({ where: inWindow, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], skip: today - CONTACT_REQUESTS_PER_DAY, take: 1, select: { createdAt: true } })
+          const seconds = frees ? Math.ceil((frees.createdAt.getTime() + CONTACT_WINDOW_MS - now) / 1000) : 0
+          throw AppError.tooMany(`At most ${CONTACT_REQUESTS_PER_DAY} contact requests a day`, Math.min(Math.max(seconds, 1), CONTACT_WINDOW_MS / 1000))
+        }
+        await stillVisible?.(tx)
+        const created = await tx.contactRequest.create({ data: { tenantId, companyId: company.id, userId, source, announcementId: ref.announcementId ?? null, contractHelpId: ref.contractHelpId ?? null }, select: { id: true } })
+        await this.audit.record({ tx, action: 'contact.request', entityType: 'ContactRequest', entityId: created.id, after: { companyId: company.id, userId, source, ...ref } })
+        return created.id
       })
     } catch (err) {
       if (isUniqueViolation(err)) throw AppError.conflict('contact_request_exists', 'Your company has already asked this student')
       throw err
     }
-    await this.audit.record({ action: 'contact.request', entityType: 'ContactRequest', entityId: id, after: { companyId: company.id, userId, source, ...ref } })
     await this.notifications.safely('contact.request', () =>
       this.notifications.notify({ tenantId, userIds: [userId], type: 'contact.request', params: { companyName: company.name, requestId: id }, dedupeKey: `contact-request:${id}` }),
     )
@@ -148,8 +163,9 @@ export class ContactsService {
       const moved = await tx.contactRequest.updateMany({ where: { id, status: 'PENDING' }, data: { status: accept ? 'ACCEPTED' : 'DECLINED', decidedAt: now, ...snapshot } })
       if (moved.count !== 1) throw AppError.conflict('contact_request_decided', 'This request is already decided')
       if (accept) await tx.studentConsent.create({ data: { tenantId, userId: actor.id, kind: 'COMPANY_CONTACTS', companyId: r.companyId, textVersion: 'contact-request', ip: ip ?? null, givenAt: now } })
+      // In the same transaction, as the request: a decision that is not in the journal is not made.
+      await this.audit.record({ tx, action: accept ? 'contact.accept' : 'contact.decline', entityType: 'ContactRequest', entityId: id, after: { companyId: r.companyId, userId: actor.id } })
     })
-    await this.audit.record({ action: accept ? 'contact.accept' : 'contact.decline', entityType: 'ContactRequest', entityId: id, after: { companyId: r.companyId } })
     const repId = r.company.representative?.id
     if (repId) {
       const type = accept ? 'contact.accepted' : 'contact.declined'

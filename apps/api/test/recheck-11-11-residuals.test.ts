@@ -25,7 +25,7 @@ import { InstitutionsService } from '../src/modules/institutions/institutions.se
 import { ManageService } from '../src/modules/manage/manage.service'
 import type { SessionsService } from '../src/modules/sessions/sessions.service'
 import type { SiteService } from '../src/modules/site/site.service'
-import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
+import { ageAudit, DB_AVAILABLE, TestContext, testEnv } from './helpers'
 import { notificationsStub } from './stubs'
 
 /** The residues of the 11.11 recheck behind «⚠️ частично» on №4, №12, №17, №19: №73, №74, №75, №76, №82, №84. */
@@ -171,7 +171,7 @@ describe.skipIf(!DB_AVAILABLE)('The 11.11 recheck residues: password reset, sand
       expect((await db.user.findUniqueOrThrow({ where: { id: owner.id } })).companyId).toBe(co.id)
       // A draft its representative really left: abandoned 14 days after the claim and the last edit (№110), not before.
       await db.company.update({ where: { id: co.id }, data: { claimedAt: new Date(Date.now() - 15 * 86_400_000) } })
-      await db.auditEvent.updateMany({ where: { entityType: 'Company', entityId: co.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000) } })
+      await ageAudit(ctx.prisma, { entityType: 'Company', entityId: co.id }, new Date(Date.now() - 15 * 86_400_000))
       await companies.create(t.tenantId, again as never, { stir: '409999993', name: 'Yangi' })
       expect((await db.user.findUniqueOrThrow({ where: { id: again.id } })).companyId).toBe(co.id)
     })

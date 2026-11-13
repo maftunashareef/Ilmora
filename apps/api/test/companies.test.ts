@@ -15,7 +15,7 @@ import { CertificateUploadInput, CompanyPatch } from '../src/modules/companies/c
 import { CompaniesService } from '../src/modules/companies/companies.service'
 import { CompanyReviewService } from '../src/modules/companies/company-review.service'
 import type { NotifyInput, NotificationsService } from '../src/modules/notifications/notifications.service'
-import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
+import { ageAudit, DB_AVAILABLE, TestContext, testEnv } from './helpers'
 import { mfaStub } from './stubs'
 
 const PDF = Buffer.from('%PDF-1.7\n%âãÏÓ\n')
@@ -170,7 +170,7 @@ describe.skipIf(!DB_AVAILABLE)('Company profile and its review (ТЗ 4.3)', () =
       await expect(service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })).rejects.toMatchObject({ code: 'company_registered' })
       // Abandoned counts from the latest of creation, claim, review (№83) and the last edit (№110): all aged.
       await db.company.update({ where: { id: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000), claimedAt: new Date(Date.now() - 15 * 86_400_000) } })
-      await db.auditEvent.updateMany({ where: { entityType: 'Company', entityId: first.id }, data: { createdAt: new Date(Date.now() - 15 * 86_400_000) } })
+      await ageAudit(ctx.prisma, { entityType: 'Company', entityId: first.id }, new Date(Date.now() - 15 * 86_400_000))
       sent.length = 0
       const taken = await service.create(s.tenantId, real, { stir: '305555555', name: 'Haqiqiy' })
       expect(taken).toMatchObject({ id: first.id, name: 'Haqiqiy', status: 'DRAFT', about: null, industries: [] })
