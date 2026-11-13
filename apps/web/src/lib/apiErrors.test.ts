@@ -70,4 +70,15 @@ describe('API error texts', () => {
     expect(apiErrorText(new ApiError(429, 'rate_limited', 'Too many'), 'ru')).toBe('Слишком много попыток. Попробуйте позже.')
     expect(retryMinutes(new ApiError(500, 'internal_error', 'x', { retryAfterSeconds: 60 }))).toBeNull()
   })
+
+  it('say a long wait (a daily limit) in hours, rounded up; up to 90 minutes — in minutes', () => {
+    const wait = (seconds: number, lang: 'uz' | 'ru' | 'en' = 'ru') => apiErrorText(new ApiError(429, 'rate_limited', 'Too many', { retryAfterSeconds: seconds }), lang)
+    expect(wait(60)).toBe('Слишком много попыток. Повторите через 1 мин.')
+    expect(wait(90 * 60)).toBe('Слишком много попыток. Повторите через 90 мин.')
+    expect(wait(90 * 60 + 1)).toBe('Слишком много попыток. Повторите через 2 ч.')
+    expect(wait(23 * 3600)).toBe('Слишком много попыток. Повторите через 23 ч.')
+    expect(wait(23 * 3600 - 600)).toBe('Слишком много попыток. Повторите через 23 ч.')
+    expect(wait(23 * 3600, 'uz')).toBe('Juda köp uriniş. 23 soatdan keyin qayta urinib köring.')
+    expect(wait(23 * 3600, 'en')).toBe('Too many attempts. Try again in 23 h.')
+  })
 })

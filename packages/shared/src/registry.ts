@@ -929,6 +929,8 @@ export const VACANCY_BROADCASTS_PER_DAY = 20
 export const BROADCAST_COURSE_MAX = 11
 /** Cards per page in the company's «Студенты» section. */
 export const STUDENTS_PAGE_SIZE = 20
+/** Student cards shown to one company in 24 hours in its «Студенты» section, over all its accounts; a card shown twice counts twice. */
+export const STUDENT_CARDS_PER_DAY = 1000
 
 /** A vacancy as a student sees it (approved companies, open, deadline not passed). */
 export interface VacancyDto {

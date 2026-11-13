@@ -207,10 +207,17 @@ export function retryMinutes(err: unknown): number | null {
   return typeof s === 'number' && Number.isFinite(s) && s > 0 ? Math.max(1, Math.ceil(s / 60)) : null
 }
 
-/** «Слишком много попыток. Повторите через N мин.» — or «Попробуйте позже» when the API gave no term. */
+/** A wait up to this many minutes is said in minutes; a longer one (the daily limits) in hours, rounded up. */
+const RETRY_MINUTES_MAX = 90
+
+/**
+ * «Слишком много попыток. Повторите через N мин.» — «через N ч.» when the wait is over RETRY_MINUTES_MAX minutes
+ * (a daily limit would read «через 1380 мин.») — or «Попробуйте позже» when the API gave no term.
+ */
 export function tooManyText(err: unknown, lang: Lang): string {
   const m = retryMinutes(err)
-  return m ? translate(lang, 'apiError.retryIn', { n: m }) : translate(lang, 'auth.err.tooMany')
+  if (!m) return translate(lang, 'auth.err.tooMany')
+  return m > RETRY_MINUTES_MAX ? translate(lang, 'apiError.retryInHours', { n: Math.ceil(m / 60) }) : translate(lang, 'apiError.retryIn', { n: m })
 }
 
 /**
