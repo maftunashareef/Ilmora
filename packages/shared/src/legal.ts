@@ -15,8 +15,10 @@ export const OFFER_STATUS: 'draft' | 'final' = 'draft'
 export const OFFER_TEXT: Record<Lang, LegalBlock[] | null> = { uz: OFFER_UZ, ru: OFFER_RU, en: null }
 
 /**
- * Operator details. Legal name, INN and e-mail are as in section 14 of the offer; the phone, the address and the
- * copyright name are the owner's current ones (2026-10-28) — the offer document still lists the earlier phone and address.
+ * Operator details. Legal name, INN and e-mail are as in section 14 of the offer; the phone (2026-11-13), the address
+ * and the copyright name (2026-10-28) are the owner's current ones — the offer document still lists the earlier phone
+ * and address. The Uzbek address is shown in the footer, so it is written in the site's alphabet (Ş, Ö) like the
+ * rest of the interface, not in the official spelling the offer text keeps.
  */
 export const OPERATOR: {
   legalName: L
@@ -32,11 +34,11 @@ export const OPERATOR: {
   brandOwner: 'Anjir group LLC',
   inn: '312525684',
   address: {
-    uz: 'Shayxontohur tumani, Qoratosh 106',
+    uz: 'Şayxontohur tumani, Qoratoş 106',
     ru: 'Шайхантахурский район, Каратош 106',
     en: 'Shaykhontohur district, Qoratosh 106',
   },
-  phone: '+998 77 188 48 80',
+  phone: '+998 91 181 30 77',
   email: 'infoangirgroup@gmail.com',
   website: 'https://ilmoraa.uz',
 }
