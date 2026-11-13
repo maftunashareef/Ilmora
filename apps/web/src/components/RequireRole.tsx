@@ -1,10 +1,11 @@
 'use client'
 import { useEffect, type ReactNode, useMemo } from 'react'
 import { useT } from '@/i18n/useT'
-import { useLocation, useNavigate } from '@/lib/router'
+import { useLocation, useNavigate } from '@/lib/routerHooks'
 import { useStore } from '@/store/useStore'
 import type { Role } from '@/types'
-import { ConsentGate, needsConsent } from './ConsentGate'
+import { ConsentGate } from './ConsentGate'
+import { needsConsent } from './consent'
 import { PasswordChangeGate } from './PasswordChange'
 import { Card, Icon, LinkButton } from './ui'
 

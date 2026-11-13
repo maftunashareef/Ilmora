@@ -9,7 +9,8 @@ import { subscribeToSession } from '../../services/attendance'
 import { useStore } from '../../store/useStore'
 import type { Course, Group, LessonSession, Student } from '../../types'
 import { QrCode } from '../QrCode'
-import { Badge, Button, cx, Eyebrow, Field, Icon, Input, Notice, Select } from '../ui'
+import { Badge, Button, Eyebrow, Field, Icon, Input, Notice, Select } from '../ui'
+import { cx } from '../ui/helpers'
 
 type Record_ = { studentId: string; status?: string; method: string; checkedInAt: string }
 

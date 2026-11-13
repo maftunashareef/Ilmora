@@ -1,21 +1,11 @@
 'use client'
 import { useState } from 'react'
-import { OFFER_VERSION } from '@ilmora/shared'
 import { useT } from '@/i18n/useT'
 import { apiErrorText } from '@/lib/apiErrors'
 import { Link } from '@/lib/router'
-import { useStore, type AuthUser } from '@/store/useStore'
+import { useStore } from '@/store/useStore'
+import { consentComplete, EMPTY_CONSENT, type ConsentState } from './consent'
 import { Button, Card, Icon, Notice } from './ui'
-
-export interface ConsentState {
-  acceptOffer: boolean
-  consentPersonalData: boolean
-}
-export const EMPTY_CONSENT: ConsentState = { acceptOffer: false, consentPersonalData: false }
-export const consentComplete = (c: ConsentState) => c.acceptOffer && c.consentPersonalData
-
-/** An account must have accepted the current offer edition and given personal-data consent before using a workspace. */
-export const needsConsent = (u: AuthUser | null | undefined) => !!u && (!u.offerAcceptedAt || u.offerVersion !== OFFER_VERSION || !u.consentAt)
 
 /** Two required marks: the offer and personal-data consent (section 9.1 of the offer keeps them separate). */
 export function ConsentFields({ value, onChange, invalid }: { value: ConsentState; onChange: (v: ConsentState) => void; invalid?: boolean }) {

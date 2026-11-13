@@ -3,23 +3,16 @@ import { CERTIFICATE_KINDS, courseFormat, discountFromDraft, discountToDraft, em
 import { useT } from '../../i18n/useT'
 import { emptyL } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
-import { enrolledCount, validateCapacity } from '../../lib/enrollment'
-import type { Course, Group, L, Level, Student, Teacher } from '../../types'
-import { finalizePublish, PublishFields, type PublishDraft, type PublishMode } from '../PublishFields'
+import { enrolledCount, groupsCapacityError, validateCapacity } from '../../lib/enrollment'
+import type { Course, Group, L, Level, Teacher } from '../../types'
+import { PublishFields, type PublishDraft, type PublishMode } from '../PublishFields'
+import { finalizePublish } from '../publish'
 import { DiscountFields } from './DiscountFields'
-import { Badge, Button, cx, Field, Icon, Input, LField, Notice, Segmented, Select, Textarea } from '../ui'
+import { Badge, Button, Field, Icon, Input, LField, Notice, Segmented, Select, Textarea } from '../ui'
+import { cx } from '../ui/helpers'
 import { StorageUploadField } from '../StorageUploadField'
 
 const DAYS = [0, 1, 2, 3, 4, 5, 6]
-
-/** First group whose capacity is invalid or below its current enrollment, if any. */
-export const groupsCapacityError = (groups: Group[], students: Student[]) => {
-  for (const g of groups) {
-    const check = validateCapacity(g.capacity, enrolledCount(students, g.id))
-    if (!check.ok) return { group: g, check }
-  }
-  return null
-}
 
 export function GroupsEditor({ groups, onChange, courseId, locked }: { groups: Group[]; onChange: (g: Group[]) => void; courseId: string; locked?: boolean }) {
   const { t } = useT()

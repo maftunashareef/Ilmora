@@ -5,7 +5,8 @@ import { Badge, Button, Icon, LinkButton, Notice, Tabs } from '../../components/
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
-import { Link, useParams, useSearchParams } from '../../lib/router'
+import { Link } from '../../lib/router'
+import { useParams, useSearchParams } from '../../lib/routerHooks'
 import { siteHref } from '../../lib/siteUrl'
 import { useStore } from '../../store/useStore'
 import { CenterAttendance } from '../center/CenterAttendance'
@@ -16,7 +17,7 @@ import { CenterStudents } from '../center/CenterStudents'
 import { CenterTeachers } from '../center/CenterTeachers'
 import { CenterScopeContext, type CenterOverview as Overview, type CenterScope, type CenterSection } from '../center/centerApi'
 import { CenterAdminsModal } from './CenterAdmins'
-import { centerStatusTone } from './PendingCenters'
+import { centerStatusTone } from './adminCenters'
 
 const SECTIONS: CenterSection[] = ['overview', 'courses', 'teachers', 'attendance', 'students', 'settings']
 const LABEL = { overview: 'dash.overview', courses: 'center.courses', teachers: 'center.teachers', attendance: 'center.attendance', students: 'center.students', settings: 'center.settings' } as const

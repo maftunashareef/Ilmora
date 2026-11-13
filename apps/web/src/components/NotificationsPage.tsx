@@ -5,10 +5,11 @@ import { useT } from '../i18n/useT'
 import { api } from '../lib/api'
 import { formatDate, formatTime } from '../lib/format'
 import { notificationHref, type DashboardRole } from '../lib/notificationLinks'
-import { useNavigate } from '../lib/router'
+import { useNavigate } from '../lib/routerHooks'
 import { useStore } from '../store/useStore'
-import { notificationText } from './NotificationBell'
-import { Button, cx, EmptyState, Icon, Notice, PageTitle, Tabs } from './ui'
+import { notificationText } from './notificationText'
+import { Button, EmptyState, Icon, Notice, PageTitle, Tabs } from './ui'
+import { cx } from './ui/helpers'
 
 const PAGE = 50
 

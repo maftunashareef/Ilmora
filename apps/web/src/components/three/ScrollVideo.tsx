@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useT } from '../../i18n/useT'
 import { clamp } from '../../lib/format'
-import { cx, Icon } from '../ui'
+import { Icon } from '../ui'
+import { cx } from '../ui/helpers'
 import { useInView, useReducedMotion, useWebGL } from './useMedia'
 
 const FurnitureAssembly = lazy(() => import('./FurnitureAssembly'))

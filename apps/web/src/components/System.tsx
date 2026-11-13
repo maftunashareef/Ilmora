@@ -3,7 +3,8 @@ import { useEffect } from 'react'
 import { Link } from '@/lib/router'
 import { applyTheme } from '../lib/theme'
 import { useStore } from '../store/useStore'
-import { cx, Icon } from './ui'
+import { Icon } from './ui'
+import { cx } from './ui/helpers'
 
 /** Applies Super Admin theme + language to the document. */
 export function ThemeApplier() {

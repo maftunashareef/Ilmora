@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { billedSom } from '@ilmora/shared'
-import { Link, useNavigate } from '@/lib/router'
+import { Link } from '@/lib/router'
+import { useNavigate } from '@/lib/routerHooks'
 import { FormatBadge, ScheduleChips } from '../../components/course/CourseCard'
 import { Badge, Button, Card, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
 import type { TKey } from '../../i18n/translations'

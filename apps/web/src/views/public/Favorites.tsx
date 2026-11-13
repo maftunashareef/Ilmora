@@ -3,7 +3,7 @@ import { isOnlineCourse, isSafeExternalUrl, MAX_CART_COURSES } from '@ilmora/sha
 import { CourseCard } from '../../components/course/CourseCard'
 import { Button, EmptyState, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
-import { useNavigate } from '../../lib/router'
+import { useNavigate } from '../../lib/routerHooks'
 import { useCanSaveCourses, useCurrentStudent, useHydrated } from '../../store/selectors'
 import { useStore, type BuilderResult } from '../../store/useStore'
 import type { Course } from '../../types'

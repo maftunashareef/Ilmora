@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { sampleData } from '@ilmora/shared'
-import { localizePath } from '../lib/router'
+import { localizePath } from '../lib/routerHooks'
 import type { InitialData } from './useStore'
 import { createIlmoraStore } from './useStore'
 

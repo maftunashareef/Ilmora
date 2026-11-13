@@ -5,7 +5,8 @@ import { useT } from '../../i18n/useT'
 import { api } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDayMonth, formatTime } from '../../lib/format'
-import { Link, useNavigate, useParams, useSearchParams } from '../../lib/router'
+import { Link } from '../../lib/router'
+import { useNavigate, useParams, useSearchParams } from '../../lib/routerHooks'
 import { type CheckInOutcome, useStore } from '../../store/useStore'
 
 interface LinkInfo { session: { id: string; date: string; startsAt: string; endsAt: string; status: string; attendanceOpen: boolean }; courseTitle: Record<string, string>; groupName: string }

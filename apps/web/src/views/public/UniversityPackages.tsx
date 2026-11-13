@@ -1,12 +1,14 @@
 import { groupByUniversity, isPreparationTrack, isUniversityPreset, universityName, presetCartPlan, presetCourses, presetNeedsConfirmation, presetPublishability, presetReadiness, presetTotal, universityOf } from '@ilmora/shared'
-import { useSearchParams } from '@/lib/router'
+import { useSearchParams } from '@/lib/routerHooks'
 import { FormatBadge, PriceNow, ScheduleChips } from '../../components/course/CourseCard'
-import { Badge, Button, Card, cx, Eyebrow, Icon } from '../../components/ui'
+import { Badge, Button, Card, Eyebrow, Icon } from '../../components/ui'
+import { cx } from '../../components/ui/helpers'
 import { useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 import type { Course, Preset, University } from '../../types'
-import { placeName, UniversityLogo } from './Universities'
+import { UniversityLogo } from './Universities'
+import { placeName } from './placeName'
 
 /**
  * One package: its program, required subjects, included courses, total price, official source and the add-to-cart

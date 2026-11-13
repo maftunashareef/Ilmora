@@ -4,7 +4,8 @@ import { registrySearchKey, type DirectionChoice, type DirectionDto } from '@ilm
 import { useT } from '@/i18n/useT'
 import { apiErrorText } from '../lib/apiErrors'
 import { registryApi, useIndustries, useSuggestions } from '../services/registry'
-import { Button, cx, Icon, Input } from './ui'
+import { Button, Icon, Input } from './ui'
+import { cx } from './ui/helpers'
 
 /**
  * The direction field used everywhere (ТЗ 3.2), on the API's shared directory: suggestions for what is typed (from two

@@ -1,7 +1,8 @@
 import { useT } from '../i18n/useT'
 import { useStore } from '../store/useStore'
 import type { Audience, Visibility } from '../types'
-import { Badge, cx, Icon, Notice } from './ui'
+import { Badge, Icon, Notice } from './ui'
+import { cx } from './ui/helpers'
 
 /**
  * Explicit Public/Private choice with an audience selector for private content.

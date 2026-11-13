@@ -6,7 +6,7 @@ import { api } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate, formatSom } from '../../lib/format'
 import { pollPayment, type PaymentState, type PollStop } from '../../lib/paymentPoll'
-import { useNavigate, useParams } from '../../lib/router'
+import { useNavigate, useParams } from '../../lib/routerHooks'
 import { useStore } from '../../store/useStore'
 
 interface PaymentStatus { id: string; state: PaymentState; provider: string | null; amountMinor: string; currency: string; paidAt: string | null; periodStart: string; periodEnd: string; receiptNumber: string | null }

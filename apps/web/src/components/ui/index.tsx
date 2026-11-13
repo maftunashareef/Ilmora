@@ -1,10 +1,9 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { Link } from '@/lib/router'
 import { useT } from '../../i18n/useT'
-import type { L, Lang } from '../../types'
+import type { L } from '../../types'
 import { LANGS } from '../../i18n/translations'
-
-export const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ')
+import { cx } from './helpers'
 
 // ─── Button ──────────────────────────────────────────────────────────────────
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'champagne'
@@ -425,8 +424,6 @@ export function Avatar({
     </span>
   )
 }
-
-export const langName = (l: Lang) => LANGS.find((x) => x.code === l)?.label ?? l
 
 export function Icon({ name, className = 'h-4 w-4' }: { name: string; className?: string }) {
   const paths: Record<string, ReactNode> = {

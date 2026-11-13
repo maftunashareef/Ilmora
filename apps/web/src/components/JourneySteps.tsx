@@ -8,7 +8,8 @@ import type { Course, Package } from '../types'
 import { CoursePrice, FormatBadge, PriceNow, ScheduleChips, TotalPrice } from './course/CourseCard'
 import { SaleRibbon } from './course/DiscountShowcase'
 import { getCoursePhotoUrl } from './course/courseImage'
-import { cx, Icon, LinkButton, SectionHeading } from './ui'
+import { Icon, LinkButton, SectionHeading } from './ui'
+import { cx } from './ui/helpers'
 
 /** The six steps from the catalog to the first lesson; the texts are in the dictionary (journey.s1 … journey.s6). */
 const STEPS = [

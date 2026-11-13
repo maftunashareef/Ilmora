@@ -1,14 +1,17 @@
 import { isPreparationTrack, isUniversityListed, presetCourses, presetNeedsConfirmation, universityName, presetDurationMonths, presetsForDirection, presetTotal, priceTotals, universityDirections } from '@ilmora/shared'
 import Image from 'next/image'
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { Link, useParams } from '@/lib/router'
+import { Link } from '@/lib/router'
+import { useParams } from '@/lib/routerHooks'
 import { NotFound } from '../../components/AccessGate'
 import { CountUp } from '../../components/motion'
 import { CoursePrice, PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
-import { Badge, Button, cx, Eyebrow, Icon, LinkButton, PageTitle } from '../../components/ui'
+import { Badge, Button, Eyebrow, Icon, LinkButton, PageTitle } from '../../components/ui'
+import { cx } from '../../components/ui/helpers'
 import { useT } from '../../i18n/useT'
 import { dict, type TKey } from '../../i18n/translations'
 import { formatSom } from '../../lib/format'
+import { placeName } from './placeName'
 import { balancedLogoSize } from '../../lib/logoSize'
 import { useCurrentStudent } from '../../store/selectors'
 import { usePresetCart } from '../../store/usePresetCart'
@@ -63,12 +66,6 @@ function useListedUniversities(which: 'universities' | 'tracks' | 'all' = 'unive
 const lowestPrice = (presets: Preset[], courses: Course[]): number => {
   const prices = presets.map((p) => presetTotal(presetCourses(p, courses, []))).filter((n) => n > 0)
   return prices.length ? Math.min(...prices) : 0
-}
-
-/** A city or country in the reader's language (the stored values are English; unknown ones are shown as stored). */
-export const placeName = (t: (key: TKey) => string, value?: string): string => {
-  const key = `uni.place.${value}`
-  return value ? (key in dict ? t(key as TKey) : value) : ''
 }
 
 /** "City, Country" in the reader's language. */
