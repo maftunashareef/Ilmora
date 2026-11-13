@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
-import { type Lang, type MfaChallengeDto, OFFER_VERSION, formatUzPhone, normalizeUzPhone } from '@ilmora/shared'
+import { type Lang, type MfaChallengeDto, OFFER_VERSION, formatUzPhone, normalizeUzPhone, type RegistryInstitutionType } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { randomToken } from '../../common/crypto'
 import { AppError, uniqueConstraintOf } from '../../common/errors'
@@ -122,7 +122,7 @@ export class AccountService {
    */
   async register(
     tenantId: string,
-    input: { role: SelfServiceRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; jobTitle?: string; lang?: 'uz' | 'ru' | 'en' },
+    input: { role: SelfServiceRole; login: string; password: string; displayName?: string; phone?: string; centerName?: string; centerKind?: RegistryInstitutionType; jobTitle?: string; lang?: 'uz' | 'ru' | 'en' },
     meta: SessionMeta,
     attempt = 1,
   ): Promise<LoginResult> {
@@ -186,7 +186,7 @@ export class AccountService {
         if (input.role === 'CENTER') {
           const slug = await this.freeCenterSlug(tx, tenantId, slugify(centerName))
           const center = await tx.center.create({
-            data: { tenantId, slug, name: centerName, district: EMPTY_L, description: EMPTY_L, status: 'PENDING', ownerUserId: created.id, phoneE164: contactPhone, checkInCode: randomToken(16), checkInCodeRotatedAt: now },
+            data: { tenantId, slug, name: centerName, kind: input.centerKind ?? 'TRAINING_CENTER', district: EMPTY_L, description: EMPTY_L, status: 'PENDING', ownerUserId: created.id, phoneE164: contactPhone, checkInCode: randomToken(16), checkInCodeRotatedAt: now },
           })
           return tx.user.update({ where: { id: created.id }, data: { centerId: center.id }, include: USER_INCLUDE })
         }
