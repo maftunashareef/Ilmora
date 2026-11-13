@@ -38,7 +38,7 @@ import { useStore, type BuilderResult } from '../../store/useStore'
 import type { Course, Section } from '../../types'
 
 /**
- * "My set" (Mening to’plamim): six questions, then courses and a ready set from the catalog. The suggestions come from the
+ * "My set" (Mening töplamim): six questions, then courses and a ready set from the catalog. The suggestions come from the
  * rules in @ilmora/shared (recommendCourses); nothing here is presented as AI. Adding to the cart goes through the same
  * store actions as the builder, so package limits, schedule clashes and seats are checked exactly as they are there.
  */
