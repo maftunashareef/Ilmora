@@ -164,8 +164,8 @@ APPROVED → правка названия / СТИР / типа / собств�
   стипендии у `JOB` нет (`Vacancy_pay_by_kind_check`); зарплата > 0, «до» не меньше «от» и без «от» не бывает
   (`Vacancy_salary_check`). У `JOB` ещё `schedule` — график (`FULL_TIME` / `PART_TIME` / `SHIFT` / `FLEXIBLE`; на месте
   или удалённо — это `format`) и `experience` — требуемый опыт (`NONE` / `UP_TO_1` / `ONE_TO_3` / `OVER_3`); у практики
-  и стажировки их нет (`Vacancy_job_terms_check`, миграция `20261122000000`). Для `JOB` оба обязательны в API; база
-  станет требовать их, когда код начнёт их заполнять (отдельной миграцией). `VacancyApplication` — отклик: `note`, `status`
+  и стажировки их нет; у `JOB` оба обязательны (`Vacancy_job_terms_check`, миграции `20261122000000` и
+  `20261124000000`). `VacancyApplication` — отклик: `note`, `status`
   (`NEW` → `VIEWED` → `INVITED` / `REJECTED`), копия контактов на момент отклика `sharedName`, `sharedPhone`,
   `sharedEmail` (те же правила, что у `ContactRequest`).
 - `VacancyBroadcast` — рассылка вакансии учреждением своим подтверждённым студентам (ТЗ «Студенты у компании»,
