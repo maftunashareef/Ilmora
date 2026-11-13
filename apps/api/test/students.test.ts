@@ -81,7 +81,7 @@ describe.skipIf(!DB_AVAILABLE)('Student questionnaire and confirmation of study 
     await TenantContext.forTenant(s.tenantId, async () => {
       const me = await s.student()
       const signInPhoneBefore = (await ctx.prisma.client.user.findUniqueOrThrow({ where: { id: me.id } })).phoneE164
-      expect(await service.questionnaire(me)).toEqual({ questionnaire: null, complete: false, studyConfirmed: null })
+      expect(await service.questionnaire(me)).toEqual({ questionnaire: null, complete: false, studyConfirmed: null, parentConsentOnRecord: false })
       sent.length = 0
       const state = await service.save(s.tenantId, me, s.studying() as never, '10.0.0.1')
       expect(state).toMatchObject({ complete: true, studyConfirmed: 'PENDING' })
