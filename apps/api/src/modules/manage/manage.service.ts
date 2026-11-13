@@ -743,6 +743,12 @@ export class ManageService {
       // or refused (giveConsent reads the account under the same lock). Disabling an account (isActive) leaves them as they are.
       await lockConsents(tx, userId)
       await tx.studentConsent.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } })
+      // The copies of the contacts the student opened are personal data and go with the consents, as on «Отозвать доступ»
+      // (ContactsService.revoke): opened requests become WITHDRAWN and lose the copy. Any copy left on another row is
+      // erased too. Applications to vacancies keep their rows (the company's history of answers) but lose the copy.
+      await tx.contactRequest.updateMany({ where: { userId, status: 'ACCEPTED' }, data: { status: 'WITHDRAWN', decidedAt: now, sharedName: null, sharedPhone: null, sharedEmail: null } })
+      await tx.contactRequest.updateMany({ where: { userId, OR: [{ sharedName: { not: null } }, { sharedPhone: { not: null } }, { sharedEmail: { not: null } }] }, data: { sharedName: null, sharedPhone: null, sharedEmail: null } })
+      await tx.vacancyApplication.updateMany({ where: { userId, OR: [{ sharedName: { not: null } }, { sharedPhone: { not: null } }, { sharedEmail: { not: null } }] }, data: { sharedName: null, sharedPhone: null, sharedEmail: null } })
       await tx.user.update({ where: { id: userId }, data: { isActive: false, deletedAt: now, login: null, phoneE164: null, googleId: null, roles: [], centerId: null, institutionId: null, companyId: null } })
       await this.audit.record({ tx, tenantId, action: 'user.delete', entityType: 'User', entityId: userId, before: { login: user.login, roles: user.roles, centerId: user.centerId, institutionId: user.institutionId, companyId: user.companyId }, reason })
     })

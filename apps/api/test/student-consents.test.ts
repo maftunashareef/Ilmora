@@ -316,6 +316,11 @@ describe.skipIf(!DB_AVAILABLE)('Student consents: «дать согласие» 
       const before = await s.db.studentConsent.findMany({ where: { userId: me.id }, orderBy: { id: 'asc' } })
       expect(before.filter((r) => r.revokedAt === null).map((r) => r.kind).sort()).toEqual(['COMPANY_CONTACTS', 'GRADUATE_CARD', 'INDUSTRY_CARD'])
       const revokedEarlier = before.find((r) => r.kind === 'CONTRACT_HELP_CARD')!
+      // The company holds a copy of the contacts and opens the contact card; a second company's request still waits.
+      await section.request(s.tenantId, s.dataCo.actor, s.inst.id, (await s.cards(s.dataCo)).find((c) => c.name === 'Aziz Karimov')!.cardId)
+      const accepted = await s.db.contactRequest.findFirstOrThrow({ where: { userId: me.id, companyId: s.softCo.row.id } })
+      expect(accepted).toMatchObject({ status: 'ACCEPTED', sharedName: 'Aziz Karimov', sharedPhone: '+998935554433', sharedEmail: 'aziz@mail.uz' })
+      expect((await contacts.companyContact(s.softCo.actor, accepted.id)).student.full).toMatchObject({ phone: '+998935554433' })
 
       await manage.deleteUser(s.tenantId, { id: 'admin', roles: ['PLATFORM_ADMIN'], centerId: null }, me.id, 'test')
       const after = await s.db.studentConsent.findMany({ where: { userId: me.id }, orderBy: { id: 'asc' } })
@@ -325,6 +330,12 @@ describe.skipIf(!DB_AVAILABLE)('Student consents: «дать согласие» 
       expect(after.find((r) => r.id === revokedEarlier.id)!.revokedAt).toEqual(revokedEarlier.revokedAt)
       const [{ deletedAt }] = (await TenantContext.system(() => s.db.user.findMany({ where: { id: { in: [me.id] } }, select: { deletedAt: true }, includeDeleted: true } as never))) as unknown as { deletedAt: Date }[]
       expect(after.filter((r) => r.id !== revokedEarlier.id).every((r) => r.revokedAt!.getTime() === deletedAt.getTime())).toBe(true)
+      // The copy of the contacts goes with the consent, as on «Отозвать доступ»: the opened request is withdrawn and
+      // empty, the company gets neither the list entry nor the contact card; the waiting request is left as it was.
+      expect(await s.db.contactRequest.findUniqueOrThrow({ where: { id: accepted.id } })).toMatchObject({ status: 'WITHDRAWN', sharedName: null, sharedPhone: null, sharedEmail: null })
+      expect(await s.db.contactRequest.findFirstOrThrow({ where: { userId: me.id, companyId: s.dataCo.row.id } })).toMatchObject({ status: 'PENDING', sharedName: null, sharedPhone: null, sharedEmail: null })
+      expect(await contacts.companyList(s.softCo.actor)).toEqual([])
+      await expect(contacts.companyContact(s.softCo.actor, accepted.id)).rejects.toMatchObject({ code: 'not_found', status: 404 })
       // Another student's consents are not touched; the deleted account gives no consent any more.
       expect(await s.inForce(other)).toBe(1)
       expect((await s.cards()).map((c) => c.name)).toEqual(['Bobur Aliyev'])
