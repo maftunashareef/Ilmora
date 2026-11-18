@@ -72,8 +72,10 @@ export function PriceNow({ course, withCurrency }: { course: Course; withCurrenc
   )
 }
 
-export function ScheduleChips({ group, compact }: { group: Group; compact?: boolean }) {
+/** A group's days and time; nothing for a course that has no group yet (a published course may have none). */
+export function ScheduleChips({ group, compact }: { group: Group | undefined; compact?: boolean }) {
   const { t } = useT()
+  if (!group) return null
   return (
     <span className={cx('inline-flex flex-wrap items-center gap-1.5', compact ? 'text-[11px]' : 'text-xs')}>
       <span className="inline-flex gap-0.5">
