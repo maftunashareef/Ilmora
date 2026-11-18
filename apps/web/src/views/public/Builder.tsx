@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
-import { countLabel, foldForSearch, isOnlineCourse, isPreparationTrack, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals, universityDirections, universityName } from '@ilmora/shared'
+import { countLabel, foldForSearch, isPreparationTrack, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useNavigate, useSearchParams } from '@/lib/routerHooks'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
@@ -11,6 +11,7 @@ import { isPublicListed } from '../../lib/access'
 import { UniversityPackagesSection } from './UniversityPackages'
 import { UniversityLogo } from './Universities'
 import { arrangeCartByPackage } from '../../lib/cartPackages'
+import { subscribableCourses } from '../../lib/builderCourses'
 import { formatSom } from '../../lib/format'
 import { usePresetCart } from '../../store/usePresetCart'
 import { CourseFinderPrompt } from './CourseFinder'
@@ -121,8 +122,8 @@ export function BuilderPage() {
   const selectedGroups = useMemo(() => resolveGroups(student?.builder.groupIds ?? [], courses), [student, courses])
   const conflicts = findConflicts(selectedGroups)
   const totals = priceTotals(selectedGroups.map((g) => courses.find((x) => x.id === g.courseId)).filter((c): c is Course => !!c))
-  // Only offline courses (groups with seats and a schedule) can be put in a subscription; online courses open on the provider's site.
-  const publicCourses = courses.filter((c) => isPublicListed(c) && !isOnlineCourse(c))
+  // Only offline courses with a group (seats and a schedule) can be put in a subscription; online courses open on the provider's site.
+  const publicCourses = subscribableCourses(courses)
   const list = publicCourses.filter((c) => (!cat || c.categoryId === cat) && (!q || foldForSearch(`${tr(c.title)} ${teachers.find((x) => x.id === c.teacherId)?.name ?? ''}`).includes(foldForSearch(q.trim()))))
   const selectedCourseIds = new Set(selectedGroups.map((g) => g.courseId))
   // Without a package this is a custom selection: any number of courses from one up to the cart limit.
@@ -267,7 +268,7 @@ export function BuilderPage() {
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-charcoal/55">
                       <span>{center?.name}</span>
-                      {g ? <ScheduleChips group={g} compact /> : <ScheduleChips group={c.groups[0]} compact />}
+                      <ScheduleChips group={g ?? c.groups[0]} compact />
                       {c.groups.length > 1 && !g && <span className="text-charcoal/40">+{countLabel(lang, c.groups.length - 1, NOUNS.group)}</span>}
                     </div>
                   </div>
