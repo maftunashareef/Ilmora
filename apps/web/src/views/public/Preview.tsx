@@ -1,12 +1,15 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { hoursLabel, isPreparationTrack, MAX_CART_COURSES, PAYMENT_HOLD_HOURS, priceTotals, universityDirections, universityName } from '@ilmora/shared'
+import { ConsentFields } from '../../components/ConsentGate'
+import { consentComplete, EMPTY_CONSENT, needsConsent, type ConsentState } from '../../components/consent'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { Badge, Button, Card, EmptyState, Eyebrow, Icon, LinkButton, Notice, PageTitle } from '../../components/ui'
 import { cx } from '../../components/ui/helpers'
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { arrangeCartByPackage } from '../../lib/cartPackages'
 import { formatSom } from '../../lib/format'
 import { UniversityLogo } from './Universities'
@@ -32,6 +35,7 @@ export function PreviewPage() {
   const students = useStore((s) => s.students)
   const setBuilderGrant = useStore((s) => s.setBuilderGrant)
   const checkout = useStore((s) => s.checkout)
+  const giveConsent = useStore((s) => s.giveConsent)
   const notify = useStore((s) => s.notify)
   const cartBundles = useStore((s) => s.cartBundles)
   const presets = useStore((s) => s.site.presets)
@@ -39,6 +43,13 @@ export function PreviewPage() {
   const [providers, setProviders] = useState<Record<PaymentProviderId, boolean> | null>(null)
   const provider: PaymentProviderId = 'PAYME'
   const [busy, setBusy] = useState(false)
+  // The offer and personal-data consent, asked for right here when the account has not accepted the current edition
+  // (an older edition, an account opened by SMS or Google, or made by a center): the server refuses the checkout without
+  // them (403 offer_required), and the consent screen of the workspaces is not on this public page.
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT)
+  const [consentInvalid, setConsentInvalid] = useState(false)
+  const [consentError, setConsentError] = useState<string | null>(null)
+  const [offerRefused, setOfferRefused] = useState(false)
 
   useEffect(() => {
     api<Record<PaymentProviderId, boolean>>('/payments/providers', { auth: false })
@@ -81,8 +92,22 @@ export function PreviewPage() {
     )
   }
 
+  const askConsent = offerRefused || needsConsent(auth.user)
+
   const onPay = async () => {
+    setConsentError(null)
+    if (askConsent && !consentComplete(consent)) { setConsentInvalid(true); return }
     setBusy(true)
+    if (askConsent) {
+      try {
+        await giveConsent({ acceptOffer: true, consentPersonalData: true })
+        setOfferRefused(false)
+      } catch (err) {
+        setConsentError(apiErrorText(err, lang))
+        setBusy(false)
+        return
+      }
+    }
     try {
       const r = await checkout(provider)
       if (!r.url) { window.location.assign(`/${lang}/payments/${r.paymentId}/return`); return }
@@ -90,6 +115,8 @@ export function PreviewPage() {
       window.location.assign(r.url)
     } catch (err) {
       if (isApiError(err) && err.code === 'full') notify(`${t('capacity.full')} — ${t('capacity.fullHint')}`, 'warn')
+      // The server knows best: ask for the marks here even if this browser thought they were given.
+      if (isApiError(err) && err.code === 'offer_required') { setOfferRefused(true); setConsent(EMPTY_CONSENT) }
       setBusy(false)
     }
   }
@@ -185,6 +212,14 @@ export function PreviewPage() {
               {fullGroups.length > 0 && <Notice tone="warn">{t('capacity.full')}: {fullGroups.map((g) => g.name).join(', ')}. {t('capacity.fullHint')}</Notice>}
               {hasSubscription && <Notice tone="warn">{t('student.sub.alreadyActive')}</Notice>}
             </div>
+            {askConsent && !hasSubscription && (
+              <div className="mt-5 rounded-card border border-champagne/60 bg-ivory p-4" data-testid="checkout-consent">
+                <div className="text-sm font-medium text-charcoal">{t('auth.consent.title')}</div>
+                <p className="mt-1 text-xs text-charcoal/60">{t('auth.consent.body')}</p>
+                <div className="mt-3"><ConsentFields value={consent} onChange={(v) => { setConsent(v); setConsentError(null) }} invalid={consentInvalid} /></div>
+                {consentError && <div role="alert" className="mt-3"><Notice tone="warn">{consentError}</Notice></div>}
+              </div>
+            )}
             <Button size="lg" className="mt-5 w-full" disabled={!ok || busy || hasSubscription || !(providers?.[provider] ?? false)} onClick={onPay}>
               {busy ? <Icon name="refresh" className="h-4 w-4 animate-spin" /> : <Icon name="arrowRight" className="h-4 w-4" />} {t('checkout.pay')} · {PROVIDER_LABEL[provider]}
             </Button>
