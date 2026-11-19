@@ -3,6 +3,7 @@ import { countLabel, foldForSearch, isPreparationTrack, MAX_CART_COURSES, NOUNS,
 import { Link } from '@/lib/router'
 import { useNavigate, useSearchParams } from '@/lib/routerHooks'
 import { PriceNow, ScheduleChips } from '../../components/course/CourseCard'
+import { PaymeLogo } from '../../components/PaymeLogo'
 import { Timetable } from '../../components/Timetable'
 import { ArtCover, Badge, Button, Card, Eyebrow, Icon, Input, Modal, Notice, PageTitle, Select } from '../../components/ui'
 import { cx } from '../../components/ui/helpers'
@@ -22,19 +23,6 @@ import { findConflicts, overlaps, resolveGroups, weeklyHours } from '../../lib/s
 import { useCurrentStudent } from '../../store/selectors'
 import { useStore, type PaymentProviderId } from '../../store/useStore'
 import type { Course, Group, Preset, University } from '../../types'
-
-/**
- * The payment system's name on a light plate, shown where the total is. It is set as text until the provider's own
- * logo file is added to the site.
- */
-function PaymeMark() {
-  const { t } = useT()
-  return (
-    <span className="flex h-11 shrink-0 items-center rounded-control bg-paper px-3.5 shadow-soft">
-      <span className="font-body text-lg font-bold tracking-tight text-charcoal">{t('payment.payme')}</span>
-    </span>
-  )
-}
 
 /** One course of the cart: center, group and schedule, price, and buttons to switch the group or take it out. */
 function CartLine({ group, course, clash, onChangeGroup, onRemove }: { group: Group; course: Course; clash: boolean; onChangeGroup?: () => void; onRemove: () => void }) {
@@ -288,7 +276,7 @@ export function BuilderPage() {
                 <Button variant="champagne" size="lg" className="w-full !py-4 !text-base font-semibold" disabled={!complete} onClick={() => nav('/preview')}>{t('builder.continue')} <Icon name="arrowRight" className="h-4 w-4" /></Button>
                 {paymeReady && (
                   <div className="flex items-center gap-3 rounded-control border border-ivory/15 bg-ivory/5 px-3.5 py-3">
-                    <PaymeMark />
+                    <PaymeLogo />
                     <span className="min-w-0 text-[11px] leading-snug text-ivory/70"><Icon name="lock" className="mr-1 inline h-3 w-3 text-champagne" />{t('preview.paymentNote')}</span>
                   </div>
                 )}
