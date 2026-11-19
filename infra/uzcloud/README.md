@@ -216,6 +216,11 @@ sh /opt/ilmora/infra/uzcloud/compose.sh admin --profile migrate run --rm migrate
   `Timeout, server not responding` или `Connection closed`, машина перезагрузилась или пропала из сети во время релиза:
   проверить `uptime` и `… compose.sh … ps` на ней и запустить релиз заново (повторный запуск безопасен: копия базы,
   миграции и выкатка повторяются).
+- **Онлайн-курсы:** подборка бесплатных онлайн-курсов (`packages/shared/src/online-courses.ts`) попадает в базу только
+  по запросу: галочка **import_online_courses** при релизе. После копии базы и миграций на ilmora-admin выполняется
+  `npx tsx prisma/seed-online-courses.ts`: добавляет недостающие курсы и категории, обновляет сведения о провайдере у
+  уже существующих, статус и видимость курсов и все остальные записи не трогает; повторный запуск безопасен. Обычный
+  релиз (без галочки) подборку не трогает.
 - **Состояние и журналы:**
   ```bash
   sh /opt/ilmora/infra/uzcloud/compose.sh web ps
