@@ -2,12 +2,13 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } 
 import { countLabel, foldForSearch, isPreparationTrack, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useNavigate, useSearchParams } from '@/lib/routerHooks'
-import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
+import { PriceNow, ScheduleChips } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
 import { ArtCover, Badge, Button, Card, Eyebrow, Icon, Input, Modal, Notice, PageTitle, Select } from '../../components/ui'
 import { cx } from '../../components/ui/helpers'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
+import { api } from '../../lib/api'
 import { UniversityPackagesSection } from './UniversityPackages'
 import { UniversityLogo } from './Universities'
 import { arrangeCartByPackage } from '../../lib/cartPackages'
@@ -19,8 +20,21 @@ import { JourneyTracker } from '../../components/JourneySteps'
 import { enrolledCount, isGroupFull } from '../../lib/enrollment'
 import { findConflicts, overlaps, resolveGroups, weeklyHours } from '../../lib/schedule'
 import { useCurrentStudent } from '../../store/selectors'
-import { useStore } from '../../store/useStore'
+import { useStore, type PaymentProviderId } from '../../store/useStore'
 import type { Course, Group, Preset, University } from '../../types'
+
+/**
+ * The payment system's name on a light plate, shown where the total is. It is set as text until the provider's own
+ * logo file is added to the site.
+ */
+function PaymeMark() {
+  const { t } = useT()
+  return (
+    <span className="flex h-11 shrink-0 items-center rounded-control bg-paper px-3.5 shadow-soft">
+      <span className="font-body text-lg font-bold tracking-tight text-charcoal">{t('payment.payme')}</span>
+    </span>
+  )
+}
 
 /** One course of the cart: center, group and schedule, price, and buttons to switch the group or take it out. */
 function CartLine({ group, course, clash, onChangeGroup, onRemove }: { group: Group; course: Course; clash: boolean; onChangeGroup?: () => void; onRemove: () => void }) {
@@ -92,12 +106,18 @@ export function BuilderPage() {
   const addBuilderGroup = useStore((s) => s.addBuilderGroup)
   const removeBuilderCourse = useStore((s) => s.removeBuilderCourse)
   const removeCartBundle = useStore((s) => s.removeCartBundle)
+  const clearBuilder = useStore((s) => s.clearBuilder)
   const cartBundles = useStore((s) => s.cartBundles)
   const notify = useStore((s) => s.notify)
   const guestHydrated = useStore((s) => s.guestHydrated)
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('')
   const [picker, setPicker] = useState<Course | null>(null)
+  // The payment system is named beside the total only while the API says it is connected (the checkout page asks the same).
+  const [paymeReady, setPaymeReady] = useState(false)
+  useEffect(() => {
+    api<Record<PaymentProviderId, boolean>>('/payments/providers', { auth: false }).then((p) => setPaymeReady(!!p.PAYME)).catch(() => setPaymeReady(false))
+  }, [])
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
 
@@ -147,6 +167,11 @@ export function BuilderPage() {
     const conflictName = r.conflictWith ? tr(courses.find((c) => c.id === r.conflictWith)?.title) : ''
     const msg = { 'no-package': t('builder.pickPackageFirst'), limit: pkg ? t('builder.limitReached') : t('builder.customLimit', { n: MAX_CART_COURSES }), duplicate: t('builder.duplicate'), conflict: `${t('builder.conflict')} — ${conflictName}. ${t('builder.conflictHint')}`, disabled: t('builder.packageDisabled'), full: `${t('capacity.full')} — ${t('capacity.fullHint')}` }[r.reason]
     notify(msg, 'warn')
+  }
+  const clearCart = () => {
+    if (!student || !confirm(t('builder.clearCartConfirm'))) return
+    clearBuilder(student.id)
+    notify(t('builder.cartCleared'))
   }
   const onAddCourse = (c: Course) => {
     if (selectedCourseIds.has(c.id)) { notify(t('builder.duplicate'), 'warn'); return }
@@ -214,7 +239,10 @@ export function BuilderPage() {
               <Eyebrow>{t('builder.yourSelection')}</Eyebrow>
               <h2 id="cart-title" className="mt-1 font-display text-3xl leading-none text-charcoal sm:text-4xl">{t('nav.cart')}</h2>
             </div>
-            {pkg ? <Badge tone="sage">{tr(pkg.name)} · {selectedGroups.length}/{pkg.maxCourses}</Badge> : <Badge tone="sage">{t('builder.custom')} · {selectedGroups.length}</Badge>}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {pkg ? <Badge tone="sage">{tr(pkg.name)} · {selectedGroups.length}/{pkg.maxCourses}</Badge> : <Badge tone="sage">{t('builder.custom')} · {selectedGroups.length}</Badge>}
+              {selectedGroups.length > 0 && <Button size="sm" variant="ghost" onClick={clearCart}><Icon name="trash" className="h-3.5 w-3.5" />{t('builder.clearCart')}</Button>}
+            </div>
           </div>
           {pkg && (
             <div className="mt-3 flex gap-1.5">
@@ -239,23 +267,31 @@ export function BuilderPage() {
             </div>
           )}
 
-          {/* Total and the way on to review and payment, under the chosen courses. */}
-          <div className="mt-5 rounded-control border border-forest/10 bg-ivory/70 p-4 sm:p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
-              <div className="flex items-end justify-between gap-4 lg:flex-1">
-                <div className="min-w-0">
-                  <div className="text-sm text-charcoal/60">{t('builder.monthlyTotal')}</div>
-                  <p className="mt-1 text-[11px] text-charcoal/45">{t('builder.transparent')}</p>
-                  {selectedGroups.length > 0 && <p className="mt-1 text-[11px] text-charcoal/45">{weeklyHours(selectedGroups)} {t('preview.hoursPerWeek')}</p>}
+          {/* Total and the way on to review and payment, under the chosen courses: the one dark panel of the page, so
+              the eye lands on the sum and the button. */}
+          <div className="mt-6 overflow-hidden rounded-card bg-forest text-ivory shadow-lift">
+            <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_22rem] lg:items-center lg:gap-10">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-champagne">{t('builder.monthlyTotal')}</div>
+                <div className="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1">
+                  <span className="font-display text-5xl leading-none sm:text-6xl">{formatSom(totals.final, lang)}</span>
+                  {totals.list > totals.final && <span className="pb-1.5 text-base text-ivory/50 line-through"><span className="sr-only">{t('discount.was')}: </span>{formatSom(totals.list, lang)}</span>}
                 </div>
-                <TotalPrice list={totals.list} final={totals.final} className="shrink-0" />
+                {totals.list > totals.final && <div className="mt-3 inline-flex rounded-full bg-champagne/20 px-3 py-1 text-xs font-semibold text-champagne">{t('builder.saving', { price: formatSom(totals.list - totals.final, lang) })}</div>}
+                <p className="mt-3 text-xs leading-relaxed text-ivory/60">{t('builder.transparent')}{selectedGroups.length > 0 && <> · {weeklyHours(selectedGroups)} {t('preview.hoursPerWeek')}</>}</p>
               </div>
-              <div className="space-y-2 lg:w-80 lg:shrink-0">
+              <div className="space-y-3">
                 {conflicts.length > 0 && <Notice tone="warn"><Icon name="warn" className="mr-1 inline h-3.5 w-3.5" />{t('builder.conflictHint')}</Notice>}
-                {conflicts.length === 0 && selectedGroups.length > 1 && <Notice tone="info"><Icon name="check" className="mr-1 inline h-3.5 w-3.5" />{t('builder.noConflicts')}</Notice>}
-                {pkg && selectedGroups.length !== pkg.maxCourses && <p className="text-xs text-charcoal/55">{t('builder.needExactly', { n: pkg.maxCourses })}</p>}
-                {!pkg && selectedGroups.length === 0 && <p className="text-xs text-charcoal/55">{t('builder.selectOne')}</p>}
-                <Button className="w-full" size="lg" disabled={!complete} onClick={() => nav('/preview')}>{t('builder.continue')} <Icon name="arrowRight" className="h-4 w-4" /></Button>
+                {conflicts.length === 0 && selectedGroups.length > 1 && <p className="flex items-center gap-2 text-sm text-ivory/85"><Icon name="check" className="h-4 w-4 shrink-0 text-champagne" />{t('builder.noConflicts')}</p>}
+                {pkg && selectedGroups.length !== pkg.maxCourses && <p className="text-xs text-ivory/70">{t('builder.needExactly', { n: pkg.maxCourses })}</p>}
+                {!pkg && selectedGroups.length === 0 && <p className="text-xs text-ivory/70">{t('builder.selectOne')}</p>}
+                <Button variant="champagne" size="lg" className="w-full !py-4 !text-base font-semibold" disabled={!complete} onClick={() => nav('/preview')}>{t('builder.continue')} <Icon name="arrowRight" className="h-4 w-4" /></Button>
+                {paymeReady && (
+                  <div className="flex items-center gap-3 rounded-control border border-ivory/15 bg-ivory/5 px-3.5 py-3">
+                    <PaymeMark />
+                    <span className="min-w-0 text-[11px] leading-snug text-ivory/70"><Icon name="lock" className="mr-1 inline h-3 w-3 text-champagne" />{t('preview.paymentNote')}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -106,6 +106,25 @@ describe('adding a whole university package with one click', () => {
     expect(store.getState().cartBundles).toEqual([])
     expect(memory.has('ilmora-cart-bundles')).toBe(false)
   })
+
+  it('empties the cart in one step: courses and packages leave it, and a reopened page finds it empty', () => {
+    const store = createIlmoraStore(initialMock)
+    store.getState().addPresetToCart(GUEST_STUDENT_ID, pkg('p1', ['math', 'eng']))
+    store.getState().addBuilderGroup(GUEST_STUDENT_ID, 'extra-g')
+    expect(cart(store).groupIds).toEqual(['math-g', 'eng-g', 'extra-g'])
+    const plan = cart(store).packageId
+
+    store.getState().clearBuilder(GUEST_STUDENT_ID)
+    expect(cart(store).groupIds).toEqual([])
+    expect(cart(store).packageId).toBe(plan)
+    expect(store.getState().cartBundles).toEqual([])
+    expect(memory.has('ilmora-cart-bundles')).toBe(false)
+
+    const reopened = createIlmoraStore(initialMock)
+    reopened.getState().hydrateGuest()
+    expect(cart(reopened).groupIds).toEqual([])
+    expect(reopened.getState().cartBundles).toEqual([])
+  })
 })
 
 describe('pickPresetGroups', () => {
