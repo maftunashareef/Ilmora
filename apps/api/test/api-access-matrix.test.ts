@@ -1,6 +1,9 @@
 import 'reflect-metadata'
 import { randomUUID } from 'node:crypto'
-import type { ExecutionContext } from '@nestjs/common'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { BadRequestException, type ExecutionContext, ValidationPipe } from '@nestjs/common'
+import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants'
 import { Reflector } from '@nestjs/core'
 import { registrySearchKey } from '@ilmora/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -8,15 +11,21 @@ import { AppModule } from '../src/app.module'
 import { RolesGuard } from '../src/common/guards'
 import { PrivateDocsService } from '../src/infra/storage/private-docs.service'
 import { type RequestActor, TenantContext } from '../src/infra/tenancy/tenant-context'
-import type { AttendanceService } from '../src/modules/attendance/attendance.service'
+import { AttendanceService } from '../src/modules/attendance/attendance.service'
+import type { AttendanceEvents } from '../src/modules/attendance/attendance.events'
+import { ConsentDto } from '../src/modules/auth/auth.dto'
 import { CenterService } from '../src/modules/center/center.service'
 import { asCenter } from '../src/modules/center/admin-center.controller'
 import { ContactsService } from '../src/modules/contacts/contacts.service'
+import { EnrollmentController } from '../src/modules/enrollment/enrollment.controller'
+import { RefundDto } from '../src/modules/enrollment/refunds.dto'
+import { CourseDiscountBody, CourseInput, CoursePatch } from '../src/modules/manage/manage.schemas'
 import { ManageService } from '../src/modules/manage/manage.service'
 import { RegistryService } from '../src/modules/registry/registry.service'
 import type { SessionsService } from '../src/modules/sessions/sessions.service'
 import type { SiteService } from '../src/modules/site/site.service'
 import { StudentsService } from '../src/modules/students/students.service'
+import { TenantsService } from '../src/modules/tenants/tenants.service'
 import { TrainingService } from '../src/modules/training/training.service'
 import { VacanciesService } from '../src/modules/vacancies/vacancies.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
@@ -89,16 +98,16 @@ const RULES: Rule[] = [
 const contextFor = (r: Route, roles: string[]) =>
   ({ getHandler: () => r.handler, getClass: () => r.cls, switchToHttp: () => ({ getRequest: () => ({ actor: { id: 'u', roles } }) }) }) as unknown as ExecutionContext
 
-describe('API access matrix: center, teacher, student, company, Super Admin', () => {
-  const guard = new RolesGuard(new Reflector())
-  const passes = (r: Route, roles: string[]) => {
-    try { return guard.canActivate(contextFor(r, roles)) } catch (err) {
-      const status = (err as { getStatus?: () => number }).getStatus?.()
-      if (status !== 403) throw new Error(`${key(r)}: ${String(err)} (status ${status})`)
-      return false
-    }
+const guard = new RolesGuard(new Reflector())
+const passes = (r: Route, roles: string[]) => {
+  try { return guard.canActivate(contextFor(r, roles)) } catch (err) {
+    const status = (err as { getStatus?: () => number }).getStatus?.()
+    if (status !== 403) throw new Error(`${key(r)}: ${String(err)} (status ${status})`)
+    return false
   }
+}
 
+describe('API access matrix: center, teacher, student, company, Super Admin', () => {
   it('finds the routes, the new center, teacher, company and student addresses among them', () => {
     expect(ALL.length).toBeGreaterThan(250)
     for (const k of ['PATCH /center/profile', 'GET /center/teachers', 'POST /teacher/center-invites/:id/accept', 'GET /admin/centers/:centerId/overview', 'PUT /manage/courses/:id/discount', 'GET /companies/me/vacancies/:id', 'POST /students/me/contact-requests/:id/accept'])
@@ -130,6 +139,203 @@ describe('API access matrix: center, teacher, student, company, Super Admin', ()
     const twin = ALL.filter((r) => r.path.startsWith('/admin/centers/:centerId/'))
     expect(twin.length).toBe(ALL.filter((r) => r.path.startsWith('/center/')).length)
     for (const r of twin) for (const who of WHO) expect(passes(r, ACTORS[who]), `${key(r)} for ${who}`).toBe(false)
+  })
+})
+
+/**
+ * Areas of the new ТЗ that are only partly built: center students and their Excel import, invitations, attendance,
+ * homework, price, parent consent, ZIP upload. A route that appears in one of them fails below, by name, until
+ *  (1) it has a rule in RULES (enforced above for every route),
+ *  (2) its id-like path param has a check with somebody else's id in the database section (FOREIGN_ID), or a reason
+ *      it is not somebody's id (NOT_AN_ID),
+ *  (3) for areas with security requirements, an entry saying where they are tested (SECURITY_DONE).
+ */
+type Area = { name: string; match: (r: Route) => boolean; security: string[] }
+/** The Super Admin's twin of the center workspace falls in the same areas as the center's own route. */
+const own = (p: string) => p.replace(/^\/admin\/centers\/:centerId(?=\/)/, '/center')
+const any = (...res: RegExp[]) => (r: Route) => res.some((re) => re.test(own(r.path)))
+/** Top-level keys of the zod schemas the route's parameters are validated with (@Body(new ZodValidationPipe(…))). */
+const schemaKeys = (r: Route) => {
+  const args = (Reflect.getMetadata(ROUTE_ARGS_METADATA, r.cls, r.handler.name) ?? {}) as Record<string, { pipes?: { schema?: { shape?: object } }[] }>
+  return Object.values(args).flatMap((a) => (a.pipes ?? []).flatMap((p) => Object.keys(p.schema?.shape ?? {})))
+}
+const PRICE = /price|discount|commission|tariff|fee/i
+const AREAS: Area[] = [
+  // Not /ministry/export: only the center, the teacher's studio and the teacher's side.
+  { name: 'center students and Excel', match: any(/^\/(center|manage|teacher)\/(.*\/)?students(\/|$)/i, /excel|xlsx/i, /^\/(center|manage|teacher)(\/.*)?\/(import|export)(\/|$)/i), security: [] },
+  {
+    name: 'invitations', match: any(/invit/i),
+    security: ['the token cannot be guessed (at least 128 random bits, stored hashed) and works once', 'the token is never in the URL path or query, so it reaches neither logs nor Referer', 'the token expires'],
+  },
+  { name: 'attendance', match: any(/attendance|\/sessions(\/|$)/i), security: [] },
+  { name: 'homework', match: any(/homework|assignment/i), security: [] },
+  // By path, and by the body: a course body carries the price and the discount.
+  { name: 'price', match: (r) => any(PRICE)(r) || schemaKeys(r).some((k) => PRICE.test(k)), security: ['the body cannot carry its own price or commission', 'a discount below 5% is refused'] },
+  { name: 'parent consent', match: any(/consent|parent/i), security: ['a center, teacher or company cannot give, change or forge a parent consent'] },
+  {
+    name: 'ZIP upload', match: any(/zip|archive|resource-file/i),
+    security: [
+      'limits against zip bombs: number of entries, total unpacked size, ratio', 'names with ../ or absolute paths', 'executable files',
+      'expiry and rights of temporary links', 'no more than 1024 MB bypassing the browser check: the size is bound in the signature or checked by the server',
+    ],
+  },
+]
+const inAreas = ALL.filter((r) => AREAS.some((a) => a.match(r)))
+const withSecurity = (r: Route) => AREAS.some((a) => a.security.length > 0 && a.match(r))
+const routeKeys = new Set(ALL.map(key))
+const hasParam = (r: Route) => r.path.includes(':')
+
+/** Routes of the areas whose path param is somebody's id, attempted with somebody else's in the database section. */
+const FOREIGN_ID = [
+  'POST /teacher/center-invites/:id/accept', 'POST /teacher/center-invites/:id/decline',
+  'PUT /manage/courses/:id/discount', 'PATCH /manage/courses/:id', 'PATCH /center/courses/:id',
+  'POST /manage/groups/:id/sessions/generate', 'POST /center/groups/:id/sessions/generate',
+  'GET /teacher/sessions/:id', 'POST /teacher/sessions/:id/open', 'POST /teacher/sessions/:id/close', 'POST /teacher/sessions/:id/qr',
+  'POST /teacher/sessions/:id/records', 'PATCH /teacher/sessions/:id', 'PATCH /teacher/sessions/:id/time', 'GET /teacher/sessions/:id/stream',
+  'POST /teacher/groups/:id/sessions',
+]
+/** Routes of the areas whose path param is not somebody's id, and why. */
+const NOT_AN_ID: Record<string, string> = {
+  'GET /attendance/centers/:code': 'the center\'s public standing QR code (a poster), not an id; an unknown code is 404',
+  'GET /attendance/centers/:code/options': 'the center\'s public standing QR code; the options are the signed-in student\'s own groups there',
+  'POST /attendance/centers/:code/check-in': 'the center\'s public standing QR code; the student checks in only themself',
+  'POST /graduates/:cardId/invite': 'a card id is a keyed hash of (company, announcement, student), resolved only among the cards this company sees (GraduatesService.invite); any other value is 404',
+  'POST /students/me/consents/:kind/give': 'kind is a consent kind (STUDENT_CONSENT_ACTION_KINDS); the student is always the signed-in one',
+  'POST /students/me/consents/:kind/revoke': 'kind is a consent kind (STUDENT_CONSENT_ACTION_KINDS); the student is always the signed-in one',
+}
+/**
+ * Public routes of the areas (no sign-in, so no role or ownership check applies). Each is public by design:
+ * - GET /attendance/links/:sessionId: the check-in page shows which lesson a link is for (course, group, time);
+ *   checking in needs the rotating token of an open lesson and a signed-in student.
+ * - GET /attendance/centers/:code: the center's standing QR poster names the center; an unknown code is 404.
+ */
+const PUBLIC_IN_AREAS = ['GET /attendance/links/:sessionId', 'GET /attendance/centers/:code']
+/**
+ * Path params that look like a secret but are not one. The center's standing code is printed on a poster; it does land
+ * in the API logs, since only the query is stripped there (known, reported). The catalog keys are a slug or an id.
+ */
+const TOKEN_LIKE_OK = ['GET /attendance/centers/:code', 'GET /attendance/centers/:code/options', 'POST /attendance/centers/:code/check-in', 'GET /public/courses/:key', 'GET /public/teachers/:key']
+/** Super Admin only (RULES); reaches any center of its tenant by design, the tenant boundary is tested in the Super Admin test below. */
+const ADMIN_PREFIX = '/admin/'
+
+const COURSE_PRICE_DONE = 'here: «price: course bodies …» (strict: commission, fee, priceMinor refused); the price only with editPrices in test/course-center-scope.test.ts, the discount rules in test/discounts.test.ts; known gap: 5% floor (it.fails)'
+/** Route key → where the security list of its area is tested, or why it does not apply. */
+const SECURITY_DONE: Record<string, string> = {
+  'GET /teacher/center-invites': 'no token: an invitation is a row addressed to the signed-in teacher\'s account, listed only to them (teacher test below)',
+  'POST /teacher/center-invites/:id/accept': 'no token: answered by id by the teacher it is addressed to; another teacher\'s id is refused (teacher test below)',
+  'POST /teacher/center-invites/:id/decline': 'no token: as accept',
+  'POST /graduates/:cardId/invite': 'no token: it creates a contact request the student answers in their own account; the card id is company-keyed (NOT_AN_ID)',
+  'PUT /manage/courses/:id/discount': 'here: «price: the discount body …» (strict body), and test/discounts.test.ts; known gap: 5% floor (it.fails)',
+  'POST /manage/courses': COURSE_PRICE_DONE,
+  'PATCH /manage/courses/:id': COURSE_PRICE_DONE,
+  'POST /center/courses': COURSE_PRICE_DONE,
+  'PATCH /center/courses/:id': COURSE_PRICE_DONE,
+  'POST /admin/centers/:centerId/courses': COURSE_PRICE_DONE,
+  'PATCH /admin/centers/:centerId/courses/:id': COURSE_PRICE_DONE,
+  'POST /auth/consent': 'here: «parent consent: …» (the account\'s own offer acceptance; other fields refused)',
+  'GET /students/me/consents': 'here: «parent consent: …» (read only, the student\'s own journal)',
+  'POST /students/me/consents/:kind/give': 'here: «parent consent: …» (student only)',
+  'POST /students/me/consents/:kind/revoke': 'here: «parent consent: …» (student only)',
+  // Zip-bomb and ../-inside-the-archive checks belong to a future route that unpacks.
+  'POST /manage/uploads/resource-file/upload-url': 'test/uploads-limits.test.ts: type and size signed in the link (enforcement by the S3 provider is not verified here); executables refused by content type only, bytes are not inspected; the archive is never unpacked',
+}
+
+/** The same options as the global pipe in src/main.ts (checked below). */
+const bodyPipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, forbidUnknownValues: true, transform: true, transformOptions: { enableImplicitConversion: false }, validationError: { target: false, value: false } })
+const bodyOf = (cls: unknown, body: object) => bodyPipe.transform(body, { type: 'body', metatype: cls as never })
+
+describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
+  it('finds the routes of the areas, and not unrelated ones', () => {
+    const by = Object.fromEntries(AREAS.map((a) => [a.name, ALL.filter(a.match).map(key)]))
+    expect(by['center students and Excel']).toEqual(['GET /center/students', 'GET /admin/centers/:centerId/students'])
+    expect(routeKeys.has('GET /ministry/export')).toBe(true)
+    expect(by['center students and Excel']).not.toContain('GET /ministry/export')
+    expect([...by.price].sort()).toEqual([
+      'PATCH /admin/centers/:centerId/courses/:id', 'PATCH /center/courses/:id', 'PATCH /manage/courses/:id', 'POST /admin/centers/:centerId/courses', 'POST /center/courses', 'POST /manage/courses', 'PUT /manage/courses/:id/discount',
+    ])
+    expect(by.attendance).toContain('POST /teacher/sessions/:id/open')
+    expect(by['ZIP upload']).toEqual(['POST /manage/uploads/resource-file/upload-url'])
+  })
+
+  it('the public routes of the areas are exactly the known ones', () => {
+    expect(inAreas.filter((r) => r.public).map(key)).toEqual(PUBLIC_IN_AREAS)
+  })
+
+  it('every route of the areas with a path param is attempted with somebody else\'s id, or says why the param is not an id', () => {
+    const missing = inAreas.filter((r) => hasParam(r) && !PUBLIC_IN_AREAS.includes(key(r)) && !FOREIGN_ID.includes(key(r)) && !NOT_AN_ID[key(r)] && !r.path.startsWith(ADMIN_PREFIX)).map(key)
+    expect(missing).toEqual([])
+    const stale = [...FOREIGN_ID, ...Object.keys(NOT_AN_ID)].filter((k) => !inAreas.some((r) => key(r) === k && hasParam(r)))
+    expect(stale).toEqual([])
+    expect(FOREIGN_ID.filter((k) => NOT_AN_ID[k])).toEqual([])
+  })
+
+  it('every route of an area with security requirements says where they are tested', () => {
+    expect(inAreas.filter((r) => withSecurity(r) && !SECURITY_DONE[key(r)]).map(key)).toEqual([])
+    expect(Object.keys(SECURITY_DONE).filter((k) => !routeKeys.has(k) || !inAreas.some((r) => key(r) === k && withSecurity(r)))).toEqual([])
+  })
+
+  it('no route takes a token, secret, code or key in its path (they would reach logs and Referer)', () => {
+    expect(ALL.filter((r) => /:[^/]*(token|secret|code|key)/i.test(r.path)).map(key).filter((k) => !TOKEN_LIKE_OK.includes(k))).toEqual([])
+    expect(TOKEN_LIKE_OK.filter((k) => !routeKeys.has(k))).toEqual([])
+  })
+
+  // The minor's own mark of the parent's consent (questionnaire, PARENT_CONSENT kind) is self-attested by the student: known product gap, reported.
+  it('parent consent: staff and companies cannot give, change or forge it — no write route lets a center, teacher or company through; the questionnaire (it carries the mark) is the student\'s', async () => {
+    const writes = ALL.filter((r) => r.method !== 'GET' && /consent|parent/i.test(r.path) && key(r) !== 'POST /auth/consent')
+    expect(writes.map(key)).toContain('POST /students/me/consents/:kind/give')
+    const others: Who[] = ['center', 'teacher', 'company']
+    expect(writes.flatMap((r) => others.filter((w) => r.public || passes(r, ACTORS[w])).map((w) => `${key(r)} for ${w}`))).toEqual([])
+    const questionnaire = ALL.find((r) => key(r) === 'PUT /students/me/questionnaire')!
+    expect(WHO.filter((w) => passes(questionnaire, ACTORS[w]))).toEqual(['student'])
+    // POST /auth/consent is the account's own offer acceptance: the global pipe refuses any other field.
+    expect(readFileSync(join(__dirname, '../src/main.ts'), 'utf8')).toMatch(/whitelist: true,\s*forbidNonWhitelisted: true/)
+    const ok = { acceptOffer: true, consentPersonalData: true }
+    await expect(bodyOf(ConsentDto, ok)).resolves.toBeTruthy()
+    for (const extra of [{ parentConsent: true }, { kind: 'PARENT_CONSENT' }, { guardianConsent: true }])
+      await expect(bodyOf(ConsentDto, { ...ok, ...extra }), JSON.stringify(extra)).rejects.toBeInstanceOf(BadRequestException)
+  })
+
+  it('price: the discount body carries only the discount — no price, commission or fee of its own', () => {
+    const discount = { percent: 10, startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' }
+    expect(CourseDiscountBody.safeParse({ discount }).success).toBe(true)
+    for (const extra of [{ price: 1 }, { commission: 0 }, { fee: 0 }]) {
+      expect(CourseDiscountBody.safeParse({ discount, ...extra }).success, JSON.stringify(extra)).toBe(false)
+      expect(CourseDiscountBody.safeParse({ discount: { ...discount, ...extra } }).success, JSON.stringify(extra)).toBe(false)
+    }
+  })
+
+  it('price: course bodies carry no commission, fee or amount of their own (strict)', () => {
+    expect(CoursePatch.safeParse({}).success).toBe(true)
+    for (const k of ['commission', 'fee', 'priceMinor'])
+      for (const [name, schema] of [['CourseInput', CourseInput], ['CoursePatch', CoursePatch]] as const) {
+        const issues = schema.safeParse({ [k]: 1 }).error?.issues ?? []
+        expect(issues.some((i) => i.code === 'unrecognized_keys' && i.keys.includes(k)), `${name} ${k}`).toBe(true)
+      }
+  })
+
+  // Known gap: DiscountInput (manage.schemas.ts) and checkDiscount (packages/shared/src/pricing.ts) allow 1–20%. Once fixed this passes, so vitest fails it: drop .fails then.
+  it.fails('price: a discount below 5% is refused (ТЗ) — known gap, floor is 1% today', () => {
+    expect(CourseDiscountBody.safeParse({ discount: { percent: 4, startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' } }).success).toBe(false)
+  })
+
+  it('price: the student\'s cart and checkout carry no amount of their own (the server prices them)', async () => {
+    // The body DTO is the last parameter of the handler; a missing one fails here, not as a silent pass.
+    const dto = (m: string) => {
+      const cls = (Reflect.getMetadata('design:paramtypes', EnrollmentController.prototype, m) as unknown[] | undefined)?.at(-1)
+      if (typeof cls !== 'function' || cls === Object || cls === String) throw new Error(`EnrollmentController.${m}: no body DTO in the metadata`)
+      return cls
+    }
+    expect(dto('quoteRefund')).toBe(RefundDto)
+    expect(dto('requestRefund')).toBe(RefundDto)
+    const valid: Record<string, object> = {
+      checkout: { provider: 'PAYME' }, renew: { provider: 'PAYME' }, draft: { packageId: null, groupIds: [], meyosGrant: false },
+      quoteRefund: { reason: 'OTHER' }, requestRefund: { reason: 'OTHER' },
+    }
+    for (const [m, body] of Object.entries(valid)) {
+      await expect(bodyOf(dto(m), body), m).resolves.toBeTruthy()
+      for (const extra of [{ amount: 1 }, { price: 1 }, { commission: 0 }])
+        await expect(bodyOf(dto(m), { ...body, ...extra }), `${m} ${JSON.stringify(extra)}`).rejects.toBeInstanceOf(BadRequestException)
+    }
   })
 })
 
@@ -215,10 +421,13 @@ describe.skipIf(!DB_AVAILABLE)('Somebody else\'s data: 403 or 404, and nothing c
   type World = Awaited<ReturnType<typeof world>>
   const inTenant = <T>(w: World, fn: () => Promise<T>) => TenantContext.forTenant(w.tenantId, fn)
 
+  /** Names of every attempt run here, so FOREIGN_ID cannot claim a check that does not exist (the last test). */
+  const attempted = new Set<string>()
   /** Runs every attempt and lists the ones that were not refused with 403 or 404. */
   async function refusedAll(w: World, attempts: Record<string, () => Promise<unknown>>) {
     const leaks: string[] = []
     for (const [name, attempt] of Object.entries(attempts)) {
+      attempted.add(name)
       const status = await inTenant(w, () => statusOf(attempt()))
       if (!REFUSED.includes(status as number)) leaks.push(`${name}: ${status}`)
     }
@@ -356,5 +565,52 @@ describe.skipIf(!DB_AVAILABLE)('Somebody else\'s data: 403 or 404, and nothing c
       'PATCH /admin/centers/:centerId/courses/:id (other tenant)': () => manage().updateCourse(w.tenantId, asCenter(owner, other.center.id), other.course.id, { price: 1 } as never),
       'GET /admin/centers/:centerId/overview (no such center)': () => centers().overview(w.tenantId, asCenter(owner, 'no-such-center')),
     })
+  })
+
+  it('attendance: another teacher\'s and another center\'s lesson — refused, and it stays as it was', async () => {
+    const w = await world()
+    const events = { publish: async () => undefined } as unknown as AttendanceEvents
+    const attendance = new AttendanceService(ctx.prisma, ctx.audit, events, new TenantsService(ctx.prisma, ctx.env), ctx.subscriptions, notificationsStub, ctx.env)
+    const db = ctx.prisma.client
+    // A lesson of center B's group, taught by center B's teacher.
+    const session = await inTenant(w, () => db.lessonSession.create({
+      data: { tenantId: w.tenantId, groupId: w.group.id, courseId: w.group.courseId, date: new Date('2031-03-03T00:00:00.000Z'), startsAt: new Date('2031-03-03T05:00:00.000Z'), endsAt: new Date('2031-03-03T06:00:00.000Z') },
+    }))
+    const before = await inTenant(w, () => db.lessonSession.count({ where: { groupId: w.group.id } }))
+    // Another teacher of the same center B: the center is not enough, the course must be theirs.
+    const sameCenter = await inTenant(w, async () => {
+      const u = await db.user.create({ data: { tenantId: w.tenantId, login: `tb2-${w.s}`, displayName: 'Teacher B2', roles: ['TEACHER'], centerId: w.centerB.id } })
+      const p = await db.teacherProfile.create({ data: { tenantId: w.tenantId, slug: `tb2-${w.s}`, name: 'Teacher B2', title: {}, bio: {}, tagline: {}, centerId: w.centerB.id, userId: u.id } })
+      return { id: u.id, roles: ['TEACHER'], centerId: w.centerB.id, teacherProfileId: p.id } as RequestActor
+    })
+    const attempts = (a: RequestActor, suffix: string) => ({
+      [`GET /teacher/sessions/:id${suffix}`]: () => attendance.sessionDetail(session.id, a),
+      // The SSE stream checks the same ownership before it subscribes.
+      [`GET /teacher/sessions/:id/stream${suffix}`]: () => attendance.sessionForTeacher(session.id, a),
+      [`POST /teacher/sessions/:id/open${suffix}`]: () => attendance.open(session.id, a),
+      [`POST /teacher/sessions/:id/close${suffix}`]: () => attendance.close(session.id, a),
+      [`POST /teacher/sessions/:id/qr${suffix}`]: () => attendance.qr(session.id, a),
+      [`POST /teacher/sessions/:id/records${suffix}`]: () => attendance.correct(session.id, a, { studentId: w.studentA.id, status: 'PRESENT', reason: 'x' }),
+      [`PATCH /teacher/sessions/:id${suffix}`]: () => attendance.setStatus(session.id, 'cancelled', a, 'x'),
+      [`PATCH /teacher/sessions/:id/time${suffix}`]: () => attendance.rescheduleSession(session.id, a, { start: '09:00', end: '10:00' }),
+      [`POST /teacher/groups/:id/sessions${suffix}`]: () => attendance.addExtraSession(w.group.id, a, { date: '2031-03-10', start: '09:00', end: '10:00' }),
+    })
+    await refusedAll(w, { ...attempts(w.teacherActor, ''), ...attempts(w.centerActor, ' (center)'), ...attempts(sameCenter, ' (same center)') })
+    const [after, count, records] = await inTenant(w, () => Promise.all([
+      db.lessonSession.findFirstOrThrow({ where: { id: session.id } }), db.lessonSession.count({ where: { groupId: w.group.id } }), db.attendanceRecord.count({ where: { sessionId: session.id } }),
+    ]))
+    expect(after).toMatchObject({ attendanceOpen: false, attendanceTokenHash: null, status: 'SCHEDULED', startsAt: session.startsAt, endsAt: session.endsAt, tokenVersion: session.tokenVersion })
+    expect(count).toBe(before)
+    expect(records).toBe(0)
+    // The teacher of the course and center B's administrator get through.
+    await expect(inTenant(w, () => attendance.sessionDetail(session.id, w.teacherOwner))).resolves.toMatchObject({ session: { id: session.id } })
+    await expect(inTenant(w, () => attendance.sessionDetail(session.id, w.centerOwner))).resolves.toMatchObject({ session: { id: session.id } })
+  })
+
+  // Keep it the last test of this section: it relies on the earlier tests of this file (vitest runs them in order) and
+  // reads the names every refusedAll above ran. If they did not run (filtered with -t, or skipped), it fails loudly.
+  it('every FOREIGN_ID route was attempted with somebody else\'s id above', () => {
+    expect(attempted.size, 'no refusedAll ran before this test').toBeGreaterThan(0)
+    expect(FOREIGN_ID.filter((k) => ![...attempted].some((name) => name === k || name.startsWith(`${k} `)))).toEqual([])
   })
 })
