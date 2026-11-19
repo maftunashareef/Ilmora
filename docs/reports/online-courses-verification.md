@@ -58,3 +58,33 @@ External course links open in a new tab with `rel="noopener noreferrer"` (previo
 ## For production
 
 The corrected texts are in the data file. In production the Super Admin applies them in **Admin → Courses** for the six courses above (certificate type and descriptions); no script is run on deployment.
+
+## Courses added on 19 November 2026
+
+**Scope:** twelve more free courses, asked for by the owner: English, school and university mathematics, natural sciences, computer science and economics. The catalog now holds 28 courses.
+**Result:** every page was opened that day and each stored fact was found on it. No IELTS course was added: each one found is paid, time-limited or tied to booking a test (FutureLearn/British Council "Understanding IELTS" is now a paid track with a two-day trial; the edX UQx audit track expires; IDP's course is free only with a test booking).
+
+How they were checked: MIT OpenCourseWare, CS50 and Saylor pages answer plain requests, so the title, instructors, units and the wording about cost were searched for in the page text. Khan Academy and OpenLearn answer scripts with a challenge page (Khan: a JavaScript check; OpenLearn: Cloudflare, HTTP 403), so those were opened in a browser and read there.
+
+| # | Course | Provider | Category | Level (basis) | Length | Certificate |
+|---|---|---|---|---|---|---|
+| 17 | Essay and report writing skills | The Open University (OpenLearn) | english | beginner (“Level 1: Introductory”) | “15 hours study” | FREE (free statement of participation) |
+| 18 | ESL003: Upper-Intermediate English as a Second Language | Saylor University | english | intermediate (“CEFR Level B2”) | “Time: 14 hours” | FREE (“Free Certificate”, final exam at 70%) |
+| 19 | Algebra 1 | Khan Academy | math | beginner (first algebra course) | not stated | NONE (none mentioned) |
+| 20 | Precalculus | Khan Academy | math | intermediate (offers “Get ready for Precalculus”) | not stated | NONE |
+| 21 | Mathematics for science and technology | The Open University (OpenLearn) | math | beginner (“Level 1: Introductory”) | “24 hours study” | FREE (free statement of participation, badge) |
+| 22 | Classical Mechanics (MIT 8.01SC) | MIT OpenCourseWare | sciences | intermediate (Undergraduate) | twelve weeks (syllabus) | NONE |
+| 23 | AP®/College Physics 1 | Khan Academy | sciences | intermediate (AP and college level) | not stated | NONE |
+| 24 | Principles of Chemical Science (MIT 5.111SC) | MIT OpenCourseWare | sciences | intermediate (Undergraduate) | about 150 hours (syllabus) | NONE |
+| 25 | Fundamentals of Biology (MIT 7.01SC) | MIT OpenCourseWare | sciences | intermediate (Undergraduate) | about 150 hours (syllabus) | NONE |
+| 26 | CS50’s Introduction to Computer Science | Harvard CS50 (OpenCourseWare) | it | beginner (with or without prior experience) | “eleven weeks of material” | FREE (free CS50 Certificate at 70%) |
+| 27 | Principles of Microeconomics (MIT 14.01SC) | MIT OpenCourseWare | economics | intermediate (Undergraduate) | not stated | NONE |
+| 28 | Microeconomics | Khan Academy | economics | beginner (no prerequisites named) | not stated | NONE |
+
+Notes:
+
+- **MIT OpenCourseWare:** the About page says the collection is free and open and that MIT does not offer credit or certification to users of OCW.
+- **Khan Academy:** the page footer states the mission of free education for anyone; no page mentions a certificate. Uzbek-language versions of Algebra 1 (“Algebra I”, 17 units) and Precalculus (“Matematik analiz asoslari”, 7 units) opened on uz.khanacademy.org and are mentioned in those two descriptions only.
+- **CS50x:** the address stays the same while the edition changes each year (“CS50x 2026” that day).
+- **New category:** `economics` (`cat-economics`). Natural sciences and computer science reuse the existing `sciences` and `it` categories.
+- **Import:** `npm run db:seed:online` on a copy of the database added the 12 courses and refreshed the 16 existing ones; a second run added nothing.
