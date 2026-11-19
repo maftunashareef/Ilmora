@@ -203,18 +203,90 @@ export function BuilderPage() {
   return (
     <div className="container-x py-12 lg:py-16">
       <PageTitle title={t('builder.title')} subtitle={t('builder.subtitle')} />
-      <JourneyTracker done={journeyDone} current={journeyCurrent} canReview={complete} onStep={goToStep} />
 
-      {/* The cart sits beside everything else from the top of the page (and comes first on a phone), so what is chosen
-          and the monthly total are in view on the first screen, not two screens down. */}
-      <div className="grid gap-8 lg:grid-cols-[1.25fr_0.75fr]">
-        <div className="min-w-0">
+      {/* The cart comes first: what is chosen, then the total and the way on to review and payment. Everything for
+          choosing more follows below it. */}
+      <section id="builder-summary" className="mb-10 scroll-mt-24" aria-labelledby="cart-title">
+        <span id="cart" className="block scroll-mt-24" aria-hidden="true" />
+        <Card className="p-5 sm:p-7">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <Eyebrow>{t('builder.yourSelection')}</Eyebrow>
+              <h2 id="cart-title" className="mt-1 font-display text-3xl leading-none text-charcoal sm:text-4xl">{t('nav.cart')}</h2>
+            </div>
+            {pkg ? <Badge tone="sage">{tr(pkg.name)} · {selectedGroups.length}/{pkg.maxCourses}</Badge> : <Badge tone="sage">{t('builder.custom')} · {selectedGroups.length}</Badge>}
+          </div>
+          {pkg && (
+            <div className="mt-3 flex gap-1.5">
+              {Array.from({ length: pkg.maxCourses }).map((_, i) => <span key={i} className={cx('h-1.5 flex-1 rounded-full', i < selectedGroups.length ? 'bg-forest' : 'bg-charcoal/10')} />)}
+            </div>
+          )}
+          {selectedGroups.length === 0 ? (
+            <p className="mt-5 text-sm text-charcoal/55">{t('builder.emptySelection')}</p>
+          ) : (
+            <div className="mt-5 space-y-4">
+              {cartPackages.map((p) => (
+                <CartPackage key={p.presetId} preset={p.preset} university={p.university} directionId={p.directionId} groups={p.groups} onRemove={() => student && removeCartBundle(student.id, p.presetId)}>
+                  {p.groups.map(cartLine)}
+                </CartPackage>
+              ))}
+              {looseGroups.length > 0 && (
+                <div>
+                  {cartPackages.length > 0 && <div className="text-[11px] font-semibold uppercase tracking-wider text-charcoal/50">{t('uni.otherCourses')}</div>}
+                  <ul className="divide-y divide-charcoal/10">{looseGroups.map(cartLine)}</ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Total and the way on to review and payment, under the chosen courses. */}
+          <div className="mt-5 rounded-control border border-forest/10 bg-ivory/70 p-4 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
+              <div className="flex items-end justify-between gap-4 lg:flex-1">
+                <div className="min-w-0">
+                  <div className="text-sm text-charcoal/60">{t('builder.monthlyTotal')}</div>
+                  <p className="mt-1 text-[11px] text-charcoal/45">{t('builder.transparent')}</p>
+                  {selectedGroups.length > 0 && <p className="mt-1 text-[11px] text-charcoal/45">{weeklyHours(selectedGroups)} {t('preview.hoursPerWeek')}</p>}
+                </div>
+                <TotalPrice list={totals.list} final={totals.final} className="shrink-0" />
+              </div>
+              <div className="space-y-2 lg:w-80 lg:shrink-0">
+                {conflicts.length > 0 && <Notice tone="warn"><Icon name="warn" className="mr-1 inline h-3.5 w-3.5" />{t('builder.conflictHint')}</Notice>}
+                {conflicts.length === 0 && selectedGroups.length > 1 && <Notice tone="info"><Icon name="check" className="mr-1 inline h-3.5 w-3.5" />{t('builder.noConflicts')}</Notice>}
+                {pkg && selectedGroups.length !== pkg.maxCourses && <p className="text-xs text-charcoal/55">{t('builder.needExactly', { n: pkg.maxCourses })}</p>}
+                {!pkg && selectedGroups.length === 0 && <p className="text-xs text-charcoal/55">{t('builder.selectOne')}</p>}
+                <Button className="w-full" size="lg" disabled={!complete} onClick={() => nav('/preview')}>{t('builder.continue')} <Icon name="arrowRight" className="h-4 w-4" /></Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+        {selectedGroups.length > 0 && (
+          <details className="mt-4 rounded-card border border-charcoal/10 bg-paper px-5 py-4">
+            <summary className="cursor-pointer select-none text-sm font-medium text-forest">{t('builder.weeklyPreview')}</summary>
+            <div className="mt-4"><Timetable groups={selectedGroups} courses={courses} conflicts={conflicts} compact /></div>
+          </details>
+        )}
+      </section>
+
+      {/* While choosing more further down, a slim bar keeps the cart's count and total in view and leads back up to it. */}
+      {selectedGroups.length > 0 && (
+        <div className="pointer-events-none sticky top-20 z-30 mb-8 flex justify-center lg:top-24">
+          <div className="pointer-events-auto flex max-w-full items-center gap-3 rounded-full border border-forest/15 bg-paper/95 py-1.5 pl-4 pr-1.5 text-sm shadow-soft backdrop-blur">
+            <Icon name="cart" className="h-4 w-4 shrink-0 text-forest" />
+            <span className="min-w-0 truncate text-charcoal/75"><span className="font-medium text-charcoal">{t('favorites.inCart')}:</span> {countLabel(lang, selectedGroups.length, NOUNS.course)} · {formatSom(totals.final, lang)}</span>
+            <Button size="sm" onClick={() => document.getElementById('builder-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{t('uni.goToCart')}</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Everything for choosing more: how it works, packages, university packages and the course list. */}
+      <JourneyTracker done={journeyDone} current={journeyCurrent} canReview={complete} onStep={goToStep} />
       <CourseFinderPrompt className="mb-10" />
 
       {/* Step 1 — package */}
-      <section id="builder-packages" className="mb-10 scroll-mt-24">
+      <section id="builder-packages" className="mb-10 scroll-mt-40">
         <Eyebrow className="mb-4">{t('builder.step1')}</Eyebrow>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {packages.map((p) => {
             const active = pkg?.id === p.id
             return (
@@ -243,7 +315,7 @@ export function BuilderPage() {
       <UniversityPackagesSection presets={presets ?? []} universities={universities ?? []} courses={courses} cartGroupIds={student?.builder.groupIds ?? []} onAdd={startPreset} />
 
         {/* Step 2 — courses */}
-        <section id="builder-courses" className="min-w-0 scroll-mt-24">
+        <section id="builder-courses" className="min-w-0 scroll-mt-40">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <Eyebrow>{t('builder.step2')}</Eyebrow>
             <div className="flex gap-2">
@@ -293,65 +365,6 @@ export function BuilderPage() {
             })}
           </ul>
         </section>
-        </div>
-
-        {/* Summary: the cart. It scrolls inside itself when it is taller than the window. */}
-        <aside id="builder-summary" className="scrollbar-thin order-first min-w-0 scroll-mt-24 lg:sticky lg:top-24 lg:order-none lg:max-h-[calc(100vh-7rem)] lg:self-start lg:overflow-y-auto lg:pr-1">
-          <span id="cart" className="block scroll-mt-24" aria-hidden="true" />
-          <Card className="p-6">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <Eyebrow>{t('builder.yourSelection')}</Eyebrow>
-                <h2 className="mt-1 font-display text-3xl leading-none text-charcoal">{t('nav.cart')}</h2>
-              </div>
-              {pkg ? <Badge tone="sage">{tr(pkg.name)} · {selectedGroups.length}/{pkg.maxCourses}</Badge> : <Badge tone="sage">{t('builder.custom')} · {selectedGroups.length}</Badge>}
-            </div>
-            {pkg && (
-              <div className="mt-3 flex gap-1.5">
-                {Array.from({ length: pkg.maxCourses }).map((_, i) => <span key={i} className={cx('h-1.5 flex-1 rounded-full', i < selectedGroups.length ? 'bg-forest' : 'bg-charcoal/10')} />)}
-              </div>
-            )}
-            {selectedGroups.length === 0 ? (
-              <p className="mt-5 text-sm text-charcoal/55">{t('builder.emptySelection')}</p>
-            ) : (
-              <div className="mt-5 space-y-4">
-                {cartPackages.map((p) => (
-                  <CartPackage key={p.presetId} preset={p.preset} university={p.university} directionId={p.directionId} groups={p.groups} onRemove={() => student && removeCartBundle(student.id, p.presetId)}>
-                    {p.groups.map(cartLine)}
-                  </CartPackage>
-                ))}
-                {looseGroups.length > 0 && (
-                  <div>
-                    {cartPackages.length > 0 && <div className="text-[11px] font-semibold uppercase tracking-wider text-charcoal/50">{t('uni.otherCourses')}</div>}
-                    <ul className="divide-y divide-charcoal/10">{looseGroups.map(cartLine)}</ul>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="mt-4 border-t border-charcoal/10 pt-4">
-              <div className="flex items-end justify-between gap-3">
-                <span className="pb-1 text-sm text-charcoal/60">{t('builder.monthlyTotal')}</span>
-                <TotalPrice list={totals.list} final={totals.final} />
-              </div>
-              <p className="mt-2 text-[11px] text-charcoal/45">{t('builder.transparent')}</p>
-              {selectedGroups.length > 0 && <p className="mt-1 text-[11px] text-charcoal/45">{weeklyHours(selectedGroups)} {t('preview.hoursPerWeek')}</p>}
-            </div>
-            <div className="mt-4 space-y-2">
-              {conflicts.length > 0 && <Notice tone="warn"><Icon name="warn" className="mr-1 inline h-3.5 w-3.5" />{t('builder.conflictHint')}</Notice>}
-              {conflicts.length === 0 && selectedGroups.length > 1 && <Notice tone="info"><Icon name="check" className="mr-1 inline h-3.5 w-3.5" />{t('builder.noConflicts')}</Notice>}
-              {pkg && selectedGroups.length !== pkg.maxCourses && <p className="text-xs text-charcoal/55">{t('builder.needExactly', { n: pkg.maxCourses })}</p>}
-              {!pkg && selectedGroups.length === 0 && <p className="text-xs text-charcoal/55">{t('builder.selectOne')}</p>}
-            </div>
-            <Button className="mt-5 w-full" size="lg" disabled={!complete} onClick={() => nav('/preview')}>{t('builder.continue')} <Icon name="arrowRight" className="h-4 w-4" /></Button>
-          </Card>
-          {selectedGroups.length > 0 && (
-            <div className="mt-4">
-              <Eyebrow className="mb-2">{t('builder.weeklyPreview')}</Eyebrow>
-              <Timetable groups={selectedGroups} courses={courses} conflicts={conflicts} compact />
-            </div>
-          )}
-        </aside>
-      </div>
 
       <Modal closeOnBackdrop open={!!picker} onClose={() => setPicker(null)} title={picker ? `${t('courses.chooseGroup')} — ${tr(picker.title)}` : ''}>
         {picker && (

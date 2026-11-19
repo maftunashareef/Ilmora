@@ -9,7 +9,7 @@ import { useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 import type { Course, Preset, University } from '../../types'
-import { trackRank } from '../../lib/trackOrder'
+import { TRACK_VISUALS, trackRank } from '../../lib/trackVisuals'
 import { UniversityLogo } from './Universities'
 import { placeName } from './placeName'
 
@@ -109,28 +109,44 @@ function PackageCard({ preset, university, courses, cartGroupIds, onAdd }: { pre
   )
 }
 
-/** A card in the chooser: a university (logo, short name, full name) or a preparation direction (emblem, full name, what it prepares for). */
+/**
+ * A card in the chooser. A university shows its logo large on a light stage, then its short name and full name; a
+ * preparation direction shows its emblem over its own photograph, then its full name and what it prepares for.
+ */
 function ChooserCard({ university, packages, onSelect }: { university: University; packages: number; onSelect: () => void }) {
   const { t, tr, lang } = useT()
   const track = isPreparationTrack(university)
   const name = universityName(university, lang)
+  const visual = TRACK_VISUALS[university.id]
   return (
-    <button type="button" onClick={onSelect} className="flex h-full w-full min-w-0 flex-col rounded-card border border-charcoal/10 bg-paper p-4 text-left transition hover:-translate-y-0.5 hover:border-forest/40 hover:shadow-lift sm:p-5">
-      <UniversityLogo university={university} height={76} maxWidth={200} align="start" className="mb-3" />
+    <button type="button" onClick={onSelect} className="group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-card border border-charcoal/10 bg-paper text-left transition hover:-translate-y-0.5 hover:border-forest/40 hover:shadow-lift">
       {track ? (
-        <>
-          <span className="break-words font-display text-2xl leading-tight text-charcoal">{name}</span>
-          {tr(university.description) && <span className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-charcoal/60">{tr(university.description)}</span>}
-        </>
+        <span className="relative flex h-32 w-full items-center justify-center overflow-hidden bg-forest sm:h-36">
+          {visual && <img src={visual.image} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover opacity-75 transition duration-500 group-hover:scale-105" style={{ objectPosition: visual.position }} />}
+          <span aria-hidden="true" className="absolute inset-0 bg-gradient-to-t from-forest/85 via-forest/35 to-forest/15" />
+          <UniversityLogo university={university} height={84} className="relative" />
+        </span>
       ) : (
-        <>
-          <span className="break-words font-display text-2xl leading-tight text-charcoal">{university.shortName || name}</span>
-          {university.shortName && <span className="mt-0.5 line-clamp-2 text-xs text-charcoal/55">{name}</span>}
-        </>
+        <span className="flex h-32 w-full items-center justify-center border-b border-charcoal/5 bg-gradient-to-br from-sage/70 via-ivory to-paper px-5 sm:h-36">
+          <UniversityLogo university={university} height={96} maxWidth={210} className="transition duration-500 group-hover:scale-105" />
+        </span>
       )}
-      <span className="mt-auto flex items-center justify-between gap-2 pt-3 text-[11px] font-medium text-forest">
-        <span>{t('uni.packagesCount', { n: packages })}</span>
-        {!track && university.city && <span className="text-charcoal/45">{placeName(t, university.city)}</span>}
+      <span className="flex flex-1 flex-col p-4 sm:p-5">
+        {track ? (
+          <>
+            <span className="break-words font-display text-2xl leading-tight text-charcoal">{name}</span>
+            {tr(university.description) && <span className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-charcoal/60">{tr(university.description)}</span>}
+          </>
+        ) : (
+          <>
+            <span className="break-words font-display text-2xl leading-tight text-charcoal">{university.shortName || name}</span>
+            {university.shortName && <span className="mt-0.5 line-clamp-2 text-xs text-charcoal/55">{name}</span>}
+          </>
+        )}
+        <span className="mt-auto flex items-center justify-between gap-2 pt-3 text-[11px] font-medium text-forest">
+          <span>{t('uni.packagesCount', { n: packages })}</span>
+          {!track && university.city && <span className="text-charcoal/45">{placeName(t, university.city)}</span>}
+        </span>
       </span>
     </button>
   )
@@ -171,8 +187,9 @@ export function UniversityPackagesSection({ presets, universities, courses, cart
   // Universities and the general preparation directions (medical, law, …) are different things and are listed apart.
   const unis = groups.filter((g) => !isPreparationTrack(g.university))
   const tracks = groups.filter((g) => isPreparationTrack(g.university)).sort((a, b) => trackRank(a.university) - trackRank(b.university))
-  const chooser = (list: typeof groups) => (
-    <ul className="grid grid-cols-2 gap-3 xl:grid-cols-3" role="list">
+  // Eight universities sit four to a row; the five directions fit one row on a wide screen.
+  const chooser = (list: typeof groups, columns: string) => (
+    <ul className={cx('grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3', columns)} role="list">
       {list.map((g) => <li key={g.university.id}><ChooserCard university={g.university} packages={g.presets.length} onSelect={() => select(g.university.id)} /></li>)}
     </ul>
   )
@@ -184,9 +201,9 @@ export function UniversityPackagesSection({ presets, universities, courses, cart
       <p id="uni-title" className="mb-5 max-w-2xl text-sm text-charcoal/60">{t('uni.subtitle')}</p>
 
       {selected ? (
-        <div ref={packagesRef} className="scroll-mt-24">
+        <div ref={packagesRef} className="scroll-mt-40">
           <div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-forest/15 bg-sage/40 p-4 sm:p-5">
-            <UniversityLogo university={selected.university} height={88} maxWidth={220} align="start" />
+            <UniversityLogo university={selected.university} height={104} maxWidth={240} align="start" />
             <div className="min-w-0 flex-1 basis-56">
               {selectedTrack && <div className="eyebrow mb-1">{t('uni.trackLabel')}</div>}
               <h2 className="break-words font-display text-3xl leading-tight text-charcoal">{universityName(selected.university, lang)}</h2>
@@ -199,8 +216,7 @@ export function UniversityPackagesSection({ presets, universities, courses, cart
             </div>
             {groups.length > 1 && <Button variant="secondary" size="sm" onClick={() => select(null)}>← {t('uni.all')}</Button>}
           </div>
-          {/* One package per row: beside the cart the column is too narrow for two of these cards. */}
-          <div className="grid gap-5">
+          <div className="grid gap-5 lg:grid-cols-2">
             {selected.presets.map((p) => <PackageCard key={p.id} preset={p} university={selected.university} courses={courses} cartGroupIds={cartGroupIds} onAdd={onAdd} />)}
           </div>
         </div>
@@ -209,21 +225,21 @@ export function UniversityPackagesSection({ presets, universities, courses, cart
           {unis.length > 0 && (
             <>
               <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-charcoal/50">{t('uni.universities')} · {unis.length}</div>
-              {chooser(unis)}
+              {chooser(unis, 'lg:grid-cols-4')}
             </>
           )}
           {tracks.length > 0 && (
             <>
               <div className={cx('text-xs font-semibold uppercase tracking-wider text-charcoal/50', unis.length > 0 && 'mt-8')}>{t('uni.tracks.eyebrow')} · {tracks.length}</div>
               <p className="mb-3 mt-1 max-w-2xl text-xs leading-relaxed text-charcoal/55">{t('uni.tracks.subtitle')}</p>
-              {chooser(tracks)}
+              {chooser(tracks, 'xl:grid-cols-5')}
             </>
           )}
         </>
       )}
 
       {generic.length > 0 && (
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {generic.map((p) => <PackageCard key={p.id} preset={p} courses={courses} cartGroupIds={cartGroupIds} onAdd={onAdd} />)}
         </div>
       )}
