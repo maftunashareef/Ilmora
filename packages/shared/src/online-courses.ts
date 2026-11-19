@@ -3,7 +3,8 @@ import type { CertificateKind, L, Level } from './types.js'
 /**
  * The curated online catalog: real courses published by their providers, opened on the provider's own site.
  *
- * Every fact below was read from the course's own page and re-checked on 2026-10-31 (see `source`). Where a page did not state a
+ * Every fact below was read from the course's own page and re-checked on the date in its `source` (the first sixteen on
+ * 2026-10-31, the twelve added later on 2026-11-19). Where a page did not state a
  * length, a level or a certificate, the field is left empty (`durationText: null`, certificate `NONE`) instead of
  * guessed. Titles, providers, instructors and curriculum items are the providers' own wording; the summaries and
  * descriptions are written in our own words, in three languages. Prices are not stored: online courses are free to take.
@@ -11,7 +12,7 @@ import type { CertificateKind, L, Level } from './types.js'
  *
  * `levelBasis` records where the difficulty comes from, because most providers do not label one.
  */
-export type OnlineCategorySlug = 'python' | 'frontend' | 'backend' | 'ai-ml' | 'ui-ux' | 'graphic-design' | 'english' | 'math'
+export type OnlineCategorySlug = 'python' | 'frontend' | 'backend' | 'ai-ml' | 'ui-ux' | 'graphic-design' | 'economics' | 'english' | 'math' | 'sciences' | 'it'
 
 export interface OnlineCourseSeed {
   id: string
@@ -37,8 +38,10 @@ export interface OnlineCourseSeed {
 
 const l = (uz: string, ru: string, en: string): L => ({ uz, ru, en })
 const VERIFIED = '2026-10-31'
+/** The date the courses added in November 2026 were read from their pages. */
+const VERIFIED_NOV = '2026-11-19'
 
-/** Categories the online catalog adds. `english` and `math` already exist in the ILMORA seed and are reused by slug. */
+/** Categories the online catalog adds. `english`, `math`, `sciences` and `it` already exist in the ILMORA seed and are reused by slug. */
 export const ONLINE_CATEGORIES: { id: string; slug: OnlineCategorySlug; name: L; glyph: string; sortOrder: number }[] = [
   { id: 'cat-python', slug: 'python', name: l('Python', 'Python', 'Python'), glyph: 'Py', sortOrder: 8 },
   { id: 'cat-frontend', slug: 'frontend', name: l('Frontend', 'Frontend', 'Frontend'), glyph: '‹/›', sortOrder: 9 },
@@ -46,6 +49,7 @@ export const ONLINE_CATEGORIES: { id: string; slug: OnlineCategorySlug; name: L;
   { id: 'cat-ai-ml', slug: 'ai-ml', name: l('Sun’iy intellekt va ML', 'ИИ и машинное обучение', 'AI & Machine Learning'), glyph: 'AI', sortOrder: 11 },
   { id: 'cat-ui-ux', slug: 'ui-ux', name: l('UI/UX dizayn', 'UI/UX-дизайн', 'UI/UX Design'), glyph: 'UX', sortOrder: 12 },
   { id: 'cat-graphic-design', slug: 'graphic-design', name: l('Grafik dizayn', 'Графический дизайн', 'Graphic Design'), glyph: '✎', sortOrder: 13 },
+  { id: 'cat-economics', slug: 'economics', name: l('Iqtisodiyot', 'Экономика', 'Economics'), glyph: '%', sortOrder: 14 },
 ]
 
 export const ONLINE_COURSES: OnlineCourseSeed[] = [
@@ -258,6 +262,34 @@ export const ONLINE_COURSES: OnlineCourseSeed[] = [
     curriculum: ['Session 1: Speaking and listening', 'Session 2: Reading', 'Session 3: Writing'],
     source: { verifiedOn: VERIFIED, note: 'OpenLearn page: free; 48 hours; Level 1 Introductory; free statement of participation; written by Bedford College Group with Middlesbrough College, West Herts College and the OU.' },
   },
+  {
+    id: 'c-online-ou-essay-report-writing', slug: 'ou-essay-and-report-writing-skills', category: 'english',
+    title: 'Essay and report writing skills', provider: 'The Open University (OpenLearn)', instructor: null, url: 'https://www.open.edu/openlearn/education-development/essay-and-report-writing-skills/content-section-0',
+    level: 'beginner', levelBasis: 'The page labels it “Level 1: Introductory”.', certificate: 'FREE',
+    durationText: l('15 soatlik öqiş', '15 часов обучения', '15 hours of study'),
+    summary: l('The Open University’ning esse va hisobot yoziş böyiça bepul kursi.', 'Бесплатный курс The Open University о том, как писать эссе и отчёты.', 'The Open University’s free course on writing essays and reports.'),
+    description: l(
+      'Yozma işning barça bosqiçlari: topşiriqni tuşuniş, tayyorgarlik, reja tuziş, qoralama yoziş, sayqallaş va öqituvçi fikrini tahlil qiliş. Kursni röyxatdan ötmasdan boşlaş mumkin; yakunlaganda bepul iştirok töğrisidagi bayonot beriladi. Bu IELTS kursi emas — ingliz tilida akademik yoziş könikmalari uçun.',
+      'Все этапы письменной работы: понимание задания, подготовка, планирование, черновик, доработка и разбор замечаний преподавателя. Начать можно без регистрации; по завершении выдаётся бесплатное заявление об участии. Это не курс IELTS — он о навыках академического письма на английском.',
+      'Every stage of a written assignment: understanding the task, preparation, planning, drafting, polishing and reflecting on tutor feedback. You can start without signing up; completion earns a free statement of participation. It is not an IELTS course — it builds academic writing skills in English.',
+    ),
+    curriculum: ['1 Good practice in writing', '2 Identifying key concerns', '3 The purpose of writing', '4 Understanding the task', '5 Preparation', '6 Planning', '7 Drafting', '8 Polishing', '9 Letting go', '10 Reflecting on tutor feedback', 'Conclusion'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'OpenLearn page: “Free course”; “15 hours study”; Level 1 Introductory; free statement of participation on completion; can be started without signing up; ten numbered sections and a conclusion.' },
+  },
+  {
+    id: 'c-online-saylor-esl003', slug: 'saylor-esl003-upper-intermediate-english', category: 'english',
+    title: 'ESL003: Upper-Intermediate English as a Second Language', provider: 'Saylor University', instructor: null, url: 'https://learn.saylor.org/course/esl003',
+    level: 'intermediate', levelBasis: 'The page labels it “CEFR Level B2”.', certificate: 'FREE',
+    durationText: l('14 soat', '14 часов', '14 hours'),
+    summary: l('Saylor University’ning B2 darajadagi ingliz tili böyiça bepul kursi.', 'Бесплатный курс английского уровня B2 от Saylor University.', 'Saylor University’s free English course at CEFR level B2.'),
+    description: l(
+      'Tört bölim: til könikmalari, matnni tuşunib öqiş, öqiş orqali tilni yaxşilaş va öqiganlar asosida yoziş. Kurs va undagi barça materiallar bepul; öqituvçi va qat’iy jadval yöq. Yakuniy imtihonni kamida 70% bilan topşirganlarga bepul sertifikat beriladi; bölimlar va imtihon uçun bepul röyxatdan ötiş kerak.',
+      'Четыре раздела: языковые навыки, чтение с пониманием, чтение для развития языка и письмо на основе прочитанного. Курс и все его материалы бесплатны; преподавателя и жёсткого расписания нет. Тем, кто сдаст итоговый экзамен не ниже чем на 70%, выдаётся бесплатный сертификат; для разделов и экзамена нужна бесплатная регистрация.',
+      'Four units: language skills, reading to comprehend, reading to improve and reading to write. The course and everything linked in it are free, with no instructor or fixed schedule. A free certificate is awarded for at least 70% on the final exam; a free account is needed for the units and the exam.',
+    ),
+    curriculum: ['Unit 1: Language Skills', 'Unit 2: Reading to Comprehend', 'Unit 3: Reading to Improve', 'Unit 4: Reading to Write'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Course page: “Time: 14 hours”, “Free Certificate”, “CEFR Level B2”. Syllabus page: the course is entirely free to enroll in and to access; a free final exam awards a completion certificate at 70% or more; the four units.' },
+  },
 
   // ── Mathematics ─────────────────────────────────────────────────────────
   {
@@ -287,5 +319,151 @@ export const ONLINE_COURSES: OnlineCourseSeed[] = [
     ),
     curriculum: ['Unit I: Ax = b and the Four Subspaces', 'Unit II: Least Squares, Determinants and Eigenvalues', 'Unit III: Positive Definite Matrices and Applications', 'Final Course Review'],
     source: { verifiedOn: VERIFIED, note: 'Course page (units and level); price and “no credit or certificate” statements come from the OCW About page, which applies to the whole site.' },
+  },
+  {
+    id: 'c-online-khan-algebra-1', slug: 'khan-academy-algebra-1', category: 'math',
+    title: 'Algebra 1', provider: 'Khan Academy', instructor: null, url: 'https://www.khanacademy.org/math/algebra',
+    level: 'beginner', levelBasis: 'No level label on the page; it is the first algebra course and offers “Get ready for Algebra 1” to those who are not ready.', certificate: 'NONE',
+    durationText: null,
+    summary: l('Khan Academy’ning algebra asoslari böyiça bepul kursi; özbek tilidagi versiyasi ham bor.', 'Бесплатный курс Khan Academy по основам алгебры; есть версия на узбекском языке.', 'Khan Academy’s free course on the foundations of algebra; an Uzbek-language version exists.'),
+    description: l(
+      'Tenglama va tengsizliklar, çiziqli tenglamalar va grafiklar, tenglamalar sistemalari, funksiyalar, ketma-ketliklar, daraja va ildizlar, kvadrat funksiyalar: video darslar va maşqlar bilan. Khan Academy notijorat taşkilot, kurslari bepul; sahifada sertifikat tilga olinmagan. Kursning özbek tilidagi versiyasi uz.khanacademy.org saytida oçiladi.',
+      'Уравнения и неравенства, линейные уравнения и графики, системы уравнений, функции, последовательности, степени и корни, квадратичные функции: с видеоуроками и упражнениями. Khan Academy — некоммерческая организация, её курсы бесплатны; о сертификате на странице не упоминается. Версия курса на узбекском языке открывается на uz.khanacademy.org.',
+      'Equations and inequalities, linear equations and graphs, systems of equations, functions, sequences, exponents and radicals, and quadratic functions, with video lessons and practice. Khan Academy is a nonprofit and its courses are free; the page mentions no certificate. An Uzbek-language version of the course opens at uz.khanacademy.org.',
+    ),
+    curriculum: ['Algebra foundations', 'Solving equations & inequalities', 'Working with units', 'Linear equations & graphs', 'Forms of linear equations', 'Systems of equations', 'Inequalities (systems & graphs)', 'Functions', 'Sequences', 'Absolute value & piecewise functions', 'Exponents & radicals', 'Exponential growth & decay', 'Quadratics: Multiplying & factoring', 'Quadratic functions & equations', 'Irrational numbers', 'Creativity in algebra'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Khan Academy’s page footer: “Our mission is to provide a free, world-class education to anyone, anywhere”; the page mentions no certificate. The page lists 17 units (the last is “Teacher resources”, not listed here). The Uzbek version (uz.khanacademy.org/math/algebra, “Algebra I”, 17 boʻlim) loaded the same day.' },
+  },
+  {
+    id: 'c-online-khan-precalculus', slug: 'khan-academy-precalculus', category: 'math',
+    title: 'Precalculus', provider: 'Khan Academy', instructor: null, url: 'https://www.khanacademy.org/math/precalculus',
+    level: 'intermediate', levelBasis: 'No level label on the page; it offers “Get ready for Precalculus” to those who are not ready, so it is placed above the introductory algebra course.', certificate: 'NONE',
+    durationText: null,
+    summary: l('Khan Academy’ning matematik tahlilga tayyorlovçi bepul kursi; özbek tilidagi versiyasi ham bor.', 'Бесплатный курс Khan Academy, готовящий к математическому анализу; есть версия на узбекском языке.', 'Khan Academy’s free course that prepares for calculus; an Uzbek-language version exists.'),
+    description: l(
+      'Ön bölim: murakkab va teskari funksiyalar, trigonometriya, kompleks sonlar, ratsional funksiyalar, konus kesimlari, vektorlar, matritsalar, ehtimollik va kombinatorika, qatorlar, funksiyaning çegaraviy qiymati va uzluksizlik. Kurs bepul; sahifada sertifikat tilga olinmagan. Özbek tilidagi versiyasi («Matematik analiz asoslari») uz.khanacademy.org saytida oçiladi va unda bölimlar kamroq.',
+      'Десять разделов: сложные и обратные функции, тригонометрия, комплексные числа, рациональные функции, конические сечения, векторы, матрицы, вероятность и комбинаторика, ряды, пределы и непрерывность. Курс бесплатный; о сертификате на странице не упоминается. Версия на узбекском языке («Matematik analiz asoslari») открывается на uz.khanacademy.org, разделов в ней меньше.',
+      'Ten units: composite and inverse functions, trigonometry, complex numbers, rational functions, conic sections, vectors, matrices, probability and combinatorics, series, and limits and continuity. The course is free; the page mentions no certificate. The Uzbek-language version (“Matematik analiz asoslari”) opens at uz.khanacademy.org and has fewer units.',
+    ),
+    curriculum: ['Composite and inverse functions', 'Trigonometry', 'Complex numbers', 'Rational functions', 'Conic sections', 'Vectors', 'Matrices', 'Probability and combinatorics', 'Series', 'Limits and continuity'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Khan Academy’s page footer: “Our mission is to provide a free, world-class education to anyone, anywhere”; the page mentions no certificate. The page shows 10 units. The Uzbek version (uz.khanacademy.org/math/precalculus, “Matematik analiz asoslari”, 7 boʻlim) loaded the same day.' },
+  },
+  {
+    id: 'c-online-ou-maths-science-technology', slug: 'ou-mathematics-for-science-and-technology', category: 'math',
+    title: 'Mathematics for science and technology', provider: 'The Open University (OpenLearn)', instructor: null, url: 'https://www.open.edu/openlearn/science-maths-technology/mathematics-science-and-technology/content-section-overview',
+    level: 'beginner', levelBasis: 'The page labels it “Level 1: Introductory”.', certificate: 'FREE',
+    durationText: l('24 soatlik öqiş', '24 часа обучения', '24 hours of study'),
+    summary: l('The Open University’ning fan va texnika uçun zarur matematika böyiça bepul kursi.', 'Бесплатный курс The Open University по математике для естественных наук и техники.', 'The Open University’s free course on the mathematics needed for science and technology.'),
+    description: l(
+      'Sakkiz hafta: darajalar va ilmiy yozuv, ölçovlar, algebraga kiriş, trigonometriya, logarifmlar, ehtimollik va statistika. Kursni röyxatdan ötmasdan boşlaş mumkin; yakunlaganda bepul iştirok töğrisidagi bayonot va OU raqamli nişoni beriladi (nişon OU tomonidan akkreditatsiya qilinmagan).',
+      'Восемь недель: степени и научная запись чисел, измерения, введение в алгебру, тригонометрия, логарифмы, вероятность и статистика. Начать можно без регистрации; по завершении выдаются бесплатное заявление об участии и цифровой значок OU (значок не аккредитован OU).',
+      'Eight weeks: powers and scientific notation, measurements, an introduction to algebra, trigonometry, logarithms, probability and statistics. You can start without signing up; completion earns a free statement of participation and an OU digital badge (the badge is not accredited by the OU).',
+    ),
+    curriculum: ['Introduction and guidance', 'Week 1: Powers and scientific notation', 'Week 2: Measurements', 'Week 3: Introduction to algebra', 'Week 4: Starting with trigonometry', 'Week 5: Logarithms', 'Week 6: Probability', 'Week 7: Statistics and repeated measurements', 'Week 8: Statistics and sampling'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'OpenLearn page: “Free course”; “24 hours study”; Level 1 Introductory; free statement of participation on completion and a digital badge; can be started without signing up; eight weeks.' },
+  },
+
+  // ── Natural sciences ────────────────────────────────────────────────────
+  {
+    id: 'c-online-mit-classical-mechanics', slug: 'mit-ocw-classical-mechanics', category: 'sciences',
+    title: 'Classical Mechanics (MIT 8.01SC)', provider: 'MIT OpenCourseWare', instructor: 'Deepto Chakrabarty, Peter Dourmashkin, Michelle Tomasik, Anna Frebel, Vladan Vuletic', url: 'https://ocw.mit.edu/courses/8-01sc-classical-mechanics-fall-2016/',
+    level: 'intermediate', levelBasis: 'The page labels it Undergraduate; the syllabus names no prerequisites and 18.01SC Single Variable Calculus as a corequisite.', certificate: 'NONE',
+    durationText: l('12 haftaga bölingan', 'разбит на 12 недель', 'organised in twelve weeks'),
+    summary: l('MIT OpenCourseWare’ning mustaqil örganiş uçun klassik mexanika kursi.', 'Курс MIT OpenCourseWare по классической механике для самостоятельного изучения.', 'MIT OpenCourseWare’s self-study course in classical mechanics.'),
+    description: l(
+      'Ön ikki hafta: kinematika, Nyuton qonunlari, aylanma harakat, impuls, iş va energiya, töqnaşuvlar nazariyasi, aylanma harakat dinamikasi va burçak momenti. Kurs matematik tahlilga tayanadi: 18.01SC kursini parallel öqiş tavsiya etiladi. MIT OpenCourseWare bepul va oçiq; kredit yoki sertifikat berilmaydi.',
+      'Двенадцать недель: кинематика, законы Ньютона, движение по окружности, импульс, работа и энергия, теория столкновений, вращательное движение и момент импульса. Курс опирается на математический анализ: параллельно рекомендуется проходить 18.01SC. MIT OpenCourseWare бесплатен и открыт; кредиты и сертификаты не выдаются.',
+      'Twelve weeks: kinematics, Newton’s laws, circular motion, momentum, work and energy, collision theory, rotational motion and angular momentum. The course is calculus-based: 18.01SC is its corequisite. MIT OpenCourseWare is free and open; it does not give credit or certificates.',
+    ),
+    curriculum: ['Review: Vectors', 'Week 1: Kinematics', "Week 2: Newton's Laws", 'Week 3: Circular Motion', 'Week 4: Drag Forces, Constraints and Continuous Systems', 'Week 5: Momentum and Impulse', 'Week 6: Continuous Mass Transfer', 'Week 7: Kinetic Energy and Work', 'Week 8: Potential Energy and Energy Conservation', 'Week 9: Collision Theory', 'Week 10: Rotational Motion', 'Week 11: Angular Momentum', 'Week 12: Rotations and Translation - Rolling'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Course page (8.01SC, Fall 2016, Undergraduate, instructors, weeks); syllabus page (no prerequisites, 18.01SC corequisite, twelve weeks); price and “no credit or certification” statements come from the OCW About page, which applies to the whole site.' },
+  },
+  {
+    id: 'c-online-khan-ap-physics-1', slug: 'khan-academy-ap-college-physics-1', category: 'sciences',
+    title: 'AP®/College Physics 1', provider: 'Khan Academy', instructor: null, url: 'https://www.khanacademy.org/science/ap-college-physics-1',
+    level: 'intermediate', levelBasis: 'No separate level label on the page; the title places it at AP and college level.', certificate: 'NONE',
+    durationText: null,
+    summary: l('Khan Academy’ning mexanika böyiça bepul fizika kursi.', 'Бесплатный курс физики Khan Academy по механике.', 'Khan Academy’s free physics course on mechanics.'),
+    description: l(
+      'Töqqiz bölim: kinematika, kuç va ilgarilanma harakat dinamikasi, iş, energiya va quvvat, impuls, aylanma harakat, tebranişlar va suyuqliklar. Kurs AQŞning AP Physics 1 imtihoniga moslangan, oxirgi bölim — imtihonga takrorlaş. Kurs bepul; sahifada sertifikat tilga olinmagan.',
+      'Девять разделов: кинематика, сила и динамика поступательного движения, работа, энергия и мощность, импульс, вращательное движение, колебания и жидкости. Курс построен по программе американского экзамена AP Physics 1, последний раздел — повторение к экзамену. Курс бесплатный; о сертификате на странице не упоминается.',
+      'Nine units: kinematics, force and translational dynamics, work, energy and power, linear momentum, rotational motion, oscillations and fluids. The course follows the US AP Physics 1 exam and its last unit is exam review. It is free; the page mentions no certificate.',
+    ),
+    curriculum: ['Kinematics', 'Force and translational dynamics', 'Work, energy, and power', 'Linear momentum', 'Torque and rotational dynamics', 'Energy and momentum of rotating systems', 'Oscillations', 'Fluids', 'AP Physics 1 review'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Khan Academy’s page footer: “Our mission is to provide a free, world-class education to anyone, anywhere”; the page mentions no certificate. The page shows 9 units.' },
+  },
+  {
+    id: 'c-online-mit-chemical-science', slug: 'mit-ocw-principles-of-chemical-science', category: 'sciences',
+    title: 'Principles of Chemical Science (MIT 5.111SC)', provider: 'MIT OpenCourseWare', instructor: 'Catherine Drennan', url: 'https://ocw.mit.edu/courses/5-111sc-principles-of-chemical-science-fall-2014/',
+    level: 'intermediate', levelBasis: 'The page labels it Undergraduate and names one year of high school chemistry as the expected background.', certificate: 'NONE',
+    durationText: l('taxminan 150 soat', 'около 150 часов', 'about 150 hours'),
+    summary: l('MIT OpenCourseWare’ning umumiy kimyo asoslari böyiça mustaqil örganiş kursi.', 'Курс MIT OpenCourseWare по основам общей химии для самостоятельного изучения.', 'MIT OpenCourseWare’s self-study course on the principles of general chemistry.'),
+    description: l(
+      'Beş bölim: atom tuzilişi, kimyoviy boğlaniş va molekulalar tuzilişi, termodinamika va kimyoviy muvozanat, ötiş metallari va oksidlaniş-qaytariliş reaksiyalari, kimyoviy kinetika. Kutilgan tayyorgarlik — maktabda bir yillik kimyo. MIT OpenCourseWare bepul va oçiq; kredit yoki sertifikat berilmaydi.',
+      'Пять разделов: строение атома, химическая связь и строение молекул, термодинамика и химическое равновесие, переходные металлы и окислительно-восстановительные реакции, химическая кинетика. Ожидаемая подготовка — год школьной химии. MIT OpenCourseWare бесплатен и открыт; кредиты и сертификаты не выдаются.',
+      'Five units: the atom, chemical bonding and structure, thermodynamics and chemical equilibrium, transition metals and oxidation-reduction reactions, and chemical kinetics. One year of high school chemistry is the expected background. MIT OpenCourseWare is free and open; it does not give credit or certificates.',
+    ),
+    curriculum: ['Unit I: The Atom', 'Unit II: Chemical Bonding & Structure', 'Unit III: Thermodynamics & Chemical Equilibrium', 'Unit IV: Transition Metals & Oxidation-Reduction Reactions', 'Unit V: Chemical Kinetics'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Course page (5.111SC, Fall 2014, Undergraduate, instructor, the five units, which the page prints in capitals); syllabus page (no formal prerequisites, about 150 hours); price and “no credit or certification” statements come from the OCW About page, which applies to the whole site.' },
+  },
+  {
+    id: 'c-online-mit-biology', slug: 'mit-ocw-fundamentals-of-biology', category: 'sciences',
+    title: 'Fundamentals of Biology (MIT 7.01SC)', provider: 'MIT OpenCourseWare', instructor: 'Eric Lander, Robert Weinberg, Tyler Jacks, Hazel Sive, Graham Walker, Sallie Chisholm, Michelle Mischke', url: 'https://ocw.mit.edu/courses/7-01sc-fundamentals-of-biology-fall-2011/',
+    level: 'intermediate', levelBasis: 'The page labels it Undergraduate; the syllabus names no formal prerequisites.', certificate: 'NONE',
+    durationText: l('taxminan 150 soat', 'около 150 часов', 'about 150 hours'),
+    summary: l('MIT OpenCourseWare’ning biologiya asoslari böyiça mustaqil örganiş kursi.', 'Курс MIT OpenCourseWare по основам биологии для самостоятельного изучения.', 'MIT OpenCourseWare’s self-study course on the fundamentals of biology.'),
+    description: l(
+      'Tört bölim: bioximiya, molekulyar biologiya, genetika va rekombinant DNK. Kurs mustaqil örganiş uçun tuzilgan; rasmiy dastlabki talablar yöq. MIT OpenCourseWare bepul va oçiq; kredit yoki sertifikat berilmaydi.',
+      'Четыре раздела: биохимия, молекулярная биология, генетика и рекомбинантная ДНК. Курс составлен для самостоятельного изучения; формальных требований к подготовке нет. MIT OpenCourseWare бесплатен и открыт; кредиты и сертификаты не выдаются.',
+      'Four units: biochemistry, molecular biology, genetics and recombinant DNA. The course is designed for independent study and has no formal prerequisites. MIT OpenCourseWare is free and open; it does not give credit or certificates.',
+    ),
+    curriculum: ['Biochemistry', 'Molecular Biology', 'Genetics', 'Recombinant DNA'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Course page (7.01SC, Fall 2011, Undergraduate, instructors, four units, designed for independent study); syllabus page (no formal prerequisites, about 150 hours); price and “no credit or certification” statements come from the OCW About page, which applies to the whole site.' },
+  },
+
+  // ── Computer science ────────────────────────────────────────────────────
+  {
+    id: 'c-online-cs50x', slug: 'cs50-introduction-to-computer-science', category: 'it',
+    title: 'CS50’s Introduction to Computer Science', provider: 'Harvard CS50 (OpenCourseWare)', instructor: 'David J. Malan', url: 'https://cs50.harvard.edu/x/',
+    level: 'beginner', levelBasis: 'The page says it is for students with or without prior programming experience.', certificate: 'FREE',
+    durationText: l('11 haftalik material', '11 недель материала', '11 weeks of material'),
+    summary: l('Harvardning CS50 jamoasidan kompyuter fanlariga kiriş kursi.', 'Вводный курс по информатике от команды CS50 Гарварда.', 'Harvard CS50’s introduction to computer science.'),
+    description: l(
+      'Ön bir haftalik material: Scratch, C, massivlar, algoritmlar, xotira, ma’lumotlar tuzilmalari, Python, SQL, HTML, CSS, JavaScript va Flask; oxirida yakuniy loyiha. Dasturlaş tajribasi şart emas. Kursni CS50 saytida bepul öqiş mumkin. Har bir topşiriq va yakuniy loyihadan kamida 70% olganlarga bepul CS50 sertifikati beriladi; edX’ning tasdiqlangan sertifikati alohida va pullik.',
+      'Одиннадцать недель материала: Scratch, C, массивы, алгоритмы, память, структуры данных, Python, SQL, HTML, CSS, JavaScript и Flask; в конце итоговый проект. Опыт программирования не обязателен. Курс можно бесплатно пройти на сайте CS50. Тем, кто наберёт не менее 70% за каждое задание и итоговый проект, выдаётся бесплатный сертификат CS50; подтверждённый сертификат edX — отдельный и платный.',
+      'Eleven weeks of material: Scratch, C, arrays, algorithms, memory, data structures, Python, SQL, HTML, CSS, JavaScript and Flask, ending with a final project. No programming experience is needed. Anyone can follow it free on the CS50 site. Scoring at least 70% on each problem set and the final project earns a free CS50 Certificate; the verified certificate from edX is separate and paid.',
+    ),
+    curriculum: ['Week 0 Scratch', 'Week 1 C', 'Week 2 Arrays', 'Week 3 Algorithms', 'Week 4 Memory', 'Week 5 Data Structures', 'Week 6 Python', 'Week 7 SQL', 'Artificial Intelligence', 'Week 8 HTML, CSS, JavaScript', 'Week 9 Flask', 'Week 10 The End', 'Final Project'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'cs50.harvard.edu/x and /x/certificate/: free via OpenCourseWare (“CS50x is free to take”); eleven weeks of material; a free CS50 Certificate for at least 70% on each problem set and the final project; an edX verified certificate is offered separately. The address stays the same while the edition changes each year (CS50x 2026 on the day it was read).' },
+  },
+
+  // ── Economics ───────────────────────────────────────────────────────────
+  {
+    id: 'c-online-mit-microeconomics', slug: 'mit-ocw-principles-of-microeconomics', category: 'economics',
+    title: 'Principles of Microeconomics (MIT 14.01SC)', provider: 'MIT OpenCourseWare', instructor: 'Jonathan Gruber', url: 'https://ocw.mit.edu/courses/14-01sc-principles-of-microeconomics-fall-2011/',
+    level: 'intermediate', levelBasis: 'The page labels it Undergraduate and calls it an introductory undergraduate course; the syllabus asks for basic single-variable calculus.', certificate: 'NONE',
+    durationText: null,
+    summary: l('MIT OpenCourseWare’ning mikroiqtisodiyot asoslari böyiça mustaqil örganiş kursi.', 'Курс MIT OpenCourseWare по основам микроэкономики для самостоятельного изучения.', 'MIT OpenCourseWare’s self-study course on the principles of microeconomics.'),
+    description: l(
+      'Yetti bölim: talab va taklif, iste’molçi nazariyasi, işlab çiqaruvçi nazariyasi, farovonlik iqtisodiyoti, monopoliya va oligopoliya, tenglik va samaradorlik. Bir özgaruvçili matematik tahlil asoslari kerak böladi. MIT OpenCourseWare bepul va oçiq; kredit yoki sertifikat berilmaydi.',
+      'Семь разделов: спрос и предложение, теория потребителя, теория производителя, экономика благосостояния, монополия и олигополия, справедливость и эффективность. Понадобятся основы анализа функций одной переменной. MIT OpenCourseWare бесплатен и открыт; кредиты и сертификаты не выдаются.',
+      'Seven units: supply and demand, consumer theory, producer theory, welfare economics, monopoly and oligopoly, and equity and efficiency. It uses some basic single-variable calculus. MIT OpenCourseWare is free and open; it does not give credit or certificates.',
+    ),
+    curriculum: ['Unit 1: Supply and Demand', 'Unit 2: Consumer Theory', 'Unit 3: Producer Theory', 'Unit 4: Welfare Economics', 'Unit 5: Monopoly and Oligopoly', 'Unit 6: Topics in Intermediate Microeconomics', 'Unit 7: Equity and Efficiency'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Course page (14.01SC, Fall 2011, Undergraduate, instructor, seven units, designed for independent study); syllabus page (basic uni-variate calculus, no other prerequisites); price and “no credit or certification” statements come from the OCW About page, which applies to the whole site.' },
+  },
+  {
+    id: 'c-online-khan-microeconomics', slug: 'khan-academy-microeconomics', category: 'economics',
+    title: 'Microeconomics', provider: 'Khan Academy', instructor: null, url: 'https://www.khanacademy.org/economics-finance-domain/microeconomics',
+    level: 'beginner', levelBasis: 'No level label and no prerequisites on the page; the first unit is “Basic economic concepts”.', certificate: 'NONE',
+    durationText: null,
+    summary: l('Khan Academy’ning mikroiqtisodiyot böyiça bepul kursi.', 'Бесплатный курс Khan Academy по микроэкономике.', 'Khan Academy’s free course on microeconomics.'),
+    description: l(
+      'Töqqiz bölim: asosiy iqtisodiy tuşunçalar, talab, taklif va bozor muvozanati, elastiklik, iste’molçi nazariyasi, işlab çiqariş qarorlari va foyda, raqobat şakllari, omillar bozori, bozor nosozliklari va davlatning roli. Kurs bepul; sahifada sertifikat tilga olinmagan.',
+      'Девять разделов: базовые экономические понятия, спрос, предложение и рыночное равновесие, эластичность, теория потребителя, производственные решения и прибыль, формы конкуренции, рынки факторов производства, провалы рынка и роль государства. Курс бесплатный; о сертификате на странице не упоминается.',
+      'Nine units: basic economic concepts, supply, demand and market equilibrium, elasticity, consumer theory, production decisions and economic profit, forms of competition, factor markets, and market failure and the role of government. The course is free; the page mentions no certificate.',
+    ),
+    curriculum: ['Basic economic concepts', 'Supply, demand, and market equilibrium', 'Elasticity', 'Consumer and producer surplus, market interventions, and international trade', 'Consumer theory', 'Production decisions and economic profit', 'Forms of competition', 'Factor markets', 'Market failure and the role of government'],
+    source: { verifiedOn: VERIFIED_NOV, note: 'Khan Academy’s page footer: “Our mission is to provide a free, world-class education to anyone, anywhere”; the page mentions no certificate. The page shows 9 units.' },
   },
 ]

@@ -8,7 +8,7 @@ describe('curated online catalog data', () => {
   it('has unique ids and slugs and only known categories', () => {
     expect(new Set(ONLINE_COURSES.map((c) => c.id)).size).toBe(ONLINE_COURSES.length)
     expect(new Set(ONLINE_COURSES.map((c) => c.slug)).size).toBe(ONLINE_COURSES.length)
-    const known = new Set<string>([...ONLINE_CATEGORIES.map((c) => c.slug), 'english', 'math'])
+    const known = new Set<string>([...ONLINE_CATEGORIES.map((c) => c.slug), 'english', 'math', 'sciences', 'it'])
     for (const c of ONLINE_COURSES) expect(known.has(c.category), c.id).toBe(true)
     expect(new Set(ONLINE_CATEGORIES.map((c) => c.id)).size).toBe(ONLINE_CATEGORIES.length)
   })
@@ -37,16 +37,18 @@ describe('curated online catalog data', () => {
 
   it('covers each requested subject that has a verified free course', () => {
     const have = new Set(ONLINE_COURSES.map((c) => c.category))
-    for (const slug of ['python', 'frontend', 'backend', 'ai-ml', 'ui-ux', 'graphic-design', 'english', 'math']) expect(have.has(slug as never), slug).toBe(true)
-    // No official free IELTS course could be verified, so none is listed rather than guessed.
+    for (const slug of ['python', 'frontend', 'backend', 'ai-ml', 'ui-ux', 'graphic-design', 'english', 'math', 'sciences', 'it', 'economics']) expect(have.has(slug as never), slug).toBe(true)
+    // No official free IELTS course could be verified (checked again on 2026-11-19: each one found is paid, time-limited or
+    // tied to booking a test), so none is listed rather than guessed.
     expect(ONLINE_COURSES.some((c) => /ielts/i.test(c.title))).toBe(false)
   })
 
   it('never claims a free certificate unless the provider page does, and keeps unknown lengths empty', () => {
     const free = ONLINE_COURSES.filter((c) => c.certificate === 'FREE').map((c) => c.id).sort()
-    // CS50: the course's own /certificate/ page offers a free CS50 Certificate; OpenLearn: a free statement of participation.
-    expect(free).toEqual(['c-online-cs50ai', 'c-online-cs50p', 'c-online-cs50w', 'c-online-ou-english-skills', 'c-online-ou-everyday-english-1', 'c-online-ou-interaction-design'])
-    for (const c of ONLINE_COURSES.filter((x) => x.certificate === 'FREE')) expect(c.source.note).toMatch(/free CS50 Certificate|free statement of participation/)
+    // CS50: the course's own /certificate/ page offers a free CS50 Certificate; OpenLearn: a free statement of participation;
+    // Saylor: its course page says “Free Certificate” (awarded for the free final exam).
+    expect(free).toEqual(['c-online-cs50ai', 'c-online-cs50p', 'c-online-cs50w', 'c-online-cs50x', 'c-online-ou-english-skills', 'c-online-ou-essay-report-writing', 'c-online-ou-everyday-english-1', 'c-online-ou-interaction-design', 'c-online-ou-maths-science-technology', 'c-online-saylor-esl003'])
+    for (const c of ONLINE_COURSES.filter((x) => x.certificate === 'FREE')) expect(c.source.note).toMatch(/free CS50 Certificate|free statement of participation|“Free Certificate”/)
     expect(ONLINE_COURSES.find((c) => c.id === 'c-online-mdn-learn')?.durationText).toBeNull()
   })
 })

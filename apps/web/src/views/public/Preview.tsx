@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { hoursLabel, isPreparationTrack, MAX_CART_COURSES, PAYMENT_HOLD_HOURS, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { ConsentFields } from '../../components/ConsentGate'
+import { PaymeLogo } from '../../components/PaymeLogo'
 import { consentComplete, EMPTY_CONSENT, needsConsent, type ConsentState } from '../../components/consent'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
 import { Timetable } from '../../components/Timetable'
@@ -172,8 +173,7 @@ export function PreviewPage() {
             <div className="mt-4 text-sm font-medium text-charcoal">{t('checkout.provider')}</div>
             {/* One provider: Payme. Shown as a card (no choice to make), with «not connected yet» while the API has no keys. */}
             <div className={cx('mt-2 flex items-center gap-3 rounded-control border px-4 py-3 text-sm', providers?.PAYME ? 'border-forest bg-sage/40' : 'border-charcoal/12 opacity-60')}>
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-ivory"><Icon name="package" className="h-4 w-4" /></span>
-              <span className="font-medium text-charcoal">{PROVIDER_LABEL.PAYME}</span>
+              <PaymeLogo className="!px-3 !py-1.5" />
               {!providers?.PAYME && <Badge tone="muted" className="ml-auto">{providers ? t('checkout.providerUnavailable') : '…'}</Badge>}
             </div>
             <Notice tone="info" className="mt-3 text-xs">{t('checkout.note', { hold: hoursLabel(lang, PAYMENT_HOLD_HOURS) })}</Notice>
