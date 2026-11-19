@@ -2,6 +2,8 @@
 # Roll out the images named in the machine's .env.
 #   sh infra/uzcloud/deploy.sh admin     on ilmora-admin: data services → migrations (+ seed on the first release)
 #                                        → worker + admin panel + backups
+#                                        IMPORT_ONLINE_COURSES=true (the release's «import_online_courses» input) also
+#                                        imports the curated online course catalog right after the migrations
 #   sh infra/uzcloud/deploy.sh web       on ilmora-web:   api + site + Caddy, then checks from outside
 # Order on release: admin first (migrations are backward compatible with the running api), then web.
 # Rollback: cp .env.previous .env (the release workflow keeps the previous image lines there) and run the same command;
@@ -164,6 +166,14 @@ case "$ROLE" in
     if [ "$($COMPOSE exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -tAc 'SELECT count(*) FROM "Tenant"')" = 0 ]; then
       echo "== first release: initial data (seed; SEED_CATALOG from api.env)"
       $COMPOSE --profile migrate run --rm migrate npx tsx prisma/seed.ts
+    fi
+    # The curated online courses (packages/shared/src/online-courses.ts) reach the database only on request, never on
+    # an ordinary release. The script is safe to repeat: it adds the missing courses and categories, refreshes the
+    # provider facts of the ones already there and leaves their status, visibility and every other record alone
+    # (apps/api/prisma/seed-online-courses.ts). It runs after the backup step above.
+    if [ "${IMPORT_ONLINE_COURSES:-}" = true ]; then
+      echo "== online course catalog import"
+      $COMPOSE --profile migrate run --rm migrate npx tsx prisma/seed-online-courses.ts
     fi
     if backup_configured; then
       $COMPOSE up -d --build worker admin backup
