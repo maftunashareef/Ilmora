@@ -204,12 +204,17 @@ export function BuilderPage() {
     <div className="container-x py-12 lg:py-16">
       <PageTitle title={t('builder.title')} subtitle={t('builder.subtitle')} />
       <JourneyTracker done={journeyDone} current={journeyCurrent} canReview={complete} onStep={goToStep} />
+
+      {/* The cart sits beside everything else from the top of the page (and comes first on a phone), so what is chosen
+          and the monthly total are in view on the first screen, not two screens down. */}
+      <div className="grid gap-8 lg:grid-cols-[1.25fr_0.75fr]">
+        <div className="min-w-0">
       <CourseFinderPrompt className="mb-10" />
 
       {/* Step 1 — package */}
       <section id="builder-packages" className="mb-10 scroll-mt-24">
         <Eyebrow className="mb-4">{t('builder.step1')}</Eyebrow>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {packages.map((p) => {
             const active = pkg?.id === p.id
             return (
@@ -237,7 +242,6 @@ export function BuilderPage() {
       {/* Ready-made packages next to Flex, Winx and Build Your Own: university preparation packages (published ones only). */}
       <UniversityPackagesSection presets={presets ?? []} universities={universities ?? []} courses={courses} cartGroupIds={student?.builder.groupIds ?? []} onAdd={startPreset} />
 
-      <div className="grid gap-8 lg:grid-cols-[1.25fr_0.75fr]">
         {/* Step 2 — courses */}
         <section id="builder-courses" className="min-w-0 scroll-mt-24">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -289,13 +293,17 @@ export function BuilderPage() {
             })}
           </ul>
         </section>
+        </div>
 
-        {/* Summary */}
-        <aside id="builder-summary" className="min-w-0 scroll-mt-24 lg:sticky lg:top-24 lg:self-start">
+        {/* Summary: the cart. It scrolls inside itself when it is taller than the window. */}
+        <aside id="builder-summary" className="scrollbar-thin order-first min-w-0 scroll-mt-24 lg:sticky lg:top-24 lg:order-none lg:max-h-[calc(100vh-7rem)] lg:self-start lg:overflow-y-auto lg:pr-1">
           <span id="cart" className="block scroll-mt-24" aria-hidden="true" />
           <Card className="p-6">
-            <div className="flex items-center justify-between">
-              <Eyebrow>{t('builder.yourSelection')}</Eyebrow>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <Eyebrow>{t('builder.yourSelection')}</Eyebrow>
+                <h2 className="mt-1 font-display text-3xl leading-none text-charcoal">{t('nav.cart')}</h2>
+              </div>
               {pkg ? <Badge tone="sage">{tr(pkg.name)} · {selectedGroups.length}/{pkg.maxCourses}</Badge> : <Badge tone="sage">{t('builder.custom')} · {selectedGroups.length}</Badge>}
             </div>
             {pkg && (

@@ -1,4 +1,6 @@
 import { groupByUniversity, isPreparationTrack, isUniversityPreset, universityName, presetCartPlan, presetCourses, presetNeedsConfirmation, presetPublishability, presetReadiness, presetTotal, universityOf } from '@ilmora/shared'
+import { useEffect, useRef } from 'react'
+import { Link } from '@/lib/router'
 import { useSearchParams } from '@/lib/routerHooks'
 import { FormatBadge, PriceNow, ScheduleChips } from '../../components/course/CourseCard'
 import { Badge, Button, Card, Eyebrow, Icon } from '../../components/ui'
@@ -7,6 +9,7 @@ import { useT } from '../../i18n/useT'
 import { formatSom } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 import type { Course, Preset, University } from '../../types'
+import { trackRank } from '../../lib/trackOrder'
 import { UniversityLogo } from './Universities'
 import { placeName } from './placeName'
 
@@ -29,7 +32,7 @@ function PackageCard({ preset, university, courses, cartGroupIds, onAdd }: { pre
 
   return (
     <Card className={cx('flex h-full min-w-0 flex-col p-5 sm:p-6', !usable && 'opacity-75')}>
-      {university && <div className="eyebrow mb-1">{university.shortName || universityName(university, lang)}</div>}
+      {university && <div className="eyebrow mb-1">{isPreparationTrack(university) ? universityName(university, lang) : university.shortName || universityName(university, lang)}</div>}
       <div className="flex items-start justify-between gap-3">
         <h3 className="min-w-0 break-words font-display text-2xl leading-tight text-charcoal sm:text-3xl">{tr(preset.name)}</h3>
         {!usable ? <Badge tone="warn">{t('preset.unavailable')}</Badge> : university ? <Badge tone={toConfirm ? 'warn' : 'sage'}>{toConfirm ? t('uni.needsReview') : t('uni.verified')}</Badge> : null}
@@ -106,85 +109,121 @@ function PackageCard({ preset, university, courses, cartGroupIds, onAdd }: { pre
   )
 }
 
+/** A card in the chooser: a university (logo, short name, full name) or a preparation direction (emblem, full name, what it prepares for). */
+function ChooserCard({ university, packages, onSelect }: { university: University; packages: number; onSelect: () => void }) {
+  const { t, tr, lang } = useT()
+  const track = isPreparationTrack(university)
+  const name = universityName(university, lang)
+  return (
+    <button type="button" onClick={onSelect} className="flex h-full w-full min-w-0 flex-col rounded-card border border-charcoal/10 bg-paper p-4 text-left transition hover:-translate-y-0.5 hover:border-forest/40 hover:shadow-lift sm:p-5">
+      <UniversityLogo university={university} height={76} maxWidth={200} align="start" className="mb-3" />
+      {track ? (
+        <>
+          <span className="break-words font-display text-2xl leading-tight text-charcoal">{name}</span>
+          {tr(university.description) && <span className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-charcoal/60">{tr(university.description)}</span>}
+        </>
+      ) : (
+        <>
+          <span className="break-words font-display text-2xl leading-tight text-charcoal">{university.shortName || name}</span>
+          {university.shortName && <span className="mt-0.5 line-clamp-2 text-xs text-charcoal/55">{name}</span>}
+        </>
+      )}
+      <span className="mt-auto flex items-center justify-between gap-2 pt-3 text-[11px] font-medium text-forest">
+        <span>{t('uni.packagesCount', { n: packages })}</span>
+        {!track && university.city && <span className="text-charcoal/45">{placeName(t, university.city)}</span>}
+      </span>
+    </button>
+  )
+}
+
 /**
- * Ready-made packages next to Duo and Trio: pick a university, then one of its programs, and add the package's courses to
+ * Ready-made packages next to Flex and Winx: pick a university or a preparation direction and add one of its packages to
  * the same cart the builder uses. Only published packages reach this component (the public site hides drafts); those
  * whose admission requirements are not verified yet are marked "requires confirmation".
+ *
+ * Choosing one (a click here, or arriving by /builder?uni=…) replaces the chooser with that university's packages and
+ * brings them into view, so the packages are what the visitor sees next; "All universities" goes back to the chooser.
  */
 export function UniversityPackagesSection({ presets, universities, courses, cartGroupIds, onAdd }: { presets: Preset[]; universities: University[]; courses: Course[]; cartGroupIds: string[]; onAdd: (p: Preset) => void }) {
-  const { t, lang } = useT()
+  const { t, tr, lang } = useT()
   const [params, setParams] = useSearchParams()
   const published = presets.filter((p) => p.enabled)
+  const groups = groupByUniversity(published, universities)
+  const generic = published.filter((p) => !universityOf(p, universities))
+  const chosen = params.get('uni')
+  const selected = groups.find((g) => g.university.id === chosen) ?? (groups.length === 1 ? groups[0] : undefined)
+  const selectedId = selected?.university.id
+  const packagesRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!chosen || chosen !== selectedId) return
+    const timer = setTimeout(() => packagesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80)
+    return () => clearTimeout(timer)
+  }, [chosen, selectedId])
+
   if (published.length === 0) return null
 
-  // Universities first, then the general preparation tracks (medical, law).
-  const groups = groupByUniversity(published, universities).sort((a, b) => Number(isPreparationTrack(a.university)) - Number(isPreparationTrack(b.university)))
-  const generic = published.filter((p) => !universityOf(p, universities))
-  const selected = groups.find((g) => g.university.id === params.get('uni')) ?? (groups.length === 1 ? groups[0] : undefined)
   const select = (id: string | null) => {
     const next = new URLSearchParams(params)
     if (id) next.set('uni', id)
     else next.delete('uni')
     setParams(next, { replace: true })
   }
+  // Universities and the general preparation directions (medical, law, …) are different things and are listed apart.
+  const unis = groups.filter((g) => !isPreparationTrack(g.university))
+  const tracks = groups.filter((g) => isPreparationTrack(g.university)).sort((a, b) => trackRank(a.university) - trackRank(b.university))
+  const chooser = (list: typeof groups) => (
+    <ul className="grid grid-cols-2 gap-3 xl:grid-cols-3" role="list">
+      {list.map((g) => <li key={g.university.id}><ChooserCard university={g.university} packages={g.presets.length} onSelect={() => select(g.university.id)} /></li>)}
+    </ul>
+  )
+  const selectedTrack = !!selected && isPreparationTrack(selected.university)
 
   return (
     <section className="mb-12" aria-labelledby="uni-title">
       <Eyebrow className="mb-1">{t('uni.title')}</Eyebrow>
       <p id="uni-title" className="mb-5 max-w-2xl text-sm text-charcoal/60">{t('uni.subtitle')}</p>
 
-      {groups.length > 0 && (
-        <>
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-charcoal/50">{t('uni.universities')} · {groups.length}</span>
-            {selected && groups.length > 1 && <button type="button" onClick={() => select(null)} className="text-xs font-medium text-forest hover:underline">← {t('uni.all')}</button>}
-          </div>
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" role="list">
-            {groups.map((g) => {
-              const active = selected?.university.id === g.university.id
-              return (
-                <li key={g.university.id}>
-                  <button
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => select(active && groups.length > 1 ? null : g.university.id)}
-                    className={cx(
-                      'flex h-full w-full min-w-0 flex-col rounded-card border p-4 text-left transition',
-                      active ? 'border-forest bg-sage/50 shadow-soft ring-1 ring-forest/20' : 'border-charcoal/10 bg-paper hover:-translate-y-0.5 hover:border-forest/40 hover:shadow-lift',
-                    )}
-                  >
-                    <UniversityLogo university={g.university} height={48} maxWidth={150} align="start" className="mb-3" />
-                    <span className="break-words font-display text-2xl leading-tight text-charcoal">{g.university.shortName || universityName(g.university, lang)}</span>
-                    {g.university.shortName && <span className="mt-0.5 line-clamp-2 text-xs text-charcoal/55">{universityName(g.university, lang)}</span>}
-                    <span className="mt-auto flex items-center justify-between pt-3 text-[11px] font-medium text-forest">
-                      <span>{t('uni.packagesCount', { n: g.presets.length })}</span>
-                      {g.university.city && <span className="text-charcoal/45">{placeName(t, g.university.city)}</span>}
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      )}
-
       {selected ? (
-        <div className="mt-8">
-          <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 className="break-words font-display text-3xl text-charcoal">{universityName(selected.university, lang)}</h2>
-            <span className="text-xs font-semibold uppercase tracking-wider text-charcoal/50">{t('uni.programs')} · {selected.presets.length}</span>
-            {/^https:\/\//.test(selected.university.website ?? '') && <a href={selected.university.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-forest hover:underline">{selected.university.website?.replace(/^https:\/\//, '')}<Icon name="external" className="h-3 w-3" /></a>}
+        <div ref={packagesRef} className="scroll-mt-24">
+          <div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-card border border-forest/15 bg-sage/40 p-4 sm:p-5">
+            <UniversityLogo university={selected.university} height={88} maxWidth={220} align="start" />
+            <div className="min-w-0 flex-1 basis-56">
+              {selectedTrack && <div className="eyebrow mb-1">{t('uni.trackLabel')}</div>}
+              <h2 className="break-words font-display text-3xl leading-tight text-charcoal">{universityName(selected.university, lang)}</h2>
+              {tr(selected.university.description) && <p className="mt-1 line-clamp-3 text-sm leading-relaxed text-charcoal/65">{tr(selected.university.description)}</p>}
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-medium">
+                <span className="text-forest">{t('uni.packagesCount', { n: selected.presets.length })}</span>
+                <Link to={`/universities/${selected.university.id}`} className="text-forest hover:underline">{t('uni.viewDetails')}</Link>
+                {/^https:\/\//.test(selected.university.website ?? '') && <a href={selected.university.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-forest hover:underline">{selected.university.website?.replace(/^https:\/\//, '')}<Icon name="external" className="h-3 w-3" /></a>}
+              </div>
+            </div>
+            {groups.length > 1 && <Button variant="secondary" size="sm" onClick={() => select(null)}>← {t('uni.all')}</Button>}
           </div>
-          <div className="grid gap-5 lg:grid-cols-2">
+          {/* One package per row: beside the cart the column is too narrow for two of these cards. */}
+          <div className="grid gap-5">
             {selected.presets.map((p) => <PackageCard key={p.id} preset={p} university={selected.university} courses={courses} cartGroupIds={cartGroupIds} onAdd={onAdd} />)}
           </div>
         </div>
-      ) : groups.length > 0 ? (
-        <p className="mt-6 text-sm text-charcoal/55">{t('uni.choose')}</p>
-      ) : null}
+      ) : (
+        <>
+          {unis.length > 0 && (
+            <>
+              <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-charcoal/50">{t('uni.universities')} · {unis.length}</div>
+              {chooser(unis)}
+            </>
+          )}
+          {tracks.length > 0 && (
+            <>
+              <div className={cx('text-xs font-semibold uppercase tracking-wider text-charcoal/50', unis.length > 0 && 'mt-8')}>{t('uni.tracks.eyebrow')} · {tracks.length}</div>
+              <p className="mb-3 mt-1 max-w-2xl text-xs leading-relaxed text-charcoal/55">{t('uni.tracks.subtitle')}</p>
+              {chooser(tracks)}
+            </>
+          )}
+        </>
+      )}
 
       {generic.length > 0 && (
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {generic.map((p) => <PackageCard key={p.id} preset={p} courses={courses} cartGroupIds={cartGroupIds} onAdd={onAdd} />)}
         </div>
       )}

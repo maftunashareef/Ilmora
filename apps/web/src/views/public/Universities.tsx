@@ -13,6 +13,7 @@ import { dict, type TKey } from '../../i18n/translations'
 import { formatSom } from '../../lib/format'
 import { placeName } from './placeName'
 import { balancedLogoSize } from '../../lib/logoSize'
+import { trackRank } from '../../lib/trackOrder'
 import { useCurrentStudent } from '../../store/selectors'
 import { usePresetCart } from '../../store/usePresetCart'
 import { useStore } from '../../store/useStore'
@@ -32,7 +33,7 @@ interface UniversityGroup {
 }
 
 /**
- * How each ready-made preparation direction looks, in the order they are shown: its photo, the icon it shows in place of a
+ * How each ready-made preparation direction looks (their order is lib/trackOrder): its photo, the icon it shows in place of a
  * logo, and the subjects named on its card (the detail page lists the exact requirements of each route).
  */
 const TRACK_VISUALS: Record<string, { image: string; position?: string; icon: string; subjects: TKey[] }> = {
@@ -42,12 +43,10 @@ const TRACK_VISUALS: Record<string, { image: string; position?: string; icon: st
   'prep-it': { image: '/images/courses/frontend-dev.jpg', position: '32% 42%', icon: 'cpu', subjects: ['uni.subject.math', 'uni.subject.physics', 'uni.subject.computing'] },
   'prep-economics': { image: '/images/courses/python-data.jpg', position: '40% 62%', icon: 'chart', subjects: ['uni.subject.math', 'uni.subject.foreign'] },
 }
-const TRACK_ORDER = Object.keys(TRACK_VISUALS)
-const trackRank = (u: University): number => (TRACK_ORDER.includes(u.id) ? TRACK_ORDER.indexOf(u.id) : TRACK_ORDER.length)
 
 /**
  * What visitors see, each with its published packages: those with a package first, then alphabetical. Universities by
- * default; `tracks` gives the ready-made preparation directions instead (in the order of TRACK_VISUALS), and `all` both.
+ * default; `tracks` gives the ready-made preparation directions instead (in the order of lib/trackOrder), and `all` both.
  */
 function useListedUniversities(which: 'universities' | 'tracks' | 'all' = 'universities'): UniversityGroup[] {
   const { lang } = useT()

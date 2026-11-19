@@ -9,10 +9,12 @@ import {
   finderAnswersToParams,
   isOnlineCourse,
   isoToTashkentLocal,
+  isPreparationTrack,
   isSafeExternalUrl,
   MAX_CART_COURSES,
   NOUNS,
   recommendCourses,
+  universityName,
   universityOf,
   type FinderAnswers,
   type FinderGoal,
@@ -599,7 +601,7 @@ export function CourseFinderPage() {
                         const uni = universityOf(preset, universities ?? [])
                         return (
                           <Card key={preset.id} className="flex flex-col p-5">
-                            {uni && <div className="eyebrow">{uni.shortName || uni.name}</div>}
+                            {uni && <div className="eyebrow">{isPreparationTrack(uni) ? universityName(uni, lang) : uni.shortName || uni.name}</div>}
                             <div className="mt-1 font-display text-2xl leading-tight text-charcoal">{tr(preset.name)}</div>
                             {tr(preset.program) && <div className="mt-1 text-sm font-medium text-forest">{tr(preset.program)}</div>}
                             <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-4">
