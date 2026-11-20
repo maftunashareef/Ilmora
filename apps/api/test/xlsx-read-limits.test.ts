@@ -15,19 +15,32 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  *    закрывающего тега. На листе с незакрытыми `<row>` / `<c>` / `<si>` каждое совпадение просматривает весь остаток
  *    текста — время растёт квадратично и блокирует цикл событий. Файл при этом крошечный (повторы жмутся в килобайты),
  *    лимиты размера его не останавливают. Правило: разбор любого такого файла заканчивается (результатом или
- *    XlsxReadError) за 300 мс.
+ *    XlsxReadError) за 300 мс. Вызов ждётся через await, так что вынос разбора в worker/Promise сам по себе правило не
+ *    закрывает: 300 мс требуют быстрого (линейного) разбора, а не воркера, которого убивают по таймауту через секунды.
  * 2. `importCheck` / `importCommit` (center-students.service.ts) проверяют только assertWritable (BLOCKED/REJECTED), так
  *    что центр на проверке (PENDING) уже импортирует учеников. Правило: центр не одобрен → 403.
  *
  * Пока находка открыта, нарушения закреплены в KNOWN_GAP: тест зелёный и падает, как только правило начнёт
- * соблюдаться — тогда ключ убирают из списка, и правило дальше охраняет исправление.
+ * соблюдаться — тогда ключ убирают из списка, и правило дальше охраняет исправление. Пока ключ в списке, закреплено и
+ * точное сегодняшнее поведение (todayObserved): частичное исправление (например, закрыт только importCheck) тоже
+ * поднимает тревогу — ключ надо перепроверить.
  */
 
 const KNOWN_GAP = new Set(['n1-row', 'n1-cell', 'n1-shared', 'n1-pending'])
-function rule(key: string, holds: boolean, what: string) {
-  if (KNOWN_GAP.has(key)) expect(holds, `${what} — now holds: finding closed, remove '${key}' from KNOWN_GAP`).toBe(false)
-  else expect(holds, what).toBe(true)
+const CHECKED = new Set<string>()
+function rule(key: string, holds: boolean, what: string, todayObserved: boolean) {
+  CHECKED.add(key)
+  if (KNOWN_GAP.has(key)) {
+    expect(holds, `${what} — now holds: finding closed, remove '${key}' from KNOWN_GAP`).toBe(false)
+    expect(todayObserved, `${what} — behaviour changed from what was pinned on 2026-11-20: re-check the key '${key}'`).toBe(true)
+  } else expect(holds, what).toBe(true)
 }
+afterAll(() => {
+  // A KNOWN_GAP key nobody checked is stale (renamed test, skipped suite): it would hide nothing and mislead.
+  // The DB suite is skipped without a database, so its key is only required where the DB runs.
+  const expected = [...KNOWN_GAP].filter((k) => DB_AVAILABLE || k !== 'n1-pending')
+  expect(expected.filter((k) => !CHECKED.has(k)), 'KNOWN_GAP keys never checked').toEqual([])
+})
 
 /** A zip of deflated parts — an .xlsx with whatever XML we put in it. */
 function zipOf(parts: { name: string; text: string }[]): Buffer {
@@ -84,26 +97,36 @@ const SHARED_BYTES = 130 * 1024
 const repeat = (tag: string, bytes: number) => tag.repeat(Math.floor(bytes / tag.length))
 
 const VALID = workbook(sheetXml(HEADER_ROW + DATA_ROW), sharedXml(SHARED))
-const EVIL: Record<'n1-row' | 'n1-cell' | 'n1-shared', { what: string; file: Buffer }> = {
-  'n1-row': { what: 'sheet: the header and then unclosed <row> tags', file: workbook(sheetXml(HEADER_ROW + repeat('<row>', ROW_BYTES)), sharedXml(SHARED)) },
-  'n1-cell': { what: 'sheet: a row of unclosed <c> tags', file: workbook(sheetXml(HEADER_ROW + `<row r="2">${repeat('<c>', CELL_BYTES)}</row>`), sharedXml(SHARED)) },
-  'n1-shared': { what: 'sharedStrings: unclosed <si> tags', file: workbook(sheetXml(HEADER_ROW + DATA_ROW), sharedXml(SHARED + repeat('<si>', SHARED_BYTES))) },
+const HEADER = { row: 1, cells: ['ФИО', 'Телефон'] }
+const DATA = { row: 2, cells: ['Aziz Karimov', '901234567'] }
+/** Each crafted file at a given size of repeats; `small` is what today's reader returns on ~1 KB of them. */
+const EVIL: Record<'n1-row' | 'n1-cell' | 'n1-shared', { what: string; bytes: number; build: (bytes: number) => Buffer; small: unknown }> = {
+  'n1-row': { what: 'sheet: the header and then unclosed <row> tags', bytes: ROW_BYTES, build: (n) => workbook(sheetXml(HEADER_ROW + repeat('<row>', n)), sharedXml(SHARED)), small: [HEADER] },
+  'n1-cell': { what: 'sheet: a row of unclosed <c> tags', bytes: CELL_BYTES, build: (n) => workbook(sheetXml(HEADER_ROW + `<row r="2">${repeat('<c>', n)}</row>`), sharedXml(SHARED)), small: [HEADER] },
+  'n1-shared': { what: 'sharedStrings: unclosed <si> tags', bytes: SHARED_BYTES, build: (n) => workbook(sheetXml(HEADER_ROW + DATA_ROW), sharedXml(SHARED + repeat('<si>', n))), small: [HEADER, DATA] },
 }
 const LIMIT_MS = 300
 
 describe('Excel reader: a crafted file is read in bounded time (проверка 20.11 №1)', () => {
-  it('sanity: the valid file parses as written, and every crafted file is small and passes the size limits', () => {
-    expect(readXlsxRows(VALID)).toEqual([{ row: 1, cells: ['ФИО', 'Телефон'] }, { row: 2, cells: ['Aziz Karimov', '901234567'] }])
-    // The attack is not about size: each crafted file is a few KB, far below the 512 KB the import accepts.
-    for (const { file } of Object.values(EVIL)) expect(file.length).toBeLessThan(16 * 1024)
+  it('sanity: the valid file parses as written; every crafted file is small and reaches the tag scanning', () => {
+    expect(readXlsxRows(VALID)).toEqual([HEADER, DATA])
+    for (const { build, bytes, small } of Object.values(EVIL)) {
+      // The attack is not about size: each crafted file is a few KB, far below the 512 KB the import accepts.
+      expect(build(bytes).length).toBeLessThan(16 * 1024)
+      // At ~1 KB of repeats the same file is read quickly and its header comes out: the zip, workbook and rels are
+      // fine and the reader really gets to the sheet/shared-strings scanning the big file attacks.
+      expect(readXlsxRows(build(1024))).toEqual(small)
+    }
   })
 
-  for (const [key, { what, file }] of Object.entries(EVIL)) {
-    it(`${key}: ${what} — finishes within ${LIMIT_MS} ms`, () => {
+  for (const [key, { what, bytes, build }] of Object.entries(EVIL)) {
+    it(`${key}: ${what} — finishes within ${LIMIT_MS} ms`, async () => {
+      const file = build(bytes)
       const started = performance.now()
       let outcome: string
       try {
-        readXlsxRows(file)
+        // Awaited, so a fix that returns a Promise (worker, async parse) is timed to its end, not to its start.
+        await Promise.resolve(readXlsxRows(file))
         outcome = 'returned'
       } catch (err) {
         if (!(err instanceof XlsxReadError)) throw err
@@ -111,7 +134,8 @@ describe('Excel reader: a crafted file is read in bounded time (проверка
       }
       const ms = performance.now() - started
       console.info(`[20.11 №1] ${key}: ${outcome} in ${ms.toFixed(0)} ms (file ${file.length} bytes)`)
-      rule(key, ms < LIMIT_MS, `${what}: readXlsxRows took ${ms.toFixed(0)} ms, limit ${LIMIT_MS} ms`)
+      // Today: the reader returns (no error) after seconds.
+      rule(key, ms < LIMIT_MS, `${what}: readXlsxRows → ${outcome} in ${ms.toFixed(0)} ms, limit ${LIMIT_MS} ms`, outcome === 'returned' && ms >= LIMIT_MS)
     }, 60_000)
   }
 })
@@ -134,7 +158,11 @@ describe.skipIf(!DB_AVAILABLE)('Excel import: only an approved center imports st
   }
   type S = Awaited<ReturnType<typeof setup>>
   const as = <T>(s: S, fn: () => Promise<T>) => TenantContext.forTenant(s.tenantId, fn, { actor: s.center })
-  const status = (p: Promise<unknown>) => p.then(() => 'ok', (e: { getStatus?: () => number; code?: string; response?: { code?: string } }) => `${e.getStatus?.()} ${e.code ?? e.response?.code}`)
+  /** 'ok' or '<HTTP status> <code>'; anything that is not an HTTP error (TypeError, Prisma) fails the test as it is. */
+  const status = (p: Promise<unknown>) => p.then(() => 'ok', (e: { getStatus?: () => number; code?: string; response?: { code?: string } }) => {
+    if (typeof e?.getStatus !== 'function') throw e
+    return `${e.getStatus()} ${e.code ?? e.response?.code}`
+  })
   const phone = () => `93${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
   const file = () => buildXlsx('S', ['ФИО', 'Телефон', 'Дата рождения', 'Учебное заведение', 'Класс или курс', 'Группы', 'ФИО родителя', 'Телефон родителя', 'Дата начала'], [
     ['Olim Soliyev', phone(), '04.05.2001', '', '', '', '', '', ''],
@@ -156,6 +184,10 @@ describe.skipIf(!DB_AVAILABLE)('Excel import: only an approved center imports st
     const commit = await status(as(s, () => table.importCommit(s.tenantId, s.center, f)))
     const written = await count(s)
     console.info(`[20.11 №1] n1-pending: importCheck → ${check}, importCommit → ${commit}, students written: ${written}`)
-    rule('n1-pending', check.startsWith('403') && commit.startsWith('403') && written === 0, `PENDING center: importCheck → ${check}, importCommit → ${commit}, written ${written}`)
+    // Outside the rule: each call either went through or was refused with 403 — never another error.
+    for (const outcome of [check, commit]) expect(outcome === 'ok' || outcome.startsWith('403'), `unexpected outcome: ${outcome}`).toBe(true)
+    rule('n1-pending', check.startsWith('403') && commit.startsWith('403') && written === 0, `PENDING center: importCheck → ${check}, importCommit → ${commit}, written ${written}`,
+      // Today (2026-11-20): both calls go through and the student is written. Guarding only one of them changes this.
+      check === 'ok' && commit === 'ok' && written === 1)
   })
 })
