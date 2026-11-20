@@ -13,6 +13,7 @@ export function CenterLayout() {
       { id: 'teachers', to: '/center/teachers', label: t('center.teachers'), icon: 'users' },
       { id: 'attendance', to: '/center/attendance', label: t('center.attendance'), icon: 'check' },
       { id: 'students', to: '/center/students', label: t('center.students'), icon: 'user' },
+      { id: 'journal', to: '/center/journal', label: t('journal.title'), icon: 'list' },
       { id: 'settings', to: '/center/settings', label: t('center.settings'), icon: 'settings' },
     ]} />
   )

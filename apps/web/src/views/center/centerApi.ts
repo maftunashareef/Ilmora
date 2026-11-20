@@ -4,7 +4,7 @@ import type { CenterCheckInSettings, CenterKind, CenterStatus, Course, L, Lesson
 
 /** Shapes of the center workspace API (`/v1/center/*`). */
 
-export type CenterSection = 'overview' | 'courses' | 'teachers' | 'attendance' | 'students' | 'settings'
+export type CenterSection = 'overview' | 'courses' | 'teachers' | 'attendance' | 'students' | 'journal' | 'settings'
 
 /**
  * Where the center views read and write. A center's own workspace uses `/center/*`; the Super Admin opens the same
