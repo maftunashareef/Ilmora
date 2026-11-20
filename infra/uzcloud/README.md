@@ -408,12 +408,13 @@ echo 'ssh-ed25519 AAAA… maftuna' >> /root/.ssh/authorized_keys
 
 ## Хранилище файлов (S3)
 
-Два бакета класса Standard (Hot) в UzCloud Object Storage, `https://s3.uzcstorage.uz`, адреса path-style:
+Три бакета класса Standard (Hot) в UzCloud Object Storage, `https://s3.uzcstorage.uz`, адреса path-style:
 
 | Бакет | Что лежит | Чтение без ключа |
 |---|---|---|
 | `ilmora-media` | картинки курсов, баннеры, аватары, файлы уроков | **да** — только файлы по точному адресу, список закрыт |
 | `ilmora-docs` | свидетельства компаний, документы студентов | **нет** — только по ссылке API на 5 минут |
+| `ilmora-homework` | ZIP домашних заданий (до 1024 МБ) | **нет** — только по ссылке API на 5 минут, только как файл |
 
 Браузер загружает файлы сам, по ссылке, которую подписал API (10–15 минут; тип и размер файла закреплены подписью).
 Настройки бакетов — в `s3/`: `cors.json` (загрузка с доменов сайта) на оба бакета, `media-policy.json` (чтение файлов)
@@ -435,10 +436,36 @@ aws s3api put-bucket-policy --bucket ilmora-media --policy file://media-policy.j
 aws s3api put-bucket-lifecycle-configuration --bucket ilmora-docs --lifecycle-configuration file://docs-lifecycle.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
 ```
 
-Ключи — в `api.env` на обеих машинах (`S3_ENDPOINT`, `S3_BUCKET=ilmora-media`, `S3_DOCS_BUCKET=ilmora-docs`,
+Ключи — в `api.env` на обеих машинах (`S3_ENDPOINT`, `S3_BUCKET=ilmora-media`, `S3_DOCS_BUCKET=ilmora-docs`, `S3_HOMEWORK_BUCKET=ilmora-homework`,
 `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`), затем `… compose.sh admin up -d worker` и `… compose.sh web up -d api`.
 Адрес медиа для сайта (`NEXT_PUBLIC_MEDIA_BASE_URL`) задаёт релиз: переменная репозитория `MEDIA_BASE_URL`, по
 умолчанию `https://s3.uzcstorage.uz/ilmora-media`; по нему CSP пускает браузер к хранилищу.
+
+### Бакет домашних заданий `ilmora-homework`
+
+ТЗ 18.11, раздел 8.4: архивы ДЗ до 1024 МБ. Браузер грузит их **частями прямо в бакет** по ссылкам, подписанным API,
+— через API и диски машин гигабайт не идёт. Бакет закрытый: ни чтения без ключа, ни политики, как у `ilmora-media`;
+скачать — только по ссылке API на 5 минут, файлом (`Content-Disposition: attachment`). **В ночные копии не входит**
+(`admin/backup.sh` копирует только базу). Файлы удаляет API через 90 дней после срока сдачи.
+
+1. UzCloud → Object Storage → создать бакет `ilmora-homework`, класс **Standard (Hot)**, без публичного доступа.
+2. Тот же `cors.json`, что у двух других бакетов (`PUT` частей с доменов сайта, `ETag` в ответе — его браузер
+   отдаёт API, чтобы собрать файл из частей), и правила `homework-lifecycle.json`: брошенные загрузки частями и
+   непроверенное в `incoming/` удаляются через сутки:
+
+```powershell
+aws s3api put-bucket-cors --bucket ilmora-homework --cors-configuration file://cors.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
+aws s3api put-bucket-lifecycle-configuration --bucket ilmora-homework --lifecycle-configuration file://homework-lifecycle.json --endpoint-url https://s3.uzcstorage.uz --profile uzcloud
+```
+
+3. Проверка: файл в бакете без ключа — 403, список бакета без ключа — 403; `get-bucket-cors` и
+   `get-bucket-lifecycle-configuration` показывают правила (если UzCloud правил не держит — брошенное чистит задача
+   воркера, как у `ilmora-docs`).
+4. В `api.env` на обеих машинах — `S3_HOMEWORK_BUCKET=ilmora-homework` (тот же ключ доступа). Совпадёт с
+   `S3_BUCKET` — API не запустится. CSP менять не нужно: адреса path-style, `https://s3.uzcstorage.uz` уже разрешён.
+
+Лимиты (20 ГБ на центр, 200 ГБ всего, тревога при 80 %) держит API по сумме размеров файлов в базе — вместе с кодом
+загрузки ZIP (вторая очередь).
 
 ## Позже
 
