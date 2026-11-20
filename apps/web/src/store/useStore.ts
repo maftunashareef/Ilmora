@@ -190,6 +190,8 @@ interface Actions {
   addPresetToCart: (studentId: string, preset: Preset, opts?: { chosenOptional?: string[]; directionId?: string }) => PresetCartResult
   /** Removes a package's courses from the cart (those another package in the cart also includes stay). */
   removeCartBundle: (studentId: string, presetId: string) => void
+  /** Empties the cart: every chosen course and package leaves it; the chosen Flex, Winx or custom mode stays. */
+  clearBuilder: (studentId: string) => void
   /** Opens a payment; a free selection is activated at once and comes back with url null. */
   checkout: (provider: PaymentProviderId) => Promise<{ url: string | null; paymentId: string; free?: boolean }>
   renewSubscription: (studentId: string, provider?: PaymentProviderId) => Promise<void>
@@ -1006,6 +1008,11 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
           students: state.students.map((x) => (x.id === studentId ? { ...x, builder: { ...x.builder, groupIds: x.builder.groupIds.filter((id) => !drop.has(allGroups.find((g) => g.id === id)?.courseId ?? '')) } } : x)),
         }))
         writeBundles(others)
+        syncDraft()
+      },
+      clearBuilder: (studentId) => {
+        set((state) => ({ cartBundles: [], students: state.students.map((x) => (x.id === studentId ? { ...x, builder: { ...x.builder, groupIds: [] } } : x)) }))
+        writeBundles([])
         syncDraft()
       },
       checkout: async (provider) => {

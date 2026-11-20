@@ -1,7 +1,7 @@
 import { activePercent, countLabel, finalPriceSom, isOnlineCourse, NOUNS } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useT } from '../../i18n/useT'
-import { formatSom } from '../../lib/format'
+import { formatPercent, formatSom } from '../../lib/format'
 import { useCanSaveCourses, useHydrated } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
 import type { Course, Group } from '../../types'
@@ -30,7 +30,7 @@ export function PriceTag({ price, original, percent, emphasis, className }: { pr
         <span className="text-[11px] text-charcoal/55 font-medium">
           {t('common.som')} {t('common.perMonth')}
         </span>
-        {percent ? <span className="rounded-full bg-champagne px-2 py-0.5 text-[10px] font-bold text-forest">−{percent}%</span> : null}
+        {percent ? <span className="rounded-full bg-champagne px-2 py-0.5 text-[10px] font-bold text-forest">−{formatPercent(percent, lang)}%</span> : null}
       </span>
     </span>
   )

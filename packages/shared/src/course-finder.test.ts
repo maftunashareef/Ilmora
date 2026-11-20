@@ -83,11 +83,12 @@ describe('reasons come from the course data', () => {
   })
 
   it('prices include the active discount, and the discount is a reason with its percent and end', () => {
-    const ielts = run({ budget: 810_000 }).matches.find((m) => m.course.id === 'ielts')!
-    expect(ielts.price).toBe(810_000)
-    expect(ielts.reasons).toContainEqual({ code: 'budget', price: 810_000 })
-    expect(ielts.reasons).toContainEqual({ code: 'discount', percent: 10, endsAt: '2026-12-01T00:00:00Z' })
-    const later = run({ budget: 810_000 }, { now: new Date('2026-12-02T00:00:00Z') })
+    // the center entered 10% on 900 000: the student sees 5% and pays 855 000
+    const ielts = run({ budget: 855_000 }).matches.find((m) => m.course.id === 'ielts')!
+    expect(ielts.price).toBe(855_000)
+    expect(ielts.reasons).toContainEqual({ code: 'budget', price: 855_000 })
+    expect(ielts.reasons).toContainEqual({ code: 'discount', percent: 5, endsAt: '2026-12-01T00:00:00Z' })
+    const later = run({ budget: 855_000 }, { now: new Date('2026-12-02T00:00:00Z') })
     expect(later.nearby.find((m) => m.course.id === 'ielts')?.warnings).toEqual([{ code: 'overBudget', price: 900_000 }])
   })
 
@@ -114,7 +115,7 @@ describe('close matches miss exactly one of the limits and say which', () => {
     const warn = (id: string) => r.nearby.find((m) => m.course.id === id)?.warnings
     expect(warn('python')).toEqual([{ code: 'overBudget', price: 850_000 }])
     expect(warn('english')).toEqual([{ code: 'overHours', hours: 4 }])
-    expect(warn('ielts')).toEqual(expect.arrayContaining([{ code: 'levelGap', level: 'advanced' }, { code: 'overBudget', price: 810_000 }, { code: 'overHours', hours: 4 }]))
+    expect(warn('ielts')).toEqual(expect.arrayContaining([{ code: 'levelGap', level: 'advanced' }, { code: 'overBudget', price: 855_000 }, { code: 'overHours', hours: 4 }]))
     const algebra = r.matches.find((m) => m.course.id === 'algebra')!
     expect(algebra.reasons).toEqual(expect.arrayContaining([{ code: 'level', level: 'intermediate', exact: false }, { code: 'budget', price: 550_000 }, { code: 'hours', hours: 3 }]))
   })

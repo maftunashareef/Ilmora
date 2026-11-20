@@ -9,10 +9,12 @@ import {
   finderAnswersToParams,
   isOnlineCourse,
   isoToTashkentLocal,
+  isPreparationTrack,
   isSafeExternalUrl,
   MAX_CART_COURSES,
   NOUNS,
   recommendCourses,
+  universityName,
   universityOf,
   type FinderAnswers,
   type FinderGoal,
@@ -34,7 +36,7 @@ import type { TKey } from '../../i18n/translations'
 import { useT } from '../../i18n/useT'
 import { isPublicListed } from '../../lib/access'
 import { seatsLeft } from '../../lib/enrollment'
-import { formatDate, formatSom } from '../../lib/format'
+import { formatDate, formatPercent, formatSom } from '../../lib/format'
 import { useCanSaveCourses, useCurrentStudent, useHydrated } from '../../store/selectors'
 import { useStore, type BuilderResult } from '../../store/useStore'
 import type { Course, Section } from '../../types'
@@ -98,7 +100,7 @@ function useReasonText() {
         case 'level': return t(r.exact ? 'finder.reason.levelExact' : 'finder.reason.levelNear', { level: t(`level.${r.level}` as TKey) })
         case 'budget': return t('finder.reason.budget', { price: formatSom(r.price, lang) })
         case 'free': return t('finder.reason.free')
-        case 'discount': return t('finder.reason.discount', { percent: r.percent, date: formatDate(isoToTashkentLocal(r.endsAt).slice(0, 10), lang) })
+        case 'discount': return t('finder.reason.discount', { percent: formatPercent(r.percent, lang), date: formatDate(isoToTashkentLocal(r.endsAt).slice(0, 10), lang) })
         case 'hours': return t('finder.reason.hours', { hours: fmtHours(r.hours, lang) })
         case 'selfPaced': return t('finder.reason.selfPaced')
         case 'seats': return t('finder.reason.seats', { n: r.left })
@@ -142,7 +144,7 @@ function ReasonList({ match }: { match: FinderMatch<Course> }) {
 
 /** One suggested course: why it fits, its group and price, and add / open / save. */
 function MatchCard({ match, inCart, onAdd }: { match: FinderMatch<Course>; inCart: boolean; onAdd: (m: FinderMatch<Course>) => void }) {
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const c = match.course
   const category = useStore((s) => s.categories.find((x) => x.id === c.categoryId))
   const center = useStore((s) => s.centers.find((x) => x.id === c.centerId))
@@ -157,7 +159,7 @@ function MatchCard({ match, inCart, onAdd }: { match: FinderMatch<Course>; inCar
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-charcoal/65 via-charcoal/10 to-transparent" />
         <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
           <FormatBadge course={c} />
-          {percent > 0 && <span className="rounded-full bg-champagne px-2 py-0.5 text-[11px] font-bold text-forest">−{percent}%</span>}
+          {percent > 0 && <span className="rounded-full bg-champagne px-2 py-0.5 text-[11px] font-bold text-forest">−{formatPercent(percent, lang)}%</span>}
         </div>
         <span className={cx('absolute bottom-3 left-3 rounded-full px-2.5 py-0.5 text-[11px] font-semibold', match.fit === 'strong' ? 'bg-forest text-ivory' : 'bg-paper/90 text-charcoal')}>
           {t(match.fit === 'strong' ? 'finder.fit.strong' : 'finder.fit.good')}
@@ -599,7 +601,7 @@ export function CourseFinderPage() {
                         const uni = universityOf(preset, universities ?? [])
                         return (
                           <Card key={preset.id} className="flex flex-col p-5">
-                            {uni && <div className="eyebrow">{uni.shortName || uni.name}</div>}
+                            {uni && <div className="eyebrow">{isPreparationTrack(uni) ? universityName(uni, lang) : uni.shortName || uni.name}</div>}
                             <div className="mt-1 font-display text-2xl leading-tight text-charcoal">{tr(preset.name)}</div>
                             {tr(preset.program) && <div className="mt-1 text-sm font-medium text-forest">{tr(preset.program)}</div>}
                             <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-4">
