@@ -141,7 +141,7 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
         await db.studentProfile.create({
           data: {
             tenantId, userId: u.id, mode: 'STUDYING', institutionType: 'TECHNIKUM', institutionId: inst.id, course: 3, graduationYear: YEAR, directionId: direction.id,
-            birthDate: new Date(`${YEAR - 20}-05-01T00:00:00Z`), regionId: tashkent.id, about: 'Python', studyConfirmation: 'CONFIRMED',
+            birthDate: new Date(`${YEAR - 20}-05-01T00:00:00Z`), regionId: tashkent.id, about: `About ${name}`, studyConfirmation: 'CONFIRMED',
           },
         })
         for (const kind of ['GRADUATE_CARD', 'INDUSTRY_CARD'] as const) await db.studentConsent.create({ data: { tenantId, userId: u.id, kind, textVersion: 'v1' } })
@@ -240,13 +240,14 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
     },
   }
 
-  it.each(CARD_PATHS)('over the daily limit no card leaves %s, and nothing is written for it', async (path) => {
+  it.each(CARD_PATHS)('over the daily limit (one card left, two to show) no card leaves %s, and nothing is written for it', async (path) => {
     const s = await setup(`acj-limit-${path}`)
     await s.inT(async () => {
       await handsOutCards(s)
       const call = await overLimit[path](s)
-      // The company has seen its whole day of cards an hour ago.
-      await s.db.companyStudentCardView.create({ data: { companyId: s.company.id, cards: STUDENT_CARDS_PER_DAY, createdAt: new Date(Date.now() - 3_600_000) } })
+      // One card left of the day: the two cards of the announcement do not fit whole, so none may leave (as in «Студенты»,
+      // a page is not given in part) — this also covers «no card left at all».
+      await s.db.companyStudentCardView.create({ data: { companyId: s.company.id, cards: STUDENT_CARDS_PER_DAY - 1, createdAt: new Date(Date.now() - 3_600_000) } })
       const before = await s.journal()
       const answer = await call().then((dto) => dto, (e: unknown) => e as { code?: string; status?: number })
       const refused = 'status' in answer && answer.status === 429 && answer.code === 'rate_limited'
