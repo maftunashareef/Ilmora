@@ -1,11 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
+import type { Response } from 'express'
 import { z } from 'zod'
 import { CurrentActor, CurrentTenantId, Roles } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod.pipe'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { CenterProfileInput, CenterTeacherInput, CenterTeacherPatch, CourseInput, CoursePatch, GroupInput, GroupPatch } from '../manage/manage.schemas'
 import { ManageService } from '../manage/manage.service'
-import { GenerateDto } from './center.controller'
+import { CenterStudentInput, CenterStudentPatch, RosterExportQuery, RosterImportBody, RosterQuery } from './center-students.schemas'
+import { CenterStudentsService } from './center-students.service'
+import { GenerateDto, sendXlsx } from './center.controller'
 import { CenterService } from './center.service'
 
 const body = <T>(schema: z.ZodType<T>) => new ZodValidationPipe(schema)
@@ -20,7 +24,7 @@ export const asCenter = (actor: RequestActor, centerId: string): RequestActor =>
 @Controller('admin/centers/:centerId')
 @Roles('PLATFORM_ADMIN')
 export class AdminCenterController {
-  constructor(private readonly center: CenterService, private readonly manage: ManageService) {}
+  constructor(private readonly center: CenterService, private readonly manage: ManageService, private readonly table: CenterStudentsService) {}
 
   @Get('overview') overview(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string) { return this.center.overview(t, asCenter(a, c)) }
   @Patch('profile') profile(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Body(body(CenterProfileInput)) dto: CenterProfileInput) { return this.center.updateProfile(t, asCenter(a, c), dto) }
@@ -36,6 +40,22 @@ export class AdminCenterController {
 
   // students
   @Get('students') students(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string) { return this.center.students(t, asCenter(a, c)) }
+  @Get('students/roster') roster(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Query(new ZodValidationPipe(RosterQuery)) q: RosterQuery) { return this.table.roster(t, asCenter(a, c), q) }
+  @Get('students/export')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async exportStudents(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Query(new ZodValidationPipe(RosterExportQuery)) q: RosterExportQuery, @Res() res: Response) { sendXlsx(res, await this.table.exportFile(t, asCenter(a, c), q)) }
+  @Post('students/import/check')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  importCheck(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Body(body(RosterImportBody)) dto: RosterImportBody) { return this.table.importCheck(t, asCenter(a, c), dto.file) }
+  @Post('students/import')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  importStudents(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Body(body(RosterImportBody)) dto: RosterImportBody) { return this.table.importCommit(t, asCenter(a, c), dto.file) }
+  @Post('students') addStudent(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Body(body(CenterStudentInput)) dto: CenterStudentInput) { return this.table.create(t, asCenter(a, c), dto) }
+  @Get('students/:id') student(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string) { return this.table.detail(t, asCenter(a, c), id) }
+  @Patch('students/:id') updateStudent(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string, @Body(body(CenterStudentPatch)) dto: CenterStudentPatch) { return this.table.update(t, asCenter(a, c), id, dto) }
+  @Post('students/:id/invite')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  inviteStudent(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string) { return this.table.invite(t, asCenter(a, c), id) }
 
   // courses, groups and schedules
   @Get('courses') courses(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string) { return this.manage.listCenterCourses(t, asCenter(a, c)) }

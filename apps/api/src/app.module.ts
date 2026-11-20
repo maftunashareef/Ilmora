@@ -11,6 +11,7 @@ import { CatalogModule } from './modules/catalog/catalog.module'
 import { EnrollmentModule } from './modules/enrollment/enrollment.module'
 import { HealthController } from './modules/health/health.controller'
 import { CenterModule } from './modules/center/center.module'
+import { ClassroomModule } from './modules/classroom/classroom.module'
 import { ManageModule } from './modules/manage/manage.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { PaymentsModule } from './modules/payments/payments.module'
@@ -41,6 +42,7 @@ import { WorkerModule } from './worker.module'
     AttendanceModule,
     ManageModule,
     CenterModule,
+    ClassroomModule,
     RegistryModule,
     InstitutionsModule,
     CompaniesModule,

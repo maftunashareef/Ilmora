@@ -26,7 +26,7 @@ import { unzip } from './support/xlsx'
  *
  *  1. Every export/import route (by path, or because its handler writes an .xlsx) is listed in EXPORTS with the roles
  *     the real role guard lets in and the audit action it writes. A new one fails here until it is listed on purpose.
- *  2. Center exports (none yet — the ТЗ plans the center's students table): the center passes, the teacher, student and
+ *  2. Center exports (the center's students table, ТЗ 2026-11-18, 4.2): the center passes, the teacher, student and
  *     company get 403. No export/import route lets a teacher in, anywhere.
  *     There is no «center manager» role: Role has CENTER_ADMIN only and the owner is Center.ownerUserId. If a manager
  *     role appears, add it to CENTER_EXPORTERS below.
@@ -52,14 +52,27 @@ type Export = {
   auditIn?: string[]
 }
 /** PLATFORM_ADMIN is the Super Admin: RolesGuard lets it through every route. */
+const CENTER_STUDENTS = ['modules/center/center-students.service.ts']
 const EXPORTS: Record<string, Export> = {
   'GET /ministry/export': { scope: 'ministry', allow: ['MINISTRY', 'PLATFORM_ADMIN'], audit: 'ministry.export' },
+  // The center's students table (ТЗ 2026-11-18, 4.2): download (or the empty template), check of a file, writing a file.
+  'GET /center/students/export': { scope: 'center', allow: ['CENTER_ADMIN', 'PLATFORM_ADMIN'], audit: 'center.students_export', auditIn: CENTER_STUDENTS },
+  'GET /admin/centers/:centerId/students/export': { scope: 'center', allow: ['PLATFORM_ADMIN'], audit: 'center.students_export', auditIn: CENTER_STUDENTS },
+  'POST /center/students/import/check': { scope: 'center', allow: ['CENTER_ADMIN', 'PLATFORM_ADMIN'], audit: 'center.students_import_check', auditIn: CENTER_STUDENTS },
+  'POST /admin/centers/:centerId/students/import/check': { scope: 'center', allow: ['PLATFORM_ADMIN'], audit: 'center.students_import_check', auditIn: CENTER_STUDENTS },
+  'POST /center/students/import': { scope: 'center', allow: ['CENTER_ADMIN', 'PLATFORM_ADMIN'], audit: 'center.students_import', auditIn: CENTER_STUDENTS },
+  'POST /admin/centers/:centerId/students/import': { scope: 'center', allow: ['PLATFORM_ADMIN'], audit: 'center.students_import', auditIn: CENTER_STUDENTS },
 }
 /** Routes the classifier catches that are not exports, with the reason. Empty today. */
 const NOT_EXPORTS: Record<string, string> = {}
 /** Files that write a spreadsheet / CSV → the routes they serve. Every export route must be served by one of them. */
 const XLSX_WRITERS: Record<string, string[]> = {
   'modules/ministry/ministry.controller.ts': ['GET /ministry/export'],
+  // Writes the export and the template; reads the imported file through common/xlsx-read.ts (it writes nothing).
+  'modules/center/center-students.service.ts': [
+    'GET /center/students/export', 'GET /admin/centers/:centerId/students/export', 'POST /center/students/import/check', 'POST /admin/centers/:centerId/students/import/check',
+    'POST /center/students/import', 'POST /admin/centers/:centerId/students/import',
+  ],
 }
 
 const CENTER_EXPORTERS: Role[] = ['CENTER_ADMIN', 'PLATFORM_ADMIN']
