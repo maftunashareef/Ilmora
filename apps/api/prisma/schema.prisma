@@ -315,6 +315,7 @@ model Tenant {
   homework               Homework[]
   homeworkSubmissions    HomeworkSubmission[]
   homeworkExtensions     HomeworkExtension[]
+  homeworkFiles          HomeworkFile[]
 }
 
 /// Template-driven site configuration (sections, theme, nav, features, permissions, media…) edited by Super Admin.
@@ -490,6 +491,8 @@ model Center {
   /** Check-in opens this many minutes before a lesson starts and closes this many minutes after it; absences are marked when it closes. */
   checkInBeforeMin Int  @default(15)
   absenceAfterMin  Int  @default(20)
+  /** Space for homework archives (ТЗ 18.11, 8.4): 20 GB by default, the Super Admin changes it. */
+  homeworkQuotaBytes BigInt @default(21474836480)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -499,6 +502,7 @@ model Center {
   courses  Course[]
   teacherInvites TeacherInvite[]
   students       CenterStudent[]
+  homeworkFiles  HomeworkFile[]
   /** The registry record of this learning center, when the Super Admin has linked one. */
   registryInstitution Institution?
 
@@ -2403,6 +2407,7 @@ model Homework {
 
   submissions HomeworkSubmission[]
   extensions  HomeworkExtension[]
+  files       HomeworkFile[]
 
   @@index([tenantId, groupId, dueAt])
 }
@@ -2419,6 +2424,9 @@ model HomeworkSubmission {
   student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
   text        String?
   link        String?
+  /// The ZIP handed in (second stage, 8.4): a READY file of this homework.
+  fileId      String?       @unique
+  file        HomeworkFile? @relation(fields: [fileId], references: [id], onDelete: Restrict)
   submittedAt DateTime  @default(now())
   grade       Int?
   comment     String?
@@ -2445,4 +2453,60 @@ model HomeworkExtension {
 
   @@unique([homeworkId, studentId])
   @@index([tenantId, studentId])
+}
+
+/// MATERIAL — attached by the teacher to the homework; SUBMISSION — handed in by a student (HomeworkSubmission.fileId).
+enum HomeworkFileKind {
+  MATERIAL
+  SUBMISSION
+}
+
+/// UPLOADING — parts are being sent; CHECKING — uploaded, the archive is being checked; READY — the teacher or student may
+/// download it; REJECTED — refused by the check (rejectReason), the object is deleted.
+enum HomeworkFileStatus {
+  UPLOADING
+  CHECKING
+  READY
+  REJECTED
+}
+
+/// A ZIP of a homework (ТЗ 18.11, 8.4): up to 1024 MB, uploaded in parts straight to the private bucket
+/// (S3_HOMEWORK_BUCKET), keys only under homework/ (uploads under incoming/homework/). The row stays when the object is
+/// deleted (deletedAt): the history of hand-ins keeps «there was a file». A center's space is the sum of sizeBytes of its
+/// files not deleted (Center.homeworkQuotaBytes). Checks: migration 20261126000300.
+model HomeworkFile {
+  id            String             @id @default(cuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
+  /// Whose space it takes: the center of the homework's group.
+  centerId      String
+  center        Center             @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  homeworkId    String
+  homework      Homework           @relation(fields: [homeworkId], references: [id], onDelete: Restrict)
+  kind          HomeworkFileKind
+  uploadedById  String?
+  /// Object key in the bucket; never the browser's file name.
+  objectKey     String             @unique
+  /// The name shown and given on download (the browser's, cleaned by the API).
+  fileName      String
+  sizeBytes     BigInt
+  status        HomeworkFileStatus @default(UPLOADING)
+  /// The storage's multipart upload id while UPLOADING.
+  uploadId      String?
+  rejectReason  String?
+  /// What the check read from the archive's table of contents.
+  entryCount    Int?
+  unpackedBytes BigInt?
+  checkedAt     DateTime?
+  /// When the object is deleted: 90 days after the deadline (the students and the teacher see it beforehand).
+  deleteAfter   DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  submission HomeworkSubmission?
+
+  @@index([tenantId, centerId, status])
+  @@index([tenantId, homeworkId, kind])
+  @@index([deleteAfter])
 }
