@@ -3,6 +3,8 @@ import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ZodType } from 'zod'
 import { ZodValidationPipe } from '../src/common/zod.pipe'
+import * as centerStudentsSchemas from '../src/modules/center/center-students.schemas'
+import * as classroomSchemas from '../src/modules/classroom/classroom.schemas'
 import * as companiesSchemas from '../src/modules/companies/companies.schemas'
 import * as contractHelpSchemas from '../src/modules/contract-help/contract-help.schemas'
 import * as graduatesSchemas from '../src/modules/graduates/graduates.schemas'
@@ -80,6 +82,7 @@ const courseBase = { title: L, categoryId: 'cat-1', summary: L, description: L, 
 const videoKey = 'videos/tenant-1/v.mp4'
 const videoBase = { title: L, description: L, source: { kind: 'upload', key: videoKey } }
 const resourceBase = { title: L, description: L, kind: 'link' }
+const homeworkBase = { groupId: 'g-1', title: 'Vazifa', description: 'Matn', dueAt: '2030-01-01T00:00:00.000Z', submitModes: ['LINK'] }
 const teacherBase = { name: 'T', title: L, bio: L, expertise: [], centerId: 'c-1', tagline: L }
 // A material link may also be the public address of an uploaded resource file.
 const resourceGood = link(`${PUBLIC_BASE}/resources/tenant-1/profile-1-1700000000000-ab12cd34.pdf`)
@@ -105,6 +108,10 @@ const FIELDS: Field[] = [
   { name: 'TeacherPatch.avatarUrl', kind: 'image', schema: TeacherPatch, good: avatarGood, body: (v) => ({ avatarUrl: v }) },
   { name: 'TeacherInput.bannerUrl', kind: 'image', schema: TeacherInput, good: image('banners'), body: (v) => ({ ...teacherBase, bannerUrl: v }) },
   { name: 'TeacherPatch.bannerUrl', kind: 'image', schema: TeacherPatch, good: image('banners'), body: (v) => ({ bannerUrl: v }) },
+  // Homework (ТЗ 2026-11-18, 8): the teacher's links to the task and the student's hand-in link.
+  { name: 'HomeworkInput.links', kind: 'link', schema: classroomSchemas.HomeworkInput, good: link(), body: (v) => ({ ...homeworkBase, links: [v] }) },
+  { name: 'HomeworkPatch.links', kind: 'link', schema: classroomSchemas.HomeworkPatch, good: link(), body: (v) => ({ links: [v] }) },
+  { name: 'SubmissionInput.link', kind: 'link', schema: classroomSchemas.SubmissionInput, good: link(), body: (v) => ({ link: v }) },
 ]
 
 /**
@@ -179,6 +186,7 @@ const SKIPPED_SCHEMAS: Record<string, string> = {
 /** URL-ish fields outside finding №3, with the reason. */
 const SUPER_ADMIN = 'site content, edited by the Super Admin only'
 const OUT_OF_SCOPE: Record<string, string> = {
+  'RosterImportBody.file': 'the uploaded .xlsx as base64 (center students import), not an address',
   'CompanyPatch.website': 'organization profile, not №3; allows http:// (regex)',
   'InstitutionPatch.website': 'organization profile, not №3; allows http:// (regex)',
   'SiteConfigSchema.pages.home[].imageUrl': `${SUPER_ADMIN}; any string`,
@@ -194,12 +202,12 @@ const OUT_OF_SCOPE: Record<string, string> = {
 }
 
 const MODULES: Record<string, Record<string, unknown>> = {
-  companies: companiesSchemas, 'contract-help': contractHelpSchemas, graduates: graduatesSchemas, institutions: institutionsSchemas, manage: manageSchemas,
+  'center-students': centerStudentsSchemas, classroom: classroomSchemas, companies: companiesSchemas, 'contract-help': contractHelpSchemas, graduates: graduatesSchemas, institutions: institutionsSchemas, manage: manageSchemas,
   ministry: ministrySchemas, 'registry-admin': registryAdminSchemas, registry: registrySchemas, certificates: certificatesSchemas, students: studentsSchemas,
   training: trainingSchemas, vacancies: vacanciesSchemas, site: { SiteConfigSchema },
 }
 /** The schema files on disk, so a new `*.schemas.ts` must be imported above. */
-const SCHEMA_FILES = ['companies', 'contract-help', 'graduates', 'institutions', 'manage', 'ministry', 'registry-admin', 'registry', 'certificates', 'students', 'training', 'vacancies']
+const SCHEMA_FILES = ['center-students', 'classroom', 'companies', 'contract-help', 'graduates', 'institutions', 'manage', 'ministry', 'registry-admin', 'registry', 'certificates', 'students', 'training', 'vacancies']
 
 type Def = Record<string, unknown> & { type: string }
 const defOf = (s: unknown): Def | undefined => (s as { _zod?: { def?: Def } } | null)?._zod?.def
