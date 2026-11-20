@@ -29,7 +29,7 @@ import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
  * the announcement does hand out cards), and the rule must still be broken. Close a path → its test fails and says to
  * take it out of KNOWN_GAP; from then on the rule is demanded there.
  */
-const KNOWN_GAP = new Set(['companyGet', 'respond', 'invite', 'limit'])
+const KNOWN_GAP = new Set(['companyGet', 'respond', 'invite', 'limit:companyGet', 'limit:respond', 'limit:invite'])
 
 const SRC = join(__dirname, '../src')
 const SERVICE = join(SRC, 'modules/graduates/graduates.service.ts')
@@ -84,6 +84,8 @@ describe('Graduate cards in announcements: every path that hands them out is kno
     expect([...cardsCalledIn]).toEqual(['companyView'])
   })
 
+  // A tripwire, not a proof: a builder that only infers the card type slips past. The scan above also misses a method
+  // head split over lines or an arrow property without parentheses — calls in it would count for the method above.
   it('graduate cards are built nowhere else in the API', () => {
     const users = sourceFiles(SRC).filter((f) => /\bGraduateCardDto\b/.test(readFileSync(f, 'utf8')))
     expect(users.map((f) => f.slice(SRC.length + 1).replace(/\\/g, '/'))).toEqual(['modules/graduates/graduates.service.ts'])
@@ -225,19 +227,33 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
     })
   })
 
-  it('over the daily limit no card leaves the announcement, and nothing is written', async () => {
-    const s = await setup('acj-limit')
+  /** Each path, called over the limit: a fresh announcement and inputs per path (a second «Откликнуться» would be a 409). */
+  const overLimit: Record<string, (s: Setup) => Promise<() => Promise<{ graduates?: unknown[] }>>> = {
+    companyGet: async (s) => () => service.companyGet(s.company.actor, s.ann.id),
+    respond: async (s) => {
+      const [visible] = await service.companyList(s.company.actor, {})
+      return () => service.respond(s.tenantId, s.company.actor, s.ann.id, { lines: [{ lineId: visible.lines[0].id, wantedCount: 1 }], comment: null })
+    },
+    invite: async (s) => {
+      const cardId = (await service.companyGet(s.company.actor, s.ann.id)).graduates!.find((g) => g.name === 'Aziz')!.cardId
+      return () => service.invite(s.tenantId, s.company.actor, cardId, s.ann.id)
+    },
+  }
+
+  it.each(CARD_PATHS)('over the daily limit no card leaves %s, and nothing is written for it', async (path) => {
+    const s = await setup(`acj-limit-${path}`)
     await s.inT(async () => {
       await handsOutCards(s)
+      const call = await overLimit[path](s)
       // The company has seen its whole day of cards an hour ago.
       await s.db.companyStudentCardView.create({ data: { companyId: s.company.id, cards: STUDENT_CARDS_PER_DAY, createdAt: new Date(Date.now() - 3_600_000) } })
       const before = await s.journal()
-      const answer = await service.companyGet(s.company.actor, s.ann.id).then((dto) => dto, (e: unknown) => e as { code?: string; status?: number })
+      const answer = await call().then((dto) => dto, (e: unknown) => e as { code?: string; status?: number })
       const refused = 'status' in answer && answer.status === 429 && answer.code === 'rate_limited'
       const noCards = 'id' in answer && !(answer as { graduates?: unknown[] }).graduates?.length
       expect(refused || 'id' in answer, 'answered or refused with 429 — not any other error').toBe(true)
       if (refused || noCards) expect(await s.journal(), 'nothing is written for cards not shown').toEqual(before)
-      rule('limit', refused || noCards, 'over the daily limit GET /announcements/:id hands out no card')
+      rule(`limit:${path}`, refused || noCards, `over the daily limit ${path} hands out no card`)
     })
   })
 })
