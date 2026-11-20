@@ -26,7 +26,8 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  * поднимает тревогу — ключ надо перепроверить.
  */
 
-const KNOWN_GAP = new Set(['n1-row', 'n1-cell', 'n1-shared', 'n1-pending'])
+// Closed 20.11 (Шерзод, #118): the reader scans with indexOf, the import needs an approved center.
+const KNOWN_GAP = new Set<string>([])
 const CHECKED = new Set<string>()
 function rule(key: string, holds: boolean, what: string, todayObserved: boolean) {
   CHECKED.add(key)
