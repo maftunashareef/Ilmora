@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { discountFromDraft, discountToDraft, emptyDiscountDraft, type DiscountDraft, isDiscountActive, isoToTashkentLocal } from '@ilmora/shared'
+import { discountFromDraft, discountToDraft, emptyDiscountDraft, type DiscountDraft, isDiscountActive, isoToTashkentLocal, studentPercent } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { PriceNow, ScheduleChips } from '../../components/course/CourseCard'
@@ -8,6 +8,7 @@ import { CourseForm } from '../../components/course/CourseForm'
 import { DiscountFields } from '../../components/course/DiscountFields'
 import { Badge, Button, Card, EmptyState, Icon, Modal, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
+import { formatPercent } from '../../lib/format'
 import { siteHref } from '../../lib/siteUrl'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
@@ -85,7 +86,7 @@ export function CenterCourses() {
 
   const discountLabel = (c: Course) => {
     if (!c.discount) return <Badge tone="muted">{t('center.discountNone')}</Badge>
-    const vars = { percent: c.discount.percent, from: when(c.discount.startsAt), until: when(c.discount.endsAt) }
+    const vars = { percent: c.discount.percent, student: formatPercent(studentPercent(c.discount.percent), lang), from: when(c.discount.startsAt), until: when(c.discount.endsAt) }
     return isDiscountActive(c.discount) ? <Badge tone="forest">{t('center.discountActive', vars)}</Badge> : <Badge tone="champagne">{t('center.discountScheduled', vars)}</Badge>
   }
   const center = data ? { id: data.center.id, name: data.center.name } : undefined

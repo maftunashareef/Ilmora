@@ -2,12 +2,20 @@ import { isPublicListed } from './access.js'
 import type { CourseDiscount, Publishable } from './types.js'
 
 /**
- * Course discounts. One window per course, no stacking with anything else. The same rules run on the server (which
- * charges the price) and in the web app (which only displays it), always in whole so'm so both sides agree exactly.
+ * Course discounts. One window per course, no stacking with anything else. The percent a center enters is split in two
+ * equal parts: one half is the discount the student sees and pays less by, the other half is ILMORA's commission (it
+ * also covers what the payment provider takes). The center receives the list price less the whole percent. The same
+ * rules run on the server (which charges the price) and in the web app (which only displays it), always in whole so'm
+ * so both sides agree exactly.
+ *
+ *   center enters 20% on 500 000  ->  the student sees −10% and pays 450 000, ILMORA keeps 50 000, the center gets 400 000
  */
 
-/** The largest discount a course may carry, set by the company (1% is the smallest). */
+/** The largest percent a center may enter on a course, set by the company (1% is the smallest). Students see half of it. */
 export const MAX_DISCOUNT_PERCENT = 20
+
+/** The student's part of the percent a center enters: half of it (20 -> 10, 15 -> 7.5). */
+export const studentPercent = (percent: number): number => percent / 2
 
 /** Uzbekistan has no daylight saving time, so Asia/Tashkent is a fixed UTC+5. */
 const TASHKENT_OFFSET_MS = 5 * 3_600_000
@@ -43,10 +51,36 @@ export function checkDiscount(d: DiscountWindow): DiscountCheck {
   return { ok: true }
 }
 
-/** The amount taken off, in so'm: floor(price * percent / 100). The customer never pays a fraction of a so'm. */
-export const discountSom = (priceSom: number, percent: number): number => Math.floor((priceSom * percent) / 100)
+/** What the entered percent takes off the list price altogether (the student's discount plus the commission), in so'm. */
+export const centerDiscountSom = (priceSom: number, percent: number): number => Math.floor((priceSom * percent) / 100)
 
-/** Price in so'm after the discount if it is active at `now`, otherwise the list price. */
+/**
+ * The amount taken off for the student, in so'm: half of the entered percent, floor(price * percent / 200). The customer
+ * never pays a fraction of a so'm.
+ */
+export const discountSom = (priceSom: number, percent: number): number => Math.floor((priceSom * percent) / 200)
+
+/** ILMORA's commission in so'm: the other half, i.e. what the percent takes off altogether less the student's discount. */
+export const commissionSom = (priceSom: number, percent: number): number => centerDiscountSom(priceSom, percent) - discountSom(priceSom, percent)
+
+/** The figures of one discount; what the student pays is exactly the commission plus what the center receives. */
+export interface DiscountSplit {
+  /** The percent students see: half of the entered one. */
+  studentPercent: number
+  studentPays: number
+  studentSaves: number
+  commission: number
+  centerReceives: number
+}
+
+/** How a list price splits for the percent a center enters (a valid whole percent, 1..MAX_DISCOUNT_PERCENT). */
+export function discountSplit(priceSom: number, percent: number): DiscountSplit {
+  const studentSaves = discountSom(priceSom, percent)
+  const commission = commissionSom(priceSom, percent)
+  return { studentPercent: studentPercent(percent), studentPays: priceSom - studentSaves, studentSaves, commission, centerReceives: priceSom - studentSaves - commission }
+}
+
+/** What the student pays in so'm: the list price less the student's half of the discount if it is active at `now`. */
 export function finalPriceSom(course: { price: number; discount?: DiscountWindow | CourseDiscount | null }, now: Date = new Date()): number {
   return isDiscountActive(course.discount, now) ? course.price - discountSom(course.price, course.discount!.percent) : course.price
 }
@@ -54,13 +88,14 @@ export function finalPriceSom(course: { price: number; discount?: DiscountWindow
 /** Server-side amount in tiyin; identical to finalPriceSom * 100 for prices stored in whole so'm. */
 export function finalPriceMinor(priceMinor: bigint, discount: DiscountWindow | null | undefined, now: Date = new Date()): bigint {
   if (!isDiscountActive(discount, now)) return priceMinor
-  const off = ((priceMinor * BigInt(discount!.percent)) / 10_000n) * 100n
+  // The student's half of the percent, floored to whole so'm: the same number as discountSom().
+  const off = ((priceMinor * BigInt(discount!.percent)) / 20_000n) * 100n
   return priceMinor - off
 }
 
-/** Percentage to show next to a discounted price, or 0 when no discount is active. */
+/** Percentage to show next to a discounted price (the student's half; may end in .5), or 0 when no discount is active. */
 export const activePercent = (course: { discount?: DiscountWindow | CourseDiscount | null }, now: Date = new Date()): number =>
-  isDiscountActive(course.discount, now) ? course.discount!.percent : 0
+  isDiscountActive(course.discount, now) ? studentPercent(course.discount!.percent) : 0
 
 /** The amount actually billed per period (tiyin string from the API) in so'm, or null when it is not known. */
 export const billedSom = (amountMinor: string | undefined | null): number | null =>
@@ -90,8 +125,9 @@ export function discountFromDraft(draft: DiscountDraft, now: Date = new Date()):
 }
 
 /**
- * Monthly totals of a selection in so‘m: the list prices, what is paid with each course's own active discount (the same
- * rule the server charges with), and the difference. There is no package discount, so nothing else is taken off.
+ * Monthly totals of a selection in so‘m: the list prices, what is paid with each course's own active discount (the
+ * student's half; the same rule the server charges with), and the difference. There is no package discount, so nothing
+ * else is taken off.
  */
 export function priceTotals(courses: { price: number; discount?: DiscountWindow | CourseDiscount | null }[], now: Date = new Date()): { list: number; final: number; saved: number } {
   const list = courses.reduce((n, c) => n + c.price, 0)

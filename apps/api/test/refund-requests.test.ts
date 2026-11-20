@@ -30,7 +30,7 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: payment lines and the database 
     const s = await paid('rf-lines')
     await s.inT(async () => {
       const lines = await db.paymentLine.findMany({ where: { paymentId: s.payment.id }, include: { enrollment: true } })
-      expect(lines.map((l) => [l.courseId, l.listPriceMinor, l.amountMinor]).sort()).toEqual([[s.course.id, 50_000_00n, 45_000_00n], [s.course2.id, 30_000_00n, 30_000_00n]].sort())
+      expect(lines.map((l) => [l.courseId, l.listPriceMinor, l.amountMinor]).sort()).toEqual([[s.course.id, 50_000_00n, 47_500_00n], [s.course2.id, 30_000_00n, 30_000_00n]].sort()) // the center entered 10%: the student's half is 5%
       expect(lines.every((l) => l.enrollment?.subscriptionId === s.subscription.id && l.enrollment.courseId === l.courseId)).toBe(true)
       expect(lines.reduce((sum, l) => sum + l.amountMinor, 0n)).toBe(s.payment.amountMinor)
 
@@ -41,7 +41,7 @@ describe.skipIf(!DB_AVAILABLE)('Refund requests: payment lines and the database 
       const nextLines = await db.paymentLine.findMany({ where: { paymentId: next.id } })
       expect(nextLines.map((l) => l.amountMinor).sort()).toEqual([30_000_00n, 70_000_00n])
       expect(nextLines.reduce((sum, l) => sum + l.amountMinor, 0n)).toBe(next.amountMinor)
-      expect((await db.paymentLine.findMany({ where: { paymentId: s.payment.id } })).map((l) => l.amountMinor).sort()).toEqual([30_000_00n, 45_000_00n])
+      expect((await db.paymentLine.findMany({ where: { paymentId: s.payment.id } })).map((l) => l.amountMinor).sort()).toEqual([30_000_00n, 47_500_00n])
     })
   })
 
