@@ -1,6 +1,7 @@
 import { isOnlineCourse, isSafeExternalUrl, MAX_CART_COURSES } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useNavigate, useParams } from '@/lib/routerHooks'
+import { useRef } from 'react'
 import { AccessDenied, NotFound } from '../../components/AccessGate'
 import { AccessBadge, LevelBadge, StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { CoursePrice, FormatBadge, ScheduleChips } from '../../components/course/CourseCard'
@@ -36,6 +37,7 @@ export function CourseDetailPage() {
   const canSave = useCanSaveCourses()
   const hydrated = useHydrated()
   const channelsOn = useStore((s) => s.site.features.teacherChannels)
+  const groupsRef = useRef<HTMLDivElement>(null)
 
   if (!course) return <NotFound />
   const access = checkAccess(course, viewer)
@@ -49,7 +51,7 @@ export function CourseDetailPage() {
   const add = (groupId: string) => {
     if (!student) return
     const r = addBuilderGroup(student.id, groupId)
-    if (r.ok) notify(t('courses.inPlan'))
+    if (r.ok) notify(t('courses.addedToCart'))
     else if (r.reason === 'limit') notify(student.builder.packageId ? t('builder.limitReached') : t('builder.customLimit', { n: MAX_CART_COURSES }), 'warn')
     else if (r.reason === 'duplicate') notify(t('builder.duplicate'), 'warn')
     else if (r.reason === 'conflict') notify(`${t('builder.conflict')}: ${t('builder.conflictHint')}`, 'warn')
@@ -57,6 +59,24 @@ export function CourseDetailPage() {
     else if (r.reason === 'full') notify(`${t('capacity.full')} — ${t('capacity.fullHint')}`, 'warn')
     else notify(t('builder.pickPackageFirst'), 'warn')
   }
+
+  // The one obvious way into the cart, on every paid course: a single open group is added at once, several groups send
+  // the visitor to the list right below to pick a schedule, and a course already in the cart leads to the cart.
+  const openGroups = course.groups.filter((g) => !isGroupFull(g, students, student?.id))
+  const addToCart = () => {
+    if (inPlan) { nav('/builder'); return }
+    if (openGroups.length === 1) { add(openGroups[0].id); return }
+    groupsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    notify(t('courses.pickGroup'))
+  }
+  const cartButton = (className?: string) => (
+    <div className={className}>
+      <Button size="lg" variant={inPlan ? 'secondary' : 'primary'} className="w-full justify-center" disabled={!inPlan && openGroups.length === 0} onClick={addToCart}>
+        {inPlan ? <><Icon name="check" className="h-4 w-4" />{t('favorites.inCart')} · {t('uni.goToCart')}</> : <><Icon name="cart" className="h-4 w-4" />{t('favorites.addToCart')}</>}
+      </Button>
+      {!inPlan && openGroups.length === 0 && <p className="mt-2 text-xs leading-relaxed text-charcoal/60">{course.groups.length === 0 ? t('courses.noGroupsYet') : `${t('capacity.full')} — ${t('capacity.fullHint')}`}</p>}
+    </div>
+  )
 
   const visibleVideos = videos.filter((v) => checkAccess(v, viewer).allowed)
   const visibleResources = resources.filter((r) => checkAccess(r, viewer).allowed)
@@ -79,6 +99,13 @@ export function CourseDetailPage() {
           </div>
           <h1 className="mt-4 font-display text-5xl leading-[1.02] text-charcoal md:text-6xl">{tr(course.title)}</h1>
           <p className="mt-4 max-w-2xl text-lg leading-relaxed text-charcoal/70">{tr(course.summary)}</p>
+          {!online && !enrolled && (
+            <div className="mt-6 rounded-card border border-charcoal/10 bg-paper p-4 lg:hidden">
+              <div className="eyebrow">{t('courses.monthlyPrice')}</div>
+              <CoursePrice course={course} emphasis className="mt-1" />
+              {cartButton('mt-4')}
+            </div>
+          )}
 
           <section className="mt-12">
             <Eyebrow className="mb-3">{t('courses.aboutCourse')}</Eyebrow>
@@ -202,12 +229,13 @@ export function CourseDetailPage() {
                 </Button>
               )}
             </div>
+            {!enrolled && cartButton('mt-5 hidden lg:block')}
             <dl className="mt-5 grid grid-cols-2 gap-3 text-xs">
               <div><dt className="text-charcoal/50">{t('common.duration')}</dt><dd className="mt-0.5 font-medium text-charcoal">{course.durationMonths} {t('common.months')}</dd></div>
               <div><dt className="text-charcoal/50">{t('common.level')}</dt><dd className="mt-0.5 font-medium text-charcoal">{t(`level.${course.level}`)}</dd></div>
             </dl>
-            <div className="mt-6 border-t border-charcoal/10 pt-5">
-              <div className="eyebrow mb-3">{t('courses.groupsAndSchedule')}</div>
+            <div ref={groupsRef} className="mt-6 scroll-mt-28 border-t border-charcoal/10 pt-5">
+              {course.groups.length > 0 && <div className="eyebrow mb-3">{t('courses.groupsAndSchedule')}</div>}
               <ul className="space-y-2">
                 {course.groups.map((g) => {
                   const chosen = inPlan === g.id
@@ -223,14 +251,14 @@ export function CourseDetailPage() {
                         <span className="text-[11px] text-charcoal/45">{t('common.room')} {g.room}</span>
                       </div>
                       <Button size="sm" variant={chosen ? 'secondary' : 'primary'} className="mt-3 w-full" disabled={full && !chosen} onClick={() => (chosen ? nav('/builder') : add(g.id))}>
-                        {chosen ? <><Icon name="check" className="h-3.5 w-3.5" />{t('courses.inPlan')}</> : full ? t('capacity.full') : t('courses.addToPlan')}
+                        {chosen ? <><Icon name="check" className="h-3.5 w-3.5" />{t('favorites.inCart')}</> : full ? t('capacity.full') : t('favorites.addToCart')}
                       </Button>
                     </li>
                   )
                 })}
               </ul>
               {enrolled && <Notice tone="ok" className="mt-3 text-xs">{t('student.myGroup')} · {t('preview.renewalNote')}</Notice>}
-              <p className="mt-4 text-[11px] leading-relaxed text-charcoal/50">{t('courses.enrollNote')}</p>
+              <p className={cx('text-[11px] leading-relaxed text-charcoal/50', course.groups.length > 0 && 'mt-4')}>{t('courses.enrollNote')}</p>
             </div>
           </Card>
 
