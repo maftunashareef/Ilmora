@@ -16,7 +16,7 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  * Rule: the import never writes a course that is not one of the platform's online courses — the row of a center's
  * course (another centerId, OFFLINE) stays exactly as it was, every column, updatedAt included. How the fix does it is
  * open (match by the stable id, or skip or stop on such a slug). A run that finishes is accepted, and so is a stop on
- * this collision only: a P2002 on (tenantId, slug), or a message naming the slug as not the platform's course. The
+ * this collision only: a P2002 on (tenantId, slug), or a message naming the slug as «not a platform course». The
  * colliding course is the last of the list, so in both cases the other courses must have been refreshed first; a fix
  * that checks every slug before writing anything has to adjust that sanity check.
  *
@@ -101,18 +101,17 @@ describe.skipIf(!DB_AVAILABLE)('№11 online catalog import leaves a center\'s o
     if (run.status === 0) {
       expect(output, output).toContain(`tenant "${tenant.slug}"`)
     } else {
-      // A stop is accepted only on this collision: the (tenantId, slug) uniqueness, or a message naming the slug as not the
-      // platform's course. A failed connection, a missing tenant or any other error is not a stop.
-      const collision = /P2002|Unique constraint failed/.test(output) || (output.includes(victimSeed.slug) && /platform|online/i.test(output.replace(victimSeed.slug, '')))
-      const unrelated = /PrismaClientInitializationError|ECONNREFUSED|not found/i.test(output)
-      expect(collision && !unrelated, `the import failed for another reason:
-${output}`).toBe(true)
+      // A stop is accepted only on this collision: the (tenantId, slug) uniqueness, or a dedicated message (stack lines
+      // aside) naming the slug as not the platform's course. A failed connection or any other error is not a stop.
+      const message = (run.stderr ?? '').split('\n').filter((l) => !/^\s+at /.test(l)).join('\n')
+      const dedicated = message.includes(victimSeed.slug) && /not (a|the) platform('s)? (online )?course/i.test(message)
+      const unique = /P2002|Unique constraint failed/.test(output) && !/PrismaClientInitializationError|ECONNREFUSED|not found/i.test(output)
+      expect(dedicated || unique, `the import failed for another reason:\n${output}`).toBe(true)
     }
     const refreshed = await TenantContext.system(() => db.course.findMany({ where: { tenantId: t.tenantId, id: { in: others.map((c) => c.id) } }, select: { id: true, externalUrl: true, centerId: true } }))
     expect(refreshed).toHaveLength(others.length)
     for (const c of refreshed) {
-      expect(c.externalUrl, `${c.id} was not refreshed:
-${output}`).toBe(others.find((o) => o.id === c.id)!.url)
+      expect(c.externalUrl, `${c.id} was not refreshed:\n${output}`).toBe(others.find((o) => o.id === c.id)!.url)
       expect(c.centerId, c.id).toBe(platformCenter.id)
     }
 

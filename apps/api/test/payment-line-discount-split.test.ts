@@ -18,11 +18,14 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  * Rule: PaymentLine keeps, at checkout, the percent the center entered (`discountPercent`) or the commission
  * (`commissionMinor`; the center's share is then the amount paid less it, `centerShareMinor` is optional), and a
  * checkout with an active discount writes it — matching discountSplit() for that price and percent. Another valid fix
- * is the double-entry ledger: settlementEntries splitting the payment into ILMORA's commission and CENTER_PAYABLE (a new
- * account type or entries per line); this test then needs its check pointed at the ledger instead.
+ * is the double-entry ledger: settlementEntries (called from PaymentsService.settle) splitting the payment into ILMORA's
+ * commission and CENTER_PAYABLE. The DB test therefore settles the payment (manualSettle — not a sandbox settlement, so
+ * the journal is posted) and accepts a CENTER_PAYABLE credit equal to the center's share as the rule holding too; and
+ * while the gap is open it pins the account types of today's PAYMENT_SETTLED journal (exactly PROVIDER_CLEARING and
+ * SUBSCRIPTION_REVENUE), so a ledger fix that reuses the existing CENTER_PAYABLE type is not missed either.
  *
- * KNOWN_GAP pins today's exact shape: the PaymentLine fields in schema.prisma, the keys of a written line and the
- * LedgerAccountType values. Any change to them fails as «re-evaluate n12» even before the rule holds, so a fix that lands
+ * KNOWN_GAP pins today's exact shape: the PaymentLine fields in schema.prisma, the keys of a written line, the
+ * LedgerAccountType values and the account types of a settled payment's journal. Any change to them fails as «re-evaluate n12» even before the rule holds, so a fix that lands
  * in a place this test does not look at is not missed. When the rule holds, the check fails with «remove 'n12-…' from
  * KNOWN_GAP» — then remove the key and the rule is demanded from then on.
  */
@@ -42,6 +45,7 @@ const expectChecked = (...keys: string[]) => {
 /** Today's shape (the gap): model fields incl. relations, the scalar keys of a row, the ledger's account types. */
 const TODAY_MODEL_FIELDS = ['id', 'tenantId', 'tenant', 'paymentId', 'payment', 'enrollmentId', 'enrollment', 'courseId', 'course', 'listPriceMinor', 'amountMinor']
 const TODAY_ROW_KEYS = ['id', 'tenantId', 'paymentId', 'enrollmentId', 'courseId', 'listPriceMinor', 'amountMinor']
+const TODAY_SETTLED_ACCOUNT_TYPES = ['PROVIDER_CLEARING', 'SUBSCRIPTION_REVENUE']
 const TODAY_LEDGER_TYPES = ['PROVIDER_CLEARING', 'SUBSCRIPTION_REVENUE', 'CENTER_PAYABLE', 'STUDENT_CREDIT', 'REFUNDS', 'ADJUSTMENTS']
 
 const schema = readFileSync(join(__dirname, '../prisma/schema.prisma'), 'utf8')
@@ -100,6 +104,18 @@ describe.skipIf(!DB_AVAILABLE)('№12 checkout with an active discount writes th
     const keepsPercent = line.discountPercent === percent
     const keepsCommission = minor(line.commissionMinor) === BigInt(split.commission) * 100n
       && (!('centerShareMinor' in line) || minor(line.centerShareMinor) === BigInt(split.centerReceives) * 100n)
-    rule('n12-checkout', keepsPercent || keepsCommission, `the PaymentLine of a ${percent}% discount keeps the percent or commission ${split.commission} so'm (center ${split.centerReceives}) (now its keys: ${Object.keys(line).join(', ')})`, sameList(Object.keys(line), TODAY_ROW_KEYS))
+
+    // Settle it the way a finance admin does (not a sandbox payment: the ledger journal is posted) and read the journal.
+    await TenantContext.forTenant(t.tenantId, () => ctx.payments.manualSettle(payment.id, student.id, 'test'))
+    const entries = await TenantContext.system(() => ctx.prisma.client.ledgerEntry.findMany({ where: { journal: { tenantId: t.tenantId, kind: 'PAYMENT_SETTLED', referenceType: 'Payment', referenceId: payment.id } } }))
+    // Setup sanity: the journal is there and balanced.
+    expect(entries.length).toBeGreaterThan(0)
+    const sum = (d: string) => entries.filter((e) => e.direction === d).reduce((n, e) => n + e.amountMinor, 0n)
+    expect(sum('DEBIT')).toBe(sum('CREDIT'))
+    const ledgerSplit = entries.some((e) => e.accountType === 'CENTER_PAYABLE' && e.direction === 'CREDIT' && e.amountMinor === BigInt(split.centerReceives) * 100n)
+    const accountTypes = [...new Set(entries.map((e) => e.accountType as string))]
+
+    rule('n12-checkout', keepsPercent || keepsCommission || ledgerSplit, `a ${percent}% discount's split is recorded: the PaymentLine keeps the percent or commission ${split.commission} so'm, or the settlement credits CENTER_PAYABLE ${split.centerReceives} so'm (now line keys: ${Object.keys(line).join(', ')}; journal account types: ${accountTypes.join(', ')})`,
+      sameList(Object.keys(line), TODAY_ROW_KEYS) && sameList(accountTypes, TODAY_SETTLED_ACCOUNT_TYPES))
   })
 })
