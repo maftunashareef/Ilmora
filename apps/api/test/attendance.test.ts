@@ -109,7 +109,7 @@ describe.skipIf(!DB_AVAILABLE)('attendance: sessions, tokens, check-in rules', (
     expect(closed?.attendanceTokenHash).toBeNull()
     expect(await asTenant(() => attendance.checkIn(other.id, { sessionId: session.id, token: rotated.token }, {}))).toMatchObject({ ok: false })
 
-    // A QR check-in is the student's own mark: the teacher and the center do not change it (ТЗ 2026-11-18, 5; Тимур, 20.11).
+    // A QR check-in is the student's own mark: the teacher and the center do not change it (ТЗ 2026-11-18, 5; Шерзод, 20.11).
     const centerAdmin = { id: 'u-center', roles: ['CENTER_ADMIN' as const], centerId: t.center.id }
     for (const who of [teacher, centerAdmin]) {
       await expect(asTenant(() => attendance.correct(session.id, who, { studentId: student.id, status: 'EXCUSED', reason: 'Doctor note' }))).rejects.toMatchObject({ code: 'qr_read_only' })

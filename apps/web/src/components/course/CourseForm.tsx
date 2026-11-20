@@ -93,7 +93,7 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
   const lockSchedule = isTeacher && !(perms.editSchedules && perms.manageGroups)
   const set = <K extends keyof Course>(k: K, v: Course[K]) => setDraft((d) => ({ ...d, [k]: v }))
   const online = isOnlineCourse(draft)
-  // A new course follows the calculator (ТЗ 18.11, 9.2); a course from before keeps its old rules (Тимур, 20.11).
+  // A new course follows the calculator (ТЗ 18.11, 9.2); a course from before keeps its old rules (Шерзод, 20.11).
   const priceRule = initial ? (initial.priceRule ?? 0) : 1
 
   // Offline <-> online (Super Admin only). An online course is free and has no groups, so a course that already has groups cannot become one.
@@ -118,7 +118,7 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
     if (!online && !lockPrice && priceRule === 1 && !checkCoursePrice(draft.price).ok) { notify(t('calc.err.price'), 'warn'); return }
     let discount: Course['discount'] = draft.discount ?? null
     if (mode === 'admin' || isCenter) {
-      const parsed = discountFromDraft(disc, new Date(), pricing?.maxDiscountPercent)
+      const parsed = discountFromDraft(disc, new Date(), pricing?.maxDiscountPercent, priceRule)
       if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
       discount = parsed.discount
     }

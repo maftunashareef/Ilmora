@@ -108,11 +108,14 @@ export type LearningFormat = 'OFFLINE' | 'ONLINE'
 /** Whether an online course ends with a certificate. AVAILABLE: offered, but the provider's page does not say whether it is free. */
 export type CertificateKind = 'NONE' | 'FREE' | 'PAID' | 'AVAILABLE'
 
-/** A course discount window; instants are ISO-8601 UTC strings. Active when startsAt <= now < endsAt. */
+/**
+ * A course discount window; instants are ISO-8601 UTC strings. Active when startsAt <= now < endsAt. `endsAt` null: no end
+ * — the student discount of a new course has no time limit (Шерзод, 20.11); a course from before keeps both dates.
+ */
 export interface CourseDiscount {
   percent: number
   startsAt: string
-  endsAt: string
+  endsAt: string | null
 }
 
 export interface Course extends Publishable {

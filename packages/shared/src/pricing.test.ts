@@ -159,6 +159,40 @@ describe('discount form text', () => {
     const far = discountFromDraft(draft('5', '2030-01-01T00:00', '2030-02-01T00:00'))
     expect(far.ok).toBe(true)
   })
+
+  it('a new course (rule 1): no end — the discount has no time limit (Шерзод, 20.11); an end typed in is refused', () => {
+    const now = new Date('2026-11-20T10:00:00Z')
+    expect(discountFromDraft(draft('10', '', ''), now, 90, 1)).toEqual({ ok: true, discount: { percent: 10, startsAt: now.toISOString(), endsAt: null } })
+    expect(discountFromDraft(draft('10', '2026-11-25T10:00', ''), now, 90, 1)).toEqual({ ok: true, discount: { percent: 10, startsAt: '2026-11-25T05:00:00.000Z', endsAt: null } })
+    expect(discountFromDraft(draft('10', '', '2026-12-01T10:00'), now, 90, 1).ok).toBe(false)
+    expect(discountFromDraft(draft('4', '', ''), now, 90, 1).ok).toBe(false)
+    // A course from before still needs its end.
+    expect(discountFromDraft(draft('10', '', ''), now, 90, 0).ok).toBe(false)
+    const open = { percent: 10, startsAt: '2026-11-20T05:00:00.000Z', endsAt: null }
+    expect(discountToDraft(open)).toEqual(draft('10', '2026-11-20T10:00', ''))
+    expect(discountFromDraft(discountToDraft(open), now, 90, 1)).toEqual({ ok: true, discount: open })
+  })
+})
+
+describe('a discount with no end (new courses, Шерзод 20.11)', () => {
+  const open = { percent: 10, startsAt: '2026-11-01T00:00:00Z', endsAt: null }
+  it('is active from its start on and never runs out', () => {
+    expect(isDiscountActive(open, new Date('2026-10-31T23:59:59Z'))).toBe(false)
+    expect(isDiscountActive(open, new Date('2026-11-01T00:00:00Z'))).toBe(true)
+    expect(isDiscountActive(open, new Date('2099-01-01T00:00:00Z'))).toBe(true)
+    expect(finalPriceSom({ price: 120_000, discount: open, priceRule: 1 }, new Date('2030-01-01T00:00:00Z'))).toBe(108_000)
+    expect(finalPriceMinor(12_000_000n, open, new Date('2030-01-01T00:00:00Z'), 1)).toBe(10_800_000n)
+  })
+  it('passes the saving rules; in the carousel it comes after those that end', () => {
+    expect(checkDiscount(open)).toEqual({ ok: true })
+    expect(checkDiscount({ ...open, startsAt: 'nonsense' })).toEqual({ ok: false, reason: 'dates' })
+    const now = new Date('2026-11-05T00:00:00Z')
+    const list = [
+      { id: 'forever', status: 'published' as const, visibility: 'public' as const, discount: open },
+      { id: 'ends', status: 'published' as const, visibility: 'public' as const, discount: d(10, '2026-11-01T00:00:00Z', '2026-11-30T00:00:00Z') },
+    ]
+    expect(carouselCourses(list, now).map((c) => c.id)).toEqual(['ends', 'forever'])
+  })
 })
 
 describe('carouselCourses', () => {

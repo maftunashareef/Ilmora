@@ -7,7 +7,7 @@ import type { CourseDiscount, Publishable } from './types.js'
  */
 
 /**
- * The calculator of ТЗ 2026-11-18, раздел 9 (решение 18.11; Тимур, 20.11: минимум скидки — для новых курсов, даты у скидки
+ * The calculator of ТЗ 2026-11-18, раздел 9 (решение 18.11; Шерзод, 20.11: минимум скидки — для новых курсов, даты у скидки
  * остаются). Price P set by the center, commission K set by the Super Admin (one for every center), student discount S:
  * the student pays P − S, the center gets P − (K + S), ILMORA the difference. All sums are whole so'm.
  */
@@ -42,16 +42,22 @@ const TASHKENT_OFFSET_MS = 5 * 3_600_000
 export interface DiscountWindow {
   percent: number
   startsAt: string | Date
-  endsAt: string | Date
+  /** null: no end — a new course's student discount has no time limit (Шерзод, 20.11). */
+  endsAt: string | Date | null
 }
 
 const ms = (d: string | Date) => (d instanceof Date ? d.getTime() : Date.parse(d))
+/** The end as a time; no end is never reached. */
+const endMs = (d: string | Date | null) => (d === null ? Number.POSITIVE_INFINITY : ms(d))
 
-/** Active when 1 <= percent <= MAX (a 1–4% discount set before the 5% minimum still counts), and startsAt <= now < endsAt. */
+/**
+ * Active when 1 <= percent <= MAX (a 1–4% discount set before the 5% minimum still counts), and startsAt <= now < endsAt
+ * (no end: from the start on).
+ */
 export function isDiscountActive(d: DiscountWindow | null | undefined, now: Date = new Date()): boolean {
   if (!d || !Number.isInteger(d.percent) || d.percent < 1 || d.percent > MAX_DISCOUNT_PERCENT) return false
   const start = ms(d.startsAt)
-  const end = ms(d.endsAt)
+  const end = endMs(d.endsAt ?? null)
   if (Number.isNaN(start) || Number.isNaN(end)) return false
   const t = now.getTime()
   return start <= t && t < end
@@ -59,11 +65,11 @@ export function isDiscountActive(d: DiscountWindow | null | undefined, now: Date
 
 export type DiscountCheck = { ok: true } | { ok: false; reason: 'percent' | 'dates' | 'order' }
 
-/** Rules for saving a discount: a whole percent from 5 to `maxPercent` (100% − K), valid dates, and an end after the start. */
+/** Rules for saving a discount: a whole percent from 5 to `maxPercent` (100% − K), valid dates, and an end (if any) after the start. */
 export function checkDiscount(d: DiscountWindow, maxPercent: number = maxDiscountPercent(COMMISSION_DEFAULT_PERCENT)): DiscountCheck {
   if (!Number.isInteger(d.percent) || d.percent < MIN_DISCOUNT_PERCENT || d.percent > Math.min(maxPercent, MAX_DISCOUNT_PERCENT)) return { ok: false, reason: 'percent' }
   const start = ms(d.startsAt)
-  const end = ms(d.endsAt)
+  const end = endMs(d.endsAt ?? null)
   if (Number.isNaN(start) || Number.isNaN(end)) return { ok: false, reason: 'dates' }
   if (end <= start) return { ok: false, reason: 'order' }
   return { ok: true }
@@ -131,18 +137,20 @@ export interface DiscountDraft {
 }
 export const emptyDiscountDraft = (): DiscountDraft => ({ percent: '', starts: '', ends: '' })
 export const discountToDraft = (d: CourseDiscount | null | undefined): DiscountDraft =>
-  d ? { percent: String(d.percent), starts: isoToTashkentLocal(d.startsAt), ends: isoToTashkentLocal(d.endsAt) } : emptyDiscountDraft()
+  d ? { percent: String(d.percent), starts: isoToTashkentLocal(d.startsAt), ends: d.endsAt ? isoToTashkentLocal(d.endsAt) : '' } : emptyDiscountDraft()
 
 const LOCAL_TEXT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 /**
- * Form text -> discount: all empty means "no discount" (null). Otherwise the end is required, an empty start means
- * "from now", and the result must pass checkDiscount, or it is not ok.
+ * Form text -> discount: all empty means "no discount" (null). An empty start means "from now". A course from before
+ * (rule 0) needs the end; a new course (rule 1) has none — its discount has no time limit (Шерзод, 20.11), and an end typed
+ * in is not ok. The result must pass checkDiscount, or it is not ok.
  */
-export function discountFromDraft(draft: DiscountDraft, now: Date = new Date(), maxPercent?: number): { ok: true; discount: CourseDiscount | null } | { ok: false } {
+export function discountFromDraft(draft: DiscountDraft, now: Date = new Date(), maxPercent?: number, rule: PriceRule = 0): { ok: true; discount: CourseDiscount | null } | { ok: false } {
   if (!draft.percent && !draft.starts && !draft.ends) return { ok: true, discount: null }
-  if (!LOCAL_TEXT.test(draft.ends) || (draft.starts !== '' && !LOCAL_TEXT.test(draft.starts))) return { ok: false }
+  if (draft.starts !== '' && !LOCAL_TEXT.test(draft.starts)) return { ok: false }
+  if (rule === 1 ? draft.ends !== '' : !LOCAL_TEXT.test(draft.ends)) return { ok: false }
   const startsAt = draft.starts === '' ? now.toISOString() : tashkentLocalToIso(draft.starts)
-  const discount = { percent: Number(draft.percent), startsAt, endsAt: tashkentLocalToIso(draft.ends) }
+  const discount = { percent: Number(draft.percent), startsAt, endsAt: rule === 1 ? null : tashkentLocalToIso(draft.ends) }
   return checkDiscount(discount, maxPercent).ok ? { ok: true, discount } : { ok: false }
 }
 
@@ -171,7 +179,7 @@ export function carouselCourses<T extends Pick<Publishable, 'status' | 'visibili
   const limit = Math.max(0, Math.min(Math.floor(max), MAX_CAROUSEL_COURSES))
   return courses
     .filter((c) => isPublicListed(c) && isDiscountActive(c.discount, now))
-    .sort((a, b) => ms(a.discount!.endsAt) - ms(b.discount!.endsAt))
+    .sort((a, b) => endMs(a.discount!.endsAt ?? null) - endMs(b.discount!.endsAt ?? null))
     .slice(0, limit)
 }
 

@@ -206,7 +206,7 @@ export class AttendanceService {
     const before = await this.prisma.client.attendanceRecord.findUnique({ where: { sessionId_studentId: { sessionId: session.id, studentId: input.studentId } } })
     // A check-in by QR (the lesson's or the center's) is the student's own mark and lessons of a subscription depend on it:
     // the teacher and the center do not change it, a disputed one is corrected by the Super Admin (ТЗ 2026-11-18, 5;
-    // Тимур, 20.11). Absences of the worker and the teacher's own marks are corrected as before.
+    // Шерзод, 20.11). Absences of the worker and the teacher's own marks are corrected as before.
     if (before && (before.method === 'QR' || before.method === 'CENTER_QR') && !actor.roles.includes('PLATFORM_ADMIN')) {
       throw new AppError('qr_read_only', 'A QR check-in is corrected by the Super Admin', HttpStatus.FORBIDDEN)
     }

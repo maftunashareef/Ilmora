@@ -152,14 +152,18 @@ export const toTeacher = (t: { id: string; slug: string; name: string; title: un
 export const toGroup = (g: { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number }, seats?: Map<string, number>) => ({
   id: g.id, courseId: g.courseId, name: g.name, days: g.days, start: g.startTime, end: g.endTime, room: g.room, capacity: g.capacity, enrolled: seats?.get(g.id) ?? 0,
 })
-/** Stored discount columns -> window used by the price rules (null when no discount is set). */
+/**
+ * Stored discount columns -> window used by the price rules (null when no discount is set). No end: a new course's student
+ * discount has no time limit (Шерзод, 20.11).
+ */
 export const discountWindow = (c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }): DiscountWindow | null =>
-  c.discountPercent && c.discountStartsAt && c.discountEndsAt ? { percent: c.discountPercent, startsAt: c.discountStartsAt, endsAt: c.discountEndsAt } : null
+  c.discountPercent && c.discountStartsAt ? { percent: c.discountPercent, startsAt: c.discountStartsAt, endsAt: c.discountEndsAt } : null
 
 /** What the browser gets: the window while it has not expired (it may start later). The browser decides "active now". */
 const publicDiscount = (c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }, now = new Date()) => {
   const w = discountWindow(c)
-  return w && (w.endsAt as Date) > now ? { percent: w.percent, startsAt: (w.startsAt as Date).toISOString(), endsAt: (w.endsAt as Date).toISOString() } : null
+  if (!w || (w.endsAt && (w.endsAt as Date) <= now)) return null
+  return { percent: w.percent, startsAt: (w.startsAt as Date).toISOString(), endsAt: w.endsAt ? (w.endsAt as Date).toISOString() : null }
 }
 
 /** A localized text object with at least one non-empty language. */

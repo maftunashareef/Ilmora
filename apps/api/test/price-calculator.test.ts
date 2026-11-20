@@ -8,7 +8,8 @@ import { DB_AVAILABLE, TestContext } from './helpers'
 import { notificationsStub } from './stubs'
 
 /**
- * The price calculator (ТЗ 2026-11-18, раздел 9; Тимур, 20.11: the 5% minimum is for new courses, discount dates stay).
+ * The price calculator (ТЗ 2026-11-18, раздел 9; Шерзод, 20.11: the 5% minimum is for new courses, and their discount has
+ * no time limit — a start, no end).
  * Every rule has a test that fails without its code (12.2): both examples of 9.2, the limits 5% and 90%, the price of a
  * new course, the snapshot in the payment, the commission only the Super Admin changes.
  */
@@ -27,7 +28,10 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
   const err = (p: Promise<unknown>) => p.then(() => 'ok', (e: { code?: string; response?: { code?: string } }) => e.code ?? e.response?.code ?? String(e))
   const L = { uz: 'Kurs', ru: 'Курс', en: 'Course' }
   const day = 86_400_000
-  const live = (percent: number) => ({ percent, startsAt: new Date(Date.now() - day).toISOString(), endsAt: new Date(Date.now() + 30 * day).toISOString() })
+  /** A new course's student discount: started yesterday, no end. */
+  const live = (percent: number) => ({ percent, startsAt: new Date(Date.now() - day).toISOString(), endsAt: null })
+  /** A course from before keeps a window with an end. */
+  const windowed = (percent: number) => ({ percent, startsAt: new Date(Date.now() - day).toISOString(), endsAt: new Date(Date.now() + 30 * day).toISOString() })
 
   async function setup(label = 'calc') {
     const t = await ctx.makeTenant(label)
@@ -60,16 +64,18 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     await expect(create({ price: 0, status: 'published' })).resolves.toMatchObject({ price: 0, status: 'published' })
   })
 
-  it('a paid new course is published only with a student discount (5% or more) that has not ended', async () => {
+  it('a paid new course is published only with a student discount (5% or more) in force: started, with no end', async () => {
     const s = await setup()
     const m = manage()
     expect(await err(as(s, s.center, () => m.createCourse(s.tenantId, s.center, body(s, { status: 'published' }) as never)))).toBe('student_discount_required')
     const draft = await as(s, s.center, () => m.createCourse(s.tenantId, s.center, body(s) as never))
     expect(await err(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, draft.id, { status: 'published' })))).toBe('student_discount_required')
-    // An ended discount does not count.
-    const ended = { percent: 10, startsAt: new Date(Date.now() - 10 * day).toISOString(), endsAt: new Date(Date.now() - day).toISOString() }
-    expect(await err(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, draft.id, { status: 'published', discount: ended })))).toBe('student_discount_required')
-    await expect(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, draft.id, { status: 'published', discount: live(5) }))).resolves.toMatchObject({ status: 'published' })
+    // No time limit (Шерзод, 20.11): an end is refused; one that starts later does not count yet.
+    expect(await err(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, draft.id, { status: 'published', discount: windowed(10) })))).toBe('discount_no_end')
+    expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, draft.id, windowed(10))))).toBe('discount_no_end')
+    const later = { percent: 10, startsAt: new Date(Date.now() + day).toISOString(), endsAt: null }
+    expect(await err(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, draft.id, { status: 'published', discount: later })))).toBe('student_discount_required')
+    await expect(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, draft.id, { status: 'published', discount: live(5) }))).resolves.toMatchObject({ status: 'published', discount: { percent: 5, endsAt: null } })
     // While published it keeps its discount: removing it is refused; editing the title is not.
     expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, draft.id, null)))).toBe('student_discount_required')
     await expect(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, draft.id, { title: { ...L, en: 'New' } }))).resolves.toMatchObject({ title: { en: 'New' } })
@@ -81,8 +87,10 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     // t.course: created before (priceRule 0), 50 000 so'm, published, no discount.
     await expect(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, s.t.course.id, { price: 50_500, status: 'published' }))).resolves.toMatchObject({ price: 50_500, priceRule: 0 })
     await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, null))).resolves.toBeTruthy()
-    // A discount set now follows the new range on any course.
-    expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, live(91))))).toBe('discount_over_limit')
+    // A discount set now follows the new range on any course; an older course keeps its window with an end.
+    expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, windowed(91))))).toBe('discount_over_limit')
+    expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, live(10))))).toBe('discount_end_required')
+    await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, windowed(10)))).resolves.toMatchObject({ discount: { percent: 10 } })
   })
 
   it('checkout: example 2 of 9.2 — 1 234 000 at 7% → 1 147 000; the payment keeps S, K and both shares; an older course keeps its rounding', async () => {

@@ -65,7 +65,7 @@ export type FinderReason =
   | { code: 'level'; level: Level; exact: boolean }
   | { code: 'budget'; price: number }
   | { code: 'free' }
-  | { code: 'discount'; percent: number; endsAt: string }
+  | { code: 'discount'; percent: number; endsAt: string | null }
   | { code: 'hours'; hours: number }
   | { code: 'selfPaced' }
   | { code: 'seats'; left: number }

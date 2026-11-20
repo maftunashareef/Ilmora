@@ -623,7 +623,7 @@ model Course {
   /**
    * 1 — created with the calculator (ТЗ 18.11, 9.2): the price is whole thousands from 50 000 so'm (or 0, free), a paid
    * course is published only with a student discount of 5% or more, the student's price rounds down to 1 000 so'm. 0 — a
-   * course from before: its prices count as they always did (Тимур, 20.11: the minimum is for new courses).
+   * course from before: its prices count as they always did (Шерзод, 20.11: the minimum is for new courses).
    */
   priceRule        Int            @default(0)
   currency         String         @default("UZS")

@@ -9,8 +9,9 @@ const DEFAULT_PRICING: Pricing = { commissionPercent: COMMISSION_DEFAULT_PERCENT
 
 /**
  * The student discount with the price calculator (ТЗ 2026-11-18, 9.3), shared by the Super Admin course editor and the
- * center workspace: percent from 5% to 100% − K, start and end in Tashkent time (dates stay — Тимур, 20.11), ILMORA's
- * commission shown, never edited, and the live split: the student's price, what the center gets, what ILMORA gets.
+ * center workspace: percent from 5% to 100% − K, a start in Tashkent time and, for a new course, no end (Шерзод, 20.11; a
+ * course from before keeps its end), ILMORA's commission shown, never edited, and the live split: the student's price,
+ * what the center gets, what ILMORA gets.
  * A course from before the calculator (rule 0) keeps its old rounding in the preview; the split is shown all the same.
  */
 export function DiscountFields({ value, onChange, price, pricing = DEFAULT_PRICING, priceRule = 1 }: { value: DiscountDraft; onChange: (v: DiscountDraft) => void; price: number; pricing?: Pricing; priceRule?: PriceRule }) {
@@ -35,7 +36,12 @@ export function DiscountFields({ value, onChange, price, pricing = DEFAULT_PRICI
           <input type="range" aria-hidden="true" tabIndex={-1} min={pricing.minDiscountPercent} max={pricing.maxDiscountPercent} step={1} value={validPercent ? percent : pricing.minDiscountPercent} onChange={(e) => set({ percent: e.target.value })} className="mt-2 w-full accent-forest" />
         </Field>
         <Field label={t('discount.starts')}><Input type="datetime-local" value={value.starts} onChange={(e) => set({ starts: e.target.value })} /></Field>
-        <Field label={t('discount.ends')}><Input type="datetime-local" value={value.ends} onChange={(e) => set({ ends: e.target.value })} /></Field>
+        {priceRule === 1 ? (
+          // A new course's discount has no time limit (Шерзод, 20.11): no end date to set.
+          <div className="self-end pb-3 text-xs text-charcoal/60">{t('calc.noEnd')}</div>
+        ) : (
+          <Field label={t('discount.ends')}><Input type="datetime-local" value={value.ends} onChange={(e) => set({ ends: e.target.value })} /></Field>
+        )}
       </div>
       <p className="mt-2 text-xs text-charcoal/55">{t('discount.hint')} {t('calc.required', { min: pricing.minDiscountPercent })}</p>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-charcoal/65"><span className="rounded-full bg-sage px-2.5 py-1 font-medium text-forest">{t('calc.commission', { k: pricing.commissionPercent })}</span>{t('calc.commissionHint')}</div>

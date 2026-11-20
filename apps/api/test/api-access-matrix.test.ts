@@ -358,7 +358,7 @@ describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
       }
   })
 
-  // Closed (ТЗ 18.11, 9.1; Тимур, 20.11): DiscountInput and checkDiscount take 5% and more; the upper limit 100% − K is the service's.
+  // Closed (ТЗ 18.11, 9.1; Шерзод, 20.11): DiscountInput and checkDiscount take 5% and more; the upper limit 100% − K is the service's.
   it('price: a discount below 5% is refused (ТЗ)', () => {
     const window = { startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' }
     expect(CourseDiscountBody.safeParse({ discount: { percent: 4, ...window } }).success).toBe(false)

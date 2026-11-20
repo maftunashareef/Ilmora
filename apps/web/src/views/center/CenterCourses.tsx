@@ -72,7 +72,7 @@ export function CenterCourses() {
   }
   const saveDiscount = async () => {
     if (!discounting) return
-    const parsed = discountFromDraft(draft, new Date(), data?.pricing?.maxDiscountPercent)
+    const parsed = discountFromDraft(draft, new Date(), data?.pricing?.maxDiscountPercent, discounting.priceRule ?? 0)
     if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
     setBusy(true)
     try {
@@ -85,8 +85,14 @@ export function CenterCourses() {
 
   const discountLabel = (c: Course) => {
     if (!c.discount) return <Badge tone="muted">{t('center.discountNone')}</Badge>
+    const active = isDiscountActive(c.discount)
+    // A new course's discount has no end (Шерзод, 20.11): «−10% · без срока» / «−10% · с …, без срока».
+    if (!c.discount.endsAt) {
+      const vars = { percent: c.discount.percent, from: when(c.discount.startsAt) }
+      return active ? <Badge tone="forest">{t('center.discountOpen', vars)}</Badge> : <Badge tone="champagne">{t('center.discountOpenFrom', vars)}</Badge>
+    }
     const vars = { percent: c.discount.percent, from: when(c.discount.startsAt), until: when(c.discount.endsAt) }
-    return isDiscountActive(c.discount) ? <Badge tone="forest">{t('center.discountActive', vars)}</Badge> : <Badge tone="champagne">{t('center.discountScheduled', vars)}</Badge>
+    return active ? <Badge tone="forest">{t('center.discountActive', vars)}</Badge> : <Badge tone="champagne">{t('center.discountScheduled', vars)}</Badge>
   }
   const center = data ? { id: data.center.id, name: data.center.name } : undefined
 
