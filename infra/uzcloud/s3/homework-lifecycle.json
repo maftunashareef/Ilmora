@@ -1,0 +1,17 @@
+{
+  "Rules": [
+    {
+      "ID": "incoming-uploads-1-day",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "incoming/" },
+      "Expiration": { "Days": 1 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    },
+    {
+      "ID": "abandoned-multipart-uploads-1-day",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

@@ -131,6 +131,11 @@ export const EnvSchema = z.object({
   S3_BUCKET: z.string().optional(),
   /** Private bucket for documents (company and student certificates): no public reads, links live 5 minutes. */
   S3_DOCS_BUCKET: z.string().optional(),
+  /**
+   * Private bucket for homework archives (ТЗ 18.11, 8.4): ZIP up to 1024 MB uploaded in parts straight from the browser, no
+   * public reads, download links live 5 minutes, not in the nightly backups. Must differ from the public media bucket.
+   */
+  S3_HOMEWORK_BUCKET: z.string().optional(),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_PUBLIC_BASE_URL: z.string().url().optional(),
@@ -168,6 +173,8 @@ export function validateEnv(raw: Record<string, unknown>): Env {
   const env = parsed.data
   // Documents and certificates would land in the public bucket (cybersecurity check 9.4, 11.11).
   if (env.S3_DOCS_BUCKET && env.S3_DOCS_BUCKET === env.S3_BUCKET) throw new Error('S3_DOCS_BUCKET must differ from S3_BUCKET: documents go to the private bucket only')
+  // Students' archives may hold anything, including personal data and other people's HTML: never in the public bucket.
+  if (env.S3_HOMEWORK_BUCKET && env.S3_HOMEWORK_BUCKET === env.S3_BUCKET) throw new Error('S3_HOMEWORK_BUCKET must differ from S3_BUCKET: homework archives go to a private bucket only')
   if (env.NODE_ENV === 'production') {
     if (env.PAYMENT_EXPIRES_HOURS > PAYMENT_EXPIRES_MAX_HOURS) {
       console.warn(`PAYMENT_EXPIRES_HOURS=${env.PAYMENT_EXPIRES_HOURS} is ignored in production: seats are held ${PAYMENT_EXPIRES_MAX_HOURS} h (security review №12, №82). Payme's test orders listed in PAYME_SANDBOX_PAYMENT_IDS do not expire; remove the line from api.env.`)

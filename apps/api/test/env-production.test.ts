@@ -26,4 +26,10 @@ describe('Environment checks (cybersecurity 9.4, 11.11)', () => {
     expect(() => validateEnv(prod({ S3_BUCKET: 'ilmora-media', S3_DOCS_BUCKET: 'ilmora-media' }))).toThrow(/S3_DOCS_BUCKET must differ/)
     expect(() => validateEnv({ ...process.env, S3_BUCKET: 'same', S3_DOCS_BUCKET: 'same' })).toThrow(/S3_DOCS_BUCKET must differ/)
   })
+
+  it('the homework bucket must differ from the public one (ТЗ 18.11, 8.4)', () => {
+    expect(() => validateEnv(prod({ S3_BUCKET: 'ilmora-media', S3_HOMEWORK_BUCKET: 'ilmora-homework' }))).not.toThrow()
+    expect(() => validateEnv(prod({ S3_BUCKET: 'ilmora-media', S3_HOMEWORK_BUCKET: 'ilmora-media' }))).toThrow(/S3_HOMEWORK_BUCKET must differ/)
+    expect(() => validateEnv({ ...process.env, S3_BUCKET: 'same', S3_HOMEWORK_BUCKET: 'same' })).toThrow(/S3_HOMEWORK_BUCKET must differ/)
+  })
 })
