@@ -8,6 +8,8 @@ name: Release (UzCloud)
 #         (migrations, worker, admin panel, backups) and ilmora-web second (api, site, Caddy), then checks from outside.
 # "files_only" copies the infra files and stops: used once before the first release, so the .example files are on
 # the servers to fill in.
+# "import_online_courses" also runs apps/api/prisma/seed-online-courses.ts on ilmora-admin after the migrations: the
+# curated free online courses (packages/shared/src/online-courses.ts) reach the database only this way, on request.
 #
 # Repository secrets: DEPLOY_SSH_KEY (private key of the ilmora-deploy pair), DEPLOY_KNOWN_HOSTS (host keys of both
 # machines), WEB_HOST (public IP), ADMIN_HOST (private IP, reached through WEB_HOST).
@@ -27,6 +29,10 @@ on:
         default: false
       no_backup:
         description: "First install or emergency only: run migrations without a database backup (BACKUP_PASSPHRASE not set)"
+        type: boolean
+        default: false
+      import_online_courses:
+        description: "Also import the curated online course catalog after the migrations (adds missing courses, refreshes provider facts; safe to repeat)"
         type: boolean
         default: false
 
@@ -230,6 +236,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
           NO_BACKUP: ${{ inputs.no_backup }}
+          IMPORT_ONLINE_COURSES: ${{ inputs.import_online_courses }}
         run: |
           API_REF="$IMAGE_API@$API_DIGEST" MIGRATOR_REF="$IMAGE_API-migrator@$MIGRATOR_DIGEST" WEB_REF="$IMAGE_WEB@$WEB_DIGEST"
           printf '%s' "$GH_TOKEN" | ssh admin "docker login ghcr.io -u '$ACTOR' --password-stdin"
@@ -239,7 +246,7 @@ jobs:
           [ -f .env ] || { echo "missing admin/.env on ilmora-admin (infra/uzcloud/README.md)"; exit 1; }
           cp .env .env.previous
           sed -i "s#^API_IMAGE=.*#API_IMAGE=$API_REF#; s#^API_IMAGE_MIGRATOR=.*#API_IMAGE_MIGRATOR=$MIGRATOR_REF#; s#^WEB_IMAGE=.*#WEB_IMAGE=$WEB_REF#" .env
-          NO_BACKUP='$NO_BACKUP' sh '$DEPLOY_PATH/infra/uzcloud/deploy.sh' admin
+          NO_BACKUP='$NO_BACKUP' IMPORT_ONLINE_COURSES='$IMPORT_ONLINE_COURSES' sh '$DEPLOY_PATH/infra/uzcloud/deploy.sh' admin
           EOF
           ssh admin "docker logout ghcr.io >/dev/null"
 

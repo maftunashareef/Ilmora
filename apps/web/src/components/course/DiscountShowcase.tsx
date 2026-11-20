@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { activePercent, finalPriceSom, isoToTashkentLocal } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useT } from '../../i18n/useT'
-import { formatDate, formatSom } from '../../lib/format'
+import { formatDate, formatPercent, formatSom } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 import type { Course } from '../../types'
 import { Icon, LinkButton } from '../ui'
@@ -14,12 +14,12 @@ const MIN_ROTATING = 4
 
 /** Golden "SALE" badge with a breathing glow and a light sweep (both stop with reduced motion). */
 export function SaleRibbon({ percent, className }: { percent?: number; className?: string }) {
-  const { t } = useT()
+  const { t, lang } = useT()
   return (
     // `relative` positions the sweep; a caller placing the ribbon passes `absolute` instead (both together would clash).
     <span className={cx('sale-ribbon inline-flex items-center gap-1 overflow-hidden rounded-full', className?.includes('absolute') ? '' : 'relative', 'sale-badge border border-[#a8842f]/50 bg-gradient-to-r from-[#b8923d] via-champagne to-[#ecdcb2] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-forest', className)}>
       {t('offers.sale')}
-      {percent ? <span className="tracking-normal text-forest/85">−{percent}%</span> : null}
+      {percent ? <span className="tracking-normal text-forest/85">−{formatPercent(percent, lang)}%</span> : null}
     </span>
   )
 }
@@ -38,13 +38,13 @@ function DiscountCard({ course, copy }: { course: Course; copy?: boolean }) {
       <Link to={`/courses/${course.id}`} className="relative block aspect-[16/9] overflow-hidden bg-sage/20" tabIndex={-1} aria-hidden="true">
         <img src={getCoursePhotoUrl(course)} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.05]" />
         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-forest/70 via-forest/10 to-transparent" />
-        <span className="discount-glow absolute left-3 top-3 rounded-full bg-champagne px-3 py-1 font-display text-lg font-semibold leading-none text-forest">−{percent}%</span>
+        <span className="discount-glow absolute left-3 top-3 rounded-full bg-champagne px-3 py-1 font-display text-lg font-semibold leading-none text-forest">−{formatPercent(percent, lang)}%</span>
         <SaleRibbon className="absolute right-3 top-3" />
       </Link>
       <div className="flex flex-1 flex-col p-4">
         <div className="truncate text-[11px] font-medium uppercase tracking-wider text-charcoal/50">{[tr(category?.name), center?.name].filter(Boolean).join(' · ')}</div>
         <Link to={`/courses/${course.id}`} className="mt-1 line-clamp-2 font-display text-xl leading-snug text-charcoal hover:text-forest">
-          {copy ? tr(course.title) : <>{tr(course.title)}<span className="sr-only">, −{percent}%</span></>}
+          {copy ? tr(course.title) : <>{tr(course.title)}<span className="sr-only">, −{formatPercent(percent, lang)}%</span></>}
         </Link>
         <div className="mt-3 rounded-control bg-gradient-to-r from-champagne/15 via-paper to-paper px-3 py-2">
           <div className="flex flex-wrap items-baseline gap-x-2">
@@ -74,7 +74,7 @@ function DiscountCard({ course, copy }: { course: Course; copy?: boolean }) {
  * every active discount.
  */
 export function DiscountShowcase({ courses, title, subtitle }: { courses: Course[]; title: string; subtitle: string }) {
-  const { t } = useT()
+  const { t, lang } = useT()
   const [offscreen, setOffscreen] = useState(false)
   const marquee = useRef<HTMLDivElement>(null)
   const rotating = courses.length >= MIN_ROTATING
@@ -98,7 +98,7 @@ export function DiscountShowcase({ courses, title, subtitle }: { courses: Course
             <div className="flex flex-wrap items-center gap-3">
               <span className="sale-badge inline-flex items-center gap-2 rounded-full border border-[#a8842f]/40 bg-gradient-to-r from-[#c9a557] via-champagne to-[#ecdcb2] px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-forest">
                 <Icon name="star" className="h-3.5 w-3.5" />
-                {t('discounts.upTo', { n: maxPercent })}
+                {t('discounts.upTo', { n: formatPercent(maxPercent, lang) })}
               </span>
               <span className="sale-badge inline-flex items-center gap-1.5 rounded-full border border-champagne/70 bg-gradient-to-r from-champagne/30 to-paper px-3.5 py-1.5 text-[11px] font-semibold text-forest [animation-delay:1.4s]">
                 <Icon name="cart" className="h-3.5 w-3.5" />

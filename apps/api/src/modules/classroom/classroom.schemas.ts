@@ -1,8 +1,13 @@
-import { HOMEWORK_COMMENT_MAX, HOMEWORK_DESCRIPTION_MAX, HOMEWORK_LINKS_MAX, HOMEWORK_TEXT_MAX, HOMEWORK_TITLE_MAX, JOURNAL_MARKS } from '@ilmora/shared'
+import { HOMEWORK_COMMENT_MAX, HOMEWORK_DESCRIPTION_MAX, HOMEWORK_LINKS_MAX, HOMEWORK_TEXT_MAX, HOMEWORK_TITLE_MAX, isSafeExternalUrl, JOURNAL_MARKS } from '@ilmora/shared'
 import { z } from 'zod'
 
 const id = z.string().min(1).max(80)
 const instant = z.string().datetime()
+/**
+ * A homework or hand-in link: plain https only, already at the schema (security review 19.11 №3, test/unsafe-urls.test.ts);
+ * blank is let through — the service drops it. The service checks again (cleanLinks).
+ */
+const link = z.string().max(500).refine((l) => !l.trim() || isSafeExternalUrl(l.trim()), 'Links must be plain https links')
 
 /** A mark in the group journal: one of the center's own students, one lesson; null clears it. */
 export const JournalMarkInput = z.object({ sessionId: id, centerStudentId: id, status: z.enum(JOURNAL_MARKS).nullable() }).strict()
@@ -17,7 +22,7 @@ export const HomeworkInput = z.object({
   description: z.string().trim().min(1).max(HOMEWORK_DESCRIPTION_MAX),
   /** UTC instant; the form types it in Tashkent time. */
   dueAt: instant,
-  links: z.array(z.string().max(500)).max(HOMEWORK_LINKS_MAX).optional(),
+  links: z.array(link).max(HOMEWORK_LINKS_MAX).optional(),
   submitModes: modes,
 }).strict()
 export type HomeworkInput = z.infer<typeof HomeworkInput>
@@ -29,5 +34,5 @@ export const ExtensionInput = z.object({ studentId: id, dueAt: instant }).strict
 export type ExtensionInput = z.infer<typeof ExtensionInput>
 export const GradeInput = z.object({ studentId: id, grade: z.number().int().min(1).max(5), comment: z.string().trim().max(HOMEWORK_COMMENT_MAX).nullable().optional() }).strict()
 export type GradeInput = z.infer<typeof GradeInput>
-export const SubmissionInput = z.object({ text: z.string().max(HOMEWORK_TEXT_MAX).nullable().optional(), link: z.string().max(500).nullable().optional() }).strict()
+export const SubmissionInput = z.object({ text: z.string().max(HOMEWORK_TEXT_MAX).nullable().optional(), link: link.nullable().optional() }).strict()
 export type SubmissionInput = z.infer<typeof SubmissionInput>

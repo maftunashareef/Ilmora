@@ -42,6 +42,7 @@ export const CATEGORY_PHOTOGRAPHS: Record<string, string> = {
   'cat-ai-ml': '/images/courses/python-data.jpg',
   'cat-ui-ux': '/images/courses/interior-design.jpg',
   'cat-graphic-design': '/images/courses/interior-design.jpg',
+  'cat-economics': '/images/courses/python-data.jpg',
   'cat-furniture': '/images/courses/furniture-craft.jpg',
   'cat-design': '/images/courses/interior-design.jpg',
   'cat-math': '/images/courses/mathematics.jpg',
