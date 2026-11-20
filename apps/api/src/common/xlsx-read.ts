@@ -31,6 +31,9 @@ export interface XlsxLimits {
 
 export const DEFAULT_XLSX_LIMITS: XlsxLimits = { maxBytes: 512 * 1024, maxEntries: 200, maxEntryBytes: 8 * 1024 * 1024, maxTotalBytes: 16 * 1024 * 1024, maxRows: 1001, maxCols: 40 }
 
+/** Control characters other than tab, line feed and carriage return: a cell keeps none of them. */
+const stripControl = (s: string): string => Array.from(s).filter((ch) => { const c = ch.charCodeAt(0); return c > 31 || c === 9 || c === 10 || c === 13 }).join('')
+
 interface Entry { name: string; method: number; flags: number; compressedSize: number; size: number; localOffset: number }
 
 function directory(buf: Buffer, limits: XlsxLimits): Map<string, Entry> {
@@ -150,7 +153,7 @@ export function readXlsxRows(buf: Buffer, limits: XlsxLimits = DEFAULT_XLSX_LIMI
       else if (type === 'inlineStr') value = textOf(inner.match(/<is>([\s\S]*?)<\/is>/)?.[1] ?? '')
       else if (type === 'b') value = v === '1' ? 'TRUE' : 'FALSE'
       else value = v !== undefined ? decode(v) : ''
-      cells[col] = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim()
+      cells[col] = stripControl(value).trim()
     }
     for (let i = 0; i < cells.length; i++) cells[i] ??= ''
     if (cells.some((x) => x !== '')) {
