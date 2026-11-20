@@ -2755,6 +2755,7 @@ export const dict = {
   'journal.noStudents': d('Guruhda talaba yöq', 'В группе нет учеников', 'No students in the group'),
   'journal.notYet': d('Dars hali bölmagan', 'Занятие ещё не прошло', 'The lesson has not taken place yet'),
   'journal.cancelled': d('Dars bekor qilingan', 'Занятие отменено', 'The lesson was cancelled'),
+  'session.qrLocked': d('QR — Super Admin tuzatadi', 'QR — правит Super Admin', 'QR — the Super Admin corrects'),
   'journal.err.qrReadOnly': d('QR böyiça qöyilgan belgini öqituvçi özgartira olmaydi: uni Super Admin tuzatadi.', 'Отметку по QR учитель не меняет: её правит Super Admin.', 'A teacher cannot change a QR check-in: the Super Admin corrects it.'),
   'hw.title': d('Uy vazifalari', 'Домашние задания', 'Homework'),
   'hw.new': d('Yangi vazifa', 'Новое задание', 'New homework'),

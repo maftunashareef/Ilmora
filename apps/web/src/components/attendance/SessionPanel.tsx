@@ -49,6 +49,9 @@ export function SessionPanel({ session, course, group, roster }: { session: Less
   const refreshSessionQr = useStore((s) => s.refreshSessionQr)
   const setSessionStatus = useStore((s) => s.setSessionStatus)
   const correctAttendance = useStore((s) => s.correctAttendance)
+  // A QR check-in is corrected by the Super Admin only (ТЗ 2026-11-18, 5): the teacher and the center see it locked.
+  const isAdmin = useStore((s) => s.role === 'admin')
+  const locked = (r: Record_ | undefined) => !isAdmin && !!r && (r.method === 'qr' || r.method === 'center_qr')
   const loadGroupDetail = useStore((s) => s.loadGroupDetail)
   const notify = useStore((s) => s.notify)
   const [live, setLive] = useState(false)
@@ -135,7 +138,7 @@ export function SessionPanel({ session, course, group, roster }: { session: Less
             {checked.length === 0 ? <p className="text-xs text-charcoal/50">{t('session.noCheckins')}</p> : (
               <ul className="space-y-1.5">
                 {checked.map((st) => { const r = statusOf(st.id)!; return (
-                  <li key={st.id} className="flex items-center justify-between rounded-control border border-charcoal/10 bg-paper px-3 py-2 text-sm"><span className="flex items-center gap-2"><Icon name="check" className="h-3.5 w-3.5 text-forest" />{st.profile.displayName}<MethodBadge method={r.method} /></span><span className="flex items-center gap-2 text-[11px] text-charcoal/50">{formatTime(r.checkedInAt, lang)}<button type="button" className="underline" onClick={() => setCorrecting({ studentId: st.id, status: 'ABSENT', reason: '' })}>{t('session.correct')}</button></span></li>
+                  <li key={st.id} className="flex items-center justify-between rounded-control border border-charcoal/10 bg-paper px-3 py-2 text-sm"><span className="flex items-center gap-2"><Icon name="check" className="h-3.5 w-3.5 text-forest" />{st.profile.displayName}<MethodBadge method={r.method} /></span><span className="flex items-center gap-2 text-[11px] text-charcoal/50">{formatTime(r.checkedInAt, lang)}{locked(r) ? <span title={t('journal.err.qrReadOnly')}>{t('session.qrLocked')}</span> : <button type="button" className="underline" onClick={() => setCorrecting({ studentId: st.id, status: 'ABSENT', reason: '' })}>{t('session.correct')}</button>}</span></li>
                 ) })}
               </ul>
             )}
@@ -144,7 +147,7 @@ export function SessionPanel({ session, course, group, roster }: { session: Less
             <div className="mb-2 flex items-center justify-between"><Eyebrow>{t('session.notCheckedIn')}</Eyebrow><Badge tone="muted">{missing.length}</Badge></div>
             {missing.length === 0 ? <p className="text-xs text-charcoal/50">—</p> : (
               <ul className="space-y-1.5">{missing.map((st) => { const r = statusOf(st.id); return (
-                <li key={st.id} className="flex items-center justify-between rounded-control border border-dashed border-charcoal/15 px-3 py-2 text-sm text-charcoal/60"><span>{st.profile.displayName}{r?.status === 'excused' && <Badge tone="champagne" className="ml-2">{t('session.statusExcused')}</Badge>}{r?.status === 'absent' && <Badge tone="danger" className="ml-2">{t('session.statusAbsent')}</Badge>}{r && <span className="ml-2"><MethodBadge method={r.method} /></span>}</span><button type="button" className="text-[11px] underline" onClick={() => setCorrecting({ studentId: st.id, status: 'PRESENT', reason: '' })}>{t('session.correct')}</button></li>
+                <li key={st.id} className="flex items-center justify-between rounded-control border border-dashed border-charcoal/15 px-3 py-2 text-sm text-charcoal/60"><span>{st.profile.displayName}{r?.status === 'excused' && <Badge tone="champagne" className="ml-2">{t('session.statusExcused')}</Badge>}{r?.status === 'absent' && <Badge tone="danger" className="ml-2">{t('session.statusAbsent')}</Badge>}{r && <span className="ml-2"><MethodBadge method={r.method} /></span>}</span>{locked(r) ? <span className="text-[11px] text-charcoal/50" title={t('journal.err.qrReadOnly')}>{t('session.qrLocked')}</span> : <button type="button" className="text-[11px] underline" onClick={() => setCorrecting({ studentId: st.id, status: 'PRESENT', reason: '' })}>{t('session.correct')}</button>}</li>
               ) })}</ul>
             )}
           </div>

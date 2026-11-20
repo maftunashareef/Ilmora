@@ -109,8 +109,15 @@ describe.skipIf(!DB_AVAILABLE)('attendance: sessions, tokens, check-in rules', (
     expect(closed?.attendanceTokenHash).toBeNull()
     expect(await asTenant(() => attendance.checkIn(other.id, { sessionId: session.id, token: rotated.token }, {}))).toMatchObject({ ok: false })
 
-    // teacher correction requires a reason and leaves an audit trail
-    const corrected = await asTenant(() => attendance.correct(session.id, teacher, { studentId: student.id, status: 'EXCUSED', reason: 'Doctor note' }))
+    // A QR check-in is the student's own mark: the teacher and the center do not change it (ТЗ 2026-11-18, 5; Тимур, 20.11).
+    const centerAdmin = { id: 'u-center', roles: ['CENTER_ADMIN' as const], centerId: t.center.id }
+    for (const who of [teacher, centerAdmin]) {
+      await expect(asTenant(() => attendance.correct(session.id, who, { studentId: student.id, status: 'EXCUSED', reason: 'Doctor note' }))).rejects.toMatchObject({ code: 'qr_read_only' })
+    }
+    expect(await asTenant(() => ctx.prisma.client.attendanceRecord.findFirstOrThrow({ where: { sessionId: session.id, studentId: student.id } }))).toMatchObject({ status: 'PRESENT', method: 'QR', correctedAt: null })
+    // The Super Admin corrects a disputed one; the correction needs a reason and leaves an audit trail.
+    const owner = { id: 'u-owner', roles: ['PLATFORM_ADMIN' as const], centerId: null }
+    const corrected = await asTenant(() => attendance.correct(session.id, owner, { studentId: student.id, status: 'EXCUSED', reason: 'Doctor note' }))
     expect(corrected.status).toBe('excused')
     expect(corrected.checkedInAt).toBe(first.ok ? first.record.checkedInAt : '')
     const audits = await asTenant(() => ctx.prisma.client.auditEvent.findMany({ where: { entityType: 'AttendanceRecord', entityId: corrected.id } }))

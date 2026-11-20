@@ -215,6 +215,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   import_too_many_rows: 'cs.err.tooManyRows',
   import_has_errors: 'cs.err.importHasErrors',
   session_not_yet: 'journal.notYet',
+  qr_read_only: 'journal.err.qrReadOnly',
   homework_bad_link: 'hw.badLink',
   homework_zip_not_yet: 'hw.err.zip',
   homework_due_past: 'hw.err.duePast',

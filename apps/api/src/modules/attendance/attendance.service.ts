@@ -197,13 +197,19 @@ export class AttendanceService {
     return { session: SessionsService.toDto(updated) }
   }
 
-  /** Teacher correction: creates or updates a record with a reason; the original check-in time is never overwritten. */
+  /** Correction with a reason: creates or updates a record; the original check-in time is never overwritten; a QR check-in only by the Super Admin. */
   async correct(sessionId: string, actor: RequestActor, input: { studentId: string; status: AttendanceStatus; reason: string }) {
     const session = await this.sessionForWrite(sessionId, actor)
     if (session.status === 'CANCELLED') throw AppError.invalid('session_cancelled', 'A cancelled lesson has no attendance')
     const enrolled = await this.prisma.client.enrollment.findFirst({ where: { groupId: session.groupId, studentId: input.studentId, status: { in: ['ACTIVE', 'COMPLETED'] } } })
     if (!enrolled) throw AppError.invalid('not_enrolled', 'This student is not enrolled in the group')
     const before = await this.prisma.client.attendanceRecord.findUnique({ where: { sessionId_studentId: { sessionId: session.id, studentId: input.studentId } } })
+    // A check-in by QR (the lesson's or the center's) is the student's own mark and lessons of a subscription depend on it:
+    // the teacher and the center do not change it, a disputed one is corrected by the Super Admin (ТЗ 2026-11-18, 5;
+    // Тимур, 20.11). Absences of the worker and the teacher's own marks are corrected as before.
+    if (before && (before.method === 'QR' || before.method === 'CENTER_QR') && !actor.roles.includes('PLATFORM_ADMIN')) {
+      throw new AppError('qr_read_only', 'A QR check-in is corrected by the Super Admin', HttpStatus.FORBIDDEN)
+    }
     const now = new Date()
     const record = await this.prisma.tx(async (tx) => {
       const row = before
