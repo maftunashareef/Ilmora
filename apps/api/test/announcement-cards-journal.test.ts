@@ -37,8 +37,10 @@ const SERVICE = join(SRC, 'modules/graduates/graduates.service.ts')
 const CARD_PATHS = ['companyGet', 'invite', 'respond']
 
 /** Holds, or is a known gap of that path — and says what to do when the gap is closed. */
-function rule(path: string, holds: boolean, what: string) {
-  if (KNOWN_GAP.has(path)) expect(holds, `${what} — now holds: finding №1 is closed here, remove '${path}' from KNOWN_GAP in this file`).toBe(false)
+function rule(path: string, holds: boolean, what: string, trace = holds) {
+  // While a path is a known gap, any trace of a fix trips the alarm — not only one of exactly the expected shape (a row
+  // under another action name, a count elsewhere), so a closed gap is never left unnoticed behind a green test.
+  if (KNOWN_GAP.has(path)) expect(trace, `${what} — something is now written or counted: finding №1 is being closed here, remove '${path}' from KNOWN_GAP in this file and check the rule`).toBe(false)
   else expect(holds, what).toBe(true)
 }
 
@@ -155,6 +157,8 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
         views: (await db.auditEvent.findMany({ where: { action: { endsWith: 'card.view' }, entityType: 'User' }, select: { entityId: true, after: true }, orderBy: { id: 'asc' } }))
           .filter((v) => (v.after as { companyId?: string } | null)?.companyId === co.id).map((v) => v.entityId as string).sort(),
         counted: (await db.companyStudentCardView.aggregate({ where: { companyId: co.id }, _sum: { cards: true } }))._sum.cards ?? 0,
+        // Every audit row except what the paths write for their own action today (the answer, the contact request).
+        others: await db.auditEvent.count({ where: { action: { notIn: ['announcement.response', 'contact.request'] } } }),
       })
 
       /**
@@ -173,7 +177,10 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
           expect(i, 'journal rows never disappear').toBeGreaterThanOrEqual(0)
           written.splice(i, 1)
         }
-        return { shown: shown.length, written: shown.every((u) => written.includes(u!)), counted: after.counted - before.counted >= shown.length }
+        const ok = { written: shown.every((u) => written.includes(u!)), counted: after.counted - before.counted >= shown.length }
+        // Any row or count a fix of whatever shape would leave: a new audit row, a counted card.
+        const trace = after.others > before.others || after.counted > before.counted
+        return { shown: shown.length, holds: ok.written && ok.counted, trace }
       }
       return { tenantId, inT, db, inst, ann, company, userByName, journal, read }
     })
@@ -189,10 +196,10 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
   it('the journal helper sees exactly what «Студенты» writes for a card shown', async () => {
     const s = await setup('acj-control')
     await s.inT(async () => {
-      expect(await s.journal()).toEqual({ views: [], counted: 0 })
+      expect(await s.journal()).toMatchObject({ views: [], counted: 0 })
       const page = await section.page(s.company.actor, s.inst.id, {}, 1)
       expect(page.items.map((c) => c.name).sort()).toEqual(['Aziz', 'Bobur'])
-      expect(await s.journal()).toEqual({ views: [s.userByName.get('Aziz'), s.userByName.get('Bobur')].sort(), counted: 2 })
+      expect(await s.journal()).toMatchObject({ views: [s.userByName.get('Aziz'), s.userByName.get('Bobur')].sort(), counted: 2 })
     })
   })
 
@@ -201,7 +208,7 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
     await s.inT(async () => {
       const r = await s.read(() => service.companyGet(s.company.actor, s.ann.id))
       expect(r.shown, 'GET /announcements/:id hands out the cards').toBe(2)
-      rule('companyGet', r.written && r.counted, 'GET /announcements/:id writes a card view for every card it returns and counts them in the daily limit')
+      rule('companyGet', r.holds, 'GET /announcements/:id writes a card view for every card it returns and counts them in the daily limit', r.trace)
     })
   })
 
@@ -213,7 +220,7 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
       const [visible] = await service.companyList(s.company.actor, {})
       expect(visible.graduates, 'the list hands out no cards').toBeUndefined()
       const r = await s.read(() => service.respond(s.tenantId, s.company.actor, s.ann.id, { lines: [{ lineId: visible.lines[0].id, wantedCount: 1 }], comment: null }))
-      rule('respond', r.written && r.counted, '«Откликнуться» writes and counts the cards of its answer (or answers without cards)')
+      rule('respond', r.holds, '«Откликнуться» writes and counts the cards of its answer (or answers without cards)', r.trace)
     })
   })
 
@@ -223,7 +230,7 @@ describe.skipIf(!DB_AVAILABLE)('Graduate cards in announcements: no card without
       await handsOutCards(s)
       const cardId = (await service.companyGet(s.company.actor, s.ann.id)).graduates!.find((g) => g.name === 'Aziz')!.cardId
       const r = await s.read(() => service.invite(s.tenantId, s.company.actor, cardId, s.ann.id))
-      rule('invite', r.written && r.counted, '«Пригласить» writes and counts the cards of its answer (or answers without cards)')
+      rule('invite', r.holds, '«Пригласить» writes and counts the cards of its answer (or answers without cards)', r.trace)
     })
   })
 
