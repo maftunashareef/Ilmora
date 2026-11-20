@@ -307,6 +307,12 @@ model Tenant {
   vacancyBroadcasts      VacancyBroadcast[]
   vacancyRecipients      VacancyBroadcastRecipient[]
   totpRecoveryCodes      TotpRecoveryCode[]
+  centerStudents         CenterStudent[]
+  centerStudentGroups    CenterStudentGroup[]
+  centerAttendanceMarks  CenterAttendanceMark[]
+  homework               Homework[]
+  homeworkSubmissions    HomeworkSubmission[]
+  homeworkExtensions     HomeworkExtension[]
 }
 
 /// Template-driven site configuration (sections, theme, nav, features, permissions, media…) edited by Super Admin.
@@ -391,6 +397,9 @@ model User {
   contactRequests        ContactRequest[]
   vacancyApplications    VacancyApplication[]
   vacancyBroadcasts      VacancyBroadcastRecipient[]
+  centerStudentRecords   CenterStudent[]
+  homeworkSubmissions    HomeworkSubmission[]
+  homeworkExtensions     HomeworkExtension[]
 
   @@unique([tenantId, phoneE164])
   @@unique([tenantId, login])
@@ -487,6 +496,7 @@ model Center {
   teachers TeacherProfile[]
   courses  Course[]
   teacherInvites TeacherInvite[]
+  students       CenterStudent[]
   /** The registry record of this learning center, when the Super Admin has linked one. */
   registryInstitution Institution?
 
@@ -661,8 +671,10 @@ model Group {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  enrollments Enrollment[]
-  sessions    LessonSession[]
+  enrollments    Enrollment[]
+  sessions       LessonSession[]
+  centerStudents CenterStudentGroup[]
+  homework       Homework[]
 
   @@index([tenantId, courseId])
 }
@@ -910,7 +922,8 @@ model LessonSession {
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
 
-  attendance AttendanceRecord[]
+  attendance  AttendanceRecord[]
+  centerMarks CenterAttendanceMark[]
 
   @@unique([groupId, date])
   @@index([tenantId, date])
@@ -1689,6 +1702,7 @@ model Institution {
   announcements     GraduationAnnouncement[]
   trainingOffers    TrainingOffer[]
   vacancyBroadcasts VacancyBroadcast[]
+  centerStudents    CenterStudent[]
 
   @@unique([tenantId, stir])
   @@index([tenantId, status])
@@ -2239,4 +2253,181 @@ model VacancyBroadcastRecipient {
   @@unique([vacancyId, userId])
   @@index([broadcastId])
   @@index([tenantId, userId])
+}
+
+// ───────────────────────────── Center students, group journal, homework (ТЗ 2026-11-18) ─────────────────────────────
+
+/// STUDYING — учится, PAUSED — на паузе, LEFT — ушёл: the record is in the center's archive, its history is kept.
+enum CenterStudentStatus {
+  STUDYING
+  PAUSED
+  LEFT
+}
+
+/// CENTER — the center added the student (studies offline, pays the center); ILMORA — came through a subscription.
+enum CenterStudentSource {
+  CENTER
+  ILMORA
+}
+
+/// A manual mark of the center's own student in the group journal: был, не был, опоздал.
+enum CenterMarkStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+/// How a homework is handed in. ZIP is the second stage (8.4): the API refuses it until then.
+enum HomeworkSubmitMode {
+  TEXT
+  LINK
+  ZIP
+}
+
+/// One student in one center's table («Студенты», ТЗ 4). A person studying at two centers has a record at each. The
+/// center adds its own students (no account needed until the invitation is accepted); students who came through an
+/// ILMORA subscription get a record of their own (source ILMORA). Checks: migration 20261126000000.
+model CenterStudent {
+  id               String              @id @default(cuid())
+  tenantId         String
+  tenant           Tenant              @relation(fields: [tenantId], references: [id])
+  centerId         String
+  center           Center              @relation(fields: [centerId], references: [id], onDelete: Cascade)
+  /// The student's account: from the start for ILMORA, once the invitation is accepted for CENTER.
+  userId           String?
+  user             User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  source           CenterStudentSource @default(CENTER)
+  fullName         String
+  /// E.164, typed by the center; unique per center when present. ILMORA records keep none (the account's is the student's).
+  phoneE164        String?
+  birthDate        DateTime?           @db.Date
+  /// From the registry; or typed by hand (institutionText + institutionType) when it is not there.
+  institutionId    String?
+  institution      Institution?        @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  institutionType  InstitutionType?
+  institutionText  String?
+  /// Class at school (1–11) or year of study.
+  studyYear        Int?
+  /// A minor's parent: the invitation goes to this phone.
+  parentName       String?
+  parentPhoneE164  String?
+  status           CenterStudentStatus @default(STUDYING)
+  startedOn        DateTime?           @db.Date
+  /// Set with status LEFT (the archive tab), cleared when the record comes back.
+  archivedAt       DateTime?
+  /// Invitation: SHA-256 of the one-time token (the token itself exists only in the link), its expiry, links sent so far.
+  inviteTokenHash  String?             @unique
+  inviteExpiresAt  DateTime?
+  invitedAt        DateTime?
+  inviteSends      Int                 @default(0)
+  inviteAcceptedAt DateTime?
+  createdById      String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  groups CenterStudentGroup[]
+  marks  CenterAttendanceMark[]
+
+  @@unique([centerId, phoneE164])
+  @@unique([centerId, userId])
+  @@index([tenantId, centerId, status])
+  @@index([tenantId, userId])
+}
+
+/// A center's own student in one of the center's groups (students who came through ILMORA are in groups by enrollment).
+model CenterStudentGroup {
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  centerStudentId String
+  centerStudent   CenterStudent @relation(fields: [centerStudentId], references: [id], onDelete: Cascade)
+  groupId         String
+  group           Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([centerStudentId, groupId])
+  @@index([tenantId, groupId])
+}
+
+/// The teacher's mark of a center's own student for one lesson (ТЗ 5). ILMORA students are marked by QR in
+/// AttendanceRecord and are read-only in the journal. Every mark and change is in the audit log (who, when, before).
+model CenterAttendanceMark {
+  id              String           @id @default(cuid())
+  tenantId        String
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  sessionId       String
+  session         LessonSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  centerStudentId String
+  centerStudent   CenterStudent    @relation(fields: [centerStudentId], references: [id], onDelete: Cascade)
+  status          CenterMarkStatus
+  markedById      String?
+  version         Int              @default(1)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([sessionId, centerStudentId])
+  @@index([tenantId, centerStudentId])
+}
+
+/// A homework the group's teacher gives (ТЗ 8.1). First stage: a description with links, handed in as text or a link.
+model Homework {
+  id          String               @id @default(cuid())
+  tenantId    String
+  tenant      Tenant               @relation(fields: [tenantId], references: [id])
+  groupId     String
+  group       Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  /// Materials: plain https links.
+  links       String[]             @default([])
+  submitModes HomeworkSubmitMode[]
+  dueAt       DateTime
+  createdById String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  submissions HomeworkSubmission[]
+  extensions  HomeworkExtension[]
+
+  @@index([tenantId, groupId, dueAt])
+}
+
+/// One hand-in: a student may hand in again before the deadline, every hand-in is kept (history), the latest counts.
+/// The teacher's grade (1–5) and comment belong to the hand-in they read. Checks: migration 20261126000000.
+model HomeworkSubmission {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  homeworkId  String
+  homework    Homework  @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  text        String?
+  link        String?
+  submittedAt DateTime  @default(now())
+  grade       Int?
+  comment     String?
+  gradedAt    DateTime?
+  gradedById  String?
+
+  @@index([tenantId, homeworkId, studentId, submittedAt])
+  @@index([tenantId, studentId])
+}
+
+/// A later deadline the teacher gave one student (ТЗ 8.2: after the deadline only with an extension).
+model HomeworkExtension {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  homeworkId  String
+  homework    Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  dueAt       DateTime
+  grantedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([homeworkId, studentId])
+  @@index([tenantId, studentId])
 }
