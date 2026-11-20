@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import type { z } from 'zod'
-import { isSafeExternalUrl, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
+import { checkCoursePrice, COMMISSION_DEFAULT_PERCENT, isSafeExternalUrl, maxDiscountPercent, MIN_COURSE_PRICE_SOM, MIN_DISCOUNT_PERCENT, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import { ENV, type Env, s3Configured } from '../../config/env'
@@ -74,20 +74,83 @@ export class ManageService {
   private canSetDiscount(actor: RequestActor, centerId: string) {
     return this.isAdmin(actor) || (this.isCenterAdmin(actor) && !!actor.centerId && actor.centerId === centerId)
   }
-  private discountColumns(d: { percent: number; startsAt: string; endsAt: string } | null) {
+  private discountColumns(d: { percent: number; startsAt: string; endsAt: string | null } | null) {
     return d
-      ? { discountPercent: d.percent, discountStartsAt: new Date(d.startsAt), discountEndsAt: new Date(d.endsAt) }
+      ? { discountPercent: d.percent, discountStartsAt: new Date(d.startsAt), discountEndsAt: d.endsAt ? new Date(d.endsAt) : null }
       : { discountPercent: null, discountStartsAt: null, discountEndsAt: null }
   }
+  // ───── the price calculator (ТЗ 2026-11-18, 9; Шерзод, 20.11: the 5% minimum is for new courses, their discount has no end) ─────
+
+  /** ILMORA's commission K: one for every center, set by the Super Admin only. */
+  async commissionPercent(tenantId: string): Promise<number> {
+    const tenant = await this.prisma.client.tenant.findUnique({ where: { id: tenantId }, select: { commissionPercent: true } })
+    return tenant?.commissionPercent ?? COMMISSION_DEFAULT_PERCENT
+  }
+  /** What the center's course form needs to show the calculator: K and the discount range 5% … 100% − K. */
+  async pricing(tenantId: string) {
+    const commissionPercent = await this.commissionPercent(tenantId)
+    return { commissionPercent, minDiscountPercent: MIN_DISCOUNT_PERCENT, maxDiscountPercent: maxDiscountPercent(commissionPercent), minPriceSom: MIN_COURSE_PRICE_SOM }
+  }
+  /**
+   * The Super Admin changes K (9.5): from the next payment and renewal on; payments made keep their snapshot. The change is
+   * in the audit log with the old and the new value.
+   */
+  async setCommission(tenantId: string, actor: RequestActor, commissionPercent: number) {
+    if (!this.isAdmin(actor)) throw AppError.forbidden('Only the Super Admin sets the commission')
+    const before = await this.commissionPercent(tenantId)
+    if (before !== commissionPercent) {
+      await this.prisma.client.tenant.update({ where: { id: tenantId }, data: { commissionPercent } })
+      await this.audit.record({ action: 'pricing.commission', entityType: 'Tenant', entityId: tenantId, before: { commissionPercent: before }, after: { commissionPercent } })
+    }
+    return this.pricing(tenantId)
+  }
+  /** A discount set now is from 5% (the request schema) to 100% − K: at the limit the center gets 0, never less. */
+  private async assertDiscountLimit(tenantId: string, d: { percent: number } | null | undefined) {
+    if (!d) return
+    const max = maxDiscountPercent(await this.commissionPercent(tenantId))
+    if (d.percent > max) throw AppError.invalid('discount_over_limit', `The student discount can be at most ${max}%`, { max })
+  }
+  /**
+   * The end of a discount by the course's price rule: a new course's student discount has no time limit (Шерзод, 20.11) —
+   * an end is refused; a course from before keeps its window and needs the end, as it always did.
+   */
+  private assertDiscountEnd(priceRule: number | null | undefined, d: { endsAt: string | null } | null | undefined) {
+    if (!d) return
+    if (priceRule === 1 && d.endsAt !== null) throw AppError.invalid('discount_no_end', 'A new course’s student discount has no end date')
+    if (priceRule !== 1 && d.endsAt === null) throw AppError.invalid('discount_end_required', 'This course’s discount needs an end date')
+  }
+  /** The price of a course created with the calculator: whole thousands from 50 000 so'm, or 0 for a free course. */
+  private assertCoursePrice(priceSom: number) {
+    const check = checkCoursePrice(priceSom)
+    if (!check.ok) throw AppError.invalid('course_price_invalid', check.reason === 'step' ? 'The price must be whole thousands of so‘m' : `The price must be at least ${MIN_COURSE_PRICE_SOM} so‘m`, { reason: check.reason, min: MIN_COURSE_PRICE_SOM })
+  }
+  /**
+   * A paid offline course created with the calculator is published only with a student discount (5% or more) in force now
+   * — started, and with no end (Шерзод, 20.11), so the student never sees it without one; a free course carries none.
+   * Checked when the course becomes published and when its price or discount changes while published.
+   */
+  private assertStudentDiscount(c: { priceRule?: number | null; learningFormat?: string | null; priceMinor: bigint; status: string; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }) {
+    if (c.priceRule !== 1 || c.learningFormat === 'ONLINE') return
+    if (c.priceMinor === 0n) {
+      if (c.discountPercent) throw AppError.invalid('free_course_no_discount', 'A free course has no discount')
+      return
+    }
+    if (c.status !== 'PUBLISHED') return
+    const now = Date.now()
+    const inForce = !!c.discountPercent && !!c.discountStartsAt && c.discountStartsAt.getTime() <= now && (!c.discountEndsAt || c.discountEndsAt.getTime() > now)
+    if (!inForce) throw AppError.invalid('student_discount_required', 'A paid course is published with a student discount of 5% or more in force', { min: MIN_DISCOUNT_PERCENT })
+  }
+
   /** Serializable discount for audit records. */
   private discountSummary(c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }) {
     const w = discountWindow(c)
-    return w ? { percent: w.percent, startsAt: (w.startsAt as Date).toISOString(), endsAt: (w.endsAt as Date).toISOString() } : null
+    return w ? { percent: w.percent, startsAt: (w.startsAt as Date).toISOString(), endsAt: w.endsAt ? (w.endsAt as Date).toISOString() : null } : null
   }
-  private sameDiscount(input: { percent: number; startsAt: string; endsAt: string } | null, stored: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }) {
+  private sameDiscount(input: { percent: number; startsAt: string; endsAt: string | null } | null, stored: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }) {
     const current = discountWindow(stored)
     if (!input || !current) return !input && !current
-    return input.percent === current.percent && Date.parse(input.startsAt) === (current.startsAt as Date).getTime() && Date.parse(input.endsAt) === (current.endsAt as Date).getTime()
+    const end = (v: string | Date | null) => (v === null ? null : v instanceof Date ? v.getTime() : Date.parse(v))
+    return input.percent === current.percent && Date.parse(input.startsAt) === (current.startsAt as Date).getTime() && end(input.endsAt) === end(current.endsAt)
   }
 
   private assertTeacherScope(actor: RequestActor, item: { teacherId: string; centerId?: string | null }) {
@@ -256,14 +319,21 @@ export class ManageService {
     const price = online || this.isAdmin(actor) || perms.editPrices ? input.price : DEFAULT_COURSE_PRICE_SOM
     if (input.discount && !this.canSetDiscount(actor, centerId)) throw AppError.forbidden('Only the Super Admin or the course center can set discounts')
     await this.assertCanPublish(tenantId, actor, centerId, input.status)
+    // Every course created from now on follows the calculator (priceRule 1).
+    if (!online) this.assertCoursePrice(price)
+    if (!online) this.assertDiscountEnd(1, input.discount)
+    await this.assertDiscountLimit(tenantId, input.discount)
+    const publishable = this.publishableData(input, actor, !!perms.publishDirectly)
+    const discount = this.discountColumns(input.discount ?? null)
+    this.assertStudentDiscount({ priceRule: 1, learningFormat: online ? 'ONLINE' : 'OFFLINE', priceMinor: somToTiyin(price), status: (publishable.status as string | undefined) ?? 'DRAFT', discountPercent: discount.discountPercent, discountStartsAt: discount.discountStartsAt, discountEndsAt: discount.discountEndsAt })
     const slug = await this.uniqueSlug('course', tenantId, slugify(input.title.en || input.title.uz))
     const course = await this.prisma.client.course.create({
       data: {
         ...formatData,
         tenantId, slug, title: input.title as Json, categoryId: input.categoryId, centerId, teacherId, subjectId: input.subjectId ?? null,
         summary: input.summary as Json, description: input.description as Json, curriculum: input.curriculum as Json, level: up(input.level), durationMonths: input.durationMonths,
-        priceMinor: somToTiyin(price), ...this.discountColumns(input.discount ?? null), coverSeed: input.coverSeed ?? Math.floor(Math.random() * 1000), imageUrl: input.imageUrl ?? null, meyosGrant: this.isAdmin(actor) ? (input.meyosGrant ?? false) : false,
-        createdById: actor.id, ...this.publishableData(input, actor, !!perms.publishDirectly),
+        priceMinor: somToTiyin(price), priceRule: 1, ...discount, coverSeed: input.coverSeed ?? Math.floor(Math.random() * 1000), imageUrl: input.imageUrl ?? null, meyosGrant: this.isAdmin(actor) ? (input.meyosGrant ?? false) : false,
+        createdById: actor.id, ...publishable,
       } as Prisma.CourseUncheckedCreateInput,
       include: { groups: true },
     })
@@ -279,20 +349,24 @@ export class ManageService {
       this.prisma.client.course.findMany({ where: { tenantId, centerId: actor.centerId, deletedAt: null }, include: { groups: { where: { deletedAt: null } } }, orderBy: { updatedAt: 'desc' }, take: 500 }),
     ])
     if (!center) throw AppError.notFound('Center')
-    return { center: { id: center.id, name: center.name }, courses: courses.map((c) => toCourse(c)) }
+    return { center: { id: center.id, name: center.name }, courses: courses.map((c) => toCourse(c)), pricing: await this.pricing(tenantId) }
   }
 
   /**
    * Sets or removes a course discount. Allowed for the Super Admin and for the center admin of the course's own center,
    * independent of the teacher permission switches. The change applies immediately and is audited.
    */
-  async setCourseDiscount(tenantId: string, actor: RequestActor, id: string, discount: { percent: number; startsAt: string; endsAt: string } | null) {
+  async setCourseDiscount(tenantId: string, actor: RequestActor, id: string, discount: { percent: number; startsAt: string; endsAt: string | null } | null) {
     const course = await this.prisma.client.course.findFirst({ where: { tenantId, id, deletedAt: null }, include: { groups: { where: { deletedAt: null } } } })
     if (!course) throw AppError.notFound('Course')
     if (!this.canSetDiscount(actor, course.centerId)) throw AppError.forbidden('Only the Super Admin or the center of this course can change its discount')
     await this.assertCenterWritable(tenantId, actor, course.centerId)
     if (course.learningFormat === 'ONLINE') this.assertOnlineIsFree(undefined, discount)
     if (this.sameDiscount(discount, course)) return toCourse(course)
+    this.assertDiscountEnd(course.priceRule, discount)
+    await this.assertDiscountLimit(tenantId, discount)
+    const next = this.discountColumns(discount)
+    this.assertStudentDiscount({ ...course, ...next })
     const updated = await this.prisma.client.course.update({ where: { id }, data: { ...this.discountColumns(discount), updatedById: actor.id }, include: { groups: { where: { deletedAt: null } } } })
     await this.audit.record({ action: 'course.discount', entityType: 'Course', entityId: id, before: { discount: this.discountSummary(course) }, after: { discount: this.discountSummary(updated) } })
     return toCourse(updated)
@@ -356,12 +430,22 @@ export class ManageService {
         }
         if (input.teacherId && (this.isAdmin(actor) || this.isCenterOwner(actor, course.centerId))) data.teacherId = input.teacherId
       }
-      if (input.price !== undefined) data.priceMinor = somToTiyin(input.price)
+      if (input.price !== undefined) {
+        // A course of the calculator keeps a price of whole thousands from 50 000 so'm (or 0); older courses as before.
+        if (course.priceRule === 1 && somToTiyin(input.price) !== course.priceMinor) this.assertCoursePrice(input.price)
+        data.priceMinor = somToTiyin(input.price)
+      }
       // A discount is changed only by the Super Admin or the course's own center admin; resending the stored one is not a change.
       if (input.discount !== undefined && !this.sameDiscount(input.discount, course)) {
         if (!this.canSetDiscount(actor, course.centerId)) throw AppError.forbidden('Only the Super Admin or the course center can change discounts')
+        this.assertDiscountEnd(course.priceRule, input.discount)
+        await this.assertDiscountLimit(tenantId, input.discount)
         Object.assign(data, this.discountColumns(input.discount))
       }
+      // Becoming published, or a new price or discount while published: a paid course of the calculator needs its discount.
+      const after = { ...course, ...(data as Partial<typeof course>) }
+      if ((data.status === 'PUBLISHED' && course.status !== 'PUBLISHED') || (after.status === 'PUBLISHED' && (data.discountPercent !== undefined || data.priceMinor !== undefined))) this.assertStudentDiscount(after)
+      else if (after.priceRule === 1 && after.priceMinor === 0n && after.discountPercent) this.assertStudentDiscount(after)
     }
     const updated = await this.prisma.client.course.update({ where: { id }, data: data as Prisma.CourseUncheckedUpdateInput, include: { groups: { where: { deletedAt: null } } } })
     await this.audit.record({ action: 'course.update', entityType: 'Course', entityId: id, before: { status: course.status, priceMinor: course.priceMinor, discount: this.discountSummary(course) }, after: { status: updated.status, priceMinor: updated.priceMinor, discount: this.discountSummary(updated) } })

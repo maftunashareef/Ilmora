@@ -32,7 +32,8 @@ function DiscountCard({ course, copy }: { course: Course; copy?: boolean }) {
   const percent = activePercent(course)
   const price = finalPriceSom(course)
   // The end date as a Tashkent calendar day, so the server and the browser print the same date.
-  const ends = course.discount ? formatDate(isoToTashkentLocal(course.discount.endsAt).slice(0, 10), lang) : ''
+  // No end (a new course's discount): no date shown.
+  const ends = course.discount?.endsAt ? formatDate(isoToTashkentLocal(course.discount.endsAt).slice(0, 10), lang) : ''
   return (
     <article className="discount-card group flex w-[272px] shrink-0 flex-col overflow-hidden rounded-card border border-champagne/60 bg-paper shadow-soft ring-1 ring-champagne/20 transition duration-300 hover:-translate-y-1 hover:shadow-lift sm:w-[300px]">
       <Link to={`/courses/${course.id}`} className="relative block aspect-[16/9] overflow-hidden bg-sage/20" tabIndex={-1} aria-hidden="true">

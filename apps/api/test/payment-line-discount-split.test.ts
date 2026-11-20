@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { discountSplit, finalPriceMinor } from '@ilmora/shared'
+import { COMMISSION_DEFAULT_PERCENT, finalPriceMinor, priceSplitMinor } from '@ilmora/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { TenantContext } from '../src/infra/tenancy/tenant-context'
 import { DB_AVAILABLE, TestContext } from './helpers'
 
 /**
  * Security check 20.11 (note «2026-11-20 Проверка безопасности ILMORA»), finding №12: the discount split of #121.
+ * Closed 20.11 in #118: #121 was replaced by the calculator of ТЗ 18.11 (раздел 9), PaymentLine keeps S, K and both shares;
+ * the description below is the finding as it was found.
  * packages/shared/src/pricing.ts splits the percent a center enters in two — half off for the student, half ILMORA's
  * commission — and the center receives the list price less the whole percent. At checkout the API stores per course
  * (PaymentLine) only the list price and what is paid. The percent is not kept: the course's discount can be changed or
@@ -29,7 +31,9 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  * in a place this test does not look at is not missed. When the rule holds, the check fails with «remove 'n12-…' from
  * KNOWN_GAP» — then remove the key and the rule is demanded from then on.
  */
-const KNOWN_GAP = new Set(['n12-schema', 'n12-checkout'])
+// Closed 20.11 in #118 (Шерзод): the calculator of ТЗ 18.11, раздел 9 replaced #121's half split — K is set by the Super
+// Admin, the student's discount S is the percent the center enters — and PaymentLine keeps S, K and both shares at checkout.
+const KNOWN_GAP = new Set<string>([])
 const checked = new Set<string>()
 function rule(key: string, holds: boolean, what: string, todayObserved: boolean) {
   checked.add(key)
@@ -92,18 +96,22 @@ describe.skipIf(!DB_AVAILABLE)('№12 checkout with an active discount writes th
     })
     const lines = await TenantContext.system(() => ctx.prisma.client.paymentLine.findMany({ where: { paymentId: payment.id } }))
 
-    // Setup sanity: one line for the course, charged list price minus the student's half.
+    // Setup sanity: one line for the course, charged the list price less the student's discount.
     expect(lines).toHaveLength(1)
     const line = lines[0] as unknown as Record<string, unknown>
     expect(line.courseId).toBe(t.course.id)
     expect(line.listPriceMinor).toBe(t.course.priceMinor)
     expect(line.amountMinor).toBe(finalPriceMinor(t.course.priceMinor, { percent, startsAt, endsAt }))
 
-    const split = discountSplit(Number(t.course.priceMinor / 100n), percent)
+    // The split of the calculator (ТЗ 18.11, 9.2; replaced #121's discountSplit): the center gets P × (100 − K − S) / 100,
+    // ILMORA the rest of what the student paid; K is the tenant's commission (10% by default).
+    const split = priceSplitMinor({ priceMinor: t.course.priceMinor, studentMinor: line.amountMinor as bigint, discountPercent: percent, commissionPercent: COMMISSION_DEFAULT_PERCENT })
     const minor = (v: unknown) => (typeof v === 'bigint' ? v : typeof v === 'number' || typeof v === 'string' ? BigInt(v) : null)
     const keepsPercent = line.discountPercent === percent
-    const keepsCommission = minor(line.commissionMinor) === BigInt(split.commission) * 100n
-      && (!('centerShareMinor' in line) || minor(line.centerShareMinor) === BigInt(split.centerReceives) * 100n)
+      && (!('centerShareMinor' in line) || minor(line.centerShareMinor) === split.centerMinor)
+      && (!('platformShareMinor' in line) || minor(line.platformShareMinor) === split.platformMinor)
+    const keepsCommission = minor(line.commissionMinor) === split.platformMinor
+      && (!('centerShareMinor' in line) || minor(line.centerShareMinor) === split.centerMinor)
 
     // Settle it the way a finance admin does (not a sandbox payment: the ledger journal is posted) and read the journal.
     await TenantContext.forTenant(t.tenantId, () => ctx.payments.manualSettle(payment.id, student.id, 'test'))
@@ -112,10 +120,10 @@ describe.skipIf(!DB_AVAILABLE)('№12 checkout with an active discount writes th
     expect(entries.length).toBeGreaterThan(0)
     const sum = (d: string) => entries.filter((e) => e.direction === d).reduce((n, e) => n + e.amountMinor, 0n)
     expect(sum('DEBIT')).toBe(sum('CREDIT'))
-    const ledgerSplit = entries.some((e) => e.accountType === 'CENTER_PAYABLE' && e.direction === 'CREDIT' && e.amountMinor === BigInt(split.centerReceives) * 100n)
+    const ledgerSplit = entries.some((e) => e.accountType === 'CENTER_PAYABLE' && e.direction === 'CREDIT' && e.amountMinor === split.centerMinor)
     const accountTypes = [...new Set(entries.map((e) => e.accountType as string))]
 
-    rule('n12-checkout', keepsPercent || keepsCommission || ledgerSplit, `a ${percent}% discount's split is recorded: the PaymentLine keeps the percent or commission ${split.commission} so'm, or the settlement credits CENTER_PAYABLE ${split.centerReceives} so'm (now line keys: ${Object.keys(line).join(', ')}; journal account types: ${accountTypes.join(', ')})`,
+    rule('n12-checkout', keepsPercent || keepsCommission || ledgerSplit, `a ${percent}% discount's split is recorded: the PaymentLine keeps the percent (and the shares) or ILMORA's ${split.platformMinor / 100n} so'm, or the settlement credits CENTER_PAYABLE ${split.centerMinor / 100n} so'm (now line keys: ${Object.keys(line).join(', ')}; journal account types: ${accountTypes.join(', ')})`,
       sameList(Object.keys(line), TODAY_ROW_KEYS) && sameList(accountTypes, TODAY_SETTLED_ACCOUNT_TYPES))
   })
 })

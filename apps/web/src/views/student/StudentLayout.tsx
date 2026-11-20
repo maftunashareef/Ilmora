@@ -1,7 +1,13 @@
+import { useSyncExternalStore } from 'react'
 import { DashboardShell, type DashNavItem } from '../../components/layout/DashboardShell'
+import { Icon } from '../../components/ui'
 import { useT } from '../../i18n/useT'
+import { pendingInvite } from '../../lib/pendingInvite'
+import { Link } from '../../lib/router'
 import { useCurrentStudent } from '../../store/selectors'
 import { useStore } from '../../store/useStore'
+
+const noSubscribe = () => () => undefined
 
 export function StudentLayout() {
   const { t } = useT()
@@ -22,9 +28,15 @@ export function StudentLayout() {
     { id: 'videos', to: '/student/videos', label: t('student.videos'), icon: 'video' },
     { id: 'resources', to: '/student/resources', label: t('student.resources'), icon: 'file' },
     { id: 'attendance', to: '/student/attendance', label: t('student.attendance'), icon: 'check' },
+    { id: 'homework', to: '/student/homework', label: t('hw.mine'), icon: 'edit' },
+    { id: 'centers', to: '/student/centers', label: t('mycenters.title'), icon: 'building' },
     { id: 'saved', to: '/student/saved', label: t('student.saved'), icon: 'bookmark' },
     { id: 'profile', to: '/student/profile', label: t('student.profile'), icon: 'user' },
   ]
   const items = all.filter((it) => (modules.find((m) => m.id === it.id)?.enabled ?? true) && (it.id !== 'saved' || savedOn))
-  return <DashboardShell role="student" title={t('dash.studentSpace')} subtitle={student?.profile.displayName} items={items} />
+  // A center's invitation opened before signing up waits in this tab: the way back to it (ТЗ 2026-11-18, 4.3).
+  // Read on the client only (sessionStorage); the server render and hydration see «no invitation».
+  const invited = useSyncExternalStore(noSubscribe, pendingInvite.has, () => false)
+  const extra = invited ? <Link to="/invite" className="flex items-center gap-2 rounded-control border border-forest/30 bg-sage/60 px-3 py-2 text-xs font-medium text-forest"><Icon name="bell" className="h-3.5 w-3.5" />{t('invite.pending')}</Link> : undefined
+  return <DashboardShell role="student" title={t('dash.studentSpace')} subtitle={student?.profile.displayName} items={items} extra={extra} />
 }

@@ -84,9 +84,11 @@ describe('course creation stays inside the author’s center', () => {
     await free.service.createCourse('t', teacher, body('center-b', 250_000))
     expect(free.created[0]).toMatchObject({ priceMinor: 25_000_000n })
 
+    // A new course follows the calculator (ТЗ 18.11, 9.2): whole thousands from 50 000 so'm — the Super Admin too.
     const admin = setup({ profileCenter: null })
-    await admin.service.createCourse('t', superAdmin, { ...body('center-b', 1), teacherId: 'teacher-1' })
-    expect(admin.created[0]).toMatchObject({ priceMinor: 100n })
+    await expect(admin.service.createCourse('t', superAdmin, { ...body('center-b', 1), teacherId: 'teacher-1' })).rejects.toMatchObject({ code: 'course_price_invalid' })
+    await admin.service.createCourse('t', superAdmin, { ...body('center-b', 120_000), teacherId: 'teacher-1' })
+    expect(admin.created[0]).toMatchObject({ priceMinor: 12_000_000n, priceRule: 1 })
   })
 })
 

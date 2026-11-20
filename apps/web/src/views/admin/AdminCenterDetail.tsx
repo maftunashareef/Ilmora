@@ -11,6 +11,7 @@ import { siteHref } from '../../lib/siteUrl'
 import { useStore } from '../../store/useStore'
 import { CenterAttendance } from '../center/CenterAttendance'
 import { CenterCourses } from '../center/CenterCourses'
+import { CenterJournal } from '../center/CenterJournal'
 import { CenterOverview } from '../center/CenterOverview'
 import { CenterSettings } from '../center/CenterSettings'
 import { CenterStudents } from '../center/CenterStudents'
@@ -19,8 +20,8 @@ import { CenterScopeContext, type CenterOverview as Overview, type CenterScope, 
 import { CenterAdminsModal } from './CenterAdmins'
 import { centerStatusTone } from './adminCenters'
 
-const SECTIONS: CenterSection[] = ['overview', 'courses', 'teachers', 'attendance', 'students', 'settings']
-const LABEL = { overview: 'dash.overview', courses: 'center.courses', teachers: 'center.teachers', attendance: 'center.attendance', students: 'center.students', settings: 'center.settings' } as const
+const SECTIONS: CenterSection[] = ['overview', 'courses', 'teachers', 'attendance', 'students', 'journal', 'settings']
+const LABEL = { overview: 'dash.overview', courses: 'center.courses', teachers: 'center.teachers', attendance: 'center.attendance', students: 'center.students', journal: 'journal.title', settings: 'center.settings' } as const
 
 /**
  * Super Admin: one center's workspace exactly as its administrators see it (the same views, pointed at
@@ -87,6 +88,7 @@ export function AdminCenterDetail() {
           {tab === 'teachers' && <CenterTeachers />}
           {tab === 'attendance' && <CenterAttendance />}
           {tab === 'students' && <CenterStudents />}
+          {tab === 'journal' && <CenterJournal />}
           {tab === 'settings' && <CenterSettings />}
         </div>
       </CenterScopeContext.Provider>

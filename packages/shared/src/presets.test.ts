@@ -72,11 +72,11 @@ describe('adding a preset to a cart', () => {
     const now = new Date('2026-11-01T10:00:00Z')
     const window = (percent: number, start: string, end: string) => ({ percent, startsAt: start, endsAt: end })
     const priced = [
-      { price: 1000, discount: window(10, '2026-10-31T00:00:00Z', '2026-11-02T00:00:00Z') }, // active, the student's half is 5%: 950
+      { price: 1000, discount: window(10, '2026-10-31T00:00:00Z', '2026-11-02T00:00:00Z') }, // active: 900
       { price: 2000, discount: window(15, '2026-11-02T00:00:00Z', '2026-11-03T00:00:00Z') }, // not started yet: 2000
       { price: 3000 }, // no discount: 3000
     ]
-    expect(presetTotal(priced, now)).toBe(950 + 2000 + 3000)
+    expect(presetTotal(priced, now)).toBe(900 + 2000 + 3000)
   })
 })
 

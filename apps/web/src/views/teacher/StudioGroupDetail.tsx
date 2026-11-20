@@ -72,7 +72,13 @@ export function StudioGroupDetail() {
         eyebrow={t('group.details')}
         title={group.name}
         subtitle={<>{tr(course.title)} · {owner?.name}{center && <> · {center.name}</>}</>}
-        action={<Badge tone={roster.length >= group.capacity ? 'warn' : 'sage'} className="text-sm">{t('capacity.students', { n: roster.length, max: group.capacity })}</Badge>}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <LinkButton size="sm" variant="secondary" to={`/teacher/groups/${group.id}/journal`}><Icon name="list" className="h-3.5 w-3.5" />{t('journal.open')}</LinkButton>
+            <LinkButton size="sm" variant="secondary" to={`/teacher/groups/${group.id}/homework`}><Icon name="edit" className="h-3.5 w-3.5" />{t('hw.open')}</LinkButton>
+            <Badge tone={roster.length >= group.capacity ? 'warn' : 'sage'} className="text-sm">{t('capacity.students', { n: roster.length, max: group.capacity })}</Badge>
+          </div>
+        }
       />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-5"><div className="text-xs text-charcoal/55">{t('common.schedule')}</div><div className="mt-2"><ScheduleChips group={group} /></div><div className="mt-1 text-xs text-charcoal/50">{t('common.room')} {group.room}</div></Card>

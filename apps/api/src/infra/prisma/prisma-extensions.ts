@@ -11,6 +11,8 @@ export const TENANT_SCOPED_MODELS = new Set<string>([
   'StudentProfile', 'StudentConsent', 'StudentCertificate', 'GraduationAnnouncement', 'AnnouncementResponse',
   'TrainingRequest', 'TrainingOffer', 'ContractHelpRequest', 'ContactRequest', 'Vacancy', 'VacancyApplication',
   'VacancyBroadcast', 'VacancyBroadcastRecipient',
+  // Center students, the group journal and homework (ТЗ 2026-11-18).
+  'CenterStudent', 'CenterStudentGroup', 'CenterAttendanceMark', 'Homework', 'HomeworkSubmission', 'HomeworkExtension',
 ])
 
 /** Models with `deletedAt`: deletes become soft deletes and normal reads exclude deleted rows. */

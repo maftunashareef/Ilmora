@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CERTIFICATE_KINDS, courseFormat, discountFromDraft, discountToDraft, emptyDiscountDraft, isOnlineCourse, isSafeExternalUrl, ONLINE_PROVIDER_SLUG, type LearningFormat } from '@ilmora/shared'
+import { CERTIFICATE_KINDS, checkCoursePrice, courseFormat, discountFromDraft, discountToDraft, emptyDiscountDraft, isOnlineCourse, isSafeExternalUrl, ONLINE_PROVIDER_SLUG, type LearningFormat } from '@ilmora/shared'
 import { useT } from '../../i18n/useT'
 import { emptyL } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
@@ -7,7 +7,7 @@ import { enrolledCount, groupsCapacityError, validateCapacity } from '../../lib/
 import type { Course, Group, L, Level, Teacher } from '../../types'
 import { PublishFields, type PublishDraft, type PublishMode } from '../PublishFields'
 import { finalizePublish } from '../publish'
-import { DiscountFields } from './DiscountFields'
+import { DiscountFields, type Pricing } from './DiscountFields'
 import { Badge, Button, Field, Icon, Input, LField, Notice, Segmented, Select, Textarea } from '../ui'
 import { cx } from '../ui/helpers'
 import { StorageUploadField } from '../StorageUploadField'
@@ -60,7 +60,7 @@ const curriculumToText = (items: L[], lang: 'uz' | 'ru' | 'en') => items.map((i)
  * Course editor. `mode` decides what may change: the Super Admin everything, a teacher what the teacher switches allow,
  * a center (`mode: 'center'`) its own course with its own teachers (`teachers`, `center`), prices and discounts included.
  */
-export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, center, onSave, onCancel }: { initial?: Course; teacherId?: string; mode: PublishMode; teachers?: Teacher[]; center?: { id: string; name: string }; onSave: (c: Course) => void; onCancel: () => void }) {
+export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, center, pricing, onSave, onCancel }: { initial?: Course; teacherId?: string; mode: PublishMode; teachers?: Teacher[]; center?: { id: string; name: string }; pricing?: Pricing; onSave: (c: Course) => void; onCancel: () => void }) {
   const { t, tr } = useT()
   const centers = useStore((s) => s.centers)
   const categories = useStore((s) => s.categories)
@@ -93,6 +93,8 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
   const lockSchedule = isTeacher && !(perms.editSchedules && perms.manageGroups)
   const set = <K extends keyof Course>(k: K, v: Course[K]) => setDraft((d) => ({ ...d, [k]: v }))
   const online = isOnlineCourse(draft)
+  // A new course follows the calculator (ТЗ 18.11, 9.2); a course from before keeps its old rules (Шерзод, 20.11).
+  const priceRule = initial ? (initial.priceRule ?? 0) : 1
 
   // Offline <-> online (Super Admin only). An online course is free and has no groups, so a course that already has groups cannot become one.
   const switchFormat = (f: LearningFormat) => {
@@ -113,9 +115,10 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
     if (bad) { notify(bad.check.reason === 'not-integer' ? t('capacity.invalid') : t('capacity.belowEnrolled', { n: bad.check.enrolled }), 'warn'); return }
     const r = finalizePublish(pub, mode, perms)
     if (!r.ok) { notify(t(r.error), 'warn'); return }
+    if (!online && !lockPrice && priceRule === 1 && !checkCoursePrice(draft.price).ok) { notify(t('calc.err.price'), 'warn'); return }
     let discount: Course['discount'] = draft.discount ?? null
     if (mode === 'admin' || isCenter) {
-      const parsed = discountFromDraft(disc)
+      const parsed = discountFromDraft(disc, new Date(), pricing?.maxDiscountPercent, priceRule)
       if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
       discount = parsed.discount
     }
@@ -158,7 +161,7 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
         {!online && <Field label={t('studio.subjects')}><Select value={draft.subjectId ?? ''} onChange={(e) => set('subjectId', e.target.value || undefined)}><option value="">{t('studio.noSubject')}</option>{subjects.filter((s) => s.teacherId === draft.teacherId).map((s) => <option key={s.id} value={s.id}>{tr(s.name)}</option>)}</Select></Field>}
         <Field label={t('common.level')}><Select value={draft.level} onChange={(e) => set('level', e.target.value as Level)}>{(['beginner', 'intermediate', 'advanced'] as Level[]).map((l) => <option key={l} value={l}>{t(`level.${l}`)}</option>)}</Select></Field>
         {!online && <Field label={`${t('common.duration')} (${t('common.months')})`}><Input type="number" min={1} value={draft.durationMonths} onChange={(e) => set('durationMonths', Number(e.target.value))} /></Field>}
-        {!online && <Field label={`${t('common.price')} (${t('common.som')} ${t('common.perMonth')})`} hint={lockPrice ? <Badge tone="warn"><Icon name="lock" className="h-3 w-3" />{t('studio.lockedByAdmin')}</Badge> : undefined}><Input disabled={lockPrice} type="number" min={0} step={10000} value={draft.price} onChange={(e) => set('price', Number(e.target.value))} /></Field>}
+        {!online && <Field label={`${t('common.price')} (${t('common.som')} ${t('common.perMonth')})`} hint={lockPrice ? <Badge tone="warn"><Icon name="lock" className="h-3 w-3" />{t('studio.lockedByAdmin')}</Badge> : undefined}><Input disabled={lockPrice} type="number" min={0} step={1000} value={draft.price} onChange={(e) => set('price', Number(e.target.value))} /></Field>}
         {mode === 'admin' && !online && <Field label={t('admin.course.meyos')}><Select value={draft.meyosGrant ? '1' : '0'} onChange={(e) => set('meyosGrant', e.target.value === '1')}><option value="0">{t('common.no')}</option><option value="1">{t('common.yes')}</option></Select></Field>}
         {mode === 'admin' && <Field label={t('common.featured')}><Select value={draft.featured ? '1' : '0'} onChange={(e) => set('featured', e.target.value === '1')}><option value="0">{t('common.no')}</option><option value="1">{t('common.yes')}</option></Select></Field>}
       </div>
@@ -171,7 +174,7 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
           <div className="md:col-span-2"><LField label={t('admin.course.durationText')} value={draft.durationText ?? emptyL()} onChange={(v) => set('durationText', v)} /></div>
         </div>
       )}
-      {(mode === 'admin' || isCenter) && !online && <DiscountFields value={disc} onChange={setDisc} price={draft.price} />}
+      {(mode === 'admin' || isCenter) && !online && <DiscountFields value={disc} onChange={setDisc} price={draft.price} pricing={pricing} priceRule={priceRule} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t('common.imageUrl')} hint={t('common.optional')}><Input placeholder="https://…" value={draft.imageUrl ?? ''} onChange={(e) => set('imageUrl', e.target.value || undefined)} /></Field>
         {/* The uploaded cover lands in object storage and its address becomes the image URL (no browser-only preview is ever saved). */}

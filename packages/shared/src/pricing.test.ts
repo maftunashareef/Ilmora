@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  activePercent, billedSom, carouselCourses, MAX_CAROUSEL_COURSES, centerDiscountSom, checkDiscount, discountFromDraft, discountSom, discountSplit, studentPercent, discountToDraft, emptyDiscountDraft, finalPriceMinor, finalPriceSom, isDiscountActive, isoToTashkentLocal, MAX_DISCOUNT_PERCENT, priceTotals, tashkentLocalToIso,
+  activePercent, billedSom, calculatorSom, carouselCourses, checkCoursePrice, COMMISSION_DEFAULT_PERCENT, COMMISSION_MIN_PERCENT, MAX_CAROUSEL_COURSES, maxDiscountPercent, MIN_DISCOUNT_PERCENT, studentPriceSom, checkDiscount, discountFromDraft, discountSom, discountToDraft, emptyDiscountDraft, finalPriceMinor, finalPriceSom, isDiscountActive, isoToTashkentLocal, MAX_DISCOUNT_PERCENT, priceTotals, tashkentLocalToIso,
 } from './pricing.js'
-import { formatPercent } from './format.js'
 
 const d = (percent: number, startsAt: string, endsAt: string) => ({ percent, startsAt, endsAt })
 const win = d(20, '2026-11-01T00:00:00Z', '2026-11-10T00:00:00Z')
@@ -26,63 +25,76 @@ describe('isDiscountActive', () => {
   })
 })
 
-describe('checkDiscount', () => {
-  it('accepts whole percents up to the maximum with an end after the start', () => {
+describe('checkDiscount (ТЗ 18.11, 9.1: from 5% to 100% − commission)', () => {
+  it('accepts whole percents from 5 to the limit with an end after the start', () => {
     expect(checkDiscount(win)).toEqual({ ok: true })
-    expect(checkDiscount(d(1, win.startsAt, win.endsAt))).toEqual({ ok: true })
-    expect(checkDiscount(d(MAX_DISCOUNT_PERCENT, win.startsAt, win.endsAt))).toEqual({ ok: true })
+    expect(checkDiscount(d(5, win.startsAt, win.endsAt))).toEqual({ ok: true })
+    expect(checkDiscount(d(90, win.startsAt, win.endsAt))).toEqual({ ok: true })
+    expect(checkDiscount(d(85, win.startsAt, win.endsAt), maxDiscountPercent(15))).toEqual({ ok: true })
   })
-  it('caps the discount at 20% and rejects bad percents, bad dates and an end that is not after the start', () => {
-    expect(MAX_DISCOUNT_PERCENT).toBe(20)
-    expect(checkDiscount(d(20, win.startsAt, win.endsAt))).toEqual({ ok: true })
-    for (const percent of [0, -5, 21, 50, 91, 100, 12.5]) expect(checkDiscount(d(percent, win.startsAt, win.endsAt))).toEqual({ ok: false, reason: 'percent' })
+  it('refuses 4% and 91% (commission 10%), the limit moves with the commission; bad dates and order', () => {
+    expect(MIN_DISCOUNT_PERCENT).toBe(5)
+    expect(maxDiscountPercent(COMMISSION_DEFAULT_PERCENT)).toBe(90)
+    for (const percent of [0, -5, 1, 4, 91, 100, 12.5]) expect(checkDiscount(d(percent, win.startsAt, win.endsAt))).toEqual({ ok: false, reason: 'percent' })
+    expect(checkDiscount(d(86, win.startsAt, win.endsAt), maxDiscountPercent(15))).toEqual({ ok: false, reason: 'percent' })
     expect(checkDiscount(d(10, 'x', win.endsAt))).toEqual({ ok: false, reason: 'dates' })
     expect(checkDiscount(d(10, win.endsAt, win.startsAt))).toEqual({ ok: false, reason: 'order' })
     expect(checkDiscount(d(10, win.startsAt, win.startsAt))).toEqual({ ok: false, reason: 'order' })
+  })
+  it('a 1–4% discount set before the minimum still applies while it lasts', () => {
+    expect(isDiscountActive(d(3, '2026-11-01T00:00:00Z', '2026-11-10T00:00:00Z'), new Date('2026-11-05T00:00:00Z'))).toBe(true)
+  })
+})
+
+describe('calculator (ТЗ 18.11, 9.1–9.2)', () => {
+  it('example 1: 1 000 000 at 5%, commission 10% → 950 000 / 850 000 / 100 000', () => {
+    expect(calculatorSom(1_000_000, 5, 10)).toEqual({ student: 950_000, center: 850_000, platform: 100_000 })
+  })
+  it('example 2: 1 234 000 at 7% → 1 147 000 (rounded down), 1 024 220, 122 780', () => {
+    expect(calculatorSom(1_234_000, 7, 10)).toEqual({ student: 1_147_000, center: 1_024_220, platform: 122_780 })
+    expect(finalPriceMinor(123_400_000n, d(7, '2026-11-01T00:00:00Z', '2026-11-10T00:00:00Z'), new Date('2026-11-05T00:00:00Z'), 1)).toBe(114_700_000n)
+  })
+  it('the limit 90%: the center gets 0, ILMORA 10%, the student pays 10%; a free course has no commission', () => {
+    expect(calculatorSom(1_000_000, 90, 10)).toEqual({ student: 100_000, center: 0, platform: 100_000 })
+    expect(calculatorSom(0, 5, 10)).toEqual({ student: 0, center: 0, platform: 0 })
+  })
+  it('ILMORA never goes below 0 for a valid price (rounding loss ≤ 990 so\'m), whatever the discount', () => {
+    for (const price of [50_000, 51_000, 99_000, 1_234_000, 9_999_000]) for (let s = 5; s <= 90; s++) {
+      const r = calculatorSom(price, s, COMMISSION_MIN_PERCENT)
+      expect(r.platform, `${price} ${s}`).toBeGreaterThanOrEqual(0)
+      expect(r.student - r.center - r.platform).toBe(0)
+    }
+  })
+  it('a course before the calculator keeps its old rounding (whole so\'m)', () => {
+    expect(studentPriceSom(1_234_000, 7, 0)).toBe(1_147_620)
+    expect(finalPriceSom({ price: 1_234_000, discount: { percent: 7, startsAt: '2026-11-01T00:00:00Z', endsAt: '2026-11-10T00:00:00Z' } }, new Date('2026-11-05T00:00:00Z'))).toBe(1_147_620)
+    expect(finalPriceSom({ price: 1_234_000, priceRule: 1, discount: { percent: 7, startsAt: '2026-11-01T00:00:00Z', endsAt: '2026-11-10T00:00:00Z' } }, new Date('2026-11-05T00:00:00Z'))).toBe(1_147_000)
+  })
+  it('the price of a new course: whole thousands from 50 000, or 0 (free)', () => {
+    expect(checkCoursePrice(0)).toEqual({ ok: true })
+    expect(checkCoursePrice(50_000)).toEqual({ ok: true })
+    expect(checkCoursePrice(1_234_000)).toEqual({ ok: true })
+    expect(checkCoursePrice(1_234_500)).toEqual({ ok: false, reason: 'step' })
+    expect(checkCoursePrice(40_000)).toEqual({ ok: false, reason: 'min' })
   })
 })
 
 describe('final price', () => {
   const now = new Date('2026-11-05T00:00:00Z')
 
-  it('takes the student\'s half of the entered percent off: floor(price * percent / 200), in whole so\'m', () => {
-    expect(discountSom(100_000, 20)).toBe(10_000)
-    expect(discountSom(99_999, 10)).toBe(4_999) // 4 999.95 -> 4 999: the customer pays 1 so'm more, never a fraction
+  it('takes floor(price * percent / 100) off, in whole so\'m', () => {
+    expect(discountSom(100_000, 20)).toBe(20_000)
+    expect(discountSom(99_999, 10)).toBe(9_999) // 9 999.9 -> 9 999: the customer pays 1 so'm more, never a fraction
     expect(discountSom(1, 50)).toBe(0)
-    expect(finalPriceSom({ price: 100_000, discount: win }, now)).toBe(90_000)
-    expect(finalPriceSom({ price: 99_999, discount: d(10, win.startsAt, win.endsAt) }, now)).toBe(95_000)
-  })
-
-  it('splits the entered percent: half is the student\'s discount, half is ILMORA\'s commission, the rest is the center\'s', () => {
-    expect(discountSplit(500_000, 20)).toEqual({ studentPercent: 10, studentPays: 450_000, studentSaves: 50_000, commission: 50_000, centerReceives: 400_000 })
-    expect(discountSplit(500_000, 15)).toEqual({ studentPercent: 7.5, studentPays: 462_500, studentSaves: 37_500, commission: 37_500, centerReceives: 425_000 })
-    expect(studentPercent(1)).toBe(0.5)
-    expect(formatPercent(10, 'uz')).toBe('10')
-    expect(formatPercent(7.5, 'uz')).toBe('7,5')
-    expect(formatPercent(7.5, 'ru')).toBe('7,5')
-    expect(formatPercent(7.5, 'en')).toBe('7.5')
-  })
-
-  it('the split adds up for every percent and awkward prices: the student pays the commission plus the center\'s part', () => {
-    for (let percent = 1; percent <= MAX_DISCOUNT_PERCENT; percent++) {
-      for (const price of [1, 99, 101, 12_345, 99_999, 333_333, 1_234_567]) {
-        const s = discountSplit(price, percent)
-        expect(s.studentPays).toBe(s.commission + s.centerReceives)
-        expect(s.centerReceives).toBe(price - centerDiscountSom(price, percent))
-        // the two halves are equal, or the commission is one so'm more when the whole amount is odd
-        expect(s.commission - s.studentSaves).toBeGreaterThanOrEqual(0)
-        expect(s.commission - s.studentSaves).toBeLessThanOrEqual(1)
-        expect(finalPriceSom({ price, discount: d(percent, win.startsAt, win.endsAt) }, now)).toBe(s.studentPays)
-      }
-    }
+    expect(finalPriceSom({ price: 100_000, discount: win }, now)).toBe(80_000)
+    expect(finalPriceSom({ price: 99_999, discount: d(10, win.startsAt, win.endsAt) }, now)).toBe(90_000)
   })
 
   it('is the list price when there is no discount or it is outside its window', () => {
     expect(finalPriceSom({ price: 100_000 }, now)).toBe(100_000)
     expect(finalPriceSom({ price: 100_000, discount: null }, now)).toBe(100_000)
     expect(finalPriceSom({ price: 100_000, discount: win }, new Date('2026-12-01T00:00:00Z'))).toBe(100_000)
-    expect(activePercent({ discount: win }, now)).toBe(10) // students see half of the 20% the center entered
-    expect(activePercent({ discount: d(15, win.startsAt, win.endsAt) }, now)).toBe(7.5)
+    expect(activePercent({ discount: win }, now)).toBe(20)
     expect(activePercent({ discount: win }, new Date('2026-12-01T00:00:00Z'))).toBe(0)
   })
 
@@ -131,10 +143,12 @@ describe('discount form text', () => {
     expect(discountFromDraft(draft('10', '', ''), now).ok).toBe(false)
   })
 
-  it('refuses half-filled or invalid forms: missing percent, percent outside 1-20, end not after start', () => {
+  it('refuses half-filled or invalid forms: missing percent, percent outside 5–90 (5–85 at commission 15%), end not after start', () => {
     expect(discountFromDraft(draft('', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
     expect(discountFromDraft(draft('0', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('21', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
+    expect(discountFromDraft(draft('4', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
+    expect(discountFromDraft(draft('91', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
+    expect(discountFromDraft(draft('86', '2026-11-01T10:00', '2026-11-10T10:00'), new Date(), 85).ok).toBe(false)
     expect(discountFromDraft(draft('abc', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
     expect(discountFromDraft(draft('10', '2026-11-10T10:00', '2026-11-01T10:00')).ok).toBe(false)
     expect(discountFromDraft(draft('10', '2026-11-01', '2026-11-10T10:00')).ok).toBe(false)
@@ -144,6 +158,40 @@ describe('discount form text', () => {
   it('allows a start date in the future', () => {
     const far = discountFromDraft(draft('5', '2030-01-01T00:00', '2030-02-01T00:00'))
     expect(far.ok).toBe(true)
+  })
+
+  it('a new course (rule 1): no end — the discount has no time limit (Шерзод, 20.11); an end typed in is refused', () => {
+    const now = new Date('2026-11-20T10:00:00Z')
+    expect(discountFromDraft(draft('10', '', ''), now, 90, 1)).toEqual({ ok: true, discount: { percent: 10, startsAt: now.toISOString(), endsAt: null } })
+    expect(discountFromDraft(draft('10', '2026-11-25T10:00', ''), now, 90, 1)).toEqual({ ok: true, discount: { percent: 10, startsAt: '2026-11-25T05:00:00.000Z', endsAt: null } })
+    expect(discountFromDraft(draft('10', '', '2026-12-01T10:00'), now, 90, 1).ok).toBe(false)
+    expect(discountFromDraft(draft('4', '', ''), now, 90, 1).ok).toBe(false)
+    // A course from before still needs its end.
+    expect(discountFromDraft(draft('10', '', ''), now, 90, 0).ok).toBe(false)
+    const open = { percent: 10, startsAt: '2026-11-20T05:00:00.000Z', endsAt: null }
+    expect(discountToDraft(open)).toEqual(draft('10', '2026-11-20T10:00', ''))
+    expect(discountFromDraft(discountToDraft(open), now, 90, 1)).toEqual({ ok: true, discount: open })
+  })
+})
+
+describe('a discount with no end (new courses, Шерзод 20.11)', () => {
+  const open = { percent: 10, startsAt: '2026-11-01T00:00:00Z', endsAt: null }
+  it('is active from its start on and never runs out', () => {
+    expect(isDiscountActive(open, new Date('2026-10-31T23:59:59Z'))).toBe(false)
+    expect(isDiscountActive(open, new Date('2026-11-01T00:00:00Z'))).toBe(true)
+    expect(isDiscountActive(open, new Date('2099-01-01T00:00:00Z'))).toBe(true)
+    expect(finalPriceSom({ price: 120_000, discount: open, priceRule: 1 }, new Date('2030-01-01T00:00:00Z'))).toBe(108_000)
+    expect(finalPriceMinor(12_000_000n, open, new Date('2030-01-01T00:00:00Z'), 1)).toBe(10_800_000n)
+  })
+  it('passes the saving rules; in the carousel it comes after those that end', () => {
+    expect(checkDiscount(open)).toEqual({ ok: true })
+    expect(checkDiscount({ ...open, startsAt: 'nonsense' })).toEqual({ ok: false, reason: 'dates' })
+    const now = new Date('2026-11-05T00:00:00Z')
+    const list = [
+      { id: 'forever', status: 'published' as const, visibility: 'public' as const, discount: open },
+      { id: 'ends', status: 'published' as const, visibility: 'public' as const, discount: d(10, '2026-11-01T00:00:00Z', '2026-11-30T00:00:00Z') },
+    ]
+    expect(carouselCourses(list, now).map((c) => c.id)).toEqual(['ends', 'forever'])
   })
 })
 
@@ -192,7 +240,7 @@ describe('priceTotals', () => {
       { price: 555_555, discount: d(15, '2026-11-01T00:00:00Z', '2026-11-20T00:00:00Z') },
       { price: 500_000, discount: d(20, '2026-11-10T00:00:00Z', '2026-11-20T00:00:00Z') },
     ]
-    expect(priceTotals(courses, now)).toEqual({ list: 2_605_555, final: 855_000 + 650_000 + 513_889 + 500_000, saved: 45_000 + 41_666 })
+    expect(priceTotals(courses, now)).toEqual({ list: 2_605_555, final: 810_000 + 650_000 + 472_222 + 500_000, saved: 90_000 + 83_333 })
     expect(priceTotals([], now)).toEqual({ list: 0, final: 0, saved: 0 })
   })
 

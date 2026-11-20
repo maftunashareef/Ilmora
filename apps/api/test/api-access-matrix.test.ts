@@ -14,7 +14,10 @@ import { type RequestActor, TenantContext } from '../src/infra/tenancy/tenant-co
 import { AttendanceService } from '../src/modules/attendance/attendance.service'
 import type { AttendanceEvents } from '../src/modules/attendance/attendance.events'
 import { ConsentDto } from '../src/modules/auth/auth.dto'
+import { CenterStudentsService } from '../src/modules/center/center-students.service'
 import { CenterService } from '../src/modules/center/center.service'
+import { HomeworkService } from '../src/modules/classroom/homework.service'
+import { JournalService } from '../src/modules/classroom/journal.service'
 import { asCenter } from '../src/modules/center/admin-center.controller'
 import { ContactsService } from '../src/modules/contacts/contacts.service'
 import { EnrollmentController } from '../src/modules/enrollment/enrollment.controller'
@@ -81,6 +84,8 @@ const RULES: Rule[] = [
   { name: 'teacher studio', match: (r) => r.path.startsWith('/manage/') && !exact('GET /manage/center/courses', 'PUT /manage/courses/:id/discount', 'GET /manage/uploads/status', 'POST /manage/uploads/course-image/upload-url')(r), allow: ['teacher'] },
   { name: 'lessons and attendance', match: path(/^\/teacher\/(sessions|groups)\//), allow: ['teacher', 'center'] },
   { name: 'center invitations', match: path(/^\/teacher\/center-invites(\/|$)/), allow: ['teacher'] },
+  // Homework is given by the group's teacher (ТЗ 2026-11-18, 8.1); the center administrator does not.
+  { name: 'homework (teacher)', match: path(/^\/teacher\/homework(\/|$)/), allow: ['teacher'] },
 
   // Student.
   { name: 'subscription and saved', match: path(/^\/student\/(subscription|saved)(\/|$)/), allow: ['student'] },
@@ -193,6 +198,11 @@ const FOREIGN_ID = [
   'GET /teacher/sessions/:id', 'POST /teacher/sessions/:id/open', 'POST /teacher/sessions/:id/close', 'POST /teacher/sessions/:id/qr',
   'POST /teacher/sessions/:id/records', 'PATCH /teacher/sessions/:id', 'PATCH /teacher/sessions/:id/time', 'GET /teacher/sessions/:id/stream',
   'POST /teacher/groups/:id/sessions',
+  // ТЗ 2026-11-18: the center's table of students, the group journal, homework.
+  'GET /center/students/:id', 'PATCH /center/students/:id', 'POST /center/students/:id/invite',
+  'GET /teacher/groups/:id/attendance', 'PUT /teacher/groups/:id/attendance/marks',
+  'GET /teacher/homework/:id', 'PATCH /teacher/homework/:id', 'DELETE /teacher/homework/:id', 'POST /teacher/homework/:id/extensions', 'POST /teacher/homework/:id/grades',
+  'GET /students/me/homework/:id', 'POST /students/me/homework/:id/submissions',
 ]
 /** Routes of the areas whose path param is not somebody's id, and why. */
 const NOT_AN_ID: Record<string, string> = {
@@ -218,14 +228,22 @@ const TOKEN_LIKE_OK = ['GET /attendance/centers/:code', 'GET /attendance/centers
 /** Super Admin only (RULES); reaches any center of its tenant by design, the tenant boundary is tested in the Super Admin test below. */
 const ADMIN_PREFIX = '/admin/'
 
-const COURSE_PRICE_DONE = 'here: «price: course bodies …» (strict: commission, fee, priceMinor refused); the price only with editPrices in test/course-center-scope.test.ts, the discount rules in test/discounts.test.ts; known gap: 5% floor (it.fails)'
+const COURSE_PRICE_DONE = 'here: «price: course bodies …» (strict: commission, fee, priceMinor refused) and «price: a discount below 5% is refused»; the price only with editPrices in test/course-center-scope.test.ts, the discount rules in test/discounts.test.ts, the calculator in test/price-calculator.test.ts'
+const CENTER_INVITE_DONE = 'test/center-students.test.ts «invitation: …»: 256 random bits, only the SHA-256 stored, works once, expires in 7 days, one answer for wrong/used/expired; here «invitation token: …» (body only, never the path or the query)'
 /** Route key → where the security list of its area is tested, or why it does not apply. */
 const SECURITY_DONE: Record<string, string> = {
   'GET /teacher/center-invites': 'no token: an invitation is a row addressed to the signed-in teacher\'s account, listed only to them (teacher test below)',
   'POST /teacher/center-invites/:id/accept': 'no token: answered by id by the teacher it is addressed to; another teacher\'s id is refused (teacher test below)',
   'POST /teacher/center-invites/:id/decline': 'no token: as accept',
+  // A student's invitation to a center's table (ТЗ 2026-11-18, 4.3).
+  'POST /center/students/:id/invite': CENTER_INVITE_DONE,
+  'POST /admin/centers/:centerId/students/:id/invite': CENTER_INVITE_DONE,
+  'POST /students/me/center-invites/preview': CENTER_INVITE_DONE,
+  'POST /students/me/center-invites/accept': CENTER_INVITE_DONE,
   'POST /graduates/:cardId/invite': 'no token: it creates a contact request the student answers in their own account; the card id is company-keyed (NOT_AN_ID)',
-  'PUT /manage/courses/:id/discount': 'here: «price: the discount body …» (strict body), and test/discounts.test.ts; known gap: 5% floor (it.fails)',
+  'PUT /manage/courses/:id/discount': 'here: «price: the discount body …» (strict body) and «price: a discount below 5% is refused»; test/discounts.test.ts; the upper limit 100% − K — test/price-calculator.test.ts',
+  // ILMORA's commission (ТЗ 18.11, 9.5): the Super Admin's route by design — the body carries the commission and nothing else.
+  'PUT /admin/pricing': 'Super Admin only (RULES): the one body that carries a commission, strict (CommissionInput, 2–50%); audited (pricing.commission) — test/price-calculator.test.ts; centers and teachers get 403 here',
   'POST /manage/courses': COURSE_PRICE_DONE,
   'PATCH /manage/courses/:id': COURSE_PRICE_DONE,
   'POST /center/courses': COURSE_PRICE_DONE,
@@ -247,11 +265,23 @@ const bodyOf = (cls: unknown, body: object) => bodyPipe.transform(body, { type: 
 describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
   it('finds the routes of the areas, and not unrelated ones', () => {
     const by = Object.fromEntries(AREAS.map((a) => [a.name, ALL.filter(a.match).map(key)]))
-    expect(by['center students and Excel']).toEqual(['GET /center/students', 'GET /admin/centers/:centerId/students'])
+    expect([...by['center students and Excel']].sort()).toEqual([
+      'GET /center/students', 'GET /center/students/roster', 'GET /center/students/export', 'POST /center/students/import/check', 'POST /center/students/import',
+      'POST /center/students', 'GET /center/students/:id', 'PATCH /center/students/:id', 'POST /center/students/:id/invite',
+      'GET /admin/centers/:centerId/students', 'GET /admin/centers/:centerId/students/roster', 'GET /admin/centers/:centerId/students/export',
+      'POST /admin/centers/:centerId/students/import/check', 'POST /admin/centers/:centerId/students/import', 'POST /admin/centers/:centerId/students',
+      'GET /admin/centers/:centerId/students/:id', 'PATCH /admin/centers/:centerId/students/:id', 'POST /admin/centers/:centerId/students/:id/invite',
+    ].sort())
+    expect(by.homework).toEqual(expect.arrayContaining(['POST /teacher/homework', 'GET /students/me/homework', 'POST /students/me/homework/:id/submissions']))
+    expect(by.attendance).toEqual(expect.arrayContaining(['GET /teacher/groups/:id/attendance', 'PUT /teacher/groups/:id/attendance/marks']))
+    expect([...by.invitations].sort()).toEqual([
+      'GET /teacher/center-invites', 'POST /teacher/center-invites/:id/accept', 'POST /teacher/center-invites/:id/decline', 'POST /graduates/:cardId/invite',
+      'POST /center/students/:id/invite', 'POST /admin/centers/:centerId/students/:id/invite', 'POST /students/me/center-invites/preview', 'POST /students/me/center-invites/accept',
+    ].sort())
     expect(routeKeys.has('GET /ministry/export')).toBe(true)
     expect(by['center students and Excel']).not.toContain('GET /ministry/export')
     expect([...by.price].sort()).toEqual([
-      'PATCH /admin/centers/:centerId/courses/:id', 'PATCH /center/courses/:id', 'PATCH /manage/courses/:id', 'POST /admin/centers/:centerId/courses', 'POST /center/courses', 'POST /manage/courses', 'PUT /manage/courses/:id/discount',
+      'PATCH /admin/centers/:centerId/courses/:id', 'PATCH /center/courses/:id', 'PATCH /manage/courses/:id', 'POST /admin/centers/:centerId/courses', 'POST /center/courses', 'POST /manage/courses', 'PUT /admin/pricing', 'PUT /manage/courses/:id/discount',
     ])
     expect(by.attendance).toContain('POST /teacher/sessions/:id/open')
     expect(by['ZIP upload']).toEqual(['POST /manage/uploads/resource-file/upload-url'])
@@ -277,6 +307,21 @@ describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
   it('no route takes a token, secret, code or key in its path (they would reach logs and Referer)', () => {
     expect(ALL.filter((r) => /:[^/]*(token|secret|code|key)/i.test(r.path)).map(key).filter((k) => !TOKEN_LIKE_OK.includes(k))).toEqual([])
     expect(TOKEN_LIKE_OK.filter((k) => !routeKeys.has(k))).toEqual([])
+  })
+
+  it('invitation token: the student\'s routes take it in the body only — no path param, no query; the API never logs a body', () => {
+    const studentSide = ALL.filter((r) => r.path.startsWith('/students/me/center-invites/'))
+    expect(studentSide.map(key).sort()).toEqual(['POST /students/me/center-invites/accept', 'POST /students/me/center-invites/preview'])
+    for (const r of studentSide) {
+      expect(r.path, key(r)).not.toContain(':')
+      expect(schemaKeys(r), key(r)).toContain('token')
+      // RouteParamtypes.QUERY is 4: the handler has no @Query() argument at all.
+      expect(Object.keys((Reflect.getMetadata(ROUTE_ARGS_METADATA, r.cls, r.handler.name) ?? {}) as object).some((k) => k.startsWith('4:')), key(r)).toBe(false)
+    }
+    // pino logs the path without the query and never the body; `req.body.token` is redacted besides.
+    const core = readFileSync(join(__dirname, '../src/core.module.ts'), 'utf8')
+    expect(core).toContain(`'req.body.token'`)
+    expect(core).toMatch(/url: \(req\.url \?\? ''\)\.split\('\?'\)\[0\]/)
   })
 
   // The minor's own mark of the parent's consent (questionnaire, PARENT_CONSENT kind) is self-attested by the student: known product gap, reported.
@@ -313,9 +358,12 @@ describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
       }
   })
 
-  // Known gap: DiscountInput (manage.schemas.ts) and checkDiscount (packages/shared/src/pricing.ts) allow 1–20%. Once fixed this passes, so vitest fails it: drop .fails then.
-  it.fails('price: a discount below 5% is refused (ТЗ) — known gap, floor is 1% today', () => {
-    expect(CourseDiscountBody.safeParse({ discount: { percent: 4, startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' } }).success).toBe(false)
+  // Closed (ТЗ 18.11, 9.1; Шерзод, 20.11): DiscountInput and checkDiscount take 5% and more; the upper limit 100% − K is the service's.
+  it('price: a discount below 5% is refused (ТЗ)', () => {
+    const window = { startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' }
+    expect(CourseDiscountBody.safeParse({ discount: { percent: 4, ...window } }).success).toBe(false)
+    expect(CourseDiscountBody.safeParse({ discount: { percent: 5, ...window } }).success).toBe(true)
+    for (const schema of [CourseInput, CoursePatch]) expect(schema.safeParse({ discount: { percent: 4, ...window } }).error?.issues.some((i) => i.path.includes('percent'))).toBe(true)
   })
 
   it('price: the student\'s cart and checkout carry no amount of their own (the server prices them)', async () => {
@@ -605,6 +653,62 @@ describe.skipIf(!DB_AVAILABLE)('Somebody else\'s data: 403 or 404, and nothing c
     // The teacher of the course and center B's administrator get through.
     await expect(inTenant(w, () => attendance.sessionDetail(session.id, w.teacherOwner))).resolves.toMatchObject({ session: { id: session.id } })
     await expect(inTenant(w, () => attendance.sessionDetail(session.id, w.centerOwner))).resolves.toMatchObject({ session: { id: session.id } })
+  })
+
+  it('center students, journal and homework (ТЗ 2026-11-18): another center\'s student, another teacher\'s group and homework — refused, and they stay as they were', async () => {
+    const w = await world()
+    const db = ctx.prisma.client
+    const table = new CenterStudentsService(ctx.prisma, ctx.audit, new TenantsService(ctx.prisma, ctx.env), ctx.env)
+    const journal = new JournalService(ctx.prisma, ctx.audit)
+    const homework = new HomeworkService(ctx.prisma, ctx.audit)
+    // Center B's own student in center B's group, a past lesson of that group, a homework of center B's teacher.
+    const { cs, session, hw, studentOfB } = await inTenant(w, async () => {
+      const studentOfB = await ctx.makeStudent(w.tenantId)
+      const cs = await db.centerStudent.create({ data: { tenantId: w.tenantId, centerId: w.centerB.id, fullName: 'Talaba B', phoneE164: `+99890${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`, birthDate: new Date('2000-01-01'), userId: studentOfB.id, inviteAcceptedAt: new Date() } })
+      await db.centerStudentGroup.create({ data: { tenantId: w.tenantId, centerStudentId: cs.id, groupId: w.group.id } })
+      const session = await db.lessonSession.create({ data: { tenantId: w.tenantId, groupId: w.group.id, courseId: w.group.courseId, date: new Date('2026-01-05T00:00:00.000Z'), startsAt: new Date('2026-01-05T13:00:00.000Z'), endsAt: new Date('2026-01-05T14:00:00.000Z'), status: 'COMPLETED' } })
+      const hw = await db.homework.create({ data: { tenantId: w.tenantId, groupId: w.group.id, title: 'Vazifa', description: 'Matn', submitModes: ['TEXT'], dueAt: new Date(Date.now() + 86_400_000) } })
+      return { cs, session, hw, studentOfB }
+    })
+    const mark = { sessionId: session.id, centerStudentId: cs.id, status: 'PRESENT' as const }
+    const future = new Date(Date.now() + 2 * 86_400_000).toISOString()
+    await refusedAll(w, {
+      // Center A's administrator and center B's student.
+      'GET /center/students/:id': () => table.detail(w.tenantId, w.centerActor, cs.id),
+      'PATCH /center/students/:id': () => table.update(w.tenantId, w.centerActor, cs.id, { fullName: 'X', status: 'LEFT' }),
+      'POST /center/students/:id/invite': () => table.invite(w.tenantId, w.centerActor, cs.id),
+      // Teacher A and center A: center B's group journal.
+      'GET /teacher/groups/:id/attendance': () => journal.journal(w.group.id, w.teacherActor),
+      'GET /teacher/groups/:id/attendance (center)': () => journal.journal(w.group.id, w.centerActor),
+      'PUT /teacher/groups/:id/attendance/marks': () => journal.setMark(w.group.id, w.teacherActor, mark),
+      'PUT /teacher/groups/:id/attendance/marks (center)': () => journal.setMark(w.group.id, w.centerActor, mark),
+      // Teacher A: center B teacher's homework.
+      'GET /teacher/homework/:id': () => homework.detail(w.teacherActor, hw.id),
+      'PATCH /teacher/homework/:id': () => homework.update(w.teacherActor, hw.id, { title: 'X' }),
+      'DELETE /teacher/homework/:id': () => homework.remove(w.teacherActor, hw.id),
+      'POST /teacher/homework/:id/extensions': () => homework.extend(w.teacherActor, hw.id, { studentId: studentOfB.id, dueAt: future }),
+      'POST /teacher/homework/:id/grades': () => homework.grade(w.teacherActor, hw.id, { studentId: studentOfB.id, grade: 5 }),
+      'GET /teacher/homework list of another group': () => homework.list(w.teacherActor, w.group.id),
+      // Student A is not in center B's group.
+      'GET /students/me/homework/:id': () => homework.myDetail(w.studentA, hw.id),
+      'POST /students/me/homework/:id/submissions': () => homework.submit(w.studentA, hw.id, { text: 'x' }),
+      // Student A cannot leave center B on student B's behalf.
+      'POST /students/me/centers/:id/leave (another student)': () => table.leave(w.tenantId, w.studentA, cs.id),
+    })
+    const [after, marks, hwAfter, ext, subs] = await inTenant(w, () => Promise.all([
+      db.centerStudent.findFirstOrThrow({ where: { id: cs.id } }), db.centerAttendanceMark.count({ where: { centerStudentId: cs.id } }), db.homework.findFirst({ where: { id: hw.id } }),
+      db.homeworkExtension.count({ where: { homeworkId: hw.id } }), db.homeworkSubmission.count({ where: { homeworkId: hw.id } }),
+    ]))
+    expect(after).toMatchObject({ fullName: 'Talaba B', status: 'STUDYING', inviteSends: 0 })
+    expect([marks, ext, subs]).toEqual([0, 0, 0])
+    expect(hwAfter).toMatchObject({ title: 'Vazifa' })
+    // Center A's table has no trace of center B's student.
+    expect(JSON.stringify(await inTenant(w, () => table.roster(w.tenantId, w.centerActor, {})))).not.toContain(cs.id)
+    // The owners get through: center B, its teacher, the student of the group.
+    await expect(inTenant(w, () => table.detail(w.tenantId, w.centerOwner, cs.id))).resolves.toMatchObject({ student: { id: cs.id } })
+    await expect(inTenant(w, () => journal.journal(w.group.id, w.teacherOwner))).resolves.toMatchObject({ group: { id: w.group.id } })
+    await expect(inTenant(w, () => homework.detail(w.teacherOwner, hw.id))).resolves.toMatchObject({ homework: { id: hw.id } })
+    await expect(inTenant(w, () => homework.myDetail({ id: studentOfB.id, roles: ['STUDENT'] }, hw.id))).resolves.toMatchObject({ homework: { id: hw.id } })
   })
 
   // Keep it the last test of this section: it relies on the earlier tests of this file (vitest runs them in order) and

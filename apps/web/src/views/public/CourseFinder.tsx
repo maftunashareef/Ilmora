@@ -100,7 +100,7 @@ function useReasonText() {
         case 'level': return t(r.exact ? 'finder.reason.levelExact' : 'finder.reason.levelNear', { level: t(`level.${r.level}` as TKey) })
         case 'budget': return t('finder.reason.budget', { price: formatSom(r.price, lang) })
         case 'free': return t('finder.reason.free')
-        case 'discount': return t('finder.reason.discount', { percent: formatPercent(r.percent, lang), date: formatDate(isoToTashkentLocal(r.endsAt).slice(0, 10), lang) })
+        case 'discount': return r.endsAt ? t('finder.reason.discount', { percent: formatPercent(r.percent, lang), date: formatDate(isoToTashkentLocal(r.endsAt).slice(0, 10), lang) }) : t('finder.reason.discountOpen', { percent: formatPercent(r.percent, lang) })
         case 'hours': return t('finder.reason.hours', { hours: fmtHours(r.hours, lang) })
         case 'selfPaced': return t('finder.reason.selfPaced')
         case 'seats': return t('finder.reason.seats', { n: r.left })

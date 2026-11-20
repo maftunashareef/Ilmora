@@ -3,7 +3,7 @@ const LOCALES = ['uz', 'ru', 'en'] as const
 /** Workspaces behind sign-in: the index page ("/uz/teacher") and everything under it ("/uz/teacher/groups"). */
 const WORKSPACES = ['admin', 'teacher', 'center', 'student']
 /** Public-layout pages with nothing to index: personal, one-off or sign-in screens. */
-const PRIVATE_PAGES = ['login', 'preview', 'favorites']
+const PRIVATE_PAGES = ['login', 'preview', 'favorites', 'invite']
 const PRIVATE_TREES = ['attend', 'payments', 'auth']
 
 /**

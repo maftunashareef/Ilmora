@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { discountFromDraft, discountToDraft, emptyDiscountDraft, type DiscountDraft, isDiscountActive, isoToTashkentLocal, studentPercent } from '@ilmora/shared'
+import { discountFromDraft, discountToDraft, emptyDiscountDraft, type DiscountDraft, isDiscountActive, isoToTashkentLocal } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { PriceNow, ScheduleChips } from '../../components/course/CourseCard'
@@ -8,7 +8,6 @@ import { CourseForm } from '../../components/course/CourseForm'
 import { DiscountFields } from '../../components/course/DiscountFields'
 import { Badge, Button, Card, EmptyState, Icon, Modal, Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
-import { formatPercent } from '../../lib/format'
 import { siteHref } from '../../lib/siteUrl'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
@@ -73,7 +72,7 @@ export function CenterCourses() {
   }
   const saveDiscount = async () => {
     if (!discounting) return
-    const parsed = discountFromDraft(draft)
+    const parsed = discountFromDraft(draft, new Date(), data?.pricing?.maxDiscountPercent, discounting.priceRule ?? 0)
     if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
     setBusy(true)
     try {
@@ -86,8 +85,14 @@ export function CenterCourses() {
 
   const discountLabel = (c: Course) => {
     if (!c.discount) return <Badge tone="muted">{t('center.discountNone')}</Badge>
-    const vars = { percent: c.discount.percent, student: formatPercent(studentPercent(c.discount.percent), lang), from: when(c.discount.startsAt), until: when(c.discount.endsAt) }
-    return isDiscountActive(c.discount) ? <Badge tone="forest">{t('center.discountActive', vars)}</Badge> : <Badge tone="champagne">{t('center.discountScheduled', vars)}</Badge>
+    const active = isDiscountActive(c.discount)
+    // A new course's discount has no end (Шерзод, 20.11): «−10% · без срока» / «−10% · с …, без срока».
+    if (!c.discount.endsAt) {
+      const vars = { percent: c.discount.percent, from: when(c.discount.startsAt) }
+      return active ? <Badge tone="forest">{t('center.discountOpen', vars)}</Badge> : <Badge tone="champagne">{t('center.discountOpenFrom', vars)}</Badge>
+    }
+    const vars = { percent: c.discount.percent, from: when(c.discount.startsAt), until: when(c.discount.endsAt) }
+    return active ? <Badge tone="forest">{t('center.discountActive', vars)}</Badge> : <Badge tone="champagne">{t('center.discountScheduled', vars)}</Badge>
   }
   const center = data ? { id: data.center.id, name: data.center.name } : undefined
 
@@ -126,7 +131,7 @@ export function CenterCourses() {
 
       <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('center.addCourse') : editing ? tr(editing.title) : ''}>
         {editing && center && (
-          <CourseForm key={editing === 'new' ? 'new' : editing.id} initial={editing === 'new' ? undefined : editing} mode="center" teachers={teachers} center={center} teacherId={teachers[0]?.id} onSave={(c) => void saveCourse(c)} onCancel={() => setEditing(null)} />
+          <CourseForm key={editing === 'new' ? 'new' : editing.id} initial={editing === 'new' ? undefined : editing} mode="center" teachers={teachers} center={center} teacherId={teachers[0]?.id} pricing={data?.pricing} onSave={(c) => void saveCourse(c)} onCancel={() => setEditing(null)} />
         )}
       </Modal>
       <Modal
@@ -136,7 +141,7 @@ export function CenterCourses() {
         title={discounting ? tr(discounting.title) : ''}
         footer={<><Button variant="ghost" onClick={() => setDiscounting(null)}>{t('common.cancel')}</Button><Button disabled={busy} onClick={() => void saveDiscount()}>{t('common.save')}</Button></>}
       >
-        {discounting && <DiscountFields value={draft} onChange={setDraft} price={discounting.price} />}
+        {discounting && <DiscountFields value={draft} onChange={setDraft} price={discounting.price} pricing={data?.pricing} priceRule={discounting.priceRule ?? 0} />}
       </Modal>
     </div>
   )
