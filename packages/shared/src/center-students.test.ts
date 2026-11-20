@@ -47,8 +47,11 @@ describe('Minors and invitations (ТЗ 4.3)', () => {
   it('the token travels in the fragment, never in the path or query', () => {
     const url = inviteUrl('https://ilmora.uz/', 'abc_DEF-123')
     expect(url).toBe('https://ilmora.uz/invite#abc_DEF-123')
-    expect(new URL(url).search).toBe('')
-    expect(new URL(url).pathname).toBe('/invite')
+    // No `URL` here: the shared package has neither DOM nor Node types. Path, then the fragment; no query at all.
+    const [address, fragment] = url.split('#')
+    expect(address).toBe('https://ilmora.uz/invite')
+    expect(address).not.toContain('?')
+    expect(fragment).toBe('abc_DEF-123')
   })
 })
 
