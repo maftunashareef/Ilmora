@@ -133,7 +133,8 @@ export const EnvSchema = z.object({
   S3_DOCS_BUCKET: z.string().optional(),
   /**
    * Private bucket for homework archives (ТЗ 18.11, 8.4): ZIP up to 1024 MB uploaded in parts straight from the browser, no
-   * public reads, download links live 5 minutes, not in the nightly backups. Must differ from the public media bucket.
+   * public reads, download links live 5 minutes, not in the nightly backups. Must differ from the public media bucket. Until it exists it may be the documents bucket:
+   * homework objects then live under their own prefix `homework/` (infra/uzcloud/README.md).
    */
   S3_HOMEWORK_BUCKET: z.string().optional(),
   S3_ACCESS_KEY_ID: z.string().optional(),
