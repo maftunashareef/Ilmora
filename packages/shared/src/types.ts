@@ -144,6 +144,8 @@ export interface Course extends Publishable {
   price: number
   /** Discount window while it has not expired (it may start later). `price` stays the list price: use finalPriceSom(). */
   discount?: CourseDiscount | null
+  /** 1 — created with the calculator (ТЗ 18.11, 9.2): the student's price rounds down to 1 000 so'm; 0 or absent — before it. */
+  priceRule?: 0 | 1
   coverSeed: number
   imageUrl?: string
   imageUpload?: UploadMeta

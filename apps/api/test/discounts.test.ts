@@ -44,7 +44,7 @@ describe('who may set a discount (stubbed storage)', () => {
 
   function setup(stored: Record<string, unknown> = {}) {
     const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => row({ ...stored, ...data }))
-    const prisma = { client: { course: { findFirst: async () => row(stored), update }, center: { findFirst: async () => ({ status: 'ACTIVE' }) } } }
+    const prisma = { client: { course: { findFirst: async () => row(stored), update }, center: { findFirst: async () => ({ status: 'ACTIVE' }) }, tenant: { findUnique: async () => ({ commissionPercent: 10 }) } } }
     const service = new ManageService(
       prisma as unknown as PrismaService,
       { record: async () => undefined } as unknown as AuditService,
@@ -112,6 +112,7 @@ describe('center admin endpoints (stubbed storage)', () => {
       client: {
         course: { findFirst: async () => (missing ? null : course), findMany, update },
         center: { findFirst: async ({ where }: { where: { id: string } }) => ({ id: where.id, name: 'Center A' }) },
+        tenant: { findUnique: async () => ({ commissionPercent: 10 }) },
       },
     }
     const site = { get: async () => ({ permissions: { teacher: { editCourses: true, editPrices: false, publishDirectly: true } } }) }
@@ -172,7 +173,10 @@ describe('center admin endpoints (stubbed storage)', () => {
     expect(CourseDiscountBody.safeParse({ discount: WINDOW }).success).toBe(true)
     expect(CourseDiscountBody.safeParse({ discount: null }).success).toBe(true)
     expect(CourseDiscountBody.safeParse({}).success).toBe(false)
-    expect(CourseDiscountBody.safeParse({ discount: { ...WINDOW, percent: 21 } }).success).toBe(false)
+    // ТЗ 18.11, 9.1: from 5%; the upper limit 100% − K is the service's (discount_over_limit), the schema caps at 98%.
+    expect(CourseDiscountBody.safeParse({ discount: { ...WINDOW, percent: 4 } }).success).toBe(false)
+    expect(CourseDiscountBody.safeParse({ discount: { ...WINDOW, percent: 21 } }).success).toBe(true)
+    expect(CourseDiscountBody.safeParse({ discount: { ...WINDOW, percent: 99 } }).success).toBe(false)
     expect(CourseDiscountBody.safeParse({ discount: WINDOW, extra: 1 }).success).toBe(false)
   })
 

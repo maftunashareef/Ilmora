@@ -72,7 +72,7 @@ export function CenterCourses() {
   }
   const saveDiscount = async () => {
     if (!discounting) return
-    const parsed = discountFromDraft(draft)
+    const parsed = discountFromDraft(draft, new Date(), data?.pricing?.maxDiscountPercent)
     if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
     setBusy(true)
     try {
@@ -125,7 +125,7 @@ export function CenterCourses() {
 
       <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('center.addCourse') : editing ? tr(editing.title) : ''}>
         {editing && center && (
-          <CourseForm key={editing === 'new' ? 'new' : editing.id} initial={editing === 'new' ? undefined : editing} mode="center" teachers={teachers} center={center} teacherId={teachers[0]?.id} onSave={(c) => void saveCourse(c)} onCancel={() => setEditing(null)} />
+          <CourseForm key={editing === 'new' ? 'new' : editing.id} initial={editing === 'new' ? undefined : editing} mode="center" teachers={teachers} center={center} teacherId={teachers[0]?.id} pricing={data?.pricing} onSave={(c) => void saveCourse(c)} onCancel={() => setEditing(null)} />
         )}
       </Modal>
       <Modal
@@ -135,7 +135,7 @@ export function CenterCourses() {
         title={discounting ? tr(discounting.title) : ''}
         footer={<><Button variant="ghost" onClick={() => setDiscounting(null)}>{t('common.cancel')}</Button><Button disabled={busy} onClick={() => void saveDiscount()}>{t('common.save')}</Button></>}
       >
-        {discounting && <DiscountFields value={draft} onChange={setDraft} price={discounting.price} />}
+        {discounting && <DiscountFields value={draft} onChange={setDraft} price={discounting.price} pricing={data?.pricing} priceRule={discounting.priceRule ?? 0} />}
       </Modal>
     </div>
   )

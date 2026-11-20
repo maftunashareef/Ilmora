@@ -34,6 +34,8 @@ function setup(opts: { priceMinor?: bigint; open?: { id: string; status: string 
       findFirst: vi.fn(async (args?: { include?: unknown }) => (args?.include ? { ...draft, status: opts.subStatus ?? 'PENDING_PAYMENT', kind: 'PERIOD', startedAt: null, currentPeriodEnd: null, amountMinor: 0n, package: null, student: { displayName: 'S' } } : { ...draft, status: 'DRAFT' })),
     },
     paymentLine: { createMany: spy('paymentLine.createMany', { count: 1 }) },
+    // ILMORA's commission (ТЗ 18.11, 9): the payment keeps the split of every course.
+    tenant: { findUnique: vi.fn(async () => ({ commissionPercent: 10 })) },
     payment: {
       findFirst: vi.fn(async () => null),
       updateMany: spy('payment.updateMany', { count: 1 }),
@@ -98,7 +100,8 @@ describe('free checkout', () => {
     expect(calls['payment.create']?.[0]).toMatchObject({ amountMinor: 50_000_00n, provider: 'PAYME' })
     expect(calls['payment.create']?.[0]).not.toHaveProperty('state')
     // What the payment pays for each course is kept with it: a refund is counted from it (security review №42).
-    expect(calls['paymentLine.createMany']?.[0]).toEqual({ data: [{ tenantId: 't', paymentId: 'pay-new', enrollmentId: 'e1', courseId: 'c1', listPriceMinor: 50_000_00n, amountMinor: 50_000_00n }] })
+    // With it, the calculation of ТЗ 18.11, 9.2: no discount here, commission 10% — the center 45 000, ILMORA 5 000 so'm.
+    expect(calls['paymentLine.createMany']?.[0]).toEqual({ data: [{ tenantId: 't', paymentId: 'pay-new', enrollmentId: 'e1', courseId: 'c1', listPriceMinor: 50_000_00n, amountMinor: 50_000_00n, discountPercent: 0, commissionPercent: 10, centerShareMinor: 45_000_00n, platformShareMinor: 5_000_00n }] })
     expect(calls['enrollment.updateMany']).toBeUndefined()
     expect(payment.state).toBe('PENDING')
   })

@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
-import { dueReminder, finalPriceMinor, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, subscriptionAccess, type SubscriptionAccess } from '@ilmora/shared'
+import { COMMISSION_DEFAULT_PERCENT, dueReminder, finalPriceMinor, isDiscountActive, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, priceSplitMinor, subscriptionAccess, type PriceRule, type SubscriptionAccess } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addMonthsInZone, localDay, todayLocal } from '../../common/time'
 import { ENV, type Env, paymeConfigured } from '../../config/env'
@@ -12,10 +12,27 @@ import { NotificationsService } from '../notifications/notifications.service'
 
 export interface DraftInput { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
 
-type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; center: { status: string }; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; meyosGrant: boolean; status: string } }
+type GroupRow = { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number; course: { id: string; center: { status: string }; priceMinor: bigint; priceRule: number; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; meyosGrant: boolean; status: string } }
 type Db = TransactionClient | PrismaService['client']
-/** One course of a payment (PaymentLine): its enrollment, its price for the period and what is paid for it. */
-type PaymentLineInput = { enrollmentId: string; courseId: string; listPriceMinor: bigint; amountMinor: bigint }
+/** One course of a payment (PaymentLine): its enrollment, its price for the period, what is paid for it and the split. */
+type PaymentLineInput = { enrollmentId: string; courseId: string; listPriceMinor: bigint; amountMinor: bigint; discountPercent: number; commissionPercent: number; centerShareMinor: bigint; platformShareMinor: bigint }
+type PricedCourse = { priceMinor: bigint; priceRule?: number; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }
+
+/**
+ * What one course costs in a payment made now (ТЗ 2026-11-18, 9): the student's price by the course's rule, and the snapshot
+ * of the calculation — the discount S that applied, ILMORA's commission K, the center's and ILMORA's shares. A later change
+ * of K or of the discount does not touch a payment already made (9.2).
+ */
+export function priceLine(course: PricedCourse, commissionPercent: number, now: Date) {
+  const window = discountWindow(course)
+  const rule: PriceRule = course.priceRule === 1 ? 1 : 0
+  const amountMinor = finalPriceMinor(course.priceMinor, window, now, rule)
+  const discountPercent = isDiscountActive(window, now) ? window!.percent : 0
+  // A free course carries no commission.
+  const commission = course.priceMinor === 0n ? 0 : commissionPercent
+  const { centerMinor, platformMinor } = priceSplitMinor({ priceMinor: course.priceMinor, studentMinor: amountMinor, discountPercent, commissionPercent: commission })
+  return { listPriceMinor: course.priceMinor, amountMinor, discountPercent, commissionPercent: commission, centerShareMinor: centerMinor, platformShareMinor: platformMinor }
+}
 type PackageAccess = { accessKind: 'PERIOD' | 'LESSONS'; periodDays: number | null; lessonCount: number | null } | null
 
 const DAY_MS = 86_400_000
@@ -108,7 +125,7 @@ export class SubscriptionService {
       if (!pkg.enabled) throw AppError.invalid('disabled', 'This package is not available')
     }
     if (groupIds.length === 0) return []
-    const groups = (await db.group.findMany({ where: { tenantId, id: { in: groupIds }, deletedAt: null }, include: { course: { select: { id: true, center: { select: { status: true } }, priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, meyosGrant: true, status: true } } } })) as GroupRow[]
+    const groups = (await db.group.findMany({ where: { tenantId, id: { in: groupIds }, deletedAt: null }, include: { course: { select: { id: true, center: { select: { status: true } }, priceMinor: true, priceRule: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, meyosGrant: true, status: true } } } })) as GroupRow[]
     if (groups.length !== groupIds.length) throw AppError.notFound('Group')
     if (groups.some((g) => g.course.status !== 'PUBLISHED')) throw AppError.invalid('disabled', 'One of the courses is not open for enrollment')
     if (groups.some((g) => g.course.center.status !== 'ACTIVE')) throw AppError.invalid('disabled', 'One of the courses belongs to a center that is not approved')
@@ -191,7 +208,8 @@ export class SubscriptionService {
       const groups = await this.validateSelection(tenantId, draft.packageId, draft.draftGroupIds, studentId, tx)
       // Each course is charged its list price minus the discount active right now (none stacks with anything else); the server
       // decides the amount, the browser only displays it. The amount stays fixed for this payment's hold.
-      const priced = groups.map((g) => ({ groupId: g.id, courseId: g.courseId, listPriceMinor: g.course.priceMinor, amountMinor: finalPriceMinor(g.course.priceMinor, discountWindow(g.course), now) }))
+      const commission = await this.commissionPercent(tx, tenantId)
+      const priced = groups.map((g) => ({ groupId: g.id, courseId: g.courseId, ...priceLine(g.course, commission, now) }))
       const listMinor = priced.reduce((sum, l) => sum + l.listPriceMinor, 0n)
       const amountMinor = priced.reduce((sum, l) => sum + l.amountMinor, 0n)
       const sub = await tx.subscription.update({
@@ -224,6 +242,12 @@ export class SubscriptionService {
    * confirm, so the payment is recorded as paid without a provider and the subscription starts on the spot.
    * `lines`: what it pays for each course (PaymentLine), adding up to the amount; a course's refund is counted from them.
    */
+  /** ILMORA's commission K now (the Super Admin's setting, one for every center). */
+  private async commissionPercent(db: Pick<TransactionClient, 'tenant'>, tenantId: string): Promise<number> {
+    const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { commissionPercent: true } })
+    return tenant?.commissionPercent ?? COMMISSION_DEFAULT_PERCENT
+  }
+
   private async createPayment(tx: TransactionClient, now: Date, data: { tenantId: string; studentId: string; subscriptionId: string; periodStart: Date; periodEnd: Date; amountMinor: bigint; currency: string; provider: PaymentProvider; expiresAt: Date; createdById: string; lessonsBought: number | null }, lines: PaymentLineInput[]) {
     if (lines.reduce((sum, l) => sum + l.amountMinor, 0n) !== data.amountMinor) throw new Error('Payment lines do not add up to the payment amount')
     const free = data.amountMinor === 0n
@@ -256,12 +280,14 @@ export class SubscriptionService {
     }
     const seats = await this.prisma.client.enrollment.findMany({
       where: { subscriptionId: sub.id, status: 'ACTIVE' },
-      select: { id: true, courseId: true, group: { select: { deletedAt: true, course: { select: { priceMinor: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, status: true, center: { select: { status: true } } } } } } },
+      select: { id: true, courseId: true, group: { select: { deletedAt: true, course: { select: { priceMinor: true, priceRule: true, discountPercent: true, discountStartsAt: true, discountEndsAt: true, status: true, center: { select: { status: true } } } } } } },
     })
     if (!seats.length || seats.some((e) => e.group.deletedAt || e.group.course.status !== 'PUBLISHED' || e.group.course.center.status !== 'ACTIVE')) {
       throw AppError.conflict('renewal_unavailable', 'One of the courses is no longer open: choose the courses again')
     }
-    const lines = seats.map((e) => ({ enrollmentId: e.id, courseId: e.courseId, listPriceMinor: e.group.course.priceMinor, amountMinor: finalPriceMinor(e.group.course.priceMinor, discountWindow(e.group.course), now) }))
+    // Renewal: today's price, discount and commission (decision 10.11), the calculation kept in the payment.
+    const commission = await this.commissionPercent(this.prisma.client, tenantId)
+    const lines = seats.map((e) => ({ enrollmentId: e.id, courseId: e.courseId, ...priceLine(e.group.course, commission, now) }))
     const amountMinor = lines.reduce((sum, l) => sum + l.amountMinor, 0n)
     // An early renewal continues after the current period; a renewal of a blocked subscription starts a fresh period now.
     const periodStart = sub.status === 'ACTIVE' && sub.kind === 'PERIOD' && sub.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now

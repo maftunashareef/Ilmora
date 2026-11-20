@@ -168,7 +168,7 @@ const hasText = (v: unknown): v is Record<'uz' | 'ru' | 'en', string> =>
 
 export const toCourse = (c: {
   id: string; slug: string; title: unknown; categoryId: string; centerId: string; teacherId: string; subjectId: string | null; summary: unknown; description: unknown; curriculum: unknown;
-  level: string; durationMonths: number; priceMinor: bigint; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; currency: string; coverSeed: number; imageUrl: string | null; meyosGrant: boolean; status: string; visibility: string;
+  level: string; durationMonths: number; priceMinor: bigint; priceRule?: number; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null; currency: string; coverSeed: number; imageUrl: string | null; meyosGrant: boolean; status: string; visibility: string;
   audienceStudentIds: string[]; audienceGroupIds: string[]; featured: boolean; reviewRequested: boolean; updatedAt: Date;
   learningFormat: string; externalUrl: string | null; providerName: string | null; instructorName: string | null; certificate: string; durationText: unknown;
   groups: { id: string; courseId: string; name: string; days: number[]; startTime: string; endTime: string; room: string; capacity: number }[]
@@ -178,7 +178,7 @@ export const toCourse = (c: {
   learningFormat: c.learningFormat,
   // The provider's link, names and certificate only exist for ONLINE courses.
   ...(c.learningFormat === 'ONLINE' ? { externalUrl: c.externalUrl ?? undefined, providerName: c.providerName ?? undefined, instructorName: c.instructorName ?? undefined, certificate: c.certificate, durationText: hasText(c.durationText) ? c.durationText : undefined } : {}),
-  price: Number(c.priceMinor / 100n), priceMinor: c.priceMinor.toString(), discount: publicDiscount(c), currency: c.currency, coverSeed: c.coverSeed, imageUrl: c.imageUrl ?? undefined, meyosGrant: c.meyosGrant,
+  price: Number(c.priceMinor / 100n), priceMinor: c.priceMinor.toString(), priceRule: c.priceRule === 1 ? (1 as const) : (0 as const), discount: publicDiscount(c), currency: c.currency, coverSeed: c.coverSeed, imageUrl: c.imageUrl ?? undefined, meyosGrant: c.meyosGrant,
   status: lower(c.status), visibility: lower(c.visibility), audience: { studentIds: c.audienceStudentIds, groupIds: c.audienceGroupIds }, featured: c.featured, reviewRequested: c.reviewRequested,
   updatedAt: c.updatedAt.toISOString(), groups: c.groups.map((g) => toGroup(g, seats)),
 })

@@ -68,7 +68,8 @@ export interface CenterStudent {
   attendance: { present: number; absent: number; excused: number }
 }
 
-export type CenterCourses = { center: { id: string; name: string }; courses: Course[] }
+/** `pricing`: ILMORA's commission and the discount range for the calculator in the course form (ТЗ 18.11, 9.3). */
+export type CenterCourses = { center: { id: string; name: string }; courses: Course[]; pricing?: { commissionPercent: number; minDiscountPercent: number; maxDiscountPercent: number; minPriceSom: number } }
 
 /** What the center sends for one of its offline courses (CourseInput on the API; the center id is fixed server-side). */
 export const centerCourseInput = (c: Course) => ({

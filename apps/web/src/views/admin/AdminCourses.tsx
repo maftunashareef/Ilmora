@@ -1,10 +1,13 @@
-import { filterCourses, formatCounts, isOnlineCourse, isSafeExternalUrl, type FormatFilter } from '@ilmora/shared'
-import { useState } from 'react'
+import { COMMISSION_MAX_PERCENT, COMMISSION_MIN_PERCENT, filterCourses, formatCounts, isOnlineCourse, isSafeExternalUrl, type FormatFilter } from '@ilmora/shared'
+import { useEffect, useState } from 'react'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { CourseForm } from '../../components/course/CourseForm'
+import type { Pricing } from '../../components/course/DiscountFields'
 import { FormatBadge, PriceNow, ScheduleChips } from '../../components/course/CourseCard'
 import { ArtCover, Badge, Button, Card, Eyebrow, Icon, Input, Modal, PageTitle, Segmented, Toggle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
+import { api, isApiError } from '../../lib/api'
+import { apiErrorText } from '../../lib/apiErrors'
 import { siteHref } from '../../lib/siteUrl'
 import { useStore } from '../../store/useStore'
 import type { Course, CourseCardTemplate } from '../../types'
@@ -29,6 +32,22 @@ export function AdminCourses() {
   // Publish / unpublish from the list; the full editor (visibility, audience) stays in the form.
   const togglePublished = (c: Course) => { void upsertCourse({ ...c, status: c.status === 'published' ? 'draft' : 'published' }).then(() => notify(t('common.saved'))).catch(() => undefined) }
   const setTpl = (patch: Partial<CourseCardTemplate>) => patchSite((s) => ({ ...s, courseCard: { ...s.courseCard, ...patch } }))
+  // ILMORA's commission (ТЗ 18.11, 9.5): one for every center, set here by the Super Admin only.
+  const [pricing, setPricing] = useState<Pricing | undefined>()
+  const [commission, setCommission] = useState('')
+  useEffect(() => {
+    let live = true
+    api<Pricing>('/admin/pricing').then((p) => { if (live) { setPricing(p); setCommission(String(p.commissionPercent)) } }).catch(() => undefined)
+    return () => { live = false }
+  }, [])
+  const saveCommission = async () => {
+    const k = Number(commission)
+    if (!Number.isInteger(k) || k < COMMISSION_MIN_PERCENT || k > COMMISSION_MAX_PERCENT) { notify(t('calc.err.commission', { min: COMMISSION_MIN_PERCENT, max: COMMISSION_MAX_PERCENT }), 'warn'); return }
+    try {
+      const p = await api<Pricing>('/admin/pricing', { method: 'PUT', body: { commissionPercent: k } })
+      setPricing(p); setCommission(String(p.commissionPercent)); notify(t('common.saved'))
+    } catch (err) { notify(isApiError(err) ? apiErrorText(err, lang) : String(err), 'warn') }
+  }
 
   return (
     <div>
@@ -39,6 +58,15 @@ export function AdminCourses() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {(['showCategory', 'showCenter', 'showTeacher', 'showLevel', 'showSchedule'] as const).map((k) => <Toggle key={k} checked={tpl[k]} onChange={(v) => setTpl({ [k]: v })} label={t(`admin.courses.${k}`)} />)}
           <div className="flex items-center justify-between gap-3"><span className="text-sm font-medium text-charcoal">{t('admin.courses.priceStyle')}</span><Segmented<CourseCardTemplate['priceStyle']> size="sm" value={tpl.priceStyle} onChange={(priceStyle) => setTpl({ priceStyle })} options={[{ id: 'plain', label: t('admin.courses.plain') }, { id: 'emphasis', label: t('admin.courses.emphasis') }]} /></div>
+        </div>
+      </Card>
+      <Card className="mb-6">
+        <Eyebrow className="mb-1">{t('calc.adminTitle')}</Eyebrow>
+        <p className="mb-4 text-xs text-charcoal/50">{t('calc.adminHint')}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-28"><Input aria-label={t('calc.adminTitle')} type="number" min={COMMISSION_MIN_PERCENT} max={COMMISSION_MAX_PERCENT} step={1} value={commission} disabled={!pricing} onChange={(e) => setCommission(e.target.value)} /></div>
+          <Button size="sm" disabled={!pricing || commission === String(pricing.commissionPercent)} onClick={() => void saveCommission()}>{t('common.save')}</Button>
+          {pricing && <span className="text-xs text-charcoal/55">{t('calc.discountRange', { min: pricing.minDiscountPercent, max: pricing.maxDiscountPercent })}</span>}
         </div>
       </Card>
       <div className="mb-3">
@@ -84,7 +112,7 @@ export function AdminCourses() {
         })}
       </ul>
       <Modal wide open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? t('admin.courses.newCourse') : editing ? tr(editing.title) : ''}>
-        {editing && <CourseForm mode="admin" initial={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSave={(c) => { void upsertCourse(c).then(() => { setEditing(null); notify(t('common.saved')) }).catch(() => undefined) }} />}
+        {editing && <CourseForm mode="admin" initial={editing === 'new' ? undefined : editing} pricing={pricing} onCancel={() => setEditing(null)} onSave={(c) => { void upsertCourse(c).then(() => { setEditing(null); notify(t('common.saved')) }).catch(() => undefined) }} />}
       </Modal>
     </div>
   )

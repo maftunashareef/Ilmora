@@ -1,4 +1,4 @@
-import { checkDiscount, isSafeExternalUrl, MAX_DISCOUNT_PERCENT, REGISTRY_INSTITUTION_TYPES } from '@ilmora/shared'
+import { checkDiscount, COMMISSION_MAX_PERCENT, COMMISSION_MIN_PERCENT, isSafeExternalUrl, MAX_DISCOUNT_PERCENT, MIN_DISCOUNT_PERCENT, REGISTRY_INSTITUTION_TYPES } from '@ilmora/shared'
 import { z } from 'zod'
 
 export const L = z.object({ uz: z.string().max(2000), ru: z.string().max(2000), en: z.string().max(2000) }).strict()
@@ -28,11 +28,18 @@ export const GroupInput = GroupBase.refine((g) => g.start < g.end, { message: 's
 export const GroupPatch = GroupBase.partial().refine((g) => !g.start || !g.end || g.start < g.end, { message: 'start must be before end', path: ['end'] })
 export type GroupInput = z.infer<typeof GroupInput>
 
-/** A course discount window (instants as UTC ISO strings). The percent limit is technical, not a company rule yet. */
+/**
+ * A course discount window (instants as UTC ISO strings): the student discount S of ТЗ 18.11, 9.1 — at least 5%; the upper
+ * limit 100% − K depends on the commission and is checked by ManageService (`discount_over_limit`).
+ */
 export const DiscountInput = z
-  .object({ percent: z.number().int().min(1).max(MAX_DISCOUNT_PERCENT), startsAt: z.string().datetime(), endsAt: z.string().datetime() })
+  .object({ percent: z.number().int().min(MIN_DISCOUNT_PERCENT).max(MAX_DISCOUNT_PERCENT), startsAt: z.string().datetime(), endsAt: z.string().datetime() })
   .strict()
-  .refine((d) => checkDiscount(d).ok, { message: 'The discount must end after it starts' })
+  .refine((d) => checkDiscount(d, MAX_DISCOUNT_PERCENT).ok, { message: 'The discount must end after it starts' })
+
+/** Super Admin: ILMORA's commission K, % of a course's price, one for every center (ТЗ 18.11, 9.5). */
+export const CommissionInput = z.object({ commissionPercent: z.number().int().min(COMMISSION_MIN_PERCENT).max(COMMISSION_MAX_PERCENT) }).strict()
+export type CommissionInput = z.infer<typeof CommissionInput>
 
 /** Body of PUT manage/courses/:id/discount: the new window, or null to remove the discount. */
 export const CourseDiscountBody = z.object({ discount: DiscountInput.nullable() }).strict()

@@ -244,6 +244,8 @@ model Tenant {
   defaultLang Lang      @default(uz)
   /** Public web origin used in links (attendance URLs, receipts), e.g. https://ilmora.uz */
   webOrigin   String
+  /** Commission of ILMORA, % of a course's price, one for every center; only the Super Admin changes it (ТЗ 18.11, 9.5). 2–50 (CHECK). */
+  commissionPercent Int     @default(10)
   /** Deprecated: replaced by User.isOwner (several owners). Kept one release so a rollback still works; not read or written; drop later. */
   ownerUserId String?   @unique
   owner       User?     @relation("TenantOwner", fields: [ownerUserId], references: [id])
@@ -618,6 +620,12 @@ model Course {
   discountPercent  Int?
   discountStartsAt DateTime?
   discountEndsAt   DateTime?
+  /**
+   * 1 — created with the calculator (ТЗ 18.11, 9.2): the price is whole thousands from 50 000 so'm (or 0, free), a paid
+   * course is published only with a student discount of 5% or more, the student's price rounds down to 1 000 so'm. 0 — a
+   * course from before: its prices count as they always did (Тимур, 20.11: the minimum is for new courses).
+   */
+  priceRule        Int            @default(0)
   currency         String         @default("UZS")
   coverSeed        Int            @default(1)
   imageUrl         String?
@@ -1024,6 +1032,13 @@ model PaymentLine {
   listPriceMinor BigInt
   /// Paid for this course: the price less the discount active at the payment.
   amountMinor    BigInt
+  /// The calculation at the payment (ТЗ 18.11, 9.2): the discount S and commission K that applied, what the center and
+  /// ILMORA get (centerShareMinor + platformShareMinor = amountMinor). A later change of K or S does not touch it. Null for
+  /// payments made before the calculator.
+  discountPercent    Int?
+  commissionPercent  Int?
+  centerShareMinor   BigInt?
+  platformShareMinor BigInt?
 
   @@unique([paymentId, enrollmentId])
   @@index([tenantId, courseId])

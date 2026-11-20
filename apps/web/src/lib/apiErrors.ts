@@ -216,6 +216,11 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   import_has_errors: 'cs.err.importHasErrors',
   session_not_yet: 'journal.notYet',
   qr_read_only: 'journal.err.qrReadOnly',
+  // the price calculator (ТЗ 2026-11-18, 9)
+  course_price_invalid: 'calc.err.price',
+  student_discount_required: 'calc.err.discountRequired',
+  discount_over_limit: 'calc.err.overLimit',
+  free_course_no_discount: 'calc.err.freeNoDiscount',
   homework_bad_link: 'hw.badLink',
   homework_zip_not_yet: 'hw.err.zip',
   homework_due_past: 'hw.err.duePast',

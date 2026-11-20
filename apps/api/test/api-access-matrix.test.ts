@@ -228,7 +228,7 @@ const TOKEN_LIKE_OK = ['GET /attendance/centers/:code', 'GET /attendance/centers
 /** Super Admin only (RULES); reaches any center of its tenant by design, the tenant boundary is tested in the Super Admin test below. */
 const ADMIN_PREFIX = '/admin/'
 
-const COURSE_PRICE_DONE = 'here: «price: course bodies …» (strict: commission, fee, priceMinor refused); the price only with editPrices in test/course-center-scope.test.ts, the discount rules in test/discounts.test.ts; known gap: 5% floor (it.fails)'
+const COURSE_PRICE_DONE = 'here: «price: course bodies …» (strict: commission, fee, priceMinor refused) and «price: a discount below 5% is refused»; the price only with editPrices in test/course-center-scope.test.ts, the discount rules in test/discounts.test.ts, the calculator in test/price-calculator.test.ts'
 const CENTER_INVITE_DONE = 'test/center-students.test.ts «invitation: …»: 256 random bits, only the SHA-256 stored, works once, expires in 7 days, one answer for wrong/used/expired; here «invitation token: …» (body only, never the path or the query)'
 /** Route key → where the security list of its area is tested, or why it does not apply. */
 const SECURITY_DONE: Record<string, string> = {
@@ -241,7 +241,9 @@ const SECURITY_DONE: Record<string, string> = {
   'POST /students/me/center-invites/preview': CENTER_INVITE_DONE,
   'POST /students/me/center-invites/accept': CENTER_INVITE_DONE,
   'POST /graduates/:cardId/invite': 'no token: it creates a contact request the student answers in their own account; the card id is company-keyed (NOT_AN_ID)',
-  'PUT /manage/courses/:id/discount': 'here: «price: the discount body …» (strict body), and test/discounts.test.ts; known gap: 5% floor (it.fails)',
+  'PUT /manage/courses/:id/discount': 'here: «price: the discount body …» (strict body) and «price: a discount below 5% is refused»; test/discounts.test.ts; the upper limit 100% − K — test/price-calculator.test.ts',
+  // ILMORA's commission (ТЗ 18.11, 9.5): the Super Admin's route by design — the body carries the commission and nothing else.
+  'PUT /admin/pricing': 'Super Admin only (RULES): the one body that carries a commission, strict (CommissionInput, 2–50%); audited (pricing.commission) — test/price-calculator.test.ts; centers and teachers get 403 here',
   'POST /manage/courses': COURSE_PRICE_DONE,
   'PATCH /manage/courses/:id': COURSE_PRICE_DONE,
   'POST /center/courses': COURSE_PRICE_DONE,
@@ -279,7 +281,7 @@ describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
     expect(routeKeys.has('GET /ministry/export')).toBe(true)
     expect(by['center students and Excel']).not.toContain('GET /ministry/export')
     expect([...by.price].sort()).toEqual([
-      'PATCH /admin/centers/:centerId/courses/:id', 'PATCH /center/courses/:id', 'PATCH /manage/courses/:id', 'POST /admin/centers/:centerId/courses', 'POST /center/courses', 'POST /manage/courses', 'PUT /manage/courses/:id/discount',
+      'PATCH /admin/centers/:centerId/courses/:id', 'PATCH /center/courses/:id', 'PATCH /manage/courses/:id', 'POST /admin/centers/:centerId/courses', 'POST /center/courses', 'POST /manage/courses', 'PUT /admin/pricing', 'PUT /manage/courses/:id/discount',
     ])
     expect(by.attendance).toContain('POST /teacher/sessions/:id/open')
     expect(by['ZIP upload']).toEqual(['POST /manage/uploads/resource-file/upload-url'])
@@ -356,9 +358,12 @@ describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
       }
   })
 
-  // Known gap: DiscountInput (manage.schemas.ts) and checkDiscount (packages/shared/src/pricing.ts) allow 1–20%. Once fixed this passes, so vitest fails it: drop .fails then.
-  it.fails('price: a discount below 5% is refused (ТЗ) — known gap, floor is 1% today', () => {
-    expect(CourseDiscountBody.safeParse({ discount: { percent: 4, startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' } }).success).toBe(false)
+  // Closed (ТЗ 18.11, 9.1; Тимур, 20.11): DiscountInput and checkDiscount take 5% and more; the upper limit 100% − K is the service's.
+  it('price: a discount below 5% is refused (ТЗ)', () => {
+    const window = { startsAt: '2026-12-01T00:00:00.000Z', endsAt: '2026-12-31T00:00:00.000Z' }
+    expect(CourseDiscountBody.safeParse({ discount: { percent: 4, ...window } }).success).toBe(false)
+    expect(CourseDiscountBody.safeParse({ discount: { percent: 5, ...window } }).success).toBe(true)
+    for (const schema of [CourseInput, CoursePatch]) expect(schema.safeParse({ discount: { percent: 4, ...window } }).error?.issues.some((i) => i.path.includes('percent'))).toBe(true)
   })
 
   it('price: the student\'s cart and checkout carry no amount of their own (the server prices them)', async () => {
