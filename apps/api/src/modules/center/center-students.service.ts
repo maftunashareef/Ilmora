@@ -623,7 +623,8 @@ export class CenterStudentsService {
   /** Check only: rows and their errors, nothing written. The check is in the audit log too (a file was read). */
   async importCheck(tenantId: string, actor: RequestActor, base64: string) {
     const center = await this.own(tenantId, actor)
-    this.assertWritable(center)
+    // Only an approved center reads a file in (проверка безопасности 20.11, №1): a center registers itself.
+    this.assertApproved(center, actor)
     const rows = await this.parseImport(tenantId, center.id, base64)
     const bad = rows.filter((r) => r.errors.length)
     await this.audit.record({ action: 'center.students_import_check', entityType: 'Center', entityId: center.id, after: { rows: rows.length, errors: bad.length } })
@@ -636,7 +637,8 @@ export class CenterStudentsService {
    */
   async importCommit(tenantId: string, actor: RequestActor, base64: string) {
     const center = await this.own(tenantId, actor)
-    this.assertWritable(center)
+    // Only an approved center reads a file in (проверка безопасности 20.11, №1): a center registers itself.
+    this.assertApproved(center, actor)
     const rows = await this.parseImport(tenantId, center.id, base64)
     const bad = rows.filter((r) => r.errors.length)
     if (bad.length) throw AppError.invalid('import_has_errors', 'The file has rows with errors; nothing was written', { errors: bad.map((r) => ({ row: r.row, errors: r.errors })) })
