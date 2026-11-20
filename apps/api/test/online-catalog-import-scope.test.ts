@@ -42,14 +42,14 @@ describe.skipIf(!DB_AVAILABLE)('№11 online catalog import leaves a center\'s o
 
   beforeAll(() => ctx.connect())
   afterAll(async () => {
-    await TenantContext.system(() => ctx.prisma.client.course.deleteMany({ where: { id: { in: ONLINE_COURSES.map((c) => c.id) }, tenant: { slug: { startsWith: 'imp-' } } } }))
+    await TenantContext.system(() => ctx.prisma.client.course.deleteMany({ where: { id: { in: ONLINE_COURSES.map((c) => c.id) }, tenant: { slug: { startsWith: 'imp-' } } }, hardDelete: true } as never))
     await ctx.close()
   })
 
   it('a run of the import does not turn the center\'s course into the platform\'s online course', async () => {
     const db = ctx.prisma.client
     // Leftovers of an interrupted earlier run would hold the stable ids.
-    await TenantContext.system(() => db.course.deleteMany({ where: { id: { in: ONLINE_COURSES.map((c) => c.id) }, tenant: { slug: { startsWith: 'imp-' } } } }))
+    await TenantContext.system(() => db.course.deleteMany({ where: { id: { in: ONLINE_COURSES.map((c) => c.id) }, tenant: { slug: { startsWith: 'imp-' } } }, hardDelete: true } as never))
     const t = await ctx.makeTenant('imp')
     const tenant = await TenantContext.system(() => db.tenant.findUniqueOrThrow({ where: { id: t.tenantId } }))
 
