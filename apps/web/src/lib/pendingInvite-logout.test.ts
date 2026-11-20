@@ -13,10 +13,16 @@ import { pendingInvite } from './pendingInvite'
  *
  * Rule, about the outcome: an invitation taken while one account was signed in is not pending for another account that
  * signs in next in the same tab — after the store's logout(), and after a forced sign-out (the session is gone and the
- * reloaded page's bootstrap applies «no account», useStore.ts applyAuth(null) on a refused refresh). Both fixes pass:
- * clearing on sign-out, or clearing on the sign-in of another account. Not to be broken (checked outside the rule, holds
- * today): an invitation opened while signed out is still pending after the page boots without a session and the student
- * signs in — that is how it is meant to be accepted, so clearing on every applyAuth(null) is not a fix (it fails there).
+ * reloaded page's bootstrap applies «no account», useStore.ts applyAuth(null) on a refused refresh; the reload is
+ * simulated with fresh modules, so only sessionStorage carries over). For logout(), clearing on sign-out is enough. For
+ * the forced case it is not: the page cannot tell a forced sign-out from a visitor whose session simply expired, so the
+ * token has to be bound to the account that took it (or to «signed out») and dropped when a different account signs in.
+ *
+ * Not to be broken (checked outside the rule, both hold today) — that is how an invitation is meant to be accepted:
+ *  - opened while signed out, it is still pending after the page boots without a session and the student signs in;
+ *  - opened by a student whose session has expired (the flag cookie is still there; Invite.tsx takes the token before
+ *    bootstrap's refused refresh), it is still pending after the student signs in again.
+ * So clearing on every applyAuth(null), or whenever the refresh is refused, is not a fix: these checks fail.
  *
  * Covered: the store paths only. The UI handlers that sign out on their own (Switchers.tsx:136, PasswordChange.tsx:88)
  * are not exercised here.
@@ -107,6 +113,19 @@ describe('№5 a pending center invitation does not pass to the next account in 
     expect(pendingInvite.has()).toBe(true)
   })
 
+  it('an invitation opened by a student whose session has expired still waits after the student signs in again', async () => {
+    ;(document as { cookie: string }).cookie = 'ilmora_session=1'
+    const store = createIlmoraStore(initial)
+    openInvite()
+    await store.getState().bootstrap()
+    // Setup sanity: the refresh was tried and refused, and the store is signed out.
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/auth/refresh'))).toBe(true)
+    expect(store.getState().auth.status).toBe('anonymous')
+    await store.getState().loginAsDemo('STUDENT')
+    expect(store.getState().auth.status).toBe('authenticated')
+    expect(pendingInvite.has()).toBe(true)
+  })
+
   it('after logout(), another student who signs in has no pending invitation', async () => {
     const store = createIlmoraStore(initial)
     await store.getState().loginAsDemo('STUDENT')
@@ -130,9 +149,13 @@ describe('№5 a pending center invitation does not pass to the next account in 
     openInvite()
     // The session ends (expired or revoked) and the tab is reloaded: the access token is gone, the session flag cookie is
     // still there, and the refresh is refused — bootstrap signs the tab out with applyAuth(null).
+    // A reload: fresh modules (no token in memory, no access token), only sessionStorage and the cookie carry over.
     session.set(null)
     ;(document as { cookie: string }).cookie = 'ilmora_session=1'
-    const store = createIlmoraStore(initial)
+    vi.resetModules()
+    const reloaded = (await import('./pendingInvite')).pendingInvite
+    const { createIlmoraStore: createReloaded } = await import('../store/useStore')
+    const store = createReloaded(initial)
     await store.getState().bootstrap()
     // Setup sanity: the refresh was tried and refused, and the store is signed out.
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/auth/refresh'))).toBe(true)
@@ -141,7 +164,8 @@ describe('№5 a pending center invitation does not pass to the next account in 
     await store.getState().loginAsDemo('STUDENT', OTHER)
     expect(store.getState().auth.user?.id).toBe(OTHER.id)
 
-    const o = outcome()
+    const o = { has: reloaded.has(), stored: storage.get(KEY) ?? null }
+    reloaded.clear()
     rule('n5-forced', !o.has, `after a forced sign-out and another student's sign-in no invitation is pending (now: ${describeOutcome(o)})`, o.has && o.stored === TOKEN)
   })
 })

@@ -95,7 +95,7 @@ describe.skipIf(!DB_AVAILABLE)('№13 deleting an account takes the person\'s da
       !!sub && JSON.stringify(sub) === JSON.stringify(submission))
 
     // Another student of the same center is not affected (outside the rule: holds today and after the fix).
-    const kept = await TenantContext.system(() => db.centerStudent.findUniqueOrThrow({ where: { id: neighbourRow.id } }))
+    const kept = await TenantContext.system(() => db.centerStudent.findUniqueOrThrow({ where: { id: neighbourRow.id }, includeDeleted: true } as never)) as unknown as typeof neighbourRow
     expect(kept).toMatchObject({ fullName: neighbourRow.fullName, phoneE164: neighbourRow.phoneE164, userId: neighbour.id })
   })
 })
