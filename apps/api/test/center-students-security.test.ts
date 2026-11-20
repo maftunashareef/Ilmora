@@ -24,12 +24,12 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  *      аккаунт не видит данных студента (можно только название центра): ни ФИО, ни учебного заведения, ни
  *      курса/класса, ни групп. Способ привязки не решён (совпадение телефона, SMS-код, подтверждение центром), поэтому
  *      правило проверяет только исход. Аккаунт с совпадающим телефоном по-прежнему принимает — или получает исход «ждёт
- *      подтверждения»: ответ без `ok: true` или с `pending: true`, либо 4xx с кодом про code/confirm/pending/sms/otp.
+ *      подтверждения»: ответ без `ok: true` или с `pending: true`, либо 4xx с одним из кодов PENDING_CODES (список уточнить под выбранное исправление).
  *      Исправление, которое пишет userId в запись ДО подтверждения, под правило не подходит (запись должна остаться
  *      непривязанной, пока шаг не пройден).
  *  №3  Центр видит полную дату рождения студентов, пришедших через ILMORA (и несовершеннолетних): для записей с
  *      source ILMORA ни таблица, ни карточка, ни выгрузка Excel не содержат даты рождения. Флаг «несовершеннолетний»
- *      или возраст — можно (флаг у несовершеннолетнего проверяется строго). Показ только года рождения намеренно не
+ *      или возраст — можно, а флаг `minor` у несовершеннолетнего обязан остаться (проверяется строго). Показ только года рождения намеренно не
  *      принимается: правило ищет полную дату, но решение по находке — дату не отдавать.
  *  №4  Выданное приглашение переживает смену телефона и архив: после смены phone / parentPhone или статуса LEFT старая
  *      ссылка отвечает так же, как несуществующая (тот же статус и код, что у случайного токена), и запись не
@@ -81,9 +81,11 @@ const outcome = (p: Promise<unknown>): Promise<Outcome> =>
 const refused4xx = (o: Outcome) => !o.ok && o.status >= 400 && o.status < 500
 const refused403 = (o: Outcome) => !o.ok && o.status === 403
 /** «Waiting for confirmation»: an answer that is not a plain `{ ok: true }`, or a 4xx naming the missing step. */
+/** TODO(№2): exact codes of the confirmation step, to be aligned with the fix that is chosen (SMS code, center confirmation). */
+const PENDING_CODES = new Set(['invite_pending', 'invite_code_required', 'invite_confirmation_required', 'invite_sms_required', 'invite_otp_required', 'code_required', 'confirmation_required'])
 const isPending = (o: Outcome) => {
   if (o.ok) { const v = (o.value ?? {}) as { ok?: unknown; pending?: unknown }; return v.ok !== true || v.pending === true }
-  return refused4xx(o) && /code|confirm|pending|sms|otp/i.test(o.code ?? '')
+  return refused4xx(o) && PENDING_CODES.has(o.code ?? '')
 }
 /** The same answer as a link that never existed. */
 const sameAsDead = (o: Outcome, dead: Outcome) => !o.ok && !dead.ok && o.status === dead.status && o.code === dead.code
@@ -162,6 +164,15 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
   const invite = (s: S, id: string) => as(s, s.center, () => table.invite(s.tenantId, s.center, id)).then((o) => new URL(o.url).hash.slice(1))
   const record = (s: S, id: string) => sys(s, () => ctx.prisma.client.centerStudent.findUniqueOrThrow({ where: { id } }))
 
+  /** The answers to a malformed body (validation, not the service). */
+  const malformed = async (s: S, actor: RequestActor) => {
+    const m = { preview: await preview(s, actor, '!'), accept: await accept(s, actor, '!') }
+    expect(refused4xx(m.preview) && refused4xx(m.accept), 'setup: a malformed body is refused').toBe(true)
+    return m
+  }
+  /** A refusal by the service: a 4xx that is not the body-validation answer. */
+  const refusedByService = (o: Outcome, bad: Outcome) => refused4xx(o) && !sameAsDead(o, bad)
+
   /** Setup: the link is alive for its owner — the preview names the center, or asks for the confirmation step. */
   const previewWorks = (o: Outcome, s: S) => (o.ok && (o.value as { centerName?: string } | null)?.centerName === s.t.center.name) || (refused4xx(o) && isPending(o))
   /** Today's preview: answered with the student's full name in it. */
@@ -190,11 +201,13 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     expect(previewWorks(await preview(s, owner, token), s), 'setup: the owner opens the preview').toBe(true)
 
     const seen = await preview(s, stranger, token)
-    rule('n2-preview', !showsStudent(seen, 'Aziz Karimov'), '№2 a stranger\'s preview shows no fullName / institution / studyYear / groups', previewShowsName(seen, 'Aziz Karimov'))
+    const allShown = seen.ok && STUDENT_FIELDS.every((f) => { const x = (seen.value as Record<string, unknown>)[f]; return x !== undefined && x !== null && !(Array.isArray(x) && !x.length) })
+    rule('n2-preview', !showsStudent(seen, 'Aziz Karimov'), '№2 a stranger\'s preview shows no fullName / institution / studyYear / groups', allShown && previewShowsName(seen, 'Aziz Karimov'))
 
+    const bad = await malformed(s, stranger)
     const taken = await accept(s, stranger, token)
     const after = await record(s, rec)
-    rule('n2-accept', after.userId === null && (refused4xx(taken) || isPending(taken)), '№2 a stranger does not get the record: unlinked, and 4xx or «waiting for confirmation»', taken.ok && after.userId === stranger.id)
+    rule('n2-accept', after.userId === null && (refusedByService(taken, bad.accept) || isPending(taken)), '№2 a stranger does not get the record: unlinked, and 4xx or «waiting for confirmation»', taken.ok && after.userId === stranger.id)
 
     // The matching phone accepts (a second record: a stranger's accept above uses the first link today).
     const phone2 = phone()
@@ -216,9 +229,10 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const token = await invite(s, rec)
     const stranger = await account(s, phone(), 'Stranger')
     expect((await record(s, rec)).inviteTokenHash, 'setup: the invitation was issued').toBeTruthy()
+    const bad = await malformed(s, stranger)
     const taken = await accept(s, stranger, token)
     const after = await record(s, rec)
-    rule('n2-accept-minor', after.userId === null && (refused4xx(taken) || isPending(taken)), '№2 a stranger does not get a minor\'s record', taken.ok && after.userId === stranger.id)
+    rule('n2-accept-minor', after.userId === null && (refusedByService(taken, bad.accept) || isPending(taken)), '№2 a stranger does not get a minor\'s record', taken.ok && after.userId === stranger.id)
   })
 
   // ───────── №3 ─────────
@@ -260,7 +274,18 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
   // ───────── №4 ─────────
 
   /** The answers to a link that never existed, for the same account. */
-  const dead = async (s: S, actor: RequestActor) => ({ preview: await preview(s, actor, randomToken(32)), accept: await accept(s, actor, randomToken(32)) })
+  /**
+   * The answers to a link that never existed, for the same account. Setup proves they come from the service, not from
+   * body validation: a malformed body (or one missing a field a fix makes required) gets another answer.
+   */
+  const dead = async (s: S, actor: RequestActor) => {
+    const d = { preview: await preview(s, actor, randomToken(32)), accept: await accept(s, actor, randomToken(32)) }
+    const bad = await malformed(s, actor)
+    expect(refused4xx(d.preview) && refused4xx(d.accept), 'setup: a dead link is refused').toBe(true)
+    expect(sameAsDead(d.preview, bad.preview), 'setup: the dead-link preview answer is the service\'s, not body validation\'s').toBe(false)
+    expect(sameAsDead(d.accept, bad.accept), 'setup: the dead-link accept answer is the service\'s, not body validation\'s').toBe(false)
+    return d
+  }
 
   it('№4: after the student\'s phone changes, the old link answers as a dead one (for the new phone too)', async () => {
     const s = await setup()
@@ -272,7 +297,6 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const newPhone = phone()
     const holder = await account(s, newPhone, 'New phone')
     const d = await dead(s, holder)
-    expect(refused4xx(d.preview) && refused4xx(d.accept), 'setup: a dead link is refused').toBe(true)
     await as(s, s.center, () => table.update(s.tenantId, s.center, rec, { phone: local(newPhone) }))
     expect((await record(s, rec)).phoneE164, 'setup: the phone changed').toBe(newPhone)
     const pv = await preview(s, holder, token)
@@ -291,7 +315,6 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const newParent = phone()
     const holder = await account(s, newParent, 'New parent phone')
     const d = await dead(s, holder)
-    expect(refused4xx(d.preview) && refused4xx(d.accept), 'setup: a dead link is refused').toBe(true)
     await as(s, s.center, () => table.update(s.tenantId, s.center, rec, { parentPhone: local(newParent) }))
     expect((await record(s, rec)).parentPhoneE164, 'setup: the parent phone changed').toBe(newParent)
     const pv = await preview(s, holder, token)
@@ -309,7 +332,6 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const owner = await account(s, p, 'Owner')
     expect(previewWorks(await preview(s, owner, token), s), 'setup: the link works before the archive').toBe(true)
     const d = await dead(s, owner)
-    expect(refused4xx(d.preview) && refused4xx(d.accept), 'setup: a dead link is refused').toBe(true)
     await as(s, s.center, () => table.update(s.tenantId, s.center, rec, { status: 'LEFT' }))
     expect((await record(s, rec)).status, 'setup: the record is in the archive').toBe('LEFT')
     const pv = await preview(s, owner, token)
@@ -351,9 +373,12 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
       rule(`n9-${status}-export`, refused403(exported), `№9 a ${status} center gets 403 on the Excel export`, exported.ok && readXlsxRows((exported.value as { file: Buffer }).file).length === 2)
 
       // Holds today: writes and invitations are refused.
-      rule(`n9-${status}-create`, refused403(await outcome(as(s, s.center, () => table.create(s.tenantId, s.center, { fullName: 'Bobur Aliyev', phone: local(phone()), birthDate: '2000-01-02' } as never)))), `№9 a ${status} center adds no student`, false)
-      rule(`n9-${status}-update`, refused403(await outcome(as(s, s.center, () => table.update(s.tenantId, s.center, rec, { status: 'PAUSED' })))), `№9 a ${status} center edits no student`, false)
-      rule(`n9-${status}-invite`, refused403(await outcome(as(s, s.center, () => table.invite(s.tenantId, s.center, rec)))), `№9 a ${status} center sends no invitation`, false)
+      const createO = await outcome(as(s, s.center, () => table.create(s.tenantId, s.center, { fullName: 'Bobur Aliyev', phone: local(phone()), birthDate: '2000-01-02' } as never)))
+      rule(`n9-${status}-create`, refused403(createO), `№9 a ${status} center adds no student`, refused403(createO))
+      const updateO = await outcome(as(s, s.center, () => table.update(s.tenantId, s.center, rec, { status: 'PAUSED' })))
+      rule(`n9-${status}-update`, refused403(updateO), `№9 a ${status} center edits no student`, refused403(updateO))
+      const inviteO = await outcome(as(s, s.center, () => table.invite(s.tenantId, s.center, rec)))
+      rule(`n9-${status}-invite`, refused403(inviteO), `№9 a ${status} center sends no invitation`, refused403(inviteO))
     })
   }
 
