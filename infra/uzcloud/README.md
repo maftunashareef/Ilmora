@@ -443,6 +443,12 @@ aws s3api put-bucket-lifecycle-configuration --bucket ilmora-docs --lifecycle-co
 
 ### Бакет домашних заданий `ilmora-homework`
 
+> **Пока бакета нет (20.11):** создать `ilmora-homework` ключом UzCloud не вышло — AWS CLI падает с
+> `argument of type 'NoneType' is not a container or iterable`. До него архивы ДЗ лежат в закрытом `ilmora-docs`, в своём
+> разделе: `S3_HOMEWORK_BUCKET=ilmora-docs`, файлы — только под `homework/`, загрузки — под `incoming/homework/` (их уже
+> чистит правило `docs-lifecycle.json`). Объём ДЗ считается по префиксу `homework/`. Когда бакет появится — шаги ниже,
+> перенос `rclone move s3:ilmora-docs/homework s3:ilmora-homework/homework` и `S3_HOMEWORK_BUCKET=ilmora-homework`.
+
 ТЗ 18.11, раздел 8.4: архивы ДЗ до 1024 МБ. Браузер грузит их **частями прямо в бакет** по ссылкам, подписанным API,
 — через API и диски машин гигабайт не идёт. Бакет закрытый: ни чтения без ключа, ни политики, как у `ilmora-media`;
 скачать — только по ссылке API на 5 минут, файлом (`Content-Disposition: attachment`). **В ночные копии не входит**
