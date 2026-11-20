@@ -64,6 +64,19 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     await expect(create({ price: 0, status: 'published' })).resolves.toMatchObject({ price: 0, status: 'published' })
   })
 
+  it('the database holds the price of a new course too: whole thousands from 50 000 or 0 (migration 20261126000200)', async () => {
+    const s = await setup('calc-db')
+    const db = ctx.prisma.client
+    const course = await as(s, s.center, () => manage().createCourse(s.tenantId, s.center, body(s) as never))
+    const setPrice = (minor: bigint, rule = 1) =>
+      db.$executeRawUnsafe('UPDATE "Course" SET "priceMinor" = $1, "priceRule" = $2 WHERE id = $3', minor, rule, course.id).then(() => 'ok', (e: Error) => (/Course_calculator_price_check/.test(e.message) ? 'refused' : e.message))
+    expect(await setPrice(1_234_500_00n)).toBe('refused') // not whole thousands
+    expect(await setPrice(40_000_00n)).toBe('refused') // below 50 000
+    expect(await setPrice(50_000_00n)).toBe('ok')
+    expect(await setPrice(0n)).toBe('ok') // free
+    expect(await setPrice(1_234_500_00n, 0)).toBe('ok') // a course of the old rule keeps any price
+  })
+
   it('a paid new course is published only with a student discount (5% or more) in force: started, with no end', async () => {
     const s = await setup()
     const m = manage()
