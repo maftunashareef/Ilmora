@@ -50,7 +50,7 @@ const FORMATS: readonly FinderFormat[] = ['offline', 'online', 'any']
 export const GOAL_PROFILES: Record<FinderGoal, { categories: readonly string[]; exams: readonly string[] }> = {
   university: { categories: ['university', 'math', 'sciences', 'english'], exams: ['dtm', 'sat', 'ielts'] },
   ielts: { categories: ['english'], exams: ['ielts'] },
-  career: { categories: ['it', 'python', 'frontend', 'backend', 'ai-ml', 'ui-ux', 'graphic-design', 'design', 'furniture'], exams: [] },
+  career: { categories: ['it', 'python', 'frontend', 'backend', 'ai-ml', 'ui-ux', 'graphic-design', 'design', 'furniture', 'economics'], exams: [] },
   personal: { categories: [], exams: [] },
 }
 

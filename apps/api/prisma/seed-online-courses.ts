@@ -28,10 +28,12 @@ const TENANT_SLUG = process.env.DEFAULT_TENANT_SLUG ?? 'ilmora'
 const json = (v: unknown) => v as Prisma.InputJsonValue
 const l = (uz: string, ru: string, en: string) => ({ uz, ru, en })
 
-/** The two categories the online catalog reuses; created only if a tenant has deleted or never had them. */
-const REUSED: Record<'english' | 'math', { id: string; name: ReturnType<typeof l>; glyph: string; sortOrder: number }> = {
+/** The categories of the base catalog the online catalog reuses; created only if a tenant has deleted or never had them. */
+const REUSED: Record<'english' | 'math' | 'it' | 'sciences', { id: string; name: ReturnType<typeof l>; glyph: string; sortOrder: number }> = {
   english: { id: 'cat-english', name: l('Ingliz tili', 'Английский язык', 'English'), glyph: 'A', sortOrder: 0 },
   math: { id: 'cat-math', name: l('Matematika', 'Математика', 'Mathematics'), glyph: '∑', sortOrder: 1 },
+  it: { id: 'cat-it', name: l('IT', 'IT', 'IT'), glyph: '</>', sortOrder: 2 },
+  sciences: { id: 'cat-sciences', name: l('Tabiiy fanlar', 'Естественные науки', 'Sciences'), glyph: '⚗', sortOrder: 3 },
 }
 
 /** Deterministic cover seed so a re-run never reshuffles the generated art. */
@@ -53,7 +55,7 @@ async function main() {
   const teacher = (await prisma.teacherProfile.findFirst({ where: { tenantId, slug } }))
     ?? (await prisma.teacherProfile.create({ data: { tenantId, slug, name: ONLINE_PROVIDER.name, title: json(ONLINE_PROVIDER.teacherTitle), bio: json(ONLINE_PROVIDER.description), tagline: json(ONLINE_PROVIDER.teacherTagline), centerId: center.id, channelActive: false } }))
 
-  // Categories by slug: the new online ones are added, english and math are reused.
+  // Categories by slug: the new online ones are added; english, math, it and sciences are reused.
   const categoryIds = new Map<OnlineCategorySlug, string>()
   for (const c of ONLINE_CATEGORIES) {
     const found = await prisma.category.findFirst({ where: { tenantId, slug: c.slug } })

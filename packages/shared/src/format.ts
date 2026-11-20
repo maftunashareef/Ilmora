@@ -16,6 +16,9 @@ export function foldForSearch(s: string): string {
     .replace(/[̀-ͯ]/g, '')
 }
 
+/** A percent for display: whole numbers as they are, halves with the language's decimal mark (7,5 in Uzbek and Russian). */
+export const formatPercent = (n: number, lang: Lang): string => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', lang === 'en' ? '.' : ','))
+
 /** 1200000 → "1 200 000 so‘m" */
 export function formatSom(n: number, lang: Lang, withUnit = true): string {
   const s = Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
