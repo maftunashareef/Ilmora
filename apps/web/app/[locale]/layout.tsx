@@ -20,7 +20,7 @@ import '@fontsource-variable/playfair-display'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/manrope'
 
-export const viewport: Viewport = { themeColor: '#163C35', width: 'device-width', initialScale: 1 }
+export const viewport: Viewport = { themeColor: '#0E5A44', width: 'device-width', initialScale: 1 }
 
 /** Rendered per request (site + catalog come from the API with a 60 s data cache); nothing is prerendered at build time. */
 export const dynamic = 'force-dynamic'

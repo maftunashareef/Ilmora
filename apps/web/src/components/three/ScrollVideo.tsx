@@ -153,31 +153,31 @@ function PosterIllustration({ progress, poster }: { progress: number; poster?: s
     { d: 'M 300 322 L 300 130', from: 0.5, to: 0.65 },
     { d: 'M 420 322 L 420 130', from: 0.55, to: 0.7 },
     { d: 'M 290 130 L 430 130 L 430 200 L 290 200 Z', from: 0.7, to: 0.88, w: 2.2 },
-    { d: 'M 300 420 L 420 420', from: 0.86, to: 0.95, c: '#C8AD7F', w: 2.4 },
-    { d: 'M 560 420 L 680 420', from: 0.88, to: 0.97, c: '#C8AD7F', w: 2.4 },
+    { d: 'M 300 420 L 420 420', from: 0.86, to: 0.95, c: '#CA9A36', w: 2.4 },
+    { d: 'M 560 420 L 680 420', from: 0.88, to: 0.97, c: '#CA9A36', w: 2.4 },
   ]
   if (poster) return null
   return (
     <svg viewBox="0 0 960 600" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
       <defs>
-        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0v40" fill="none" stroke="#F7F5F0" strokeOpacity="0.05" /></pattern>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0v40" fill="none" stroke="#FBF3E3" strokeOpacity="0.05" /></pattern>
       </defs>
       <rect width="960" height="600" fill="url(#grid)" />
-      <line x1="120" y1="520" x2="860" y2="520" stroke="#C8AD7F" strokeOpacity="0.35" />
+      <line x1="120" y1="520" x2="860" y2="520" stroke="#CA9A36" strokeOpacity="0.35" />
       {strokes.map((s, i) => {
         const k = seg(s.from, s.to)
-        return <path key={i} d={s.d} fill="none" stroke={s.c ?? '#F7F5F0'} strokeWidth={s.w ?? 1.6} strokeLinecap="round" pathLength={1} strokeDasharray="1" strokeDashoffset={1 - k} opacity={0.5 + k * 0.5} />
+        return <path key={i} d={s.d} fill="none" stroke={s.c ?? '#FBF3E3'} strokeWidth={s.w ?? 1.6} strokeLinecap="round" pathLength={1} strokeDasharray="1" strokeDashoffset={1 - k} opacity={0.5 + k * 0.5} />
       })}
-      <g opacity={seg(0.35, 0.5)} stroke="#C8AD7F" strokeWidth="1">
+      <g opacity={seg(0.35, 0.5)} stroke="#CA9A36" strokeWidth="1">
         <path d="M 280 560 L 700 560 M 280 552 L 280 568 M 700 552 L 700 568" />
-        <text x="490" y="585" fill="#C8AD7F" fontSize="14" textAnchor="middle" fontFamily="Inter, sans-serif">420 mm</text>
+        <text x="490" y="585" fill="#CA9A36" fontSize="14" textAnchor="middle" fontFamily="Inter, sans-serif">420 mm</text>
       </g>
-      <g opacity={seg(0.7, 0.9)} stroke="#C8AD7F" strokeWidth="1">
+      <g opacity={seg(0.7, 0.9)} stroke="#CA9A36" strokeWidth="1">
         <path d="M 760 130 L 760 520 M 752 130 L 768 130 M 752 520 L 768 520" />
-        <text x="790" y="330" fill="#C8AD7F" fontSize="14" fontFamily="Inter, sans-serif">890 mm</text>
+        <text x="790" y="330" fill="#CA9A36" fontSize="14" fontFamily="Inter, sans-serif">890 mm</text>
       </g>
-      <circle cx="300" cy="420" r={4 * seg(0.86, 0.95)} fill="#C8AD7F" />
-      <circle cx="420" cy="420" r={4 * seg(0.86, 0.95)} fill="#C8AD7F" />
+      <circle cx="300" cy="420" r={4 * seg(0.86, 0.95)} fill="#CA9A36" />
+      <circle cx="420" cy="420" r={4 * seg(0.86, 0.95)} fill="#CA9A36" />
     </svg>
   )
 }

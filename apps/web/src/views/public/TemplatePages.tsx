@@ -440,7 +440,7 @@ function TeachersSection({ s }: { s: Section }) {
         <SnapTrack prevLabel={t('home.prev')} nextLabel={t('home.next')} className="reveal-stagger">
           {teachers.map((te) => (
             <Link key={te.id} to={`/teachers/${te.id}`} className="reveal card group w-[260px] overflow-hidden p-0 transition duration-500 hover:-translate-y-1 hover:shadow-lift sm:w-[280px]">
-              <div className="h-24 transition duration-700 group-hover:brightness-110" style={{ background: te.bannerUpload?.previewUrl ? `url(${te.bannerUpload.previewUrl}) center/cover` : te.bannerUrl ? `url(${te.bannerUrl}) center/cover` : `linear-gradient(120deg, ${te.bannerTone}, ${te.bannerTone}cc 60%, #C8AD7F55)` }} />
+              <div className="h-24 transition duration-700 group-hover:brightness-110" style={{ background: te.bannerUpload?.previewUrl ? `url(${te.bannerUpload.previewUrl}) center/cover` : te.bannerUrl ? `url(${te.bannerUrl}) center/cover` : `linear-gradient(120deg, ${te.bannerTone}, ${te.bannerTone}cc 60%, #CA9A3655)` }} />
               <div className="-mt-8 px-5 pb-5">
                 <Avatar name={te.name} seed={te.avatarSeed} size={60} url={getTeacherAvatarUrl(te)} alt={te.name} className="ring-4 ring-paper" />
                 <div className="mt-3 font-display text-2xl text-charcoal group-hover:text-forest">{te.name}</div>

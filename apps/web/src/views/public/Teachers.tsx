@@ -167,7 +167,7 @@ export function TeachersPage() {
               ? `url(${te.bannerUpload.previewUrl}) center/cover`
               : te.bannerUrl
               ? `url(${te.bannerUrl}) center/cover`
-              : `linear-gradient(120deg, ${te.bannerTone}, ${te.bannerTone}cc 60%, #C8AD7F55)`
+              : `linear-gradient(120deg, ${te.bannerTone}, ${te.bannerTone}cc 60%, #CA9A3655)`
 
             const Wrapper = enabled ? Link : 'div'
 

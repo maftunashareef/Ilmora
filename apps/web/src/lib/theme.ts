@@ -23,8 +23,8 @@ export function applyTheme(theme: Theme) {
   root.style.setProperty('--c-champagne', c.champagne)
   root.style.setProperty('--c-sage', c.sage)
   root.style.setProperty('--c-white', c.white)
-  root.style.setProperty('--f-display', FONT_STACK[theme.fonts.display] ?? FONT_STACK['Cormorant Garamond'])
-  root.style.setProperty('--f-body', FONT_STACK[theme.fonts.body] ?? FONT_STACK.Inter)
+  root.style.setProperty('--f-display', FONT_STACK[theme.fonts.display] ?? FONT_STACK['Playfair Display'])
+  root.style.setProperty('--f-body', FONT_STACK[theme.fonts.body] ?? FONT_STACK.Manrope)
   const r = RADIUS[theme.radius] ?? RADIUS.soft
   root.style.setProperty('--r-card', r.card)
   root.style.setProperty('--r-control', r.control)

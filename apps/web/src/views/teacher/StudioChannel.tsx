@@ -395,7 +395,7 @@ export function StudioChannel() {
               style={{
                 background: currentBannerUrl
                   ? `url(${currentBannerUrl}) center/cover`
-                  : `linear-gradient(110deg, ${draft.bannerTone} 0%, ${draft.bannerTone}dd 55%, #C8AD7F66 100%)`,
+                  : `linear-gradient(110deg, ${draft.bannerTone} 0%, ${draft.bannerTone}dd 55%, #CA9A3666 100%)`,
               }}
             />
             <div className="-mt-9 px-5 pb-5">

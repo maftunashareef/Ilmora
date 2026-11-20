@@ -20,9 +20,9 @@ import * as THREE from 'three'
 const RAW = '#C9A67A'
 const WOOD = '#A67C52'
 const WOOD_DARK = '#6B4F3A'
-const FOREST = '#163C35'
-const CHAMPAGNE = '#C8AD7F'
-const IVORY = '#F7F5F0'
+const FOREST = '#0E5A44'
+const CHAMPAGNE = '#CA9A36'
+const IVORY = '#FBF3E3'
 
 interface Part {
   size: [number, number, number]

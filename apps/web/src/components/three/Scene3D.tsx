@@ -50,20 +50,20 @@ function StaticIllustration({ kind }: { kind: 'studio' | 'assembly' }) {
   return (
     <svg viewBox="0 0 400 300" className="h-full w-full" aria-hidden="true">
       <defs>
-        <linearGradient id="fl" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stopColor="#E3EBE5" /><stop offset="1" stopColor="#F7F5F0" /></linearGradient>
+        <linearGradient id="fl" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stopColor="#E3EDE6" /><stop offset="1" stopColor="#FBF3E3" /></linearGradient>
       </defs>
       <rect width="400" height="300" fill="url(#fl)" />
-      <ellipse cx="200" cy="245" rx="150" ry="14" fill="#163C35" opacity="0.08" />
+      <ellipse cx="200" cy="245" rx="150" ry="14" fill="#0E5A44" opacity="0.08" />
       {kind === 'studio' ? (
-        <g stroke="#163C35" strokeWidth="1.6" fill="none" strokeLinecap="round">
+        <g stroke="#0E5A44" strokeWidth="1.6" fill="none" strokeLinecap="round">
           <rect x="90" y="150" width="220" height="10" rx="2" fill="#A67C52" stroke="none" />
           <path d="M100 160v70M300 160v70M110 160v70M290 160v70" />
-          <rect x="220" y="128" width="46" height="22" rx="2" fill="#163C35" stroke="none" />
-          <rect x="222" y="120" width="46" height="8" rx="2" fill="#C8AD7F" stroke="none" />
+          <rect x="220" y="128" width="46" height="22" rx="2" fill="#0E5A44" stroke="none" />
+          <rect x="222" y="120" width="46" height="8" rx="2" fill="#CA9A36" stroke="none" />
           <path d="M120 150v-58M120 92l30 12" />
-          <path d="M150 104l-18 8 8 4z" fill="#163C35" />
+          <path d="M150 104l-18 8 8 4z" fill="#0E5A44" />
           <rect x="150" y="60" width="110" height="60" rx="4" fill="#FFFFFF" />
-          <path d="M162 76h44M162 88h70M162 100h56" stroke="#C8AD7F" strokeWidth="3" />
+          <path d="M162 76h44M162 88h70M162 100h56" stroke="#CA9A36" strokeWidth="3" />
         </g>
       ) : (
         <g stroke="#6B4F3A" strokeWidth="6" fill="none" strokeLinecap="round">
@@ -71,7 +71,7 @@ function StaticIllustration({ kind }: { kind: 'studio' | 'assembly' }) {
           <rect x="130" y="150" width="140" height="12" rx="2" fill="#A67C52" stroke="none" />
           <path d="M140 150V60M170 150V60" />
           <rect x="132" y="60" width="46" height="30" rx="3" fill="#A67C52" stroke="none" />
-          <path d="M140 200h30" stroke="#C8AD7F" />
+          <path d="M140 200h30" stroke="#CA9A36" />
         </g>
       )}
     </svg>
