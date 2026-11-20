@@ -4,6 +4,7 @@ import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum'
 import { CUSTOM_ROUTE_ARGS_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants'
 import { FULL_NAME_MAX, OFFER_VERSION } from '@ilmora/shared'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { randomToken } from '../src/common/crypto'
 import { buildXlsx } from '../src/common/xlsx'
 import { readXlsxRows } from '../src/common/xlsx-read'
 import { type RequestActor, TenantContext } from '../src/infra/tenancy/tenant-context'
@@ -18,25 +19,34 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  * ILMORA»). Номера — номера находок той заметки:
  *
  *  №2  Приглашение не привязано к человеку. Аккаунт, чей телефон не совпадает с телефоном записи (взрослый) или
- *      телефоном родителя (несовершеннолетний), не принимает приглашение (любой 4xx, запись остаётся непривязанной) и
- *      в предпросмотре не видит данных студента (можно только название центра): ни ФИО, ни учебного заведения, ни
+ *      телефоном родителя (несовершеннолетний), не получает запись: она остаётся непривязанной, а ответ — 4xx или
+ *      «ждёт подтверждения» (центр не может отличить чужого от владельца, пока не подтвердит). В предпросмотре такой
+ *      аккаунт не видит данных студента (можно только название центра): ни ФИО, ни учебного заведения, ни
  *      курса/класса, ни групп. Способ привязки не решён (совпадение телефона, SMS-код, подтверждение центром), поэтому
- *      правило проверяет только исход. Аккаунт с совпадающим телефоном по-прежнему принимает — или, если исправление
- *      вводит лишний шаг, получает исход «ждёт подтверждения» (ответ без `ok: true` или 4xx с кодом про
- *      code/confirm/pending/sms/otp); запись тогда не привязана к нему, пока шаг не пройден.
+ *      правило проверяет только исход. Аккаунт с совпадающим телефоном по-прежнему принимает — или получает исход «ждёт
+ *      подтверждения»: ответ без `ok: true` или с `pending: true`, либо 4xx с кодом про code/confirm/pending/sms/otp.
+ *      Исправление, которое пишет userId в запись ДО подтверждения, под правило не подходит (запись должна остаться
+ *      непривязанной, пока шаг не пройден).
  *  №3  Центр видит полную дату рождения студентов, пришедших через ILMORA (и несовершеннолетних): для записей с
- *      source ILMORA ни таблица, ни карточка, ни выгрузка Excel не содержат даты рождения (флаг «несовершеннолетний»
- *      или возраст — можно).
+ *      source ILMORA ни таблица, ни карточка, ни выгрузка Excel не содержат даты рождения. Флаг «несовершеннолетний»
+ *      или возраст — можно (флаг у несовершеннолетнего проверяется строго). Показ только года рождения намеренно не
+ *      принимается: правило ищет полную дату, но решение по находке — дату не отдавать.
  *  №4  Выданное приглашение переживает смену телефона и архив: после смены phone / parentPhone или статуса LEFT старая
- *      ссылка не открывает предпросмотр и не принимается; запись в статусе LEFT не принимается вовсе.
+ *      ссылка отвечает так же, как несуществующая (тот же статус и код, что у случайного токена), и запись не
+ *      привязывается; запись в статусе LEFT не принимается вовсе. Сравнение с «мёртвой» ссылкой нужно, чтобы отказ из-за
+ *      лишнего шага №2 (SMS-код, подтверждение) не выдавал себя за закрытие №4.
  *  №9  Заблокированный или отклонённый центр (BLOCKED / REJECTED) не читает и не выгружает студентов (таблица,
  *      карточка, Excel — 403); ФИО родителя длиннее FULL_NAME_MAX в строке файла — ошибка строки.
  *      Лимит записей на ещё не одобренный центр здесь не проверяется (не решён; см. PR).
  *
+ * Предпросмотр и принятие идут через настоящий обработчик StudentCentersController (параметры из метаданных маршрута),
+ * но без guard'ов и interceptor'ов Nest: исправление, сделанное только guard'ом, этот тест не увидит.
+ *
  * KNOWN_GAP — правила, которые код PR #118 сегодня нарушает (каждое сверено с кодом). Пока ключ в списке, тест требует,
- * чтобы правило НЕ выполнялось — при этом сценарий обязан реально работать (проверки «setup» вне rule()), так что
- * сломанная подготовка тоже валит тест. Когда находку закроют, тест упадёт с подсказкой убрать ключ — с этого момента
- * правило требуется строго.
+ * чтобы правило НЕ выполнялось И чтобы наблюдалось ровно сегодняшнее поведение (todayObserved) — так и исправление, и
+ * поломка сценария валят тест. Сценарий обязан реально работать (проверки «setup» вне rule()). Когда находку закроют,
+ * тест упадёт с подсказкой убрать ключ — с этого момента правило требуется строго. Ошибка, не являющаяся HTTP-ответом
+ * (TypeError и т. п.), всегда валит тест, а не засчитывается как «дыра открыта».
  */
 const KNOWN_GAP = new Set([
   // №2
@@ -49,19 +59,34 @@ const KNOWN_GAP = new Set([
   'n9-BLOCKED-roster', 'n9-BLOCKED-detail', 'n9-BLOCKED-export', 'n9-REJECTED-roster', 'n9-REJECTED-detail', 'n9-REJECTED-export',
   'n9-import-parentname-check', 'n9-import-parentname-commit',
 ])
-function rule(key: string, holds: boolean, what: string) {
-  if (KNOWN_GAP.has(key)) expect(holds, `${what} — now holds: finding closed, remove '${key}' from KNOWN_GAP`).toBe(false)
-  else expect(holds, what).toBe(true)
+const checked = new Set<string>()
+function rule(key: string, holds: boolean, what: string, todayObserved: boolean) {
+  checked.add(key)
+  if (KNOWN_GAP.has(key)) {
+    expect(holds, `${what} — now holds: finding closed, remove '${key}' from KNOWN_GAP`).toBe(false)
+    expect(todayObserved, `${what} — '${key}' no longer behaves as on 20.11 (fix or broken scenario): check the rule and KNOWN_GAP`).toBe(true)
+  } else expect(holds, what).toBe(true)
 }
 
-type Outcome = { ok: true; value: unknown } | { ok: false; status: number | undefined; code: string | undefined }
+type Outcome = { ok: true; value: unknown } | { ok: false; status: number; code: string | undefined }
+/** An HTTP answer; anything else (TypeError, a broken test helper) is rethrown and fails the test. */
 const outcome = (p: Promise<unknown>): Promise<Outcome> =>
   p.then(
     (value) => ({ ok: true as const, value }),
-    (e: { getStatus?: () => number; code?: string; response?: { code?: string } }) => ({ ok: false as const, status: e.getStatus?.(), code: e.code ?? e.response?.code }),
+    (e: { getStatus?: () => number; code?: string; response?: { code?: string } }) => {
+      if (typeof e?.getStatus !== 'function') throw e
+      return { ok: false as const, status: e.getStatus(), code: e.code ?? e.response?.code }
+    },
   )
-const refused4xx = (o: Outcome) => !o.ok && o.status !== undefined && o.status >= 400 && o.status < 500
+const refused4xx = (o: Outcome) => !o.ok && o.status >= 400 && o.status < 500
 const refused403 = (o: Outcome) => !o.ok && o.status === 403
+/** «Waiting for confirmation»: an answer that is not a plain `{ ok: true }`, or a 4xx naming the missing step. */
+const isPending = (o: Outcome) => {
+  if (o.ok) { const v = (o.value ?? {}) as { ok?: unknown; pending?: unknown }; return v.ok !== true || v.pending === true }
+  return refused4xx(o) && /code|confirm|pending|sms|otp/i.test(o.code ?? '')
+}
+/** The same answer as a link that never existed. */
+const sameAsDead = (o: Outcome, dead: Outcome) => !o.ok && !dead.ok && o.status === dead.status && o.code === dead.code
 
 describe('№9 parentName limit in the form (holds today)', () => {
   it('the hand-entered form refuses a parent name over FULL_NAME_MAX', () => {
@@ -77,7 +102,10 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
   const table = new CenterStudentsService(ctx.prisma, ctx.audit, new TenantsService(ctx.prisma, ctx.env), ctx.env)
   const studentSide = new StudentCentersController(table)
   beforeAll(() => ctx.connect())
-  afterAll(() => ctx.close())
+  afterAll(async () => {
+    await ctx.close()
+    expect([...KNOWN_GAP].filter((k) => !checked.has(k)), 'every KNOWN_GAP key was checked by a test').toEqual([])
+  })
 
   const phone = () => `+99893${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
   const local = (p: string) => p.replace('+998', '')
@@ -105,7 +133,7 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
   /**
    * The student's side through the real controller handler (POST /students/me/center-invites/{preview,accept}): its
    * parameters are resolved from the route metadata (actor, tenant, body with its zod pipe), so the test stays valid
-   * whatever the fix adds to the handler's signature.
+   * whatever the fix adds to the handler's signature. Guards and interceptors are not run.
    */
   async function viaRoute(s: S, actor: RequestActor, path: 'center-invites/preview' | 'center-invites/accept', body: Record<string, unknown>) {
     const proto = StudentCentersController.prototype as unknown as Record<string, (...a: unknown[]) => unknown>
@@ -134,6 +162,11 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
   const invite = (s: S, id: string) => as(s, s.center, () => table.invite(s.tenantId, s.center, id)).then((o) => new URL(o.url).hash.slice(1))
   const record = (s: S, id: string) => sys(s, () => ctx.prisma.client.centerStudent.findUniqueOrThrow({ where: { id } }))
 
+  /** Setup: the link is alive for its owner — the preview names the center, or asks for the confirmation step. */
+  const previewWorks = (o: Outcome, s: S) => (o.ok && (o.value as { centerName?: string } | null)?.centerName === s.t.center.name) || (refused4xx(o) && isPending(o))
+  /** Today's preview: answered with the student's full name in it. */
+  const previewShowsName = (o: Outcome, fullName: string) => o.ok && JSON.stringify(o.value).includes(fullName)
+
   /** Fields of the student that a stranger must not see in the preview. */
   const STUDENT_FIELDS = ['fullName', 'institution', 'studyYear', 'groups'] as const
   const showsStudent = (o: Outcome, fullName: string) => {
@@ -145,7 +178,7 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
 
   // ───────── №2 ─────────
 
-  it('№2: a stranger account neither accepts the invitation nor sees the student in the preview; the matching phone still accepts', async () => {
+  it('№2: a stranger account neither takes the record nor sees the student in the preview; the matching phone still accepts', async () => {
     const s = await setup()
     const adultPhone = phone()
     const rec = await create(s, { fullName: 'Aziz Karimov', phone: local(adultPhone), birthDate: '2001-05-04', groupIds: [s.t.group.id], studyYear: 2, institutionText: 'TATU', institutionType: 'UNIVERSITY' })
@@ -154,44 +187,38 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const stranger = await account(s, phone(), 'Stranger')
     const owner = await account(s, adultPhone, 'Owner')
 
-    // Setup: the link works — the owner's preview answers with the center's name.
-    const own = await preview(s, owner, token)
-    expect(own.ok, 'setup: the owner opens the preview').toBe(true)
-    expect((own as { value: { centerName?: string } }).value.centerName, 'setup: the preview names the center').toBe(s.t.center.name)
+    expect(previewWorks(await preview(s, owner, token), s), 'setup: the owner opens the preview').toBe(true)
 
     const seen = await preview(s, stranger, token)
-    rule('n2-preview', !showsStudent(seen, 'Aziz Karimov'), '№2 a stranger\'s preview shows no fullName / institution / studyYear / groups')
+    rule('n2-preview', !showsStudent(seen, 'Aziz Karimov'), '№2 a stranger\'s preview shows no fullName / institution / studyYear / groups', previewShowsName(seen, 'Aziz Karimov'))
 
     const taken = await accept(s, stranger, token)
     const after = await record(s, rec)
-    rule('n2-accept', refused4xx(taken) && after.userId === null && after.inviteAcceptedAt === null, '№2 a stranger cannot accept: 4xx and the record stays unlinked')
+    rule('n2-accept', after.userId === null && (refused4xx(taken) || isPending(taken)), '№2 a stranger does not get the record: unlinked, and 4xx or «waiting for confirmation»', taken.ok && after.userId === stranger.id)
 
-    // The matching phone accepts (a second record: a stranger's accept above may have used the first link today).
+    // The matching phone accepts (a second record: a stranger's accept above uses the first link today).
     const phone2 = phone()
     const rec2 = await create(s, { fullName: 'Bobur Aliyev', phone: local(phone2), birthDate: '2000-01-02' })
     const token2 = await invite(s, rec2)
     const rightful = await account(s, phone2, 'Rightful')
     const res = await accept(s, rightful, token2)
     const linked = (await record(s, rec2)).userId
-    const pending = res.ok ? (res.value as { ok?: unknown } | null)?.ok !== true : refused4xx(res) && /code|confirm|pending|sms|otp/i.test(res.code ?? '')
-    if (pending) expect(linked, '№2 «waiting for confirmation»: not linked yet').toBeNull()
+    if (isPending(res)) expect(linked, '№2 «waiting for confirmation»: not linked yet').toBeNull()
     else {
       expect(res, '№2 the account with the record\'s phone still accepts').toMatchObject({ ok: true, value: { ok: true } })
       expect(linked, '№2 the record is linked to the account that accepted').toBe(rightful.id)
     }
   })
 
-  it('№2: a stranger account cannot accept a minor\'s invitation (it goes to the parent\'s phone)', async () => {
+  it('№2: a stranger account cannot take a minor\'s record (the link goes to the parent\'s phone)', async () => {
     const s = await setup()
     const rec = await create(s, { fullName: 'Malika Karimova', birthDate: '2013-02-01', parentName: 'Dilnoza Karimova', parentPhone: local(phone()), groupIds: [s.t.group.id] })
     const token = await invite(s, rec)
     const stranger = await account(s, phone(), 'Stranger')
     expect((await record(s, rec)).inviteTokenHash, 'setup: the invitation was issued').toBeTruthy()
-    const seen = await preview(s, stranger, token)
-    expect(seen.ok || refused4xx(seen), 'setup: the preview answers (or refuses with 4xx), never fails otherwise').toBe(true)
     const taken = await accept(s, stranger, token)
     const after = await record(s, rec)
-    rule('n2-accept-minor', refused4xx(taken) && after.userId === null, '№2 a stranger cannot take a minor\'s record')
+    rule('n2-accept-minor', after.userId === null && (refused4xx(taken) || isPending(taken)), '№2 a stranger does not get a minor\'s record', taken.ok && after.userId === stranger.id)
   })
 
   // ───────── №3 ─────────
@@ -214,50 +241,64 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     expect(mine.map((r) => (r as { linked: boolean }).linked), 'setup: both ILMORA students are in the table').toEqual([true, true])
     const has = (x: unknown, iso: string, dmy: string) => { const j = JSON.stringify(x); return j.includes(iso) || j.includes(dmy) }
     const rowBirth = (r: unknown) => (r as Record<string, unknown>).birthDate
-    rule('n3-roster', mine.every((r) => !rowBirth(r)) && !births.some(([, iso, dmy]) => has(roster, iso, dmy)), '№3 the table has no birth date of ILMORA students')
+    const isoBirths = births.map(([, iso]) => iso).sort()
+    const kidRow = mine.find((r) => (r as { fullName: string }).fullName.startsWith('Ilmora kid'))
+    expect((kidRow as { minor?: unknown } | undefined)?.minor, '№3 the minor flag stays for the minor').toBe(true)
+    rule('n3-roster', mine.every((r) => !rowBirth(r)) && !births.some(([, iso, dmy]) => has(roster, iso, dmy)), '№3 the table has no birth date of ILMORA students', JSON.stringify(mine.map(rowBirth).sort()) === JSON.stringify(isoBirths))
 
     const cards = await Promise.all(mine.map((r) => as(s, s.center, () => table.detail(s.tenantId, s.center, r.id))))
     expect(cards.map((c) => c.student.source), 'setup: the cards open').toEqual(['ILMORA', 'ILMORA'])
-    rule('n3-detail', cards.every((c) => !rowBirth(c.student)) && !births.some(([, iso, dmy]) => has(cards, iso, dmy)), '№3 the card has no birth date of an ILMORA student')
+    rule('n3-detail', cards.every((c) => !rowBirth(c.student)) && !births.some(([, iso, dmy]) => has(cards, iso, dmy)), '№3 the card has no birth date of an ILMORA student', JSON.stringify(cards.map((c) => rowBirth(c.student)).sort()) === JSON.stringify(isoBirths))
 
     const file = await as(s, s.center, () => table.exportFile(s.tenantId, s.center, { lang: 'ru' }))
     const sheet = readXlsxRows(file.file)
     expect(sheet.length, 'setup: the export has the two students').toBe(3)
     const cells = sheet.slice(1).flatMap((r) => r.cells)
-    rule('n3-excel', !births.some(([, iso, dmy]) => cells.some((c) => c.includes(iso) || c.includes(dmy))), '№3 the Excel export has no birth date of ILMORA students')
+    rule('n3-excel', !births.some(([, iso, dmy]) => cells.some((c) => c.includes(iso) || c.includes(dmy))), '№3 the Excel export has no birth date of ILMORA students', births.every(([, , dmy]) => cells.includes(dmy)))
   })
 
   // ───────── №4 ─────────
 
-  it('№4: after the student\'s phone changes, the old link neither previews nor is accepted (by the new phone either)', async () => {
+  /** The answers to a link that never existed, for the same account. */
+  const dead = async (s: S, actor: RequestActor) => ({ preview: await preview(s, actor, randomToken(32)), accept: await accept(s, actor, randomToken(32)) })
+
+  it('№4: after the student\'s phone changes, the old link answers as a dead one (for the new phone too)', async () => {
     const s = await setup()
     const oldPhone = phone()
     const rec = await create(s, { fullName: 'Aziz Karimov', phone: local(oldPhone), birthDate: '2001-05-04' })
     const token = await invite(s, rec)
-    expect((await preview(s, await account(s, oldPhone, 'Old phone'), token)).ok, 'setup: the link works before the change').toBe(true)
+    expect(previewWorks(await preview(s, await account(s, oldPhone, 'Old phone'), token), s), 'setup: the link works before the change').toBe(true)
     // The account of the NEW phone tries the old link: whatever binding №2 brings, it matches the record now.
     const newPhone = phone()
     const holder = await account(s, newPhone, 'New phone')
+    const d = await dead(s, holder)
+    expect(refused4xx(d.preview) && refused4xx(d.accept), 'setup: a dead link is refused').toBe(true)
     await as(s, s.center, () => table.update(s.tenantId, s.center, rec, { phone: local(newPhone) }))
     expect((await record(s, rec)).phoneE164, 'setup: the phone changed').toBe(newPhone)
-    rule('n4-phone-preview', refused4xx(await preview(s, holder, token)), '№4 the old link opens no preview after a phone change')
+    const pv = await preview(s, holder, token)
+    rule('n4-phone-preview', sameAsDead(pv, d.preview), '№4 the old link previews as a dead one after a phone change', previewShowsName(pv, 'Aziz Karimov'))
     const res = await accept(s, holder, token)
-    rule('n4-phone-accept', refused4xx(res) && (await record(s, rec)).userId === null, '№4 the old link is not accepted after a phone change')
+    const after = await record(s, rec)
+    rule('n4-phone-accept', sameAsDead(res, d.accept) && after.userId === null, '№4 the old link is refused as a dead one after a phone change', res.ok && after.userId === holder.id)
   })
 
-  it('№4: after a minor\'s parent phone changes, the old link neither previews nor is accepted', async () => {
+  it('№4: after a minor\'s parent phone changes, the old link answers as a dead one', async () => {
     const s = await setup()
     const oldParent = phone()
     const rec = await create(s, { fullName: 'Malika Karimova', birthDate: '2013-02-01', parentName: 'Dilnoza Karimova', parentPhone: local(oldParent) })
     const token = await invite(s, rec)
-    expect((await preview(s, await account(s, oldParent, 'Old parent phone'), token)).ok, 'setup: the link works before the change').toBe(true)
+    expect(previewWorks(await preview(s, await account(s, oldParent, 'Old parent phone'), token), s), 'setup: the link works before the change').toBe(true)
     const newParent = phone()
     const holder = await account(s, newParent, 'New parent phone')
+    const d = await dead(s, holder)
+    expect(refused4xx(d.preview) && refused4xx(d.accept), 'setup: a dead link is refused').toBe(true)
     await as(s, s.center, () => table.update(s.tenantId, s.center, rec, { parentPhone: local(newParent) }))
     expect((await record(s, rec)).parentPhoneE164, 'setup: the parent phone changed').toBe(newParent)
-    rule('n4-parent-preview', refused4xx(await preview(s, holder, token)), '№4 the old link opens no preview after a parent phone change')
+    const pv = await preview(s, holder, token)
+    rule('n4-parent-preview', sameAsDead(pv, d.preview), '№4 the old link previews as a dead one after a parent phone change', previewShowsName(pv, 'Malika Karimova'))
     const res = await accept(s, holder, token)
-    rule('n4-parent-accept', refused4xx(res) && (await record(s, rec)).userId === null, '№4 the old link is not accepted after a parent phone change')
+    const after = await record(s, rec)
+    rule('n4-parent-accept', sameAsDead(res, d.accept) && after.userId === null, '№4 the old link is refused as a dead one after a parent phone change', res.ok && after.userId === holder.id)
   })
 
   it('№4: a record sent to the archive (LEFT) is not accepted, whether by the old link or with a link still on it', async () => {
@@ -266,12 +307,16 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const rec = await create(s, { fullName: 'Aziz Karimov', phone: local(p), birthDate: '2001-05-04' })
     const token = await invite(s, rec)
     const owner = await account(s, p, 'Owner')
-    expect((await preview(s, owner, token)).ok, 'setup: the link works before the archive').toBe(true)
+    expect(previewWorks(await preview(s, owner, token), s), 'setup: the link works before the archive').toBe(true)
+    const d = await dead(s, owner)
+    expect(refused4xx(d.preview) && refused4xx(d.accept), 'setup: a dead link is refused').toBe(true)
     await as(s, s.center, () => table.update(s.tenantId, s.center, rec, { status: 'LEFT' }))
     expect((await record(s, rec)).status, 'setup: the record is in the archive').toBe('LEFT')
-    rule('n4-left-preview', refused4xx(await preview(s, owner, token)), '№4 the link of an archived record opens no preview')
+    const pv = await preview(s, owner, token)
+    rule('n4-left-preview', sameAsDead(pv, d.preview), '№4 the link of an archived record previews as a dead one', previewShowsName(pv, 'Aziz Karimov'))
     const res = await accept(s, owner, token)
-    rule('n4-left-accept', refused4xx(res) && (await record(s, rec)).userId === null, '№4 the link of an archived record is not accepted')
+    const after = await record(s, rec)
+    rule('n4-left-accept', sameAsDead(res, d.accept) && after.userId === null, '№4 the link of an archived record is refused as a dead one', res.ok && after.userId === owner.id)
 
     // A LEFT record that still carries a live token (however it got there) is refused at accept time too.
     const p2 = phone()
@@ -281,8 +326,10 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const live = await record(s, rec2)
     expect(live.inviteTokenHash && live.inviteExpiresAt!.getTime() > Date.now(), 'setup: the token is still on the archived record').toBeTruthy()
     const owner2 = await account(s, p2, 'Owner 2')
+    const d2 = await dead(s, owner2)
     const res2 = await accept(s, owner2, token2)
-    rule('n4-left-direct-accept', refused4xx(res2) && (await record(s, rec2)).userId === null, '№4 a LEFT record is not accepted')
+    const after2 = await record(s, rec2)
+    rule('n4-left-direct-accept', sameAsDead(res2, d2.accept) && after2.userId === null, '№4 a LEFT record is refused as a dead link', res2.ok && after2.userId === owner2.id)
   })
 
   // ───────── №9 ─────────
@@ -296,14 +343,17 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
       expect(readXlsxRows((await as(s, s.center, () => table.exportFile(s.tenantId, s.center, { lang: 'ru' }))).file), 'setup: the export has the student').toHaveLength(2)
       await sys(s, () => ctx.prisma.client.center.update({ where: { id: s.t.center.id }, data: { status } }))
 
-      rule(`n9-${status}-roster`, refused403(await outcome(as(s, s.center, () => table.roster(s.tenantId, s.center, {})))), `№9 a ${status} center gets 403 on the table`)
-      rule(`n9-${status}-detail`, refused403(await outcome(as(s, s.center, () => table.detail(s.tenantId, s.center, rec)))), `№9 a ${status} center gets 403 on the card`)
-      rule(`n9-${status}-export`, refused403(await outcome(as(s, s.center, () => table.exportFile(s.tenantId, s.center, { lang: 'ru' })))), `№9 a ${status} center gets 403 on the Excel export`)
+      const roster = await outcome(as(s, s.center, () => table.roster(s.tenantId, s.center, {})))
+      rule(`n9-${status}-roster`, refused403(roster), `№9 a ${status} center gets 403 on the table`, roster.ok && (roster.value as { rows: { id: string }[] }).rows.some((r) => r.id === rec))
+      const detail = await outcome(as(s, s.center, () => table.detail(s.tenantId, s.center, rec)))
+      rule(`n9-${status}-detail`, refused403(detail), `№9 a ${status} center gets 403 on the card`, detail.ok && (detail.value as { student: { id: string } }).student.id === rec)
+      const exported = await outcome(as(s, s.center, () => table.exportFile(s.tenantId, s.center, { lang: 'ru' })))
+      rule(`n9-${status}-export`, refused403(exported), `№9 a ${status} center gets 403 on the Excel export`, exported.ok && readXlsxRows((exported.value as { file: Buffer }).file).length === 2)
 
       // Holds today: writes and invitations are refused.
-      rule(`n9-${status}-create`, refused403(await outcome(as(s, s.center, () => table.create(s.tenantId, s.center, { fullName: 'Bobur Aliyev', phone: local(phone()), birthDate: '2000-01-02' } as never)))), `№9 a ${status} center adds no student`)
-      rule(`n9-${status}-update`, refused403(await outcome(as(s, s.center, () => table.update(s.tenantId, s.center, rec, { status: 'PAUSED' })))), `№9 a ${status} center edits no student`)
-      rule(`n9-${status}-invite`, refused403(await outcome(as(s, s.center, () => table.invite(s.tenantId, s.center, rec)))), `№9 a ${status} center sends no invitation`)
+      rule(`n9-${status}-create`, refused403(await outcome(as(s, s.center, () => table.create(s.tenantId, s.center, { fullName: 'Bobur Aliyev', phone: local(phone()), birthDate: '2000-01-02' } as never)))), `№9 a ${status} center adds no student`, false)
+      rule(`n9-${status}-update`, refused403(await outcome(as(s, s.center, () => table.update(s.tenantId, s.center, rec, { status: 'PAUSED' })))), `№9 a ${status} center edits no student`, false)
+      rule(`n9-${status}-invite`, refused403(await outcome(as(s, s.center, () => table.invite(s.tenantId, s.center, rec)))), `№9 a ${status} center sends no invitation`, false)
     })
   }
 
@@ -323,10 +373,11 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const overLimit = xlsx([['Olim Soliyev', local(phone()), '04.05.2001', '', '', '', long, '', ''], ['Kamola Ergasheva', '', '01.02.2013', '', '', '', long, local(phone()), '']])
     const check = await as(s, s.center, () => table.importCheck(s.tenantId, s.center, overLimit))
     expect(check.total, 'setup: the file is read').toBe(2)
-    rule('n9-import-parentname-check', check.errors.length === 2 && check.errors.every((e) => (e.errors as string[]).includes('parentName')), '№9 a parent name over FULL_NAME_MAX is a row error (check)')
+    rule('n9-import-parentname-check', check.errors.length === 2 && check.errors.every((e) => e.errors.length > 0), '№9 a parent name over FULL_NAME_MAX is a row error (check)', check.errors.length === 0)
     const count = () => sys(s, () => ctx.prisma.client.centerStudent.count({ where: { centerId: s.t.center.id } }))
     const before = await count()
     const commit = await outcome(as(s, s.center, () => table.importCommit(s.tenantId, s.center, overLimit)))
-    rule('n9-import-parentname-commit', refused4xx(commit) && (await count()) === before, '№9 a file with a parent name over FULL_NAME_MAX is not written')
+    const afterCount = await count()
+    rule('n9-import-parentname-commit', refused4xx(commit) && afterCount === before, '№9 a file with a parent name over FULL_NAME_MAX is not written', commit.ok && afterCount === before + 2)
   })
 })
