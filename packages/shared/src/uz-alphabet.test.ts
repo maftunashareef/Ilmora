@@ -29,6 +29,11 @@ describe('ilmoraUz: stored Uzbek text shown in the ILMORA alphabet', () => {
     expect(ilmoraUz('IELTS Speaking sharhi', 'IELTS Speaking review')).toBe('IELTS Speaking şarhi')
   })
 
+  it('converts a single word or phrase with no English version beside it (a teacher\'s skills)', () => {
+    const skills = ['Shaxmat', "boshlang'ich taktika", '3D modellashtirish', "Sun'iy intellekt", 'Dasturlash', 'ChatGPT', 'Scratch', 'Chess Teacher · FIDE Candidate Master (CM)', 'Java', 'AWS']
+    expect(skills.map((x) => ilmoraUz(x))).toEqual(['Şaxmat', 'boşlanğiç taktika', '3D modellaştiriş', 'Sun’iy intellekt', 'Dasturlaş', 'ChatGPT', 'Scratch', 'Chess Teacher · FIDE Candidate Master (CM)', 'Java', 'AWS'])
+  })
+
   it('never touches links, e-mail addresses, placeholders or a text that is the same in English', () => {
     expect(ilmoraUz('Sayt: https://shaxmat.uz/boshlash va info@chess-school.uz, {child} uchun')).toBe('Sayt: https://shaxmat.uz/boshlash va info@chess-school.uz, {child} uçun')
     expect(ilmoraUz('CS50’s Introduction to Computer Science', 'CS50’s Introduction to Computer Science')).toBe('CS50’s Introduction to Computer Science')

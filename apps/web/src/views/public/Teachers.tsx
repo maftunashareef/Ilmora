@@ -1,4 +1,4 @@
-import { countLabel, foldForSearch, NOUNS } from '@ilmora/shared'
+import { countLabel, foldForSearch, ilmoraUz, NOUNS } from '@ilmora/shared'
 import { useMemo, useState } from 'react'
 import { Link } from '@/lib/router'
 import { Avatar, Badge, Button, Icon, Input, Notice, PageTitle, Select } from '../../components/ui'
@@ -207,7 +207,7 @@ export function TeachersPage() {
                     <div className="mt-3 flex flex-wrap gap-1">
                       {te.expertise.slice(0, 3).map((e) => (
                         <Badge key={e} tone="muted">
-                          {e}
+                          {lang === 'uz' ? ilmoraUz(e) : e}
                         </Badge>
                       ))}
                       {te.expertise.length > 3 && (
