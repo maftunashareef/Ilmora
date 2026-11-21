@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { finalPriceSom, pick, type L, type Lang } from '@ilmora/shared'
+import { finalPriceSom, pick, pickDisplay, type L, type Lang } from '@ilmora/shared'
 import { SITE_URL } from './server-api'
 
 export const LOCALES: Lang[] = ['uz', 'ru', 'en']
@@ -48,7 +48,7 @@ export function pageMetadata(opts: { locale: Lang; path: string; title: string; 
   }
 }
 
-export const l = (lang: Lang, v: L | undefined | null) => pick(lang, v)
+export const l = (lang: Lang, v: L | undefined | null) => pickDisplay(lang, v)
 
 /** Only factual structured data: no ratings, reviews or invented offers beyond the published monthly price. */
 export function courseJsonLd(course: { title: L; summary: L; description: L; price: number; currency?: string; durationMonths: number; slug?: string; id: string; imageUrl?: string }, teacher: { name: string } | undefined, center: { name: string; district?: L } | undefined, lang: Lang) {

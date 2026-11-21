@@ -24,6 +24,12 @@ Rules:
   one name was kept as “Mening to’plamim”; that spelling is no longer used.
 - Suffixes join names and acronyms directly: Clickning, APIga, DTMga.
 - After a number the noun stays singular: 3 ta kurs, 0 ta guruh.
+- Text typed by centers and admins (course and teacher texts, menu labels, page sections) is stored as typed, usually in
+  the standard alphabet. The site shows it in the ILMORA alphabet through `ilmoraUz` / `pickDisplay`
+  (`packages/shared/src/uz-alphabet.ts`, used by `tr()` and the page titles): o‘ g‘ sh ch become Ö Ğ Ş Ç, a word that
+  also stands in the English version of the same text, a product name or an English-looking word keeps its spelling, and
+  plain strings such as people's and centers' names are not passed through it. Nothing is written back to the database;
+  forms show the stored text. `pick` still returns the stored text and is the one to use for matching and exports.
 - Dates: 2026-yil 20-noyabr.
 
 Search folds every spelling to one form (`foldForSearch`), so "öquvçi", "o‘quvchi", "o'quvchi" and "oquvchi" find

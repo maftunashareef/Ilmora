@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { notFound } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { isLang, pick } from '@ilmora/shared'
+import { isLang, pickDisplay } from '@ilmora/shared'
 import { AppProviders } from '@/components/AppProviders'
 import { JsonLd } from '@/components/JsonLd'
 import { getCatalog, getSite } from '@/lib/server-api'
@@ -37,9 +37,9 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     icons: { icon: [{ url: '/brand/icon-32.png', sizes: '32x32' }, { url: '/brand/icon-192.png', sizes: '192x192' }], apple: '/brand/icon-180.png', shortcut: '/brand/favicon.ico' },
     manifest: '/manifest.webmanifest',
     verification: searchVerification(),
-    ...pageMetadata({ locale: lang, path: '/', title: `${name} — ${pick(lang, site?.brand.heroHeadline)}`, description: pick(lang, site?.brand.heroTagline) || 'ILMORA' }),
+    ...pageMetadata({ locale: lang, path: '/', title: `${name} — ${pickDisplay(lang, site?.brand.heroHeadline)}`, description: pickDisplay(lang, site?.brand.heroTagline) || 'ILMORA' }),
     // Last so the spread above cannot replace it: child pages become "Kurslar — ILMORA".
-    title: { default: `${name} — ${pick(lang, site?.brand.heroHeadline) || 'Bitta abonement'}`, template: `%s — ${name}` },
+    title: { default: `${name} — ${pickDisplay(lang, site?.brand.heroHeadline) || 'Bitta abonement'}`, template: `%s — ${name}` },
   }
 }
 

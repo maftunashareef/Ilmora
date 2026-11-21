@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { dict, type TKey } from './translations'
+import { pickDisplay } from '@ilmora/shared'
 import type { L, Lang } from '../types'
 import { useStore } from '../store/useStore'
 
@@ -18,7 +19,8 @@ export function pick(lang: Lang, l: L | undefined | null): string {
 export function useT() {
   const lang = useStore((s) => s.lang)
   const t = useCallback((key: TKey, vars?: Record<string, string | number>) => translate(lang, key, vars), [lang])
-  const tr = useCallback((l: L | undefined | null) => pick(lang, l), [lang])
+  // What a visitor reads: an Uzbek text typed in the standard alphabet is shown in ILMORA's (see uz-alphabet.ts).
+  const tr = useCallback((l: L | undefined | null) => pickDisplay(lang, l), [lang])
   return { t, tr, lang }
 }
 

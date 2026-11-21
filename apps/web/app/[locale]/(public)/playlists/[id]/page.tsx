@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { pick, translate, type Lang } from '@ilmora/shared'
+import { pickDisplay, translate, type Lang } from '@ilmora/shared'
 import { getContentTitle } from '@/lib/server-api'
 import { PlaylistPage } from '@/views/next/clients'
 
@@ -7,7 +7,7 @@ import { PlaylistPage } from '@/views/next/clients'
 export async function generateMetadata({ params }: { params: Promise<{ locale: Lang; id: string }> }): Promise<Metadata> {
   const { locale, id } = await params
   const title = await getContentTitle('playlists', id)
-  return { title: (title && pick(locale, title)) || translate(locale, 'common.playlist'), robots: { index: false, follow: true } }
+  return { title: (title && pickDisplay(locale, title)) || translate(locale, 'common.playlist'), robots: { index: false, follow: true } }
 }
 
 export default function Page() {

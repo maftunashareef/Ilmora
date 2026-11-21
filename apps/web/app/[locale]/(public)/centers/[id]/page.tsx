@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { pick, type Lang } from '@ilmora/shared'
+import { pickDisplay, type Lang } from '@ilmora/shared'
 import { CenterPage } from '@/views/next/clients'
 import { pageMetadata } from '@/lib/seo'
 import { getCatalogOrThrow } from '@/lib/server-api'
@@ -11,7 +11,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { locale, id } = await params
   const center = (await getCatalogOrThrow()).centers.find((c) => c.slug === id || c.id === id)
   if (!center) notFound()
-  return pageMetadata({ locale, path: `/centers/${center.slug ?? center.id}`, title: `${center.name} — ${pick(locale, center.district)}`, description: pick(locale, center.description), type: 'article' })
+  return pageMetadata({ locale, path: `/centers/${center.slug ?? center.id}`, title: `${center.name} — ${pickDisplay(locale, center.district)}`, description: pickDisplay(locale, center.description), type: 'article' })
 }
 
 export default async function Page({ params }: { params: Params }) {
