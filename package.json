@@ -46,6 +46,7 @@
     "body-parser": "2.4.0",
     "multer": "2.5.0",
     "source-map-js": "1.2.4",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "effect": "3.22.4"
   }
 }
