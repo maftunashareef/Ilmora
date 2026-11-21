@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { pick, type Lang } from '@ilmora/shared'
+import { pickDisplay, type Lang } from '@ilmora/shared'
 import { JsonLd } from '@/components/JsonLd'
 import { CourseDetailPage } from '@/views/next/clients'
 import { courseJsonLd, pageMetadata } from '@/lib/seo'
@@ -12,7 +12,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { locale, id } = await params
   const course = await getCourse(id)
   if (!course) notFound()
-  return pageMetadata({ locale, path: `/courses/${course.slug ?? course.id}`, title: pick(locale, course.title), description: pick(locale, course.summary), image: course.imageUrl, type: 'article' })
+  return pageMetadata({ locale, path: `/courses/${course.slug ?? course.id}`, title: pickDisplay(locale, course.title), description: pickDisplay(locale, course.summary), image: course.imageUrl, type: 'article' })
 }
 
 export default async function Page({ params }: { params: Params }) {

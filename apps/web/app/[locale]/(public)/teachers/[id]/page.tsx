@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { pick, type Lang } from '@ilmora/shared'
+import { pickDisplay, type Lang } from '@ilmora/shared'
 import { JsonLd } from '@/components/JsonLd'
 import { TeacherChannelPage } from '@/views/next/clients'
 import { pageMetadata, teacherJsonLd } from '@/lib/seo'
@@ -13,7 +13,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const data = await getTeacher(id)
   if (!data || !data.teacher.channelActive) notFound()
   const t = data.teacher
-  return pageMetadata({ locale, path: `/teachers/${t.slug ?? t.id}`, title: `${t.name} — ${pick(locale, t.title)}`, description: pick(locale, t.bio), type: 'article' })
+  return pageMetadata({ locale, path: `/teachers/${t.slug ?? t.id}`, title: `${t.name} — ${pickDisplay(locale, t.title)}`, description: pickDisplay(locale, t.bio), type: 'article' })
 }
 
 export default async function Page({ params }: { params: Params }) {

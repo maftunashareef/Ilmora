@@ -1,4 +1,4 @@
-import { foldForSearch } from '@ilmora/shared'
+import { foldForSearch, ilmoraUz } from '@ilmora/shared'
 import { useState } from 'react'
 import { Link } from '@/lib/router'
 import { useParams, useSearchParams } from '@/lib/routerHooks'
@@ -19,7 +19,7 @@ const TABS: Tab[] = ['home', 'courses', 'videos', 'playlists', 'resources', 'abo
 
 export function TeacherChannelPage() {
   const { id: param } = useParams()
-  const { t, tr } = useT()
+  const { t, tr, lang } = useT()
   const [params, setParams] = useSearchParams()
   const tab = (TABS.includes(params.get('tab') as Tab) ? params.get('tab') : 'home') as Tab
   const viewer = useViewer()
@@ -139,7 +139,7 @@ export function TeacherChannelPage() {
               <Card>
                 <Eyebrow className="mb-3">{t('channel.tab.about')}</Eyebrow>
                 <p className="text-[15px] leading-relaxed text-charcoal/75">{tr(teacher.bio)}</p>
-                <div className="mt-6 flex flex-wrap gap-1.5">{teacher.expertise.map((e) => <Badge key={e} tone="sage">{e}</Badge>)}</div>
+                <div className="mt-6 flex flex-wrap gap-1.5">{teacher.expertise.map((e) => <Badge key={e} tone="sage">{lang === 'uz' ? ilmoraUz(e) : e}</Badge>)}</div>
               </Card>
               <Card>
                 <Eyebrow className="mb-3">{t('teachers.affiliation')}</Eyebrow>
