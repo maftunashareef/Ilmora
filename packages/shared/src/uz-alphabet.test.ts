@@ -39,6 +39,12 @@ describe('ilmoraUz: stored Uzbek text shown in the ILMORA alphabet', () => {
     expect(ilmoraUz('CS50’s Introduction to Computer Science', 'CS50’s Introduction to Computer Science')).toBe('CS50’s Introduction to Computer Science')
   })
 
+  it('stays fast on a hostile text: the time grows with the length, not faster', () => {
+    const started = Date.now()
+    for (const nasty of ['!'.repeat(200_000), '!@'.repeat(100_000), "o'".repeat(100_000), 'sh'.repeat(100_000), `${'a'.repeat(100_000)}'da`, '{'.repeat(100_000)]) ilmoraUz(nasty, 'x')
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+
   it('changes nothing that is already in the ILMORA alphabet: the whole interface and the seeded content', () => {
     for (const [key, v] of Object.entries(dict)) expect(ilmoraUz(v.uz, v.en), key).toBe(v.uz)
     const walk = (path: string, o: unknown) => {
