@@ -2419,7 +2419,8 @@ model HomeworkSubmission {
   tenantId    String
   tenant      Tenant    @relation(fields: [tenantId], references: [id])
   homeworkId  String
-  homework    Homework  @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  /// RESTRICT (security review 20.11, №8): a homework with hand-ins is never deleted — the students' work stays.
+  homework    Homework  @relation(fields: [homeworkId], references: [id], onDelete: Restrict)
   studentId   String
   student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
   text        String?
