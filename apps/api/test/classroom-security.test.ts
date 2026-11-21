@@ -32,8 +32,6 @@ const KNOWN_GAP = new Set([
   'n6-my-detail', // №6: the student's detail returns every own hand-in
   'n7', // №7: grade() takes the latest hand-in at the moment of grading, not the one the teacher read
   'n7-schema', // №7: GradeInput (strict) cannot name the hand-in being graded
-  'n8-restrict', // №8: HomeworkSubmission/HomeworkExtension → Homework are ON DELETE CASCADE in the migration
-  'n8-audit-tx', // №8: homework.service writes the row and its audit outside one transaction
   'n10-month', // №10: month 9999-12 → nextMonth «10000-01» → Invalid Date → PrismaClientValidationError → 500
   'n10-mark-race', // №10: the second of two concurrent first marks of a cell throws raw P2002 from the service
   'n10-left-mark', // №10: setMark does not look at the record's status: a LEFT student can be marked
@@ -41,7 +39,7 @@ const KNOWN_GAP = new Set([
   'n10-accept-race', // №10: acceptInvite racing on unique [centerId, userId] throws raw P2002 from the service
 ])
 /** Keys whose test needs no database (the others are checked in CI only). */
-const NO_DB_KEYS = ['n7-schema', 'n8-audit-tx']
+const NO_DB_KEYS = ['n7-schema']
 const checked = new Set<string>()
 /**
  * holds — the rule of the finding; todayObserved — exactly what today's code does (only looked at while gapped).

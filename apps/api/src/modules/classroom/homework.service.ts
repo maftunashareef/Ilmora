@@ -93,10 +93,12 @@ export class HomeworkService {
     assertGroupWritable(group, actor)
     const dueAt = new Date(input.dueAt)
     if (dueAt.getTime() <= Date.now()) throw AppError.invalid('homework_due_past', 'The deadline must be in the future')
-    const hw = await this.db.homework.create({
-      data: { tenantId: group.tenantId, groupId: group.id, title: input.title.trim(), description: input.description.trim(), links: cleanLinks(input.links ?? []), submitModes: cleanModes(input.submitModes), dueAt, createdById: actor.id },
+    const data = { tenantId: group.tenantId, groupId: group.id, title: input.title.trim(), description: input.description.trim(), links: cleanLinks(input.links ?? []), submitModes: cleanModes(input.submitModes), dueAt, createdById: actor.id }
+    const hw = await this.prisma.tx(async (tx) => {
+      const created = await tx.homework.create({ data })
+      await this.audit.record({ tx, action: 'homework.create', entityType: 'Homework', entityId: created.id, after: { groupId: group.id, dueAt } })
+      return created
     })
-    await this.audit.record({ action: 'homework.create', entityType: 'Homework', entityId: hw.id, after: { groupId: group.id, dueAt } })
     return toHomework(hw)
   }
 
@@ -109,8 +111,11 @@ export class HomeworkService {
     if (patch.links !== undefined) data.links = cleanLinks(patch.links)
     if (patch.submitModes !== undefined) data.submitModes = cleanModes(patch.submitModes)
     if (patch.dueAt !== undefined) data.dueAt = new Date(patch.dueAt)
-    const updated = await this.db.homework.update({ where: { id: hw.id }, data })
-    await this.audit.record({ action: 'homework.update', entityType: 'Homework', entityId: hw.id, before: { dueAt: hw.dueAt }, after: { dueAt: updated.dueAt, fields: Object.keys(data) } })
+    const updated = await this.prisma.tx(async (tx) => {
+      const row = await tx.homework.update({ where: { id: hw.id }, data })
+      await this.audit.record({ tx, action: 'homework.update', entityType: 'Homework', entityId: hw.id, before: { dueAt: hw.dueAt }, after: { dueAt: row.dueAt, fields: Object.keys(data) } })
+      return row
+    })
     return toHomework(updated)
   }
 
@@ -118,9 +123,18 @@ export class HomeworkService {
   async remove(actor: RequestActor, id: string) {
     const { hw, group } = await this.ownHomework(id, actor)
     assertGroupWritable(group, actor)
-    if ((await this.db.homeworkSubmission.count({ where: { homeworkId: hw.id } })) > 0) throw AppError.conflict('homework_has_submissions', 'There are hand-ins: the homework cannot be deleted')
-    await this.db.homework.delete({ where: { id: hw.id } })
-    await this.audit.record({ action: 'homework.delete', entityType: 'Homework', entityId: hw.id, before: { groupId: hw.groupId, title: hw.title } })
+    const hasSubmissions = () => AppError.conflict('homework_has_submissions', 'There are hand-ins: the homework cannot be deleted')
+    if ((await this.db.homeworkSubmission.count({ where: { homeworkId: hw.id } })) > 0) throw hasSubmissions()
+    try {
+      await this.prisma.tx(async (tx) => {
+        // A hand-in that lands after the check above is held by the foreign key (RESTRICT, security review 20.11 №8).
+        await tx.homework.delete({ where: { id: hw.id } })
+        await this.audit.record({ tx, action: 'homework.delete', entityType: 'Homework', entityId: hw.id, before: { groupId: hw.groupId, title: hw.title } })
+      })
+    } catch (err) {
+      if (['P2003', 'P2014'].includes((err as { code?: string }).code ?? '')) throw hasSubmissions()
+      throw err
+    }
     return { ok: true as const }
   }
 
@@ -159,12 +173,15 @@ export class HomeworkService {
     await this.assertInRoster(group.id, group.course.centerId, input.studentId)
     const dueAt = new Date(input.dueAt)
     if (dueAt.getTime() <= Date.now()) throw AppError.invalid('homework_due_past', 'The new deadline must be in the future')
-    const ext = await this.db.homeworkExtension.upsert({
-      where: { homeworkId_studentId: { homeworkId: hw.id, studentId: input.studentId } },
-      create: { tenantId: hw.tenantId, homeworkId: hw.id, studentId: input.studentId, dueAt, grantedById: actor.id },
-      update: { dueAt, grantedById: actor.id },
+    const ext = await this.prisma.tx(async (tx) => {
+      const row = await tx.homeworkExtension.upsert({
+        where: { homeworkId_studentId: { homeworkId: hw.id, studentId: input.studentId } },
+        create: { tenantId: hw.tenantId, homeworkId: hw.id, studentId: input.studentId, dueAt, grantedById: actor.id },
+        update: { dueAt, grantedById: actor.id },
+      })
+      await this.audit.record({ tx, action: 'homework.extend', entityType: 'Homework', entityId: hw.id, after: { studentId: input.studentId, dueAt } })
+      return row
     })
-    await this.audit.record({ action: 'homework.extend', entityType: 'Homework', entityId: hw.id, after: { studentId: input.studentId, dueAt } })
     return { studentId: ext.studentId, extendedTo: ext.dueAt.toISOString() }
   }
 
@@ -175,8 +192,11 @@ export class HomeworkService {
     await this.assertInRoster(group.id, group.course.centerId, input.studentId)
     const last = await this.db.homeworkSubmission.findFirst({ where: { homeworkId: hw.id, studentId: input.studentId }, orderBy: { submittedAt: 'desc' } })
     if (!last) throw AppError.invalid('homework_nothing_to_grade', 'The student has not handed it in yet')
-    const updated = await this.db.homeworkSubmission.update({ where: { id: last.id }, data: { grade: input.grade, comment: input.comment?.trim() || null, gradedAt: new Date(), gradedById: actor.id } })
-    await this.audit.record({ action: 'homework.grade', entityType: 'HomeworkSubmission', entityId: last.id, before: { grade: last.grade }, after: { grade: updated.grade, homeworkId: hw.id, studentId: input.studentId } })
+    const updated = await this.prisma.tx(async (tx) => {
+      const row = await tx.homeworkSubmission.update({ where: { id: last.id }, data: { grade: input.grade, comment: input.comment?.trim() || null, gradedAt: new Date(), gradedById: actor.id } })
+      await this.audit.record({ tx, action: 'homework.grade', entityType: 'HomeworkSubmission', entityId: last.id, before: { grade: last.grade }, after: { grade: row.grade, homeworkId: hw.id, studentId: input.studentId } })
+      return row
+    })
     return toSubmission(updated)
   }
 
@@ -235,8 +255,11 @@ export class HomeworkService {
     if (!text && !link) throw AppError.invalid('homework_empty', 'Enter the text or the link')
     if ((text && !hw.submitModes.includes('TEXT')) || (link && !hw.submitModes.includes('LINK'))) throw AppError.invalid('homework_mode', 'This homework is not handed in this way')
     if (link) cleanLinks([link])
-    const sub = await this.db.homeworkSubmission.create({ data: { tenantId: hw.tenantId, homeworkId: hw.id, studentId: actor.id, text, link } })
-    await this.audit.record({ action: 'homework.submit', entityType: 'HomeworkSubmission', entityId: sub.id, after: { homeworkId: hw.id, text: !!text, link: !!link } })
+    const sub = await this.prisma.tx(async (tx) => {
+      const row = await tx.homeworkSubmission.create({ data: { tenantId: hw.tenantId, homeworkId: hw.id, studentId: actor.id, text, link } })
+      await this.audit.record({ tx, action: 'homework.submit', entityType: 'HomeworkSubmission', entityId: row.id, after: { homeworkId: hw.id, text: !!text, link: !!link } })
+      return row
+    })
     return toSubmission(sub)
   }
 }
