@@ -297,12 +297,12 @@ export function Segmented<T extends string>({ options, value, onChange, size = '
 
 // ─── Generated cover art (no external imagery; deterministic per seed) ───────
 const PALETTES = [
-  ['#163C35', '#4E6E68', '#C8AD7F'],
-  ['#6B4F3A', '#A67C52', '#E3EBE5'],
-  ['#202725', '#163C35', '#C8AD7F'],
-  ['#8A9A7B', '#163C35', '#F7F5F0'],
-  ['#4E6E68', '#E3EBE5', '#C8AD7F'],
-  ['#A67C52', '#F7F5F0', '#163C35'],
+  ['#0E5A44', '#4E6E68', '#CA9A36'],
+  ['#6B4F3A', '#A67C52', '#E3EDE6'],
+  ['#1D211C', '#0E5A44', '#CA9A36'],
+  ['#8A9A7B', '#0E5A44', '#FBF3E3'],
+  ['#4E6E68', '#E3EDE6', '#CA9A36'],
+  ['#A67C52', '#FBF3E3', '#0E5A44'],
 ]
 
 export function ArtCover({ seed, className, label, imageUrl, alt = '', tone }: { seed: number; className?: string; label?: string; imageUrl?: string; alt?: string; tone?: string }) {
@@ -403,7 +403,7 @@ export function Avatar({
         width: size,
         height: size,
         fontSize: Math.max(12, size * 0.38),
-        background: 'linear-gradient(145deg, #E3EBE5 0%, #D5E1D8 100%)',
+        background: 'linear-gradient(145deg, #E3EDE6 0%, #D5E1D8 100%)',
       }}
     >
       {ini || (

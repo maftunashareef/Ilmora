@@ -45,7 +45,7 @@ export function AdminPeople() {
   }, [query, lang, notify])
   useEffect(() => { void loadStudents(1) }, [loadStudents])
 
-  const newTeacher = (): Teacher => ({ id: uid('t'), name: '', title: emptyL(), bio: emptyL(), expertise: [], centerId: s.centers[0]?.id ?? '', avatarSeed: Math.floor(Math.random() * 60), bannerTone: '#163C35', tagline: emptyL(), channelActive: false })
+  const newTeacher = (): Teacher => ({ id: uid('t'), name: '', title: emptyL(), bio: emptyL(), expertise: [], centerId: s.centers[0]?.id ?? '', avatarSeed: Math.floor(Math.random() * 60), bannerTone: '#0E5A44', tagline: emptyL(), channelActive: false })
   // Impersonation is not available in production; admins open the public channel instead.
   const actAs = (role: 'teacher' | 'student', id: string) => { if (role === 'teacher') window.location.assign(siteHref(lang, `/teachers/${id}`)) }
   // Dialogs close and report "Saved" only once the API has answered; the store toasts the error otherwise.

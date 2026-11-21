@@ -17,7 +17,7 @@ export function SaleRibbon({ percent, className }: { percent?: number; className
   const { t, lang } = useT()
   return (
     // `relative` positions the sweep; a caller placing the ribbon passes `absolute` instead (both together would clash).
-    <span className={cx('sale-ribbon inline-flex items-center gap-1 overflow-hidden rounded-full', className?.includes('absolute') ? '' : 'relative', 'sale-badge border border-[#a8842f]/50 bg-gradient-to-r from-[#b8923d] via-champagne to-[#ecdcb2] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-forest', className)}>
+    <span className={cx('sale-ribbon inline-flex items-center gap-1 overflow-hidden rounded-full', className?.includes('absolute') ? '' : 'relative', 'sale-badge border border-champagne/50 bg-gradient-to-r from-[color-mix(in_srgb,var(--c-champagne)_80%,black)] via-champagne to-[color-mix(in_srgb,var(--c-champagne)_40%,white)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-forest', className)}>
       {t('offers.sale')}
       {percent ? <span className="tracking-normal text-forest/85">−{formatPercent(percent, lang)}%</span> : null}
     </span>
@@ -97,7 +97,7 @@ export function DiscountShowcase({ courses, title, subtitle }: { courses: Course
         <div className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="sale-badge inline-flex items-center gap-2 rounded-full border border-[#a8842f]/40 bg-gradient-to-r from-[#c9a557] via-champagne to-[#ecdcb2] px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-forest">
+              <span className="sale-badge inline-flex items-center gap-2 rounded-full border border-champagne/40 bg-gradient-to-r from-[color-mix(in_srgb,var(--c-champagne)_88%,black)] via-champagne to-[color-mix(in_srgb,var(--c-champagne)_40%,white)] px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-forest">
                 <Icon name="star" className="h-3.5 w-3.5" />
                 {t('discounts.upTo', { n: formatPercent(maxPercent, lang) })}
               </span>

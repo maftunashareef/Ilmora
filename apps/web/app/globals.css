@@ -2,19 +2,19 @@
 
 /* Runtime theme variables — set from Super Admin theme settings via applyTheme() */
 :root {
-  --c-ivory: #F7F5F0;
-  --c-forest: #163C35;
-  --c-charcoal: #202725;
-  --c-champagne: #C8AD7F;
-  --c-sage: #E3EBE5;
-  --c-white: #FFFFFF;
+  --c-ivory: #FBF3E3;
+  --c-forest: #0E5A44;
+  --c-charcoal: #1D211C;
+  --c-champagne: #CA9A36;
+  --c-sage: #E3EDE6;
+  --c-white: #FFFCF5;
   /* Self-hosted @fontsource family names (imported in app/[locale]/layout.tsx); previously set by next/font. */
   --font-cormorant: "Cormorant Garamond";
   --font-playfair: "Playfair Display Variable";
   --font-inter: "Inter Variable";
   --font-manrope: "Manrope Variable";
-  --f-display: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
-  --f-body: var(--font-inter), "Inter", system-ui, sans-serif;
+  --f-display: var(--font-playfair), "Playfair Display", Georgia, serif;
+  --f-body: var(--font-manrope), "Manrope", system-ui, sans-serif;
   --r-card: 1.25rem;
   --r-control: 0.75rem;
   --ease-out-soft: cubic-bezier(0.22, 0.68, 0.32, 1);
@@ -31,8 +31,8 @@
   --font-body: var(--f-body);
   --radius-card: var(--r-card);
   --radius-control: var(--r-control);
-  --shadow-soft: 0 1px 2px rgba(32, 39, 37, 0.04), 0 18px 50px -30px rgba(22, 60, 53, 0.35);
-  --shadow-lift: 0 2px 4px rgba(32, 39, 37, 0.05), 0 30px 70px -35px rgba(22, 60, 53, 0.45);
+  --shadow-soft: 0 1px 2px color-mix(in srgb, var(--c-charcoal) 4%, transparent), 0 18px 50px -30px color-mix(in srgb, var(--c-forest) 35%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in srgb, var(--c-charcoal) 5%, transparent), 0 30px 70px -35px color-mix(in srgb, var(--c-forest) 45%, transparent);
   --animate-rise: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-fade: fade 0.6s ease both;
   --animate-float: float 9s ease-in-out infinite;
@@ -208,7 +208,7 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
 
 /* Hero video fallback: slow drifting gradient in brand tones */
 .hero-fallback {
-  background: linear-gradient(120deg, #0f2a25, var(--c-forest), #2a5c50, #0f2a25);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--c-forest) 55%, black), var(--c-forest), color-mix(in srgb, var(--c-forest) 82%, white), color-mix(in srgb, var(--c-forest) 55%, black));
   background-size: 300% 300%;
   animation: heroShift 18s ease infinite;
 }
@@ -252,25 +252,25 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
    Luxury UI Enhancements
    ─────────────────────────────────────────────────────────────────────────── */
 .glass-panel {
-  background: rgba(247, 245, 240, 0.72);
+  background: color-mix(in srgb, var(--c-ivory) 72%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(200, 173, 127, 0.22);
+  border: 1px solid color-mix(in srgb, var(--c-champagne) 22%, transparent);
 }
 
 .glass-panel-dark {
-  background: rgba(32, 39, 37, 0.75);
+  background: color-mix(in srgb, var(--c-charcoal) 75%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(200, 173, 127, 0.25);
+  border: 1px solid color-mix(in srgb, var(--c-champagne) 25%, transparent);
 }
 
 .glow-champagne {
-  box-shadow: 0 0 35px -8px rgba(200, 173, 127, 0.28);
+  box-shadow: 0 0 35px -8px color-mix(in srgb, var(--c-champagne) 28%, transparent);
 }
 
 .glow-forest {
-  box-shadow: 0 0 40px -10px rgba(22, 60, 53, 0.35);
+  box-shadow: 0 0 40px -10px color-mix(in srgb, var(--c-forest) 35%, transparent);
 }
 
 .luxury-border {
@@ -278,7 +278,7 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
   background-clip: padding-box, border-box;
   background-origin: padding-box, border-box;
   background-image: linear-gradient(to right, var(--c-white), var(--c-ivory)),
-                    linear-gradient(135deg, rgba(200, 173, 127, 0.5), rgba(22, 60, 53, 0.15), rgba(200, 173, 127, 0.35));
+                    linear-gradient(135deg, color-mix(in srgb, var(--c-champagne) 50%, transparent), color-mix(in srgb, var(--c-forest) 15%, transparent), color-mix(in srgb, var(--c-champagne) 35%, transparent));
 }
 
 @keyframes shimmer {
