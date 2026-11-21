@@ -141,6 +141,12 @@ export const EnvSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_PUBLIC_BASE_URL: z.string().url().optional(),
   S3_FORCE_PATH_STYLE: bool(true),
+  /**
+   * Abandoned files in the media bucket (security review 19.11, №10; infra/storage/media-sweep.service.ts): files older
+   * than MEDIA_SWEEP_MIN_AGE_DAYS that no row mentions. Report only until MEDIA_SWEEP_DELETE=true.
+   */
+  MEDIA_SWEEP_DELETE: bool(false),
+  MEDIA_SWEEP_MIN_AGE_DAYS: z.coerce.number().int().min(7).default(30),
 
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   RATE_LIMIT_DEFAULT_PER_MINUTE: z.coerce.number().int().positive().default(240),
