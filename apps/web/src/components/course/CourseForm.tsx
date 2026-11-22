@@ -118,7 +118,7 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
     if (!online && !lockPrice && priceRule === 1 && !checkCoursePrice(draft.price).ok) { notify(t('calc.err.price'), 'warn'); return }
     let discount: Course['discount'] = draft.discount ?? null
     if (mode === 'admin' || isCenter) {
-      const parsed = discountFromDraft(disc, new Date(), pricing?.maxDiscountPercent, priceRule)
+      const parsed = discountFromDraft(disc, new Date(), pricing?.maxDiscountPercent)
       if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
       discount = parsed.discount
     }

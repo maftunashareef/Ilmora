@@ -2,7 +2,7 @@ import { isPublicListed } from './access.js'
 import { isOnlineCourse, isSafeExternalUrl } from './catalog.js'
 import { MAX_CART_COURSES } from './enrollment.js'
 import { presetCourses, presetPublishability, presetTotal } from './presets.js'
-import { activePercent, finalPriceSom, isDiscountActive } from './pricing.js'
+import { discountInForce, finalPriceSom, isDiscountActive } from './pricing.js'
 import { groupHours, overlaps } from './schedule.js'
 import type { Category, CertificateKind, Course, Group, Level, Package, Preset } from './types.js'
 
@@ -187,7 +187,8 @@ function evaluate<T extends Course>(course: T, input: FinderInput<T>, slugs: Map
   else if (!withinLimit(price, answers.budget)) warnings.push({ code: 'overBudget', price })
   else if (answers.budget !== 'any') reasons.push({ code: 'budget', price })
 
-  if (isDiscountActive(course.discount, now)) { score += 5; reasons.push({ code: 'discount', percent: activePercent(course, now), endsAt: course.discount!.endsAt }) }
+  const sale = discountInForce(course, now)
+  if (isDiscountActive(sale, now)) { score += 5; reasons.push({ code: 'discount', percent: sale!.percent, endsAt: typeof sale!.endsAt === 'string' ? sale!.endsAt : null }) }
 
   let group: Group | null = null
   let hours: number | null = null

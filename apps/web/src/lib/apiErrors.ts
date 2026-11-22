@@ -221,8 +221,6 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   student_discount_required: 'calc.err.discountRequired',
   discount_over_limit: 'calc.err.overLimit',
   free_course_no_discount: 'calc.err.freeNoDiscount',
-  discount_no_end: 'calc.err.noEnd',
-  discount_end_required: 'calc.err.endRequired',
   homework_bad_link: 'hw.badLink',
   homework_zip_not_yet: 'hw.err.zip',
   homework_due_past: 'hw.err.duePast',

@@ -33,7 +33,7 @@ export type GroupInput = z.infer<typeof GroupInput>
  * limit 100% − K depends on the commission and is checked by ManageService (`discount_over_limit`).
  */
 export const DiscountInput = z
-  // endsAt null: no end — a new course's student discount (Шерзод, 20.11); the service decides by the course's price rule.
+  // endsAt null: a permanent discount; a date: a time-limited one — the center chooses (22.11).
   .object({ percent: z.number().int().min(MIN_DISCOUNT_PERCENT).max(MAX_DISCOUNT_PERCENT), startsAt: z.string().datetime(), endsAt: z.string().datetime().nullable() })
   .strict()
   .refine((d) => checkDiscount(d, MAX_DISCOUNT_PERCENT).ok, { message: 'The discount must end after it starts' })

@@ -10,6 +10,10 @@ import type { CourseDiscount, Publishable } from './types.js'
  * The calculator of ТЗ 2026-11-18, раздел 9 (решение 18.11; Шерзод, 20.11: минимум скидки — для новых курсов, даты у скидки
  * остаются). Price P set by the center, commission K set by the Super Admin (one for every center), student discount S:
  * the student pays P − S, the center gets P − (K + S), ILMORA the difference. All sums are whole so'm.
+ *
+ * The term of a discount (22.11): the center chooses «permanent» (no end) or «time-limited» (an end: 10 days, 1–3 months or
+ * its own date). A paid course of the calculator never stays without a student discount: when a time-limited one ends,
+ * the minimum (5%) holds from that moment on — see discountInForce.
  */
 export const COMMISSION_DEFAULT_PERCENT = 10
 /** The range the Super Admin may set K in: at least 2% keeps ILMORA's share above the rounding loss (≤ 990 so'm) at P ≥ 50 000. */
@@ -42,7 +46,7 @@ const TASHKENT_OFFSET_MS = 5 * 3_600_000
 export interface DiscountWindow {
   percent: number
   startsAt: string | Date
-  /** null: no end — a new course's student discount has no time limit (Шерзод, 20.11). */
+  /** null: no end — a permanent discount; a date — a time-limited one. */
   endsAt: string | Date | null
 }
 
@@ -87,9 +91,22 @@ export function studentPriceSom(priceSom: number, percent: number, rule: PriceRu
   return priceSom - discountSom(priceSom, percent)
 }
 
+/**
+ * The window that counts on a course at `now`. A paid course of the calculator (rule 1) never stays without a student
+ * discount: once its time-limited window has ended, the minimum (5%) holds from that moment on, with no end (22.11). Any
+ * other course — one from before the calculator, a free one — has its own window and nothing after it, as it always did.
+ * The server charges by this and sends it to the browser, so both sides agree.
+ */
+export function discountInForce(course: { price?: number; priceRule?: PriceRule; discount?: DiscountWindow | CourseDiscount | null }, now: Date = new Date()): DiscountWindow | null {
+  const d = course.discount ?? null
+  if (!d || course.priceRule !== 1 || !((course.price ?? 0) > 0) || d.endsAt === null || d.endsAt === undefined) return d
+  return ms(d.endsAt) <= now.getTime() ? { percent: MIN_DISCOUNT_PERCENT, startsAt: d.endsAt, endsAt: null } : d
+}
+
 /** Price in so'm after the discount if it is active at `now`, otherwise the list price. */
 export function finalPriceSom(course: { price: number; discount?: DiscountWindow | CourseDiscount | null; priceRule?: PriceRule }, now: Date = new Date()): number {
-  return isDiscountActive(course.discount, now) ? studentPriceSom(course.price, course.discount!.percent, course.priceRule ?? 0) : course.price
+  const d = discountInForce(course, now)
+  return isDiscountActive(d, now) ? studentPriceSom(course.price, d!.percent, course.priceRule ?? 0) : course.price
 }
 
 /** Server-side amount in tiyin; identical to finalPriceSom * 100 for prices stored in whole so'm. */
@@ -122,8 +139,10 @@ export function calculatorSom(priceSom: number, discountPercent: number, commiss
 }
 
 /** Percentage to show next to a discounted price, or 0 when no discount is active. */
-export const activePercent = (course: { discount?: DiscountWindow | CourseDiscount | null }, now: Date = new Date()): number =>
-  isDiscountActive(course.discount, now) ? course.discount!.percent : 0
+export const activePercent = (course: { price?: number; priceRule?: PriceRule; discount?: DiscountWindow | CourseDiscount | null }, now: Date = new Date()): number => {
+  const d = discountInForce(course, now)
+  return isDiscountActive(d, now) ? d!.percent : 0
+}
 
 /** The amount actually billed per period (tiyin string from the API) in so'm, or null when it is not known. */
 export const billedSom = (amountMinor: string | undefined | null): number | null =>
@@ -141,18 +160,56 @@ export const discountToDraft = (d: CourseDiscount | null | undefined): DiscountD
 
 const LOCAL_TEXT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 /**
- * Form text -> discount: all empty means "no discount" (null). An empty start means "from now". A course from before
- * (rule 0) needs the end; a new course (rule 1) has none — its discount has no time limit (Шерзод, 20.11), and an end typed
- * in is not ok. The result must pass checkDiscount, or it is not ok.
+ * Form text -> discount: all empty means "no discount" (null). An empty start means "from now". An empty end is a permanent
+ * discount (no end); an end typed in makes it time-limited and must still be ahead of `now` — a term that is already over
+ * is a slip of the hand. The result must pass checkDiscount, or it is not ok.
  */
-export function discountFromDraft(draft: DiscountDraft, now: Date = new Date(), maxPercent?: number, rule: PriceRule = 0): { ok: true; discount: CourseDiscount | null } | { ok: false } {
+export function discountFromDraft(draft: DiscountDraft, now: Date = new Date(), maxPercent?: number): { ok: true; discount: CourseDiscount | null } | { ok: false } {
   if (!draft.percent && !draft.starts && !draft.ends) return { ok: true, discount: null }
   if (draft.starts !== '' && !LOCAL_TEXT.test(draft.starts)) return { ok: false }
-  if (rule === 1 ? draft.ends !== '' : !LOCAL_TEXT.test(draft.ends)) return { ok: false }
+  if (draft.ends !== '' && !LOCAL_TEXT.test(draft.ends)) return { ok: false }
   const startsAt = draft.starts === '' ? now.toISOString() : tashkentLocalToIso(draft.starts)
-  const discount = { percent: Number(draft.percent), startsAt, endsAt: rule === 1 ? null : tashkentLocalToIso(draft.ends) }
+  const endsAt = draft.ends === '' ? null : tashkentLocalToIso(draft.ends)
+  if (endsAt !== null && !(Date.parse(endsAt) > now.getTime())) return { ok: false }
+  const discount = { percent: Number(draft.percent), startsAt, endsAt }
   return checkDiscount(discount, maxPercent).ok ? { ok: true, discount } : { ok: false }
 }
+
+/** The quick terms of a time-limited discount in the course form, counted from its start (22.11). */
+export const DISCOUNT_TERMS = [
+  { id: '10d', days: 10, months: 0 },
+  { id: '1m', days: 0, months: 1 },
+  { id: '2m', days: 0, months: 2 },
+  { id: '3m', days: 0, months: 3 },
+] as const
+export type DiscountTermId = (typeof DISCOUNT_TERMS)[number]['id']
+
+/**
+ * The end of a term counted from `startLocal`, both `datetime-local` text in Tashkent time. A month is a calendar month
+ * (15 Jan → 15 Feb); a day the shorter month does not have becomes its last one (31 Jan → 28 Feb). '' when the start is not
+ * a date.
+ */
+export function discountTermEnd(startLocal: string, termId: DiscountTermId): string {
+  const term = DISCOUNT_TERMS.find((x) => x.id === termId)
+  if (!term || !LOCAL_TEXT.test(startLocal)) return ''
+  const d = new Date(Date.parse(`${startLocal}:00Z`))
+  if (Number.isNaN(d.getTime())) return ''
+  if (term.months) {
+    const day = d.getUTCDate()
+    d.setUTCDate(1)
+    d.setUTCMonth(d.getUTCMonth() + term.months)
+    d.setUTCDate(Math.min(day, new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()))
+  }
+  if (term.days) d.setUTCDate(d.getUTCDate() + term.days)
+  return d.toISOString().slice(0, 16)
+}
+
+/** Which quick term a draft's dates make, if any — the form marks that button. */
+export const discountTermOf = (draft: Pick<DiscountDraft, 'starts' | 'ends'>): DiscountTermId | null =>
+  draft.ends === '' ? null : (DISCOUNT_TERMS.find((x) => discountTermEnd(draft.starts, x.id) === draft.ends)?.id ?? null)
+
+/** `now` as `datetime-local` text in Tashkent time, to the minute. */
+export const tashkentNowLocal = (now: Date = new Date()): string => isoToTashkentLocal(now.toISOString())
 
 /**
  * Monthly totals of a selection in so‘m: the list prices, what is paid with each course's own active discount (the same
@@ -171,15 +228,16 @@ export const MAX_CAROUSEL_COURSES = 16
  * Courses for the homepage discount carousel: published, public and with a discount active right now, the one that
  * ends soonest first, at most `max` (never more than MAX_CAROUSEL_COURSES). They stay in the main catalog as well.
  */
-export function carouselCourses<T extends Pick<Publishable, 'status' | 'visibility'> & { discount?: DiscountWindow | CourseDiscount | null }>(
+export function carouselCourses<T extends Pick<Publishable, 'status' | 'visibility'> & { price?: number; priceRule?: PriceRule; discount?: DiscountWindow | CourseDiscount | null }>(
   courses: T[],
   now: Date = new Date(),
   max: number = MAX_CAROUSEL_COURSES,
 ): T[] {
   const limit = Math.max(0, Math.min(Math.floor(max), MAX_CAROUSEL_COURSES))
+  const end = (c: T) => endMs(discountInForce(c, now)?.endsAt ?? null)
   return courses
-    .filter((c) => isPublicListed(c) && isDiscountActive(c.discount, now))
-    .sort((a, b) => endMs(a.discount!.endsAt ?? null) - endMs(b.discount!.endsAt ?? null))
+    .filter((c) => isPublicListed(c) && isDiscountActive(discountInForce(c, now), now))
+    .sort((a, b) => end(a) - end(b))
     .slice(0, limit)
 }
 
