@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import type { DiscountWindow } from '@ilmora/shared'
+import { discountInForce, type DiscountWindow } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -153,15 +153,24 @@ export const toGroup = (g: { id: string; courseId: string; name: string; days: n
   id: g.id, courseId: g.courseId, name: g.name, days: g.days, start: g.startTime, end: g.endTime, room: g.room, capacity: g.capacity, enrolled: seats?.get(g.id) ?? 0,
 })
 /**
- * Stored discount columns -> window used by the price rules (null when no discount is set). No end: a new course's student
- * discount has no time limit (Шерзод, 20.11).
+ * Stored discount columns -> the window as the center set it (null when no discount is set). No end: a permanent discount;
+ * an end: a time-limited one (22.11).
  */
 export const discountWindow = (c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }): DiscountWindow | null =>
   c.discountPercent && c.discountStartsAt ? { percent: c.discountPercent, startsAt: c.discountStartsAt, endsAt: c.discountEndsAt } : null
 
-/** What the browser gets: the window while it has not expired (it may start later). The browser decides "active now". */
-const publicDiscount = (c: { discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }, now = new Date()) => {
-  const w = discountWindow(c)
+type DiscountedCourse = { priceMinor: bigint; priceRule?: number | null; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }
+/**
+ * The window the price rules use at `now`: the stored one, and for a paid course of the calculator whose time-limited
+ * discount has ended — the minimum from that moment on (22.11: such a course never stays without a student discount).
+ * Payments, the catalog and the publishing check all go by this one.
+ */
+export const discountNow = (c: DiscountedCourse, now = new Date()): DiscountWindow | null =>
+  discountInForce({ price: Number(c.priceMinor / 100n), priceRule: c.priceRule === 1 ? 1 : 0, discount: discountWindow(c) }, now)
+
+/** What the browser gets: the window in force while it has not expired (it may start later). The browser decides "active now". */
+const publicDiscount = (c: DiscountedCourse, now = new Date()) => {
+  const w = discountNow(c, now)
   if (!w || (w.endsAt && (w.endsAt as Date) <= now)) return null
   return { percent: w.percent, startsAt: (w.startsAt as Date).toISOString(), endsAt: w.endsAt ? (w.endsAt as Date).toISOString() : null }
 }

@@ -7,7 +7,7 @@ import type { PaymentProvider, SubscriptionStatus } from '../../generated/prisma
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { discountWindow, toGroup } from '../catalog/catalog.service'
+import { discountNow, toGroup } from '../catalog/catalog.service'
 import { NotificationsService } from '../notifications/notifications.service'
 
 export interface DraftInput { packageId: string | null; groupIds: string[]; meyosGrant: boolean }
@@ -24,7 +24,8 @@ type PricedCourse = { priceMinor: bigint; priceRule?: number; discountPercent: n
  * of K or of the discount does not touch a payment already made (9.2).
  */
 export function priceLine(course: PricedCourse, commissionPercent: number, now: Date) {
-  const window = discountWindow(course)
+  // The window in force: after a time-limited discount of a calculator course ends, the minimum holds (22.11).
+  const window = discountNow(course, now)
   const rule: PriceRule = course.priceRule === 1 ? 1 : 0
   const amountMinor = finalPriceMinor(course.priceMinor, window, now, rule)
   const discountPercent = isDiscountActive(window, now) ? window!.percent : 0

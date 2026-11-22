@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  activePercent, billedSom, calculatorSom, carouselCourses, checkCoursePrice, COMMISSION_DEFAULT_PERCENT, COMMISSION_MIN_PERCENT, MAX_CAROUSEL_COURSES, maxDiscountPercent, MIN_DISCOUNT_PERCENT, studentPriceSom, checkDiscount, discountFromDraft, discountSom, discountToDraft, emptyDiscountDraft, finalPriceMinor, finalPriceSom, isDiscountActive, isoToTashkentLocal, MAX_DISCOUNT_PERCENT, priceTotals, tashkentLocalToIso,
+  activePercent, billedSom, calculatorSom, carouselCourses, checkCoursePrice, COMMISSION_DEFAULT_PERCENT, COMMISSION_MIN_PERCENT, MAX_CAROUSEL_COURSES, maxDiscountPercent, MIN_DISCOUNT_PERCENT, studentPriceSom, checkDiscount, DISCOUNT_TERMS, discountFromDraft, discountInForce, discountSom, discountTermEnd, discountTermOf, discountToDraft, emptyDiscountDraft, finalPriceMinor, finalPriceSom, isDiscountActive, isoToTashkentLocal, MAX_DISCOUNT_PERCENT, priceTotals, tashkentLocalToIso, tashkentNowLocal,
 } from './pricing.js'
 
 const d = (percent: number, startsAt: string, endsAt: string) => ({ percent, startsAt, endsAt })
@@ -132,27 +132,27 @@ describe('discount form text', () => {
     expect(discountToDraft(null)).toEqual(emptyDiscountDraft())
     const stored = { percent: 15, startsAt: '2026-11-01T05:00:00.000Z', endsAt: '2026-11-10T18:30:00.000Z' }
     expect(discountToDraft(stored)).toEqual(draft('15', '2026-11-01T10:00', '2026-11-10T23:30'))
-    expect(discountFromDraft(discountToDraft(stored))).toEqual({ ok: true, discount: stored })
+    expect(discountFromDraft(discountToDraft(stored), new Date('2026-11-05T00:00:00Z'))).toEqual({ ok: true, discount: stored })
   })
 
-  it('starts immediately when the start is left empty, but always needs an end after it', () => {
+  it('starts immediately when the start is left empty; an end, when given, comes after the start', () => {
     const now = new Date('2026-11-01T00:00:00Z')
     expect(discountFromDraft(draft('10', '', '2026-11-10T10:00'), now)).toEqual({ ok: true, discount: { percent: 10, startsAt: now.toISOString(), endsAt: '2026-11-10T05:00:00.000Z' } })
     expect(discountFromDraft(draft('10', '', '2026-10-31T10:00'), now).ok).toBe(false)
-    expect(discountFromDraft(draft('10', '2026-11-01T10:00', ''), now).ok).toBe(false)
-    expect(discountFromDraft(draft('10', '', ''), now).ok).toBe(false)
   })
 
   it('refuses half-filled or invalid forms: missing percent, percent outside 5–90 (5–85 at commission 15%), end not after start', () => {
-    expect(discountFromDraft(draft('', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('0', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('4', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('91', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('86', '2026-11-01T10:00', '2026-11-10T10:00'), new Date(), 85).ok).toBe(false)
-    expect(discountFromDraft(draft('abc', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('10', '2026-11-10T10:00', '2026-11-01T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('10', '2026-11-01', '2026-11-10T10:00')).ok).toBe(false)
-    expect(discountFromDraft(draft('20', '2026-11-01T10:00', '2026-11-10T10:00')).ok).toBe(true)
+    const now = new Date('2026-11-01T00:00:00Z')
+    expect(discountFromDraft(draft('', '2026-11-01T10:00', '2026-11-10T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('0', '2026-11-01T10:00', '2026-11-10T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('4', '2026-11-01T10:00', '2026-11-10T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('91', '2026-11-01T10:00', '2026-11-10T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('86', '2026-11-01T10:00', '2026-11-10T10:00'), now, 85).ok).toBe(false)
+    expect(discountFromDraft(draft('abc', '2026-11-01T10:00', '2026-11-10T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('10', '2026-11-10T10:00', '2026-11-01T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('10', '2026-11-01', '2026-11-10T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('10', '2026-11-01T10:00', '2026-11-10'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('20', '2026-11-01T10:00', '2026-11-10T10:00'), now).ok).toBe(true)
   })
 
   it('allows a start date in the future', () => {
@@ -160,21 +160,107 @@ describe('discount form text', () => {
     expect(far.ok).toBe(true)
   })
 
-  it('a new course (rule 1): no end — the discount has no time limit (Шерзод, 20.11); an end typed in is refused', () => {
+  it('the term is the center’s choice (22.11): an empty end is a permanent discount, an end makes it time-limited', () => {
     const now = new Date('2026-11-20T10:00:00Z')
-    expect(discountFromDraft(draft('10', '', ''), now, 90, 1)).toEqual({ ok: true, discount: { percent: 10, startsAt: now.toISOString(), endsAt: null } })
-    expect(discountFromDraft(draft('10', '2026-11-25T10:00', ''), now, 90, 1)).toEqual({ ok: true, discount: { percent: 10, startsAt: '2026-11-25T05:00:00.000Z', endsAt: null } })
-    expect(discountFromDraft(draft('10', '', '2026-12-01T10:00'), now, 90, 1).ok).toBe(false)
-    expect(discountFromDraft(draft('4', '', ''), now, 90, 1).ok).toBe(false)
-    // A course from before still needs its end.
-    expect(discountFromDraft(draft('10', '', ''), now, 90, 0).ok).toBe(false)
+    // Permanent: no end, from now or from the start typed in.
+    expect(discountFromDraft(draft('10', '', ''), now, 90)).toEqual({ ok: true, discount: { percent: 10, startsAt: now.toISOString(), endsAt: null } })
+    expect(discountFromDraft(draft('10', '2026-11-25T10:00', ''), now, 90)).toEqual({ ok: true, discount: { percent: 10, startsAt: '2026-11-25T05:00:00.000Z', endsAt: null } })
+    // Time-limited: the end typed in, Tashkent time.
+    expect(discountFromDraft(draft('10', '', '2026-12-01T10:00'), now, 90)).toEqual({ ok: true, discount: { percent: 10, startsAt: now.toISOString(), endsAt: '2026-12-01T05:00:00.000Z' } })
+    expect(discountFromDraft(draft('4', '', ''), now, 90).ok).toBe(false)
     const open = { percent: 10, startsAt: '2026-11-20T05:00:00.000Z', endsAt: null }
     expect(discountToDraft(open)).toEqual(draft('10', '2026-11-20T10:00', ''))
-    expect(discountFromDraft(discountToDraft(open), now, 90, 1)).toEqual({ ok: true, discount: open })
+    expect(discountFromDraft(discountToDraft(open), now, 90)).toEqual({ ok: true, discount: open })
+  })
+
+  it('a term that is already over is refused: the end must be ahead of now', () => {
+    const now = new Date('2026-11-20T10:00:00Z') // 15:00 in Tashkent
+    expect(discountFromDraft(draft('10', '2026-11-01T10:00', '2026-11-10T10:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('10', '2026-11-01T10:00', '2026-11-20T15:00'), now).ok).toBe(false)
+    expect(discountFromDraft(draft('10', '2026-11-01T10:00', '2026-11-20T15:01'), now).ok).toBe(true)
   })
 })
 
-describe('a discount with no end (new courses, Шерзод 20.11)', () => {
+describe('the quick terms of a time-limited discount (22.11): 10 days, 1, 2 and 3 months from the start', () => {
+  it('offers exactly these four, in this order', () => {
+    expect(DISCOUNT_TERMS.map((x) => x.id)).toEqual(['10d', '1m', '2m', '3m'])
+  })
+  it('counts days and calendar months from the start, keeping the time of day', () => {
+    expect(discountTermEnd('2026-11-22T14:30', '10d')).toBe('2026-12-02T14:30')
+    expect(discountTermEnd('2026-11-22T14:30', '1m')).toBe('2026-12-22T14:30')
+    expect(discountTermEnd('2026-11-22T14:30', '2m')).toBe('2027-01-22T14:30')
+    expect(discountTermEnd('2026-11-22T14:30', '3m')).toBe('2027-02-22T14:30')
+  })
+  it('a day the shorter month does not have becomes its last day; a leap year is counted', () => {
+    expect(discountTermEnd('2027-01-31T09:00', '1m')).toBe('2027-02-28T09:00')
+    expect(discountTermEnd('2028-01-31T09:00', '1m')).toBe('2028-02-29T09:00')
+    expect(discountTermEnd('2026-12-31T23:59', '2m')).toBe('2027-02-28T23:59')
+    expect(discountTermEnd('2026-11-30T00:00', '3m')).toBe('2027-02-28T00:00')
+    expect(discountTermEnd('2026-12-25T10:00', '10d')).toBe('2027-01-04T10:00')
+  })
+  it('gives nothing for a start that is not a date', () => {
+    expect(discountTermEnd('', '10d')).toBe('')
+    expect(discountTermEnd('2026-11-22', '1m')).toBe('')
+    expect(discountTermEnd('2026-13-45T10:00', '1m')).toBe('')
+  })
+  it('recognises the term a pair of dates makes, so the form marks its button', () => {
+    expect(discountTermOf({ starts: '2026-11-22T14:30', ends: '2026-12-02T14:30' })).toBe('10d')
+    expect(discountTermOf({ starts: '2026-11-22T14:30', ends: '2027-01-22T14:30' })).toBe('2m')
+    expect(discountTermOf({ starts: '2026-11-22T14:30', ends: '2027-02-22T14:30' })).toBe('3m')
+    expect(discountTermOf({ starts: '2026-11-22T14:30', ends: '2026-12-15T00:00' })).toBeNull() // the center's own date
+    expect(discountTermOf({ starts: '2026-11-22T14:30', ends: '' })).toBeNull() // permanent
+    expect(discountTermOf({ starts: '', ends: '2026-12-02T14:30' })).toBeNull()
+  })
+  it('a quick term makes a discount the form accepts, in Tashkent time', () => {
+    const now = new Date('2026-11-22T09:30:00Z')
+    const starts = tashkentNowLocal(now)
+    expect(starts).toBe('2026-11-22T14:30')
+    expect(discountFromDraft({ percent: '20', starts, ends: discountTermEnd(starts, '10d') }, now)).toEqual({ ok: true, discount: { percent: 20, startsAt: '2026-11-22T09:30:00.000Z', endsAt: '2026-12-02T09:30:00.000Z' } })
+  })
+})
+
+describe('after a time-limited discount (22.11): a paid course of the calculator keeps the minimum', () => {
+  const timed = { percent: 20, startsAt: '2026-11-01T00:00:00Z', endsAt: '2026-11-11T00:00:00Z' }
+  const during = new Date('2026-11-05T00:00:00Z')
+  const after = new Date('2026-11-11T00:00:00Z')
+  it('during the term the discount is the center’s own', () => {
+    expect(discountInForce({ price: 1_000_000, priceRule: 1, discount: timed }, during)).toBe(timed)
+    expect(activePercent({ price: 1_000_000, priceRule: 1, discount: timed }, during)).toBe(20)
+    expect(finalPriceSom({ price: 1_000_000, priceRule: 1, discount: timed }, during)).toBe(800_000)
+  })
+  it('from the end on the minimum holds, with no end of its own', () => {
+    expect(discountInForce({ price: 1_000_000, priceRule: 1, discount: timed }, after)).toEqual({ percent: MIN_DISCOUNT_PERCENT, startsAt: timed.endsAt, endsAt: null })
+    expect(activePercent({ price: 1_000_000, priceRule: 1, discount: timed }, after)).toBe(5)
+    expect(finalPriceSom({ price: 1_000_000, priceRule: 1, discount: timed }, after)).toBe(950_000)
+    expect(finalPriceSom({ price: 1_000_000, priceRule: 1, discount: timed }, new Date('2030-01-01T00:00:00Z'))).toBe(950_000)
+    expect(priceTotals([{ price: 1_000_000, priceRule: 1 as const, discount: timed }], after)).toEqual({ list: 1_000_000, final: 950_000, saved: 50_000 })
+  })
+  it('a permanent discount and one that has not started stay as they are', () => {
+    const open = { percent: 20, startsAt: '2026-11-01T00:00:00Z', endsAt: null }
+    expect(discountInForce({ price: 1_000_000, priceRule: 1, discount: open }, new Date('2030-01-01T00:00:00Z'))).toBe(open)
+    const later = { percent: 20, startsAt: '2026-12-01T00:00:00Z', endsAt: '2026-12-11T00:00:00Z' }
+    expect(activePercent({ price: 1_000_000, priceRule: 1, discount: later }, during)).toBe(0)
+    expect(discountInForce({ price: 1_000_000, priceRule: 1 }, during)).toBeNull()
+  })
+  it('a course from before the calculator and a free course have nothing after the term, as always', () => {
+    expect(discountInForce({ price: 1_000_000, priceRule: 0, discount: timed }, after)).toBe(timed)
+    expect(finalPriceSom({ price: 1_000_000, priceRule: 0, discount: timed }, after)).toBe(1_000_000)
+    expect(finalPriceSom({ price: 1_000_000, discount: timed }, after)).toBe(1_000_000)
+    expect(activePercent({ discount: timed }, after)).toBe(0)
+    expect(finalPriceSom({ price: 0, priceRule: 1, discount: timed }, after)).toBe(0)
+    expect(activePercent({ price: 0, priceRule: 1, discount: timed }, after)).toBe(0)
+  })
+  it('the carousel keeps such a course, after those whose term still runs', () => {
+    const list = [
+      { id: 'kept', status: 'published' as const, visibility: 'public' as const, price: 1_000_000, priceRule: 1 as const, discount: timed },
+      { id: 'old-ended', status: 'published' as const, visibility: 'public' as const, price: 1_000_000, priceRule: 0 as const, discount: timed },
+      { id: 'runs', status: 'published' as const, visibility: 'public' as const, price: 1_000_000, priceRule: 1 as const, discount: { percent: 10, startsAt: '2026-11-01T00:00:00Z', endsAt: '2026-11-30T00:00:00Z' } },
+    ]
+    expect(carouselCourses(list, new Date('2026-11-15T00:00:00Z')).map((c) => c.id)).toEqual(['runs', 'kept'])
+  })
+})
+
+describe('a discount with no end (a permanent discount)', () => {
   const open = { percent: 10, startsAt: '2026-11-01T00:00:00Z', endsAt: null }
   it('is active from its start on and never runs out', () => {
     expect(isDiscountActive(open, new Date('2026-10-31T23:59:59Z'))).toBe(false)

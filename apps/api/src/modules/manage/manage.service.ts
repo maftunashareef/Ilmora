@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import type { z } from 'zod'
-import { checkCoursePrice, COMMISSION_DEFAULT_PERCENT, isSafeExternalUrl, maxDiscountPercent, MIN_COURSE_PRICE_SOM, MIN_DISCOUNT_PERCENT, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
+import { checkCoursePrice, COMMISSION_DEFAULT_PERCENT, isDiscountActive, isSafeExternalUrl, maxDiscountPercent, MIN_COURSE_PRICE_SOM, MIN_DISCOUNT_PERCENT, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import { ENV, type Env, s3Configured } from '../../config/env'
@@ -12,7 +12,7 @@ import { unclaimInstitution } from '../institutions/institutions.service'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { AuditService } from '../audit/audit.service'
-import { discountWindow, toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
+import { discountNow, discountWindow, toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { SessionsService } from '../sessions/sessions.service'
 import { SiteService } from '../site/site.service'
@@ -79,7 +79,8 @@ export class ManageService {
       ? { discountPercent: d.percent, discountStartsAt: new Date(d.startsAt), discountEndsAt: d.endsAt ? new Date(d.endsAt) : null }
       : { discountPercent: null, discountStartsAt: null, discountEndsAt: null }
   }
-  // ───── the price calculator (ТЗ 2026-11-18, 9; Шерзод, 20.11: the 5% minimum is for new courses, their discount has no end) ─────
+  // ───── the price calculator (ТЗ 2026-11-18, 9; Шерзод, 20.11: the 5% minimum is for new courses; 22.11: the center chooses a
+  // permanent or a time-limited discount, and after a time-limited one the minimum holds) ─────
 
   /** ILMORA's commission K: one for every center, set by the Super Admin only. */
   async commissionPercent(tenantId: string): Promise<number> {
@@ -110,15 +111,6 @@ export class ManageService {
     const max = maxDiscountPercent(await this.commissionPercent(tenantId))
     if (d.percent > max) throw AppError.invalid('discount_over_limit', `The student discount can be at most ${max}%`, { max })
   }
-  /**
-   * The end of a discount by the course's price rule: a new course's student discount has no time limit (Шерзод, 20.11) —
-   * an end is refused; a course from before keeps its window and needs the end, as it always did.
-   */
-  private assertDiscountEnd(priceRule: number | null | undefined, d: { endsAt: string | null } | null | undefined) {
-    if (!d) return
-    if (priceRule === 1 && d.endsAt !== null) throw AppError.invalid('discount_no_end', 'A new course’s student discount has no end date')
-    if (priceRule !== 1 && d.endsAt === null) throw AppError.invalid('discount_end_required', 'This course’s discount needs an end date')
-  }
   /** The price of a course created with the calculator: whole thousands from 50 000 so'm, or 0 for a free course. */
   private assertCoursePrice(priceSom: number) {
     const check = checkCoursePrice(priceSom)
@@ -126,7 +118,9 @@ export class ManageService {
   }
   /**
    * A paid offline course created with the calculator is published only with a student discount (5% or more) in force now
-   * — started, and with no end (Шерзод, 20.11), so the student never sees it without one; a free course carries none.
+   * — started (Шерзод, 20.11), so the student never sees it without one; a free course carries none. The discount is
+   * permanent or time-limited, as the center chose (22.11); a time-limited one that has ended leaves the minimum in force
+   * (discountNow), so the course still counts as discounted.
    * Checked when the course becomes published and when its price or discount changes while published.
    */
   private assertStudentDiscount(c: { priceRule?: number | null; learningFormat?: string | null; priceMinor: bigint; status: string; discountPercent: number | null; discountStartsAt: Date | null; discountEndsAt: Date | null }) {
@@ -136,8 +130,8 @@ export class ManageService {
       return
     }
     if (c.status !== 'PUBLISHED') return
-    const now = Date.now()
-    const inForce = !!c.discountPercent && !!c.discountStartsAt && c.discountStartsAt.getTime() <= now && (!c.discountEndsAt || c.discountEndsAt.getTime() > now)
+    const now = new Date()
+    const inForce = isDiscountActive(discountNow(c, now), now)
     if (!inForce) throw AppError.invalid('student_discount_required', 'A paid course is published with a student discount of 5% or more in force', { min: MIN_DISCOUNT_PERCENT })
   }
 
@@ -321,7 +315,6 @@ export class ManageService {
     await this.assertCanPublish(tenantId, actor, centerId, input.status)
     // Every course created from now on follows the calculator (priceRule 1).
     if (!online) this.assertCoursePrice(price)
-    if (!online) this.assertDiscountEnd(1, input.discount)
     await this.assertDiscountLimit(tenantId, input.discount)
     const publishable = this.publishableData(input, actor, !!perms.publishDirectly)
     const discount = this.discountColumns(input.discount ?? null)
@@ -363,7 +356,6 @@ export class ManageService {
     await this.assertCenterWritable(tenantId, actor, course.centerId)
     if (course.learningFormat === 'ONLINE') this.assertOnlineIsFree(undefined, discount)
     if (this.sameDiscount(discount, course)) return toCourse(course)
-    this.assertDiscountEnd(course.priceRule, discount)
     await this.assertDiscountLimit(tenantId, discount)
     const next = this.discountColumns(discount)
     this.assertStudentDiscount({ ...course, ...next })
@@ -438,7 +430,6 @@ export class ManageService {
       // A discount is changed only by the Super Admin or the course's own center admin; resending the stored one is not a change.
       if (input.discount !== undefined && !this.sameDiscount(input.discount, course)) {
         if (!this.canSetDiscount(actor, course.centerId)) throw AppError.forbidden('Only the Super Admin or the course center can change discounts')
-        this.assertDiscountEnd(course.priceRule, input.discount)
         await this.assertDiscountLimit(tenantId, input.discount)
         Object.assign(data, this.discountColumns(input.discount))
       }

@@ -72,7 +72,7 @@ export function CenterCourses() {
   }
   const saveDiscount = async () => {
     if (!discounting) return
-    const parsed = discountFromDraft(draft, new Date(), data?.pricing?.maxDiscountPercent, discounting.priceRule ?? 0)
+    const parsed = discountFromDraft(draft, new Date(), data?.pricing?.maxDiscountPercent)
     if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
     setBusy(true)
     try {
@@ -86,7 +86,7 @@ export function CenterCourses() {
   const discountLabel = (c: Course) => {
     if (!c.discount) return <Badge tone="muted">{t('center.discountNone')}</Badge>
     const active = isDiscountActive(c.discount)
-    // A new course's discount has no end (Шерзод, 20.11): «−10% · без срока» / «−10% · с …, без срока».
+    // A permanent discount has no end: «−10% · без срока» / «−10% · с …, без срока».
     if (!c.discount.endsAt) {
       const vars = { percent: c.discount.percent, from: when(c.discount.startsAt) }
       return active ? <Badge tone="forest">{t('center.discountOpen', vars)}</Badge> : <Badge tone="champagne">{t('center.discountOpenFrom', vars)}</Badge>
