@@ -26,7 +26,7 @@ const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription', 'RefundRequest']
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
-const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'item'
+const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'item'
 /** Everything a center may do with its own courses and groups, whatever the teacher switches say. */
 const CENTER_OWNER_PERMS = { customizeChannel: false, editCourses: true, editPrices: true, editSchedules: true, manageGroups: true, publishDirectly: true, uploadResources: false }
 

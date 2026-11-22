@@ -174,7 +174,7 @@ describe('Excel export / import: every download is audited', () => {
   // The DB check below covers the real row of ministry.export.
   it('each listed handler writes its audit action with the number of rows', () => {
     const missing = Object.entries(EXPORTS).filter(([k, e]) => {
-      const re = new RegExp(`action:\\s*['"\`]${e.audit.replace(/\./g, '\\.')}['"\`][^}]*\\brows:`)
+      const re = new RegExp(`action:\\s*['"\`]${e.audit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`][^}]*\\brows:`)
       const texts = [route(k).handler.toString(), ...(e.auditIn ?? []).map((f) => SOURCES.find((s) => s.file === f)?.text ?? '')]
       return !texts.some((t) => re.test(t))
     }).map(([k]) => k)

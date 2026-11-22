@@ -85,7 +85,7 @@ const SELF_SERVICE_ROLES: Record<SelfServiceRole, Role[]> = { STUDENT: ['STUDENT
 const USER_INCLUDE = { teacherProfile: { select: { id: true } } } as const
 const EMPTY_L = { uz: '', ru: '', en: '' }
 /** URL slug for a center name written in any of the three alphabets. */
-const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').replace(/ö/g, 'o').replace(/ğ/g, 'g').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'center'
+const slugify = (s: string) => s.toLowerCase().replace(/ş/g, 'sh').replace(/ç/g, 'ch').replace(/ö/g, 'o').replace(/ğ/g, 'g').normalize('NFKD').replace(/[‘’'`ʻ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'center'
 
 /**
  * Accounts with a login + password, and the one rule every session relies on: Super Admin (PLATFORM_ADMIN)
@@ -447,7 +447,7 @@ export class AccountService {
   }
 
   private async freeTeacherSlug(tx: TransactionClient, tenantId: string, base: string): Promise<string> {
-    const root = base.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'teacher'
+    const root = base.replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'teacher'
     for (let n = 0; n < 50; n++) {
       const slug = n === 0 ? root : `${root}-${n + 1}`
       if (!(await tx.teacherProfile.findFirst({ where: { tenantId, slug }, select: { id: true }, includeDeleted: true } as never))) return slug

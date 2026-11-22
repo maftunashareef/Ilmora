@@ -78,7 +78,10 @@ export class MinistryStatsService {
       companies_by_region: (c) => this.companiesByRegion(c), ilmora_students: (c) => this.ilmoraStudents(c), applicants: (c) => this.applicants(c),
       contract_help: (c) => this.contractHelp(c), vacancies: (c) => this.vacancies(c), student_added: (c) => this.studentAdded(c),
     }
-    return build[key](ctx)
+    // `key` is a zod enum already; the own-key check keeps a prototype name (`constructor`…) from ever being called.
+    const run = Object.hasOwn(build, key) ? build[key] : undefined
+    if (typeof run !== 'function') throw new Error(`Unknown ministry table: ${String(key)}`)
+    return run(ctx)
   }
 
   // ───────────── tables ─────────────
