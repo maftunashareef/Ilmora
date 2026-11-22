@@ -27,10 +27,9 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  *      подтверждения»: ответ без `ok: true` или с `pending: true`, либо 4xx с одним из кодов PENDING_CODES (список уточнить под выбранное исправление).
  *      Исправление, которое пишет userId в запись ДО подтверждения, под правило не подходит (запись должна остаться
  *      непривязанной, пока шаг не пройден).
- *  №3  Центр видит полную дату рождения студентов, пришедших через ILMORA (и несовершеннолетних): для записей с
- *      source ILMORA ни таблица, ни карточка, ни выгрузка Excel не содержат даты рождения. Флаг «несовершеннолетний»
- *      или возраст — можно, а флаг `minor` у несовершеннолетнего обязан остаться (проверяется строго). Показ только года рождения намеренно не
- *      принимается: правило ищет полную дату, но решение по находке — дату не отдавать.
+ *  №3  Центр видит полную дату рождения студентов, пришедших через ILMORA. Риск принят решением Тимура 23.11: дата
+ *      остаётся (у центра эти данные всё равно есть), правила «даты нет» сняты. Строго проверяется только то, что флаг
+ *      `minor` у несовершеннолетнего на месте — от него зависят согласие родителя и показ компаниям.
  *  №4  Выданное приглашение переживает смену телефона и архив: после смены phone / parentPhone или статуса LEFT старая
  *      ссылка отвечает так же, как несуществующая (тот же статус и код, что у случайного токена), и запись не
  *      привязывается; запись в статусе LEFT не принимается вовсе. Сравнение с «мёртвой» ссылкой нужно, чтобы отказ из-за
@@ -51,8 +50,6 @@ import { DB_AVAILABLE, TestContext } from './helpers'
 const KNOWN_GAP = new Set([
   // №2
   'n2-preview', 'n2-accept', 'n2-accept-minor',
-  // №3
-  'n3-roster', 'n3-detail', 'n3-excel',
   // №4
   'n4-phone-preview', 'n4-phone-accept', 'n4-parent-preview', 'n4-parent-accept', 'n4-left-preview', 'n4-left-accept', 'n4-left-direct-accept',
   // №9
@@ -237,7 +234,8 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
 
   // ───────── №3 ─────────
 
-  it('№3: the birth date of a student who came through ILMORA is in neither the table, the card nor the Excel export', async () => {
+  // The birth date itself is allowed (decision 23.11); the table, card and export must still open and keep the minor flag.
+  it('№3 (risk accepted 23.11): ILMORA students show in the table, card and Excel export, the minor flag stays', async () => {
     const s = await setup()
     const db = ctx.prisma.client
     const kid = await account(s, phone(), 'Ilmora kid')
@@ -253,22 +251,15 @@ describe.skipIf(!DB_AVAILABLE)('Center students: security check 20.11 (№2, №
     const roster = await as(s, s.center, () => table.roster(s.tenantId, s.center, {}))
     const mine = roster.rows.filter((r) => r.source === 'ILMORA')
     expect(mine.map((r) => (r as { linked: boolean }).linked), 'setup: both ILMORA students are in the table').toEqual([true, true])
-    const has = (x: unknown, iso: string, dmy: string) => { const j = JSON.stringify(x); return j.includes(iso) || j.includes(dmy) }
-    const rowBirth = (r: unknown) => (r as Record<string, unknown>).birthDate
-    const isoBirths = births.map(([, iso]) => iso).sort()
     const kidRow = mine.find((r) => (r as { fullName: string }).fullName.startsWith('Ilmora kid'))
     expect((kidRow as { minor?: unknown } | undefined)?.minor, '№3 the minor flag stays for the minor').toBe(true)
-    rule('n3-roster', mine.every((r) => !rowBirth(r)) && !births.some(([, iso, dmy]) => has(roster, iso, dmy)), '№3 the table has no birth date of ILMORA students', JSON.stringify(mine.map(rowBirth).sort()) === JSON.stringify(isoBirths))
 
     const cards = await Promise.all(mine.map((r) => as(s, s.center, () => table.detail(s.tenantId, s.center, r.id))))
     expect(cards.map((c) => c.student.source), 'setup: the cards open').toEqual(['ILMORA', 'ILMORA'])
-    rule('n3-detail', cards.every((c) => !rowBirth(c.student)) && !births.some(([, iso, dmy]) => has(cards, iso, dmy)), '№3 the card has no birth date of an ILMORA student', JSON.stringify(cards.map((c) => rowBirth(c.student)).sort()) === JSON.stringify(isoBirths))
 
     const file = await as(s, s.center, () => table.exportFile(s.tenantId, s.center, { lang: 'ru' }))
     const sheet = readXlsxRows(file.file)
     expect(sheet.length, 'setup: the export has the two students').toBe(3)
-    const cells = sheet.slice(1).flatMap((r) => r.cells)
-    rule('n3-excel', !births.some(([, iso, dmy]) => cells.some((c) => c.includes(iso) || c.includes(dmy))), '№3 the Excel export has no birth date of ILMORA students', births.every(([, , dmy]) => cells.includes(dmy)))
   })
 
   // ───────── №4 ─────────

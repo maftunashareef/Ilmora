@@ -18,20 +18,13 @@ import { notificationsStub } from './stubs'
  * The other place that soft-deletes accounts, apps/api/src/cli/cleanup-accounts.ts:32, scrubs nothing at all (not even
  * the phone) and is not covered here.
  *
- * Rule, mirroring that pattern (rows stay for the center's history, the personal data goes): after the account is
- * deleted, every CenterStudent row that was linked to it either is gone or no longer holds the person's full name, phone,
- * birth date, parent's name or parent's phone, place of study (institutionText) or year (studyYear); and every
- * HomeworkSubmission of the account either is gone or has no text and no link. A row of another student of the same
- * center is not touched. Rows are read with includeDeleted, so a fix that soft-deletes them still has to scrub them.
- *
- * Policy, not settled here (Тимур): a CENTER-sourced row was typed by the center itself and is its own register (journal,
- * attendance marks). Wiping it on the student's deletion is a decision; the rule follows the brief of finding №13.
- *
- * KNOWN_GAP pins today's exact observation (every linked row and the submission are exactly as before). When a part is
- * fixed, its check fails with «remove 'n13-…' from KNOWN_GAP» — then remove the key and the rule is demanded from then
- * on; any other outcome fails as «re-evaluate».
+ * Decision 23.11 (Тимур): records are never wiped on deletion — everything stays in the database for at least 3 months.
+ * So the rule is the opposite of the first brief of finding №13: right after the account is deleted, every CenterStudent
+ * row that was linked to it and every HomeworkSubmission of the account are still there (not deleted, soft or hard) and
+ * unchanged. What happens after the 3 months (anonymize or delete) is not decided yet and is not tested here. A row of
+ * another student of the same center is not touched.
  */
-const KNOWN_GAP = new Set(['n13-center-student', 'n13-homework'])
+const KNOWN_GAP = new Set<string>([])
 const checked = new Set<string>()
 function rule(key: string, holds: boolean, what: string, todayObserved: boolean) {
   checked.add(key)
@@ -43,7 +36,7 @@ function rule(key: string, holds: boolean, what: string, todayObserved: boolean)
 
 const phone = () => `+99893${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
 
-describe.skipIf(!DB_AVAILABLE)('№13 deleting an account takes the person\'s data out of the centers\' student records and homework', () => {
+describe.skipIf(!DB_AVAILABLE)('№13 deleting an account keeps the centers\' student records and homework (≥ 3 months, decision 23.11)', () => {
   const ctx = new TestContext()
   const db = ctx.prisma.client
   beforeAll(() => ctx.connect())
@@ -52,7 +45,7 @@ describe.skipIf(!DB_AVAILABLE)('№13 deleting an account takes the person\'s da
     for (const key of KNOWN_GAP) expect(checked.has(key), `'${key}' in KNOWN_GAP was never checked`).toBe(true)
   })
 
-  it('the linked CenterStudent rows and the homework handed in lose the personal data; another student\'s row stays', async () => {
+  it('the linked CenterStudent rows and the homework handed in are kept unchanged; another student\'s row stays', async () => {
     const t = await ctx.makeTenant('n13')
     const student = await ctx.makeStudent(t.tenantId)
     const neighbour = await ctx.makeStudent(t.tenantId)
@@ -80,19 +73,16 @@ describe.skipIf(!DB_AVAILABLE)('№13 deleting an account takes the person\'s da
     expect(account.phoneE164).toBeNull()
 
     const rows = await TenantContext.system(() => db.centerStudent.findMany({ where: { id: { in: linked.map((r) => r.id) } }, includeDeleted: true } as never)) as unknown as typeof linked
-    const holding = rows.filter((r) => r.fullName === person.fullName || (r.phoneE164 !== null && r.phoneE164 === person.phoneE164) || r.birthDate !== null
-      || r.parentName === person.parentName || (r.parentPhoneE164 !== null && r.parentPhoneE164 === person.parentPhoneE164)
-      || r.institutionText === person.institutionText || r.studyYear === person.studyYear)
-    // Today: both rows are exactly as they were (only updatedAt aside), still linked to the account.
+    // Kept: both rows are exactly as they were (only updatedAt aside), still linked to the account, not deleted.
     const asBefore = rows.length === linked.length && linked.every((l) => {
       const r = rows.find((x) => x.id === l.id)
       return !!r && JSON.stringify({ ...r, updatedAt: null }) === JSON.stringify({ ...l, updatedAt: null })
     })
-    rule('n13-center-student', holding.length === 0, `no CenterStudent row of the deleted account keeps the name, phone, birth date, parent's contacts or place of study (now ${holding.length} of ${linked.length} still do)`, asBefore)
+    const notDeleted = rows.every((r) => (r as unknown as { deletedAt?: Date | null }).deletedAt == null)
+    rule('n13-center-student', asBefore && notDeleted, `every CenterStudent row of the deleted account is kept unchanged and not deleted (${rows.length} of ${linked.length} found)`, true)
 
     const sub = await TenantContext.system(() => db.homeworkSubmission.findFirst({ where: { id: submission.id }, includeDeleted: true } as never)) as unknown as typeof submission | null
-    rule('n13-homework', !sub || (sub.text === null && sub.link === null), `the homework the deleted account handed in keeps no text or link (now: ${sub ? `text ${sub.text === null ? 'null' : 'kept'}, link ${sub.link === null ? 'null' : 'kept'}` : 'row gone'})`,
-      !!sub && JSON.stringify(sub) === JSON.stringify(submission))
+    rule('n13-homework', !!sub && JSON.stringify(sub) === JSON.stringify(submission), `the homework the deleted account handed in is kept unchanged (now: ${sub ? 'row changed' : 'row gone'})`, true)
 
     // Another student of the same center is not affected (outside the rule: holds today and after the fix).
     const kept = await TenantContext.system(() => db.centerStudent.findUniqueOrThrow({ where: { id: neighbourRow.id }, includeDeleted: true } as never)) as unknown as typeof neighbourRow
