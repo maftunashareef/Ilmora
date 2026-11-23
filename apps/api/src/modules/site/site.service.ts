@@ -72,7 +72,7 @@ export const SiteConfigSchema = z.object({
   brand: z.object({ name: z.string().min(1).max(40), heroHeadline: L, heroTagline: L, primaryCta: L, footerNote: L, city: L }),
   theme: z.object({
     colors: z.object({ ivory: z.string(), forest: z.string(), charcoal: z.string(), champagne: z.string(), sage: z.string(), white: z.string() }),
-    fonts: z.object({ display: z.enum(['Cormorant Garamond', 'Playfair Display']), body: z.enum(['Inter', 'Manrope']) }),
+    fonts: z.object({ display: z.enum(['Prata', 'Cormorant Garamond', 'Playfair Display']), body: z.enum(['Inter', 'Manrope']) }),
     radius: z.enum(['sharp', 'soft', 'round']),
   }),
   nav: z.array(z.object({ id: z.string(), label: L, path: z.string().max(100), enabled: z.boolean() })).max(12),

@@ -11,9 +11,10 @@
   /* Self-hosted @fontsource family names (imported in app/[locale]/layout.tsx); previously set by next/font. */
   --font-cormorant: "Cormorant Garamond";
   --font-playfair: "Playfair Display Variable";
+  --font-prata: "Prata";
   --font-inter: "Inter Variable";
   --font-manrope: "Manrope Variable";
-  --f-display: var(--font-playfair), "Playfair Display", Georgia, serif;
+  --f-display: var(--font-prata), "Prata", Georgia, serif;
   --f-body: var(--font-manrope), "Manrope", system-ui, sans-serif;
   --r-card: 1.25rem;
   --r-control: 0.75rem;
@@ -57,7 +58,8 @@
     @apply bg-ivory text-charcoal font-body antialiased;
     font-feature-settings: "ss01", "cv11";
   }
-  h1, h2, h3, .font-display { font-family: var(--f-display); }
+  /* Prata has one weight (400): show headings in it as drawn instead of a browser-faked bold. */
+  h1, h2, h3, .font-display { font-family: var(--f-display); font-synthesis-weight: none; }
   ::selection { background: color-mix(in srgb, var(--c-champagne) 45%, transparent); }
   :focus-visible {
     outline: 2px solid var(--c-forest);

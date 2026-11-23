@@ -7,6 +7,7 @@ const RADIUS: Record<Theme['radius'], { card: string; control: string }> = {
 }
 
 const FONT_STACK: Record<string, string> = {
+  Prata: 'var(--font-prata), "Prata", Georgia, serif',
   'Cormorant Garamond': 'var(--font-cormorant), "Cormorant Garamond", Georgia, serif',
   'Playfair Display': 'var(--font-playfair), "Playfair Display", Georgia, serif',
   Inter: 'var(--font-inter), "Inter", system-ui, sans-serif',
@@ -23,7 +24,7 @@ export function applyTheme(theme: Theme) {
   root.style.setProperty('--c-champagne', c.champagne)
   root.style.setProperty('--c-sage', c.sage)
   root.style.setProperty('--c-white', c.white)
-  root.style.setProperty('--f-display', FONT_STACK[theme.fonts.display] ?? FONT_STACK['Playfair Display'])
+  root.style.setProperty('--f-display', FONT_STACK[theme.fonts.display] ?? FONT_STACK.Prata)
   root.style.setProperty('--f-body', FONT_STACK[theme.fonts.body] ?? FONT_STACK.Manrope)
   const r = RADIUS[theme.radius] ?? RADIUS.soft
   root.style.setProperty('--r-card', r.card)

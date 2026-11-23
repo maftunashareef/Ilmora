@@ -17,6 +17,7 @@ import '@fontsource/cormorant-garamond/500-italic.css'
 import '@fontsource/cormorant-garamond/600.css'
 import '@fontsource/cormorant-garamond/600-italic.css'
 import '@fontsource-variable/playfair-display'
+import '@fontsource/prata/400.css'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/manrope'
 
