@@ -51,9 +51,7 @@ const KNOWN_GAP = new Set([
   // №2
   'n2-preview', 'n2-accept', 'n2-accept-minor',
   // №4 — closed 23.11 (Шерзод): a phone or parent phone change and the archive cancel the link; LEFT is never accepted.
-  // №9
-  'n9-BLOCKED-roster', 'n9-BLOCKED-detail', 'n9-BLOCKED-export', 'n9-REJECTED-roster', 'n9-REJECTED-detail', 'n9-REJECTED-export',
-  'n9-import-parentname-check', 'n9-import-parentname-commit',
+  // №9 — closed 23.11 (Шерзод): a blocked or rejected center neither reads nor exports; the parent's name has the form's limit.
 ])
 const checked = new Set<string>()
 function rule(key: string, holds: boolean, what: string, todayObserved: boolean) {
