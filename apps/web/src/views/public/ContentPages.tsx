@@ -1,3 +1,4 @@
+'use client'
 import { useEffect } from 'react'
 import { Link } from '@/lib/router'
 import { useParams, useSearchParams } from '@/lib/routerHooks'

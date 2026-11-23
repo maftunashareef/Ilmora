@@ -7,7 +7,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: L
   return pageMetadata({ locale, path: '/privacy', title: staticTitle(locale, '/privacy'), description: translate(locale, 'legal.privacyIntro') })
 }
 
-import { PrivacyPage } from '@/views/next/clients'
+import { PrivacyPage } from '@/views/public/Legal'
 
 export default function Page() {
   return <PrivacyPage />

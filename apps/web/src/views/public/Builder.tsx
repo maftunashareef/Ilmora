@@ -1,3 +1,4 @@
+'use client'
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
 import { countLabel, foldForSearch, isPreparationTrack, MAX_CART_COURSES, NOUNS, presetCartPlan, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { Link } from '@/lib/router'

@@ -1,5 +1,5 @@
 'use client'
-import { StudentVideos } from '@/views/next/clients'
+import { StudentVideos } from '@/views/student/StudentVideos'
 
 export default function Page() {
   return <StudentVideos />

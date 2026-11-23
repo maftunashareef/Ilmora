@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { pickDisplay, translate, type Lang } from '@ilmora/shared'
 import { getContentTitle } from '@/lib/server-api'
-import { VideoPage } from '@/views/next/clients'
+import { VideoPage } from '@/views/public/ContentPages'
 
 /** The tab shows the item's own title when it is public, else what kind of page it is (М17). */
 export async function generateMetadata({ params }: { params: Promise<{ locale: Lang; id: string }> }): Promise<Metadata> {

@@ -1,5 +1,5 @@
 'use client'
-import { StudioVisibility } from '@/views/next/clients'
+import { StudioVisibility } from '@/views/teacher/StudioVisibility'
 
 export default function Page() {
   return <StudioVisibility />

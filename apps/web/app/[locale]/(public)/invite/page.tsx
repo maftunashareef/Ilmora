@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { translate, type Lang } from '@ilmora/shared'
-import { InvitePage } from '@/views/next/clients'
+import { InvitePage } from '@/views/public/Invite'
 
 /** A center's invitation (the token is in the fragment, read by the page): never indexed. */
 export async function generateMetadata({ params }: { params: Promise<{ locale: Lang }> }): Promise<Metadata> {

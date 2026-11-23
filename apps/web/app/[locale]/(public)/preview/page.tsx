@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { translate, type Lang } from '@ilmora/shared'
-import { PreviewPage } from '@/views/next/clients'
+import { PreviewPage } from '@/views/public/Preview'
 
 /** The browser tab names the page (М17): «{title} — ILMORA» by the root layout's template. */
 export async function generateMetadata({ params }: { params: Promise<{ locale: Lang }> }): Promise<Metadata> {

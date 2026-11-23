@@ -1,5 +1,5 @@
 'use client'
-import { AdminNotifications } from '@/views/next/clients'
+import { AdminNotifications } from '@/views/common/Notifications'
 
 export default function Page() {
   return <AdminNotifications />

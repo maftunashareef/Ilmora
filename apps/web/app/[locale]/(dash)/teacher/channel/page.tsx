@@ -1,5 +1,5 @@
 'use client'
-import { StudioChannel } from '@/views/next/clients'
+import { StudioChannel } from '@/views/teacher/StudioChannel'
 
 export default function Page() {
   return <StudioChannel />
