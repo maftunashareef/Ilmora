@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Inject, Injectable } from '@nestjs/common'
 import {
-  attendancePercent, countsAsAttended, EXPORT_EXTRA_COLUMNS, foldForSearch, formatUzPhone, GROUPS_SEPARATOR, IMPORT_COLUMNS, IMPORT_MAX_BYTES, IMPORT_MAX_ROWS,
+  attendancePercent, countsAsAttended, EXPORT_EXTRA_COLUMNS, foldForSearch, FULL_NAME_MAX, formatUzPhone, GROUPS_SEPARATOR, IMPORT_COLUMNS, IMPORT_MAX_BYTES, IMPORT_MAX_ROWS,
   INVITE_SENDS_MAX, INVITE_TTL_DAYS, inviteState, inviteUrl, isMinorOn, maskPhone, normalizeUzPhone, parseSheetDate, pick, registrySearchKey, translate,
   type ImportColumnKey, type ImportRowError, type InviteState, type L, type Lang, type RegistryInstitutionType, type TKey,
 } from '@ilmora/shared'
@@ -90,6 +90,15 @@ export class CenterStudentsService {
 
   private assertWritable(center: { status: string }) {
     if (center.status === 'BLOCKED' || center.status === 'REJECTED') throw AppError.forbidden('This center is blocked', { code: 'center_blocked' })
+  }
+
+  /**
+   * A blocked or rejected center no longer reads or exports its students — children's data among them (проверка
+   * безопасности 20.11, №9); the Super Admin still does, for support.
+   */
+  private assertReadable(center: { status: string }, actor: RequestActor) {
+    if (actor.roles.includes('PLATFORM_ADMIN')) return
+    this.assertWritable(center)
   }
 
   /** Invitations reach other people's accounts: only an approved center sends them (as with teachers). */
@@ -242,6 +251,7 @@ export class CenterStudentsService {
 
   async roster(tenantId: string, actor: RequestActor, q: RosterQuery) {
     const center = await this.own(tenantId, actor)
+    this.assertReadable(center, actor)
     await this.syncIlmora(tenantId, center.id)
     const archive = q.archive === '1'
     const [rows, groups] = await Promise.all([this.load(tenantId, center.id, archive ? { status: 'LEFT' } : { status: { not: 'LEFT' } }), this.centerGroups(tenantId, center.id)])
@@ -250,6 +260,7 @@ export class CenterStudentsService {
 
   async detail(tenantId: string, actor: RequestActor, id: string) {
     const center = await this.own(tenantId, actor)
+    this.assertReadable(center, actor)
     const [row] = await this.load(tenantId, center.id, { id })
     if (!row) throw AppError.notFound('Student')
     return { center: { id: center.id, name: center.name }, student: row }
@@ -260,7 +271,7 @@ export class CenterStudentsService {
   private clean(raw: RawFields, today: string): { value?: CleanFields; errors: ImportRowError[] } {
     const errors: ImportRowError[] = []
     const fullName = (raw.fullName ?? '').replace(/\s+/g, ' ').trim()
-    if (fullName.length < 2 || fullName.length > 120) errors.push('fullName')
+    if (fullName.length < 2 || fullName.length > FULL_NAME_MAX) errors.push('fullName')
     const birth = raw.birthDate ?? ''
     if (!isCalendarDate(birth) || birth > today || birth < '1900-01-01') errors.push('birthDate')
     const minor = isCalendarDate(birth) && isMinorOn(birth, today)
@@ -277,7 +288,8 @@ export class CenterStudentsService {
       if (p.ok) parentPhoneE164 = p.e164
       else errors.push('parentPhone')
     }
-    if (minor && (!parentName || parentName.length < 2)) errors.push('parentName')
+    // The file is not checked by the request schema: the parent's name has the same limit as the form's (№9, 20.11).
+    if ((minor && (!parentName || parentName.length < 2)) || (parentName && parentName.length > FULL_NAME_MAX)) errors.push('parentName')
     if (minor && !parentPhoneE164 && !errors.includes('parentPhone')) errors.push('parentPhone')
     const studyYear = raw.studyYear ?? null
     if (studyYear !== null && (!Number.isInteger(studyYear) || studyYear < 1 || studyYear > 11)) errors.push('studyYear')
@@ -529,6 +541,7 @@ export class CenterStudentsService {
    */
   async exportFile(tenantId: string, actor: RequestActor, q: RosterExportQuery): Promise<{ file: Buffer; filename: string; rows: number }> {
     const center = await this.own(tenantId, actor)
+    this.assertReadable(center, actor)
     const lang = q.lang
     const template = q.template === '1'
     const header = [...IMPORT_COLUMNS.map((c) => translate(lang, c.label as TKey)), ...(template ? [] : EXPORT_EXTRA_COLUMNS.map((c) => translate(lang, c.label as TKey)))]
