@@ -59,7 +59,8 @@ or write a forward migration that reverts the change.
 Measure with `docker image inspect <image> --format '{{.Size}}'` (uncompressed bytes). The Dockerfiles use
 `node:24-alpine`, prune dev dependencies and copy only `dist/` + production `node_modules`.
 
-## 5. Payme
+## 5. Payme / Click
 
-Contracts, keys, callback URLs and the sandbox: `docs/payments/onboarding-checklist.md`. Protocol reference used by
-the adapter: `docs/payments/payme-merchant-api.md`. Click was removed on 10.11.2026.
+Contracts, keys, callback URLs and the sandbox: `docs/payments/onboarding-checklist.md`. Protocol references used by
+the adapters: `docs/payments/payme-merchant-api.md`, `docs/payments/click-shop-api.md` (Click removed on 10.11.2026,
+back on 23.11.2026).

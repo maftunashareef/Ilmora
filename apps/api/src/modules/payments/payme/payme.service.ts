@@ -208,8 +208,9 @@ export class PaymeService {
       }
       if (!(await this.payable(tx, payment))) throw new PaymeError(PAYME.ORDER_NOT_PENDING, M.orderNotPending, 'payment_id')
       if (payment.amountMinor !== amount) throw new PaymeError(PAYME.WRONG_AMOUNT, M.wrongAmount)
-      const active = await tx.paymentTransaction.findFirst({ where: { paymentId: payment.id, provider: 'PAYME', state: 'CREATED' } })
-      if (active) throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
+      // Another transaction already runs on the order — Payme's or Click's (security review 10.11 №6: one invoice, one
+      // payment; a Click attempt abandoned after Prepare stops counting after CLICK_PENDING_MINUTES).
+      if (await this.payments.inProgress(tx, payment.id)) throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
       if (this.expired(BigInt(Math.trunc(time)))) throw new PaymeError(PAYME.CANNOT_PERFORM, M.cannotPerform)
       const created = await tx.paymentTransaction.create({
         data: { tenantId: payment.tenantId, paymentId: payment.id, provider: 'PAYME', providerTransactionId: providerTxId, providerTime: BigInt(Math.trunc(time)), providerState: 1, state: 'CREATED', amountMinor: amount, currency: payment.currency, sandbox },

@@ -3,6 +3,7 @@ import { countLabel, foldForSearch, isPreparationTrack, MAX_CART_COURSES, NOUNS,
 import { Link } from '@/lib/router'
 import { useNavigate, useSearchParams } from '@/lib/routerHooks'
 import { PriceNow, ScheduleChips } from '../../components/course/CourseCard'
+import { ClickLogo } from '../../components/ClickLogo'
 import { PaymeLogo } from '../../components/PaymeLogo'
 import { Timetable } from '../../components/Timetable'
 import { ArtCover, Badge, Button, Card, Eyebrow, Icon, Input, Modal, Notice, PageTitle, Select } from '../../components/ui'
@@ -102,9 +103,9 @@ export function BuilderPage() {
   const [cat, setCat] = useState('')
   const [picker, setPicker] = useState<Course | null>(null)
   // The payment system is named beside the total only while the API says it is connected (the checkout page asks the same).
-  const [paymeReady, setPaymeReady] = useState(false)
+  const [ready, setReady] = useState<Record<PaymentProviderId, boolean>>({ PAYME: false, CLICK: false })
   useEffect(() => {
-    api<Record<PaymentProviderId, boolean>>('/payments/providers', { auth: false }).then((p) => setPaymeReady(!!p.PAYME)).catch(() => setPaymeReady(false))
+    api<Partial<Record<PaymentProviderId, boolean>>>('/payments/providers', { auth: false }).then((p) => setReady({ PAYME: !!p.PAYME, CLICK: !!p.CLICK })).catch(() => setReady({ PAYME: false, CLICK: false }))
   }, [])
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
@@ -274,9 +275,10 @@ export function BuilderPage() {
                 {pkg && selectedGroups.length !== pkg.maxCourses && <p className="text-xs text-ivory/70">{t('builder.needExactly', { n: pkg.maxCourses })}</p>}
                 {!pkg && selectedGroups.length === 0 && <p className="text-xs text-ivory/70">{t('builder.selectOne')}</p>}
                 <Button variant="champagne" size="lg" className="w-full !py-4 !text-base font-semibold" disabled={!complete} onClick={() => nav('/preview')}>{t('builder.continue')} <Icon name="arrowRight" className="h-4 w-4" /></Button>
-                {paymeReady && (
+                {(ready.PAYME || ready.CLICK) && (
                   <div className="flex items-center gap-3 rounded-control border border-ivory/15 bg-ivory/5 px-3.5 py-3">
-                    <PaymeLogo />
+                    {ready.PAYME && <PaymeLogo />}
+                    {ready.CLICK && <ClickLogo />}
                     <span className="min-w-0 text-[11px] leading-snug text-ivory/70"><Icon name="lock" className="mr-1 inline h-3 w-3 text-champagne" />{t('preview.paymentNote')}</span>
                   </div>
                 )}

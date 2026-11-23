@@ -2,7 +2,8 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import { COMMISSION_DEFAULT_PERCENT, dueReminder, finalPriceMinor, isDiscountActive, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, priceSplitMinor, subscriptionAccess, type PriceRule, type SubscriptionAccess } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addMonthsInZone, localDay, todayLocal } from '../../common/time'
-import { ENV, type Env, paymeConfigured } from '../../config/env'
+import { clickConfigured, ENV, type Env, paymeConfigured } from '../../config/env'
+import { CLICK_REASON_ABANDONED, clickStaleBefore } from '../payments/click/click-rules'
 import type { PaymentProvider, SubscriptionStatus } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { TenantContext } from '../../infra/tenancy/tenant-context'
@@ -254,7 +255,7 @@ export class SubscriptionService {
     const free = data.amountMinor === 0n
     // A provider that is not connected could never confirm the payment: refuse before any seat is held (Н12). The
     // transaction is rolled back, the holds with it.
-    if (!free && !(data.provider === 'PAYME' && paymeConfigured(this.env))) {
+    if (!free && !((data.provider === 'PAYME' && paymeConfigured(this.env)) || (data.provider === 'CLICK' && clickConfigured(this.env)))) {
       throw new AppError('payment_unavailable', 'This payment method is not connected yet', HttpStatus.SERVICE_UNAVAILABLE)
     }
     const payment = await tx.payment.create({ data: free ? { ...data, provider: null, state: 'PAID', paidAt: now } : data })
@@ -460,12 +461,18 @@ export class SubscriptionService {
     // A payment the provider is processing right now (a Payme transaction created, not yet performed) keeps its hold
     // until Payme performs or cancels it — the hold is short (security review №12), the bank's confirmation is not.
     // Payme's test orders (PAYME_SANDBOX_PAYMENT_IDS) keep their seats while listed: the tests take days (№82).
+    // A Click attempt keeps the hold only CLICK_PENDING_MINUTES: Click does not cancel an attempt that never reached
+    // Complete, so an abandoned one would hold the seats for ever (security review №12, №6).
     const sandbox = this.env.PAYME_SANDBOX_PAYMENT_IDS
-    const expired = await this.prisma.client.payment.findMany({ where: { tenantId, state: 'PENDING', expiresAt: { lt: now }, transactions: { none: { state: 'CREATED' } }, ...(sandbox.length ? { id: { notIn: sandbox } } : {}) }, select: { id: true, subscriptionId: true } })
+    const staleBefore = clickStaleBefore(this.env, now)
+    const inProgress = { state: 'CREATED' as const, NOT: { provider: 'CLICK' as const, createdAt: { lt: staleBefore } } }
+    const expired = await this.prisma.client.payment.findMany({ where: { tenantId, state: 'PENDING', expiresAt: { lt: now }, transactions: { none: inProgress }, ...(sandbox.length ? { id: { notIn: sandbox } } : {}) }, select: { id: true, subscriptionId: true } })
     for (const p of expired) {
       await this.prisma.tx(async (tx) => {
         const locked = await tx.payment.updateMany({ where: { id: p.id, state: 'PENDING' }, data: { state: 'EXPIRED' } })
         if (locked.count !== 1) return
+        // The abandoned Click attempts go with the hold: a late Complete for one of them is answered «cancelled» (-9).
+        await tx.paymentTransaction.updateMany({ where: { paymentId: p.id, provider: 'CLICK', state: 'CREATED', createdAt: { lt: staleBefore } }, data: { state: 'CANCELLED', cancelReason: CLICK_REASON_ABANDONED, cancelledAt: now } })
         const sub = await tx.subscription.findFirst({ where: { id: p.subscriptionId } })
         if (sub?.status === 'PENDING_PAYMENT') {
           await tx.enrollment.updateMany({ where: { subscriptionId: sub.id, status: 'PENDING' }, data: { status: 'CANCELLED', cancelledAt: now } })

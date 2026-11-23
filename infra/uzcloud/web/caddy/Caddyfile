@@ -73,7 +73,7 @@ www.{$WEB_DOMAIN} {
 	handle /v1/* {
 		import api
 	}
-	# Payme callbacks and health checks live outside the /v1 prefix.
+	# Payme / Click callbacks and health checks live outside the /v1 prefix.
 	handle /payments/* {
 		import api
 	}

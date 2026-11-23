@@ -17,7 +17,7 @@ describe('reconciliation files reversal journals under the payment they reverse'
     }
     // A refund journal debits the revenue it gives back; the settlement's entries do not count as refunded.
     const ledgerJournal = { findMany: vi.fn(async (_args: unknown) => journals.map((j) => ({ ...j, createdAt: new Date(), entries: [{ direction: 'DEBIT', amountMinor: 100n }, { direction: 'CREDIT', amountMinor: 100n }] }))) }
-    const prisma = { client: { paymentTransaction: { findMany: vi.fn(async () => [row]), count: vi.fn(async () => 1) }, ledgerJournal, refundRequest: { findMany: vi.fn(async () => []) } } }
+    const prisma = { client: { paymentTransaction: { findMany: vi.fn(async () => [row]), count: vi.fn(async () => 1), groupBy: vi.fn(async () => []) }, ledgerJournal, refundRequest: { findMany: vi.fn(async () => []) } } }
     return { service: new ReconciliationService(prisma as unknown as PrismaService), ledgerJournal }
   }
 

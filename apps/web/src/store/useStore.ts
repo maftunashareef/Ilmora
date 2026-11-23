@@ -27,8 +27,8 @@ export interface CartBundle { presetId: string; directionId?: string; courseIds:
 export type PresetCartResult =
   | { ok: true; added: number; /** The Flex/Winx package the cart left for a custom selection, if it did. */ switchedFrom: string | null }
   | { ok: false; reason: 'unavailable' | 'limit' | 'full' | 'conflict'; courseId?: string; conflictWith?: string }
-/** Payment goes through Payme only (decision of 10.11, security review №5, №6: Click removed from the API). */
-export type PaymentProviderId = 'PAYME'
+/** Payme or Click (Click came back on 23.11 with security review №5, №6 closed); each only while the API has its keys. */
+export type PaymentProviderId = 'PAYME' | 'CLICK'
 
 export interface AuthUser {
   id: string
@@ -1022,8 +1022,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         // A free selection is activated at once and comes back without a provider page (url null).
         return guard(() => api<{ url: string | null; paymentId: string; free?: boolean }>('/student/subscription/checkout', { method: 'POST', body: { provider, lang: get().lang } }))
       },
-      renewSubscription: async (_studentId, provider = 'PAYME') => {
+      renewSubscription: async (_studentId, chosen) => {
         // Nothing is renewed here: the API opens a payment and the browser goes to the provider's page to pay for it.
+        // No provider chosen: Payme, or Click when only Click is connected.
+        const provider: PaymentProviderId = chosen ?? (await api<Partial<Record<PaymentProviderId, boolean>>>('/payments/providers', { auth: false }).then((p) => (!p.PAYME && p.CLICK ? 'CLICK' : 'PAYME')).catch(() => 'PAYME' as const))
         const r = await guard(() => api<{ url: string | null; paymentId: string }>('/student/subscription/renew', { method: 'POST', body: { provider, lang: get().lang } }))
         if (typeof window === 'undefined') return
         // A free renewal needs no provider page: the return page shows it paid and reloads the cabinet.

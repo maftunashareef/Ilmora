@@ -19,8 +19,8 @@ class DraftDto {
   @IsBoolean() meyosGrant!: boolean
 }
 class CheckoutDto {
-  // Payme only: Click was removed (decision 10.11).
-  @IsIn(['PAYME']) provider!: 'PAYME'
+  // Payme or Click (Click back since 23.11, security review №5 and №6 closed). A provider without its keys is refused (Н12).
+  @IsIn(['PAYME', 'CLICK']) provider!: 'PAYME' | 'CLICK'
   @IsOptional() @IsIn(['uz', 'ru', 'en']) lang?: 'uz' | 'ru' | 'en'
 }
 class CancelDto {

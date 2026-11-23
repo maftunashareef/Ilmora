@@ -12,8 +12,11 @@ import { paymeBodyErrorHandler } from './modules/payments/payme/payme.controller
  *   any non-200 as -32400). The error handler must come after the parser: useBodyParser registers it at once.
  */
 export const JSON_BODY = { limit: '1mb', type: ['application/json', 'text/json'] }
+/** Click sends Prepare/Complete as a form (application/x-www-form-urlencoded): flat string fields only. */
+export const FORM_BODY = { limit: '20kb', extended: false }
 
 export function configureBodyParsing(app: NestExpressApplication) {
   app.useBodyParser('json', JSON_BODY)
   app.use('/payments/payme', paymeBodyErrorHandler)
+  app.useBodyParser('urlencoded', FORM_BODY)
 }

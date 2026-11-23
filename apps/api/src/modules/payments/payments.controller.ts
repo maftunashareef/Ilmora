@@ -7,7 +7,7 @@ import { PaymentsService } from './payments.service'
 import { ReconciliationService } from './reconciliation.service'
 
 class ReconQuery {
-  @IsOptional() @IsIn(['PAYME', 'MANUAL']) provider?: 'PAYME' | 'MANUAL'
+  @IsOptional() @IsIn(['PAYME', 'CLICK', 'MANUAL']) provider?: 'PAYME' | 'CLICK' | 'MANUAL'
   @IsOptional() @IsIn(['CREATED', 'PERFORMED', 'CANCELLED', 'FAILED']) status?: 'CREATED' | 'PERFORMED' | 'CANCELLED' | 'FAILED'
   // A date that does not parse is a 400, not a 500 from the database (security review 10.11 №43).
   @IsOptional() @IsDateString({ strict: true }) from?: string

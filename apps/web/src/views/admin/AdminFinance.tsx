@@ -86,7 +86,7 @@ function FinancePayments() {
       <div className="mt-8 flex flex-wrap items-center gap-2">
         <Eyebrow>{t('finance.transactions')} · {total}</Eyebrow>
         <div className="ml-auto flex gap-2">
-          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="MANUAL">{t('finance.manual')}</option></Select>
+          <Select aria-label={t('finance.provider')} className="py-2" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">{t('common.all')}</option><option value="PAYME">Payme</option><option value="CLICK">Click</option><option value="MANUAL">{t('finance.manual')}</option></Select>
           <Select aria-label={t('finance.status')} className="py-2" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">{t('common.all')}</option><option value="CREATED">CREATED</option><option value="PERFORMED">PERFORMED</option><option value="CANCELLED">CANCELLED</option><option value="FAILED">FAILED</option></Select>
         </div>
       </div>

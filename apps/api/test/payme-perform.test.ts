@@ -32,6 +32,8 @@ function setup(opts: { paymentState?: string; blocker?: Blocker; rowState?: 'CRE
     settleBlocker: vi.fn(async () => opts.blocker ?? null),
     settle: vi.fn(async (_tx: unknown, _input: unknown) => ({ applied: true, paidAt: new Date() })),
     cancelPending: vi.fn(async () => true),
+    // No other transaction runs on the order (Payme's or Click's, security review №6).
+    inProgress: vi.fn(async () => null),
   }
   const payme = new PaymeService(prisma as unknown as PrismaService, payments as unknown as PaymentsService, env)
   return { payme, prisma, payments, calls, performedAt }

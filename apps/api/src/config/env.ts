@@ -115,6 +115,21 @@ export const EnvSchema = z.object({
   PAYME_FISCAL_PACKAGE_CODE: z.string().default('1501338'),
   PAYME_FISCAL_VAT_PERCENT: z.coerce.number().default(0),
   /**
+   * Click SHOP API (docs/payments/click-shop-api.md). Click takes payments only when all three are set (`clickConfigured`);
+   * production refuses to start with a part of them (security review 10.11 №5: a service id without the secret signed with
+   * an empty secret, and anyone could forge Prepare/Complete for any unpaid invoice).
+   */
+  CLICK_SERVICE_ID: z.string().optional(),
+  CLICK_MERCHANT_ID: z.string().optional(),
+  CLICK_SECRET_KEY: z.string().optional(),
+  CLICK_PAY_URL: z.string().url().default('https://my.click.uz/services/pay'),
+  CLICK_ALLOWED_IPS: csv,
+  /**
+   * How long a Click transaction that passed Prepare blocks other attempts on the same invoice while Complete has not come
+   * (security review 10.11 №6: one invoice, one payment). After it, the attempt counts as abandoned and is cancelled.
+   */
+  CLICK_PENDING_MINUTES: z.coerce.number().int().min(1).max(60).default(30),
+  /**
    * Seats are held this long for an unpaid checkout (security review 10.11 №12: an hour, not a day). Production holds at
    * most PAYMENT_EXPIRES_MAX_HOURS whatever is set (№82): Payme's test orders outlive it by being listed in
    * PAYME_SANDBOX_PAYMENT_IDS, not by a long hold for everybody.
@@ -178,6 +193,7 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     throw new Error(`Invalid environment configuration:\n  ${issues}`)
   }
   const env = parsed.data
+  const clickParts = [env.CLICK_SERVICE_ID, env.CLICK_MERCHANT_ID, env.CLICK_SECRET_KEY].filter((v) => !!v).length
   // Documents and certificates would land in the public bucket (cybersecurity check 9.4, 11.11).
   if (env.S3_DOCS_BUCKET && env.S3_DOCS_BUCKET === env.S3_BUCKET) throw new Error('S3_DOCS_BUCKET must differ from S3_BUCKET: documents go to the private bucket only')
   // Students' archives may hold anything, including personal data and other people's HTML: never in the public bucket.
@@ -200,10 +216,17 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     // Credentials and signatures still gate every callback; the allowlist is the second lock, so its absence is logged, not fatal.
     if (paymeConfigured(env) && env.PAYME_ALLOWED_IPS.length === 0) console.warn('PAYME_ALLOWED_IPS is empty: Payme callbacks are accepted from any address (credentials are still checked)')
     if (env.PAYME_SANDBOX_PAYMENT_IDS.length) console.warn(`PAYME_SANDBOX_PAYMENT_IDS is set: the Payme test key is accepted for ${env.PAYME_SANDBOX_PAYMENT_IDS.length} test order(s). Clear it once Payme's tests pass.`)
+    // Security review 10.11 №5: a part of the Click settings is a misconfiguration, not «Click off» — refuse to start.
+    if (clickParts > 0 && clickParts < 3) throw new Error('Click is configured partly: set all of CLICK_SERVICE_ID, CLICK_MERCHANT_ID and CLICK_SECRET_KEY, or none of them (security review №5)')
+    if (clickConfigured(env) && env.CLICK_ALLOWED_IPS.length === 0) console.warn('CLICK_ALLOWED_IPS is empty: Click callbacks are accepted from any address (the signature is still checked)')
+  } else if (clickParts > 0 && clickParts < 3) {
+    console.warn('Click is configured partly (CLICK_SERVICE_ID, CLICK_MERCHANT_ID, CLICK_SECRET_KEY): Click stays off until all three are set')
   }
   return env
 }
 
 export const isProd = (env: Env) => env.NODE_ENV === 'production'
 export const paymeConfigured = (env: Env) => !!(env.PAYME_MERCHANT_ID && (env.PAYME_KEY || env.PAYME_TEST_KEY))
+/** Click answers callbacks and offers checkout only with every credential set (security review №5). */
+export const clickConfigured = (env: Env) => !!(env.CLICK_SERVICE_ID && env.CLICK_MERCHANT_ID && env.CLICK_SECRET_KEY)
 export const s3Configured = (env: Env) => !!(env.S3_ENDPOINT && env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY)

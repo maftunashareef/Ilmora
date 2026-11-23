@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { hoursLabel, isPreparationTrack, MAX_CART_COURSES, PAYMENT_HOLD_HOURS, priceTotals, universityDirections, universityName } from '@ilmora/shared'
 import { ConsentFields } from '../../components/ConsentGate'
+import { ClickLogo } from '../../components/ClickLogo'
 import { PaymeLogo } from '../../components/PaymeLogo'
 import { consentComplete, EMPTY_CONSENT, needsConsent, type ConsentState } from '../../components/consent'
 import { PriceNow, ScheduleChips, TotalPrice } from '../../components/course/CourseCard'
@@ -21,9 +22,9 @@ import { useLocation, useNavigate } from '../../lib/routerHooks'
 import { useCurrentStudent } from '../../store/selectors'
 import { type PaymentProviderId, useStore } from '../../store/useStore'
 
-const PROVIDER_LABEL: Record<PaymentProviderId, string> = { PAYME: 'Payme' }
+const PROVIDER_LABEL: Record<PaymentProviderId, string> = { PAYME: 'Payme', CLICK: 'Click' }
 
-/** Step 3: review the selection and go to Payme's hosted payment page (Payme only since 10.11 — Click was removed). */
+/** Step 3: review the selection and go to the hosted payment page of Payme or Click (Click only while it is connected). */
 export function PreviewPage() {
   const { t, tr, lang } = useT()
   const nav = useNavigate()
@@ -42,7 +43,7 @@ export function PreviewPage() {
   const presets = useStore((s) => s.site.presets)
   const universities = useStore((s) => s.site.universities)
   const [providers, setProviders] = useState<Record<PaymentProviderId, boolean> | null>(null)
-  const provider: PaymentProviderId = 'PAYME'
+  const [provider, setProvider] = useState<PaymentProviderId>('PAYME')
   const [busy, setBusy] = useState(false)
   // The offer and personal-data consent, asked for right here when the account has not accepted the current edition
   // (an older edition, an account opened by SMS or Google, or made by a center): the server refuses the checkout without
@@ -54,8 +55,12 @@ export function PreviewPage() {
 
   useEffect(() => {
     api<Record<PaymentProviderId, boolean>>('/payments/providers', { auth: false })
-      .then((p) => setProviders({ PAYME: !!p.PAYME }))
-      .catch(() => setProviders({ PAYME: false }))
+      .then((p) => {
+        setProviders({ PAYME: !!p.PAYME, CLICK: !!p.CLICK })
+        // Payme first; Click is chosen for the student only when Payme is not connected.
+        if (!p.PAYME && p.CLICK) setProvider('CLICK')
+      })
+      .catch(() => setProviders({ PAYME: false, CLICK: false }))
   }, [])
 
   const builder = student?.builder ?? { packageId: null, groupIds: [], meyosGrant: false }
@@ -171,10 +176,18 @@ export function PreviewPage() {
           <Card>
             <div className="flex items-center justify-between gap-3"><Eyebrow>{t('payment.title')}</Eyebrow></div>
             <div className="mt-4 text-sm font-medium text-charcoal">{t('checkout.provider')}</div>
-            {/* One provider: Payme. Shown as a card (no choice to make), with «not connected yet» while the API has no keys. */}
-            <div className={cx('mt-2 flex items-center gap-3 rounded-control border px-4 py-3 text-sm', providers?.PAYME ? 'border-forest bg-sage/40' : 'border-charcoal/12 opacity-60')}>
-              <PaymeLogo className="!px-3 !py-1.5" />
-              {!providers?.PAYME && <Badge tone="muted" className="ml-auto">{providers ? t('checkout.providerUnavailable') : '…'}</Badge>}
+            {/* Payme always (with «not connected yet» while the API has no keys); Click only once it is connected. */}
+            <div role="radiogroup" aria-label={t('checkout.provider')} className="mt-2 space-y-2">
+              {(['PAYME', 'CLICK'] as const).filter((id) => id === 'PAYME' || providers?.CLICK).map((id) => {
+                const ready = !!providers?.[id]
+                return (
+                  <label key={id} className={cx('flex items-center gap-3 rounded-control border px-4 py-3 text-sm', ready ? 'cursor-pointer' : 'opacity-60', ready && provider === id ? 'border-forest bg-sage/40' : 'border-charcoal/12')}>
+                    <input type="radio" name="provider" value={id} className="h-4 w-4 accent-forest" checked={provider === id} disabled={!ready} onChange={() => setProvider(id)} />
+                    {id === 'PAYME' ? <PaymeLogo className="!px-3 !py-1.5" /> : <ClickLogo className="!px-3 !py-1.5" />}
+                    {!ready && <Badge tone="muted" className="ml-auto">{providers ? t('checkout.providerUnavailable') : '…'}</Badge>}
+                  </label>
+                )
+              })}
             </div>
             <Notice tone="info" className="mt-3 text-xs">{t('checkout.note', { hold: hoursLabel(lang, PAYMENT_HOLD_HOURS) })}</Notice>
 

@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
+import { tiyinToClickAmount } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
-import { ENV, type Env, paymeConfigured } from '../../config/env'
+import { clickConfigured, ENV, type Env, paymeConfigured } from '../../config/env'
+import { CLICK_REASON_ABANDONED, clickStaleBefore } from './click/click-rules'
 import type { PaymentProvider, PaymentState } from '../../generated/prisma/enums'
 import { PrismaService, type TransactionClient } from '../../infra/prisma/prisma.service'
 import { CALLBACK_LOG_DAYS, UNPROVEN_CALLBACK_LOG_DAYS } from './callback-log-budget'
@@ -38,15 +40,27 @@ export class PaymentsService {
   ) {}
 
   providersAvailable() {
-    // Payme only: Click was removed (decision 10.11, security review №5, №6).
-    return { PAYME: paymeConfigured(this.env) }
+    // Click came back on 23.11 with a contract and the fixes of security review 10.11 №5, №6 (it was removed on 10.11).
+    return { PAYME: paymeConfigured(this.env), CLICK: clickConfigured(this.env) }
   }
 
   /** Builds the hosted-checkout URL for a pending payment (no card data ever touches ILMORA). */
-  checkoutLink(payment: { id: string; amountMinor: bigint; provider: PaymentProvider | null; expiresAt: Date }, provider: 'PAYME', lang: 'uz' | 'ru' | 'en') {
+  checkoutLink(payment: { id: string; amountMinor: bigint; provider: PaymentProvider | null; expiresAt: Date }, provider: 'PAYME' | 'CLICK', lang: 'uz' | 'ru' | 'en') {
     // Nothing to collect: the checkout settled on the spot, so there is no provider page to send the student to.
     if (payment.amountMinor === 0n) return { paymentId: payment.id, provider: null, url: null, expiresAt: payment.expiresAt, free: true as const }
     const returnUrl = `${this.env.PUBLIC_WEB_URL}/${lang}/payments/${payment.id}/return`
+    if (provider === 'CLICK') {
+      if (!clickConfigured(this.env)) throw AppError.unavailable('Click is not configured yet')
+      // Click's payment page: a Click account pays from the app, anybody else by card on the same page.
+      const q = new URLSearchParams({
+        service_id: this.env.CLICK_SERVICE_ID!,
+        merchant_id: this.env.CLICK_MERCHANT_ID!,
+        amount: tiyinToClickAmount(payment.amountMinor),
+        transaction_param: payment.id,
+        return_url: returnUrl,
+      })
+      return { paymentId: payment.id, provider, url: `${this.env.CLICK_PAY_URL.replace(/\/$/, '')}/?${q.toString()}`, expiresAt: payment.expiresAt, free: false as const }
+    }
     if (!paymeConfigured(this.env)) throw AppError.unavailable('Payme is not configured yet')
     const params = `m=${this.env.PAYME_MERCHANT_ID};ac.payment_id=${payment.id};a=${payment.amountMinor.toString()};l=${lang};c=${returnUrl}`
     const url = `${this.env.PAYME_CHECKOUT_URL.replace(/\/$/, '')}/${Buffer.from(params, 'utf8').toString('base64')}`
@@ -56,6 +70,25 @@ export class PaymentsService {
   async lockPayment(tx: TransactionClient, paymentId: string) {
     await tx.$queryRawUnsafe(`SELECT id FROM "Payment" WHERE id = $1 FOR UPDATE`, paymentId)
     return tx.payment.findFirst({ where: { id: paymentId } })
+  }
+
+  /**
+   * The provider transaction already in progress on the payment, of any provider — one invoice, one payment at a time
+   * (security review 10.11 №6: two Click tabs, or Payme while Click ran, took the money twice). A Click attempt older
+   * than CLICK_PENDING_MINUTES without Complete is abandoned: it is cancelled here and does not count. The caller holds
+   * the Payment row lock.
+   */
+  async inProgress(tx: TransactionClient, paymentId: string, now = new Date()) {
+    const open = await tx.paymentTransaction.findMany({ where: { paymentId, state: 'CREATED' }, orderBy: { createdAt: 'asc' } })
+    const staleBefore = clickStaleBefore(this.env, now)
+    for (const row of open) {
+      if (row.provider === 'CLICK' && row.createdAt < staleBefore) {
+        await tx.paymentTransaction.update({ where: { id: row.id }, data: { state: 'CANCELLED', cancelReason: CLICK_REASON_ABANDONED, cancelledAt: now } })
+        continue
+      }
+      return row
+    }
+    return null
   }
 
   /**

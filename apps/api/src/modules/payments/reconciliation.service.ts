@@ -7,9 +7,12 @@ export interface ReconciliationFilter { provider?: PaymentProvider; from?: Date;
 /**
  * Two layers, reported separately:
  *  1. internal consistency — provider callback state vs. payment state vs. ledger posting (always available);
- *  2. provider verification — none: Payme's Merchant API has no pull endpoint (GetStatement is Payme calling us), so
- *     rows are marked "provider check unavailable". (Click, the provider that had one, was removed on 10.11.)
- * Reconciliation never changes balances; discrepancies are surfaced for a human decision.
+ *  2. provider verification — none: Payme's Merchant API has no pull endpoint (GetStatement is Payme calling us), and
+ *     Click's status call is not connected (no Merchant API user), so rows are marked "provider check unavailable" and
+ *     are reconciled against the statements in the providers' cabinets.
+ * Reconciliation never changes balances; discrepancies are surfaced for a human decision. Money taken that bought nothing
+ * — a second performed transaction on one invoice, or one on an invoice that expired or was cancelled — is
+ * `double_payment` / `refund_required` (security review 10.11 №6: it used to read «no discrepancy»).
  */
 @Injectable()
 export class ReconciliationService {
@@ -29,6 +32,9 @@ export class ReconciliationService {
       this.prisma.client.paymentTransaction.count({ where }),
     ])
     const paymentIds = rows.map((r) => r.paymentId)
+    // Performed transactions per invoice, over all pages: more than one means the student paid twice.
+    const performed = await this.prisma.client.paymentTransaction.groupBy({ by: ['paymentId'], where: { tenantId, paymentId: { in: paymentIds }, state: 'PERFORMED', sandbox: false }, _count: { _all: true } })
+    const performedCount = new Map(performed.map((p) => [p.paymentId, p._count._all]))
     // A reversal journal carries "<paymentId>:reversal:<journalId>" as its own reference, so it is found through the
     // journal it reverses and filed under that payment; matching on referenceId alone made every refund look unposted.
     const journals = await this.prisma.client.ledgerJournal.findMany({
@@ -73,7 +79,7 @@ export class ReconciliationService {
           performedAt: r.performedAt,
           cancelledAt: r.cancelledAt,
           ledger: { settled, refunded, journalIds: js.map((j) => j.id) },
-          discrepancy: this.discrepancy(r, r.payment, settled, refunded) ?? (!r.sandbox && r.payment.refundedMinor !== refundedLedgerMinor ? 'refund_amount_mismatch' : null),
+          discrepancy: this.moneyWithoutOrder(r, r.payment, performedCount.get(r.paymentId) ?? 0) ?? this.discrepancy(r, r.payment, settled, refunded) ?? (!r.sandbox && r.payment.refundedMinor !== refundedLedgerMinor ? 'refund_amount_mismatch' : null),
           // Money returned by our own transfer while the provider still shows the payment as performed (№77): a cancellation
           // in the provider's cabinet would pay the card again, so the API refuses it — the finance admin sees why here.
           refundedOutsideProvider: r.state === 'PERFORMED' && r.payment.refundedMinor > 0n,
@@ -81,6 +87,21 @@ export class ReconciliationService {
         }
       }),
     }
+  }
+
+  /**
+   * Money the provider took that bought nothing (security review 10.11 №6): to be returned to the student.
+   * - `refund_required` — performed on an invoice that expired or was cancelled meanwhile;
+   * - `double_payment` — one of two (or more) performed transactions on one invoice;
+   * - `check_with_provider` — Click reported a payment complete for an attempt closed here: answered «cancelled», so Click
+   *   should have returned the money; make sure in the Click cabinet.
+   */
+  private moneyWithoutOrder(tx: { provider: string; state: string; providerState: number | null; sandbox: boolean }, payment: { state: string }, performedOnInvoice: number): string | null {
+    if (tx.sandbox) return null
+    if (tx.state === 'PERFORMED' && (payment.state === 'EXPIRED' || payment.state === 'CANCELLED')) return 'refund_required'
+    if (tx.state === 'PERFORMED' && performedOnInvoice > 1) return 'double_payment'
+    if (tx.provider === 'CLICK' && tx.state === 'CANCELLED' && tx.providerState === 1) return 'check_with_provider'
+    return null
   }
 
   private discrepancy(tx: { state: string; amountMinor: bigint }, payment: { state: string; amountMinor: bigint }, settled: boolean, refunded: boolean): string | null {
@@ -95,12 +116,13 @@ export class ReconciliationService {
   }
 
   /**
-   * Independent provider check for one transaction: not available — Payme has no status endpoint to ask. Kept so the
-   * finance screen's «Check» button keeps working; it answers the same for every row.
+   * Independent provider check for one transaction: not available — Payme has no status endpoint to ask, and Click's
+   * (Merchant API) is not connected. It answers the same for every row; reconcile against the cabinet statements.
    */
   async verifyWithProvider(tenantId: string, transactionId: string) {
     const row = await this.prisma.client.paymentTransaction.findFirst({ where: { tenantId, id: transactionId } })
     if (!row) return { available: false, reason: 'not_found' }
+    if (row.provider === 'CLICK') return { available: false, reason: 'provider_check_unavailable', note: 'Click Merchant API is not connected; reconcile against the statement in the Click cabinet (merchant.click.uz).' }
     return { available: false, reason: 'provider_check_unavailable', note: 'Payme Merchant API has no status pull endpoint; reconcile against the cabinet statement (GetStatement is served by this API).' }
   }
 
