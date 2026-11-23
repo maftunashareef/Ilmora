@@ -58,9 +58,9 @@ export function TeacherChannelPage() {
   return (
     <div className="animate-fade">
       {/* Banner */}
-      <div className="relative h-44 md:h-64" style={{ background: teacher.bannerUpload?.previewUrl ? `url(${teacher.bannerUpload.previewUrl}) center/cover` : teacher.bannerUrl ? `url(${teacher.bannerUrl}) center/cover` : `linear-gradient(110deg, ${teacher.bannerTone} 0%, ${teacher.bannerTone}dd 55%, #C8AD7F66 100%)` }}>
+      <div className="relative h-44 md:h-64" style={{ background: teacher.bannerUpload?.previewUrl ? `url(${teacher.bannerUpload.previewUrl}) center/cover` : teacher.bannerUrl ? `url(${teacher.bannerUrl}) center/cover` : `linear-gradient(110deg, ${teacher.bannerTone} 0%, ${teacher.bannerTone}dd 55%, #CA9A3666 100%)` }}>
         <svg className="absolute inset-0 h-full w-full opacity-30" viewBox="0 0 800 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-          {Array.from({ length: 6 }).map((_, i) => <path key={i} d={`M -20 ${30 + i * 32} C 200 ${i * 20}, 500 ${120 + i * 10}, 820 ${20 + i * 30}`} fill="none" stroke="#F7F5F0" strokeWidth="0.7" />)}
+          {Array.from({ length: 6 }).map((_, i) => <path key={i} d={`M -20 ${30 + i * 32} C 200 ${i * 20}, 500 ${120 + i * 10}, 820 ${20 + i * 30}`} fill="none" stroke="#FBF3E3" strokeWidth="0.7" />)}
         </svg>
         {!teacher.channelActive && <div className="absolute left-4 top-4"><Badge tone="warn">{t('teachers.channelInactive')}</Badge></div>}
       </div>

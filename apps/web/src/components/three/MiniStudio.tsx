@@ -3,10 +3,10 @@ import { ContactShadows, Float, RoundedBox } from '@react-three/drei'
 import { useRef } from 'react'
 import * as THREE from 'three'
 
-const IVORY = '#F7F5F0'
-const FOREST = '#163C35'
-const CHAMPAGNE = '#C8AD7F'
-const SAGE = '#E3EBE5'
+const IVORY = '#FBF3E3'
+const FOREST = '#0E5A44'
+const CHAMPAGNE = '#CA9A36'
+const SAGE = '#E3EDE6'
 const WOOD = '#A67C52'
 
 function Book({ position, color, rotation = 0 }: { position: [number, number, number]; color: string; rotation?: number }) {

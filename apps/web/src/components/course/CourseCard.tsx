@@ -155,7 +155,7 @@ export function CourseCard({ course, showInternal, compact }: { course: Course; 
       )}
       style={{ padding: 0 }}
     >
-      {salePercent > 0 && <span className="pointer-events-none absolute inset-x-0 top-0 z-20 h-1 bg-gradient-to-r from-[#b8923d] via-champagne to-[#b8923d]" aria-hidden="true" />}
+      {salePercent > 0 && <span className="pointer-events-none absolute inset-x-0 top-0 z-20 h-1 bg-gradient-to-r from-[color-mix(in_srgb,var(--c-champagne)_80%,black)] via-champagne to-[color-mix(in_srgb,var(--c-champagne)_80%,black)]" aria-hidden="true" />}
       {/* Top Cover Media: Editorial photographic representation */}
       <Link to={`/courses/${course.id}`} className="block relative overflow-hidden focus-visible:outline-offset-[-3px] bg-sage/20">
         <div className={cx('relative overflow-hidden', compact ? 'aspect-[16/8]' : 'aspect-[16/10]')}>

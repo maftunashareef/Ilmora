@@ -47,7 +47,7 @@ export function AdminCenters() {
       <div className="mb-8"><PendingCentersPanel list={list} busy={busy} setStatus={setStatus} reviewName={reviewName} /></div>
       <div className="grid gap-8 lg:grid-cols-2">
         <section>
-          <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('common.centers')} · {list?.length ?? 0}</Eyebrow><Button size="sm" onClick={() => setCenter({ id: uid('ce'), name: '', district: emptyL(), description: emptyL(), tone: '#163C35' })}><Icon name="plus" className="h-3.5 w-3.5" />{t('admin.centers.addCenter')}</Button></div>
+          <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('common.centers')} · {list?.length ?? 0}</Eyebrow><Button size="sm" onClick={() => setCenter({ id: uid('ce'), name: '', district: emptyL(), description: emptyL(), tone: '#0E5A44' })}><Icon name="plus" className="h-3.5 w-3.5" />{t('admin.centers.addCenter')}</Button></div>
           <ul className="space-y-2">
             {(list ?? []).map((c) => (
               <li key={c.id} className="card p-3">

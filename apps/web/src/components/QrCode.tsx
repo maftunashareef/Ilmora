@@ -8,7 +8,7 @@ export function QrCode({ value, size = 280, className, label }: { value: string;
   const [error, setError] = useState(false)
   useEffect(() => {
     let cancelled = false
-    QRCode.toDataURL(value, { width: size, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#163C35', light: '#FFFFFF' } })
+    QRCode.toDataURL(value, { width: size, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#0E5A44', light: '#FFFFFF' } })
       .then((url) => { if (!cancelled) { setSrc(url); setError(false) } })
       .catch(() => { if (!cancelled) setError(true) })
     return () => { cancelled = true }

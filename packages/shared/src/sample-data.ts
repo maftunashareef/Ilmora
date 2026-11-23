@@ -278,8 +278,8 @@ export const site: SiteConfig = {
     city: l('Toşkent şahri', 'г. Ташкент', 'Tashkent, Uzbekistan'),
   },
   theme: {
-    colors: { ivory: '#F7F5F0', forest: '#163C35', charcoal: '#202725', champagne: '#C8AD7F', sage: '#E3EBE5', white: '#FFFFFF' },
-    fonts: { display: 'Cormorant Garamond', body: 'Inter' },
+    colors: { ivory: '#FBF3E3', forest: '#0E5A44', charcoal: '#1D211C', champagne: '#CA9A36', sage: '#E3EDE6', white: '#FFFCF5' },
+    fonts: { display: 'Playfair Display', body: 'Manrope' },
     radius: 'soft',
   },
   nav: [
