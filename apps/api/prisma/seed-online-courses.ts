@@ -4,7 +4,8 @@
  *   npm run db:seed:online            (root)  or  npm run prisma:seed:online -w apps/api
  *
  * Safe for production and for repeated runs: it only adds the platform center/profile "ILMORA Online", the online
- * categories and the online courses, and it never deletes or changes anything else. On a re-run a course gets its provider
+ * categories and the online courses, and it never deletes or changes anything else — a center's own course whose slug
+ * matches an online one is skipped, never rewritten (security check 20.11, №11). On a re-run a course gets its provider
  * facts refreshed from the data file, but its status, visibility and featured flag are left as the Super Admin set them,
  * so unpublishing a course in the admin panel survives. It does not touch demo data and does not need SEED_DEMO.
  * Needs the migrations 20261031000000_course_learning_format and 20261031000100_certificate_available.
@@ -67,6 +68,7 @@ async function main() {
   }
 
   let created = 0
+  let skipped = 0
   let refreshed = 0
   for (const c of ONLINE_COURSES) {
     const categoryId = categoryIds.get(c.category)
@@ -79,6 +81,13 @@ async function main() {
       durationText: json(c.durationText ?? { uz: '', ru: '', en: '' }), priceMinor: 0n,
     }
     const existing = await prisma.course.findFirst({ where: { tenantId, slug: c.slug } })
+    // A center's own course that happens to use this slug is not the platform's (security check 20.11, №11): it is left
+    // exactly as it is, and the online course is not added under that slug.
+    if (existing && (existing.centerId !== center.id || existing.learningFormat !== 'ONLINE')) {
+      console.warn(`Online catalog: "${c.slug}" is a center's course, not a platform online course — left as is, not imported.`)
+      skipped++
+      continue
+    }
     if (existing) {
       await prisma.course.update({ where: { id: existing.id }, data: facts })
       refreshed++
@@ -87,7 +96,7 @@ async function main() {
       created++
     }
   }
-  console.log(`Online catalog: ${created} course(s) added, ${refreshed} refreshed (tenant "${TENANT_SLUG}").`)
+  console.log(`Online catalog: ${created} course(s) added, ${refreshed} refreshed, ${skipped} skipped (slug taken by a center's course) (tenant "${TENANT_SLUG}").`)
 }
 
 main()

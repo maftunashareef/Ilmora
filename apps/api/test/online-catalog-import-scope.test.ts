@@ -29,7 +29,7 @@ import { DB_AVAILABLE, TestContext } from './helpers'
  * provider's link, price 0). When the import stops doing that, the check fails with «remove 'n11' from KNOWN_GAP» —
  * then remove it and the rule is demanded from then on. Any other change of today's outcome fails as «re-evaluate».
  */
-const KNOWN_GAP = new Set(['n11'])
+const KNOWN_GAP = new Set<string>()
 const checked = new Set<string>()
 function rule(key: string, holds: boolean, what: string, todayObserved: boolean) {
   checked.add(key)
