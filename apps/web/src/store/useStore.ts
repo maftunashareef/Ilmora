@@ -466,9 +466,9 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
             // Someone else saved the settings meanwhile: their version (and its number) is loaded and the admin is told
             // that the last change did not go through — otherwise every next save would fail the same way.
             try {
-              const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
-              set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true })
-              get().notify(translate(get().lang, 'admin.siteReloaded'), 'warn')
+              // The same load as the workspace's: an answer after a sign-out or a switch of account is dropped (Ж17).
+              await get().loadAdminPresets()
+              if (get().role === 'admin' && get().presetsLoaded) get().notify(translate(get().lang, 'admin.siteReloaded'), 'warn')
             } catch (reloadErr) {
               toast(reloadErr)
             }
@@ -507,12 +507,15 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         // Disabled presets are internal: drop them from memory on every sign-in/out; admins reload the full list.
         presetsLoaded: false,
         siteLoadFailed: false,
-        permissionsStatus: user ? 'loading' : 'idle',
+        // A visitor and the Super Admin stay `idle` here: the Super Admin's matrix comes with GET /admin/site
+        // (loadAdminPresets sets loading → ready/error). An account that must first change its temporary password stays
+        // `idle` too: the API answers it 403 password_change_required until then, and the new session loads the switches.
+        permissionsStatus: user && role !== 'admin' && !user.passwordChangeRequired ? 'loading' : 'idle',
         // Ж17: the switches of the previous account (or the Super Admin's whole matrix) never outlive a sign-in/out.
         site: { ...(s.site.presets ? publicSite(s.site) : s.site), permissions: NO_PERMISSIONS },
       }))
       // The Super Admin gets the whole matrix with the full settings (loadAdminPresets); everyone else reads their own.
-      permissionsLoading = user && role !== 'admin' ? loadOwnPermissions(user) : null
+      permissionsLoading = user && role !== 'admin' && !user.passwordChangeRequired ? loadOwnPermissions(user) : null
     }
     /**
      * The signed-in account's own switches (`GET /me/permissions`). One retry after a short pause; if that fails too the
@@ -528,7 +531,13 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         }
         try {
           own = (await api<Partial<Permissions>>('/me/permissions')) ?? {}
-        } catch {
+        } catch (err) {
+          // The temporary password must be changed first: not a failure to report — the change opens a new session,
+          // which loads the switches. No retry, no «could not load» notice over the password-change screen.
+          if (isApiError(err) && err.code === 'password_change_required') {
+            if (stillSignedIn()) set({ permissionsStatus: 'idle' })
+            return
+          }
           // Offline demo accounts (no backend) use the sample switches of their own role.
           if (DEMO_LOGIN_ENABLED && session.token?.startsWith('demo-token-')) {
             const sample = (sampleData.site as unknown as SiteConfig).permissions
@@ -750,6 +759,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         const who = get().auth.user?.id
         const asRole = get().role
         const sameAdmin = () => get().role === asRole && get().auth.user?.id === who
+        if (asRole === 'admin') set({ permissionsStatus: 'loading' })
         try {
           const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
           if (!sameAdmin()) return

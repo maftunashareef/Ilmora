@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sampleData } from '@ilmora/shared'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import type { AuthUser, InitialData } from './useStore'
 import { createIlmoraStore, NO_PERMISSIONS } from './useStore'
 
@@ -121,6 +121,32 @@ describe('Ж17: the role-permission matrix comes only after sign-in', () => {
   })
 })
 
+describe('Ж17: a temporary password to change first', () => {
+  it('no /me/permissions call and no «could not load» notice while the password must be changed', async () => {
+    serve({ ...account('m1', ['TEACHER']), passwordChangeRequired: true }, { teacher: TEACHER_SWITCHES })
+    const store = createIlmoraStore(initial)
+    await store.getState().login('m1', 'password-1')
+    expect(apiMock).not.toHaveBeenCalledWith('/me/permissions')
+    expect(store.getState().permissionsStatus).toBe('idle')
+    expect(store.getState().toasts).toEqual([])
+  })
+
+  it('a 403 password_change_required answer is not a failure: no retry, no notice, status idle', async () => {
+    vi.useFakeTimers()
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/auth/login') return { accessToken: 'token', user: account('t1', ['TEACHER']) } as never
+      if (path === '/me/permissions') throw new ApiError(403, 'password_change_required', 'Change the temporary password first')
+      return {} as never
+    })
+    const store = createIlmoraStore(initial)
+    await store.getState().login('t1', 'password-1')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(apiMock.mock.calls.filter(([p]) => p === '/me/permissions')).toHaveLength(1)
+    expect(store.getState().permissionsStatus).toBe('idle')
+    expect(store.getState().toasts).toEqual([])
+  })
+})
+
 describe('Ж17: the whole matrix of the Super Admin', () => {
   const ADMIN_MATRIX = {
     teacher: { ...TEACHER_SWITCHES, editPrices: false },
@@ -148,6 +174,8 @@ describe('Ж17: the whole matrix of the Super Admin', () => {
     apiMock.mockImplementation(async (path: string, opts?: { method?: string }) => (path === '/auth/login' ? { accessToken: 'token', user: account('a1', ['PLATFORM_ADMIN']) } : path === '/admin/site' ? (opts?.method === 'PUT' ? { version: 6 } : adminSite(5)) : {}) as never)
     const store = createIlmoraStore(initial)
     await store.getState().login('a1', 'password-1')
+    // Not «loading» on a sign-in: the Super Admin's matrix comes with the workspace's /admin/site load.
+    expect(store.getState().permissionsStatus).toBe('idle')
     await store.getState().loadAdminPresets()
     expect(store.getState().permissionsStatus).toBe('ready')
     store.getState().patchSite((s) => ({ ...s, brand: { ...s.brand } }))
