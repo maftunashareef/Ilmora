@@ -12,10 +12,11 @@
 		format filter {
 			wrap json
 			fields {
-				request>uri query {
-					delete t
-					delete next
-				}
+				# One filter for the address (Caddy 2.10 has no «multiple»): the values of t (the QR token) and next (the
+				# sign-in return address, holds the QR page with its token) are cut — «?t=», «&next=» stay — and so is the
+				# center's standing QR code in the path: /attendance/centers/<code>, /attend/c/<code> → «…/» (it never
+				# changes on its own, a log line holding it is a working QR; security review 19.11, №11).
+				request>uri regexp "(/(?:attendance/centers|attend/c)/)[^/?#&]+|([?&](?:t|next)=)[^&#]*" "${1}${2}"
 				request>headers>Referer delete
 			}
 		}
@@ -33,10 +34,9 @@
 		format filter {
 			wrap json
 			fields {
-				request>uri query {
-					delete t
-					delete next
-				}
+				# Same as Caddy's own log above: values of t and next cut, the center's QR code in the path masked
+				# (security review 11.11 №124; 19.11 №11).
+				request>uri regexp "(/(?:attendance/centers|attend/c)/)[^/?#&]+|([?&](?:t|next)=)[^&#]*" "${1}${2}"
 				request>headers>Cookie delete
 				request>headers>Authorization delete
 				request>headers>Referer delete
