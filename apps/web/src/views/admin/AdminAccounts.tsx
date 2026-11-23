@@ -49,7 +49,7 @@ export function AdminAccounts() {
     // Only the site roles go in the body: the API keeps the others (ministry, institution, company) as they are, so
     // blocking never turns such an account into a student.
     const roles = siteRoles(a.roles)
-    return act(a.id, () => api(`/admin/users/${a.id}/roles`, { method: 'PUT', body: { roles: roles.length || hasServerKeptRole(a.roles) ? roles : ['STUDENT'], isActive: !a.isActive, reason: a.isActive ? 'Blocked by the Super Admin' : 'Unblocked by the Super Admin' } }), t('common.saved'))
+    return act(a.id, () => api(`/admin/users/${a.id}/roles`, { method: 'PUT', body: { roles: roles.length || a.isOwner || hasServerKeptRole(a.roles) ? roles : ['STUDENT'], isActive: !a.isActive, reason: a.isActive ? 'Blocked by the Super Admin' : 'Unblocked by the Super Admin' } }), t('common.saved'))
   }
   const remove = (a: Account) => {
     if (!confirm(t('admin.accounts.confirmDelete'))) return

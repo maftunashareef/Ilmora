@@ -2,14 +2,15 @@
 const ASSIGNABLE = ['FINANCE_ADMIN', 'CENTER_ADMIN', 'CENTER_MANAGER', 'TEACHER', 'STUDENT'] as const
 export type AssignableRole = (typeof ASSIGNABLE)[number]
 /**
- * Roles the endpoint never sets and the API keeps as they are: an owner's pair (owner-setup on the server) and the roles
- * given by their own flows (ministry accounts, institution and company claims). A body without them does not remove them.
+ * Roles the endpoint never sets and the API keeps as they are: the roles given by their own flows (ministry accounts,
+ * institution and company claims). A body without them does not remove them. An owner's pair is kept too, but an owner
+ * is told by the isOwner flag, not by the roles column.
  */
-const SERVER_KEPT = ['PLATFORM_ADMIN', 'MINISTRY', 'INSTITUTION_ADMIN', 'COMPANY_ADMIN']
+const SERVER_KEPT = ['MINISTRY', 'INSTITUTION_ADMIN', 'COMPANY_ADMIN']
 
 /** The part of an account's roles the roles endpoint takes, in a stable order. */
 export const siteRoles = (roles: string[]): AssignableRole[] => ASSIGNABLE.filter((r) => roles.includes(r))
-/** True when the account keeps a role the API preserves, so an empty list of site roles is still a valid body. */
+/** True when the account keeps a role the API preserves, so an empty list of site roles is still a valid body (owners: check isOwner). */
 export const hasServerKeptRole = (roles: string[]): boolean => roles.some((r) => SERVER_KEPT.includes(r))
 
 /** The roles endpoint replaces the site roles, so adding center admin must keep everything else the person already has. */

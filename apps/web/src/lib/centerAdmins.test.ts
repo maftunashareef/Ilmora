@@ -26,5 +26,7 @@ describe('center admin role changes keep the rest of the roles', () => {
     expect(siteRoles(['MINISTRY'])).toEqual([])
     expect(hasServerKeptRole(['MINISTRY'])).toBe(true)
     expect(hasServerKeptRole(['STUDENT'])).toBe(false)
+    // An owner is told by isOwner, not by the roles column.
+    expect(hasServerKeptRole(['PLATFORM_ADMIN'])).toBe(false)
   })
 })

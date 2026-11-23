@@ -72,7 +72,11 @@ describe('Super Admin only via owner-setup: setRoles', () => {
     const centerAdmin: RequestActor = { id: 'ca', roles: ['CENTER_ADMIN'], centerId: 'c1' }
     await expect(managers.setActive('t', centerAdmin, 'owner', false)).rejects.toMatchObject({ code: 'not_found' })
     await expect(managers.resetPassword('t', centerAdmin, 'owner')).rejects.toMatchObject({ code: 'not_found' })
-    for (const where of wheres) expect(where).toMatchObject({ roles: { has: 'CENTER_MANAGER' }, isOwner: false, NOT: { roles: { hasSome: ['PLATFORM_ADMIN', 'FINANCE_ADMIN'] } } })
+    for (const where of wheres) {
+      expect(where).toMatchObject({ roles: { has: 'CENTER_MANAGER' }, isOwner: false })
+      const banned = [...(where as { NOT: { roles: { hasSome: string[] } } }).NOT.roles.hasSome].sort()
+      expect(banned).toEqual(['CENTER_ADMIN', 'COMPANY_ADMIN', 'FINANCE_ADMIN', 'INSTITUTION_ADMIN', 'MINISTRY', 'PLATFORM_ADMIN'])
+    }
     expect(wheres).toHaveLength(2)
   })
 
@@ -95,17 +99,47 @@ describe('Super Admin only via owner-setup: setRoles', () => {
     expect(writes).toEqual([])
   })
 
-  it('an owner or a finance admin is never a center administrator or manager', async () => {
+  it('an owner, a finance admin, a ministry, institution or company account is never a center administrator or manager', async () => {
     for (const [target, roles] of [
       [{ isOwner: true, roles: ['PLATFORM_ADMIN', 'FINANCE_ADMIN'] }, ['CENTER_MANAGER']],
       [{ isOwner: true, roles: ['PLATFORM_ADMIN', 'FINANCE_ADMIN'] }, ['CENTER_ADMIN']],
       [{}, ['FINANCE_ADMIN', 'CENTER_MANAGER']],
       [{}, ['FINANCE_ADMIN', 'CENTER_ADMIN']],
-    ] as [Partial<Row>, ('CENTER_MANAGER' | 'CENTER_ADMIN' | 'FINANCE_ADMIN')[]][]) {
+      [{ roles: ['MINISTRY'] }, ['CENTER_MANAGER']],
+      [{ roles: ['COMPANY_ADMIN'] }, ['CENTER_ADMIN']],
+      [{ roles: ['INSTITUTION_ADMIN', 'STUDENT'] }, ['STUDENT', 'CENTER_MANAGER']],
+      // A legacy finance + center account: adding another role is refused too.
+      [{ roles: ['FINANCE_ADMIN', 'CENTER_MANAGER'], centerId: 'c1' }, ['FINANCE_ADMIN', 'CENTER_MANAGER', 'TEACHER']],
+    ] as [Partial<Row>, ('CENTER_MANAGER' | 'CENTER_ADMIN' | 'FINANCE_ADMIN' | 'STUDENT' | 'TEACHER')[]][]) {
       const { service, writes } = setup(target)
       await expect(service.setRoles('t', superAdmin, 'u1', { roles, centerId: 'c1', reason: 'center role' })).rejects.toMatchObject({ code: 'privileged_center_role' })
       expect(writes).toEqual([])
     }
+  })
+
+  it('an account made before the rule (finance or ministry + a center role) can still be blocked, unblocked and stripped', async () => {
+    for (const legacy of [['FINANCE_ADMIN', 'CENTER_ADMIN'], ['MINISTRY', 'CENTER_MANAGER']] as const) {
+      const { service, writes } = setup({ roles: [...legacy], centerId: 'c1' })
+      const site = legacy.filter((r) => r !== 'MINISTRY') as ('FINANCE_ADMIN' | 'CENTER_ADMIN' | 'CENTER_MANAGER')[]
+      await service.setRoles('t', superAdmin, 'u1', { roles: site, isActive: false, reason: 'Blocked by the Super Admin' })
+      await service.setRoles('t', superAdmin, 'u1', { roles: site, isActive: true, reason: 'Unblocked by the Super Admin' })
+      await service.setRoles('t', superAdmin, 'u1', { roles: site.filter((r) => r === 'FINANCE_ADMIN'), reason: 'drop the center role' })
+      expect(writes.map((w) => w.isActive)).toEqual([false, true, true])
+      expect([...(writes[0].roles as string[])].sort()).toEqual([...legacy].sort())
+      expect(writes[2].roles).toEqual(legacy.filter((r) => r === 'FINANCE_ADMIN' || r === 'MINISTRY'))
+    }
+  })
+
+  it('uses the locked row for the center and the teacher profile', async () => {
+    const created: unknown[] = []
+    const { service, writes } = setup({ centerId: null, teacherProfile: { id: 'tp' } }, { centerId: 'c9', teacherProfile: null })
+    ;(service as unknown as { uniqueSlug: () => Promise<string> }).uniqueSlug = async () => 'u1'
+    const tx = (service as unknown as { prisma: { client: { $transaction: (fn: (t: unknown) => unknown) => unknown } } }).prisma.client
+    const run = tx.$transaction
+    tx.$transaction = (fn) => run((t: unknown) => fn({ ...(t as object), teacherProfile: { create: async (a: unknown) => (created.push(a), {}) } }))
+    await service.setRoles('t', superAdmin, 'u1', { roles: ['STUDENT', 'TEACHER', 'CENTER_MANAGER'], reason: 'center manager' })
+    expect(writes[0]).toMatchObject({ centerId: 'c9' })
+    expect(created).toHaveLength(1)
   })
 
   it('follows the row as locked in the transaction: an owner made meanwhile by owner-setup keeps the pair', async () => {

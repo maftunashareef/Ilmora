@@ -33,15 +33,19 @@ const CENTER_ROLES: Role[] = ['CENTER_ADMIN', 'CENTER_MANAGER']
 /**
  * The roles column after PUT /admin/users/:id/roles. The request lists only the roles the site assigns; the roles it does
  * not assign (KEPT_ROLES, an owner's pair) stay, and a stale PLATFORM_ADMIN on a non-owner goes. A privileged account
- * (owner or finance admin) is never a center admin or manager: the center would manage it (block it, reset its password).
+ * (owner, finance admin, ministry, institution or company) is never also a center admin or manager: the center would
+ * manage it (block it, reset its password). The rule applies when a role is added; a request that only removes roles or
+ * only blocks / unblocks still goes through for an account made before the rule, so blocking always works.
  * An owner cannot be blocked here: that would take Super Admin away too.
  */
 function rolesToStore(input: { roles: readonly string[]; isActive?: boolean }, cur: { roles: Role[]; isOwner: boolean }): Role[] {
   if (cur.isOwner && input.isActive === false) throw new AppError('owner_protected', 'The owner account cannot be blocked here', HttpStatus.FORBIDDEN)
   const roles = [...new Set([...(input.roles as Role[]), ...cur.roles.filter((r) => KEPT_ROLES.includes(r)), ...(cur.isOwner ? OWNER_ROLES : [])])]
   if (roles.length === 0) throw AppError.invalid('no_roles', 'An account needs at least one role')
-  if ((cur.isOwner || roles.includes('FINANCE_ADMIN')) && roles.some((r) => CENTER_ROLES.includes(r))) {
-    throw AppError.invalid('privileged_center_role', 'A Super Admin or finance admin cannot also be a center administrator or manager')
+  const adds = roles.some((r) => !cur.roles.includes(r))
+  const privileged = cur.isOwner || roles.some((r) => r === 'FINANCE_ADMIN' || KEPT_ROLES.includes(r))
+  if (adds && privileged && roles.some((r) => CENTER_ROLES.includes(r))) {
+    throw AppError.invalid('privileged_center_role', 'A Super Admin, finance admin, ministry, institution or company account cannot also be a center administrator or manager')
   }
   return roles
 }
@@ -1095,33 +1099,33 @@ export class ManageService {
       await this.audit.record({ action: 'user.roles.denied', entityType: 'User', entityId: userId, after: { roles: input.roles, code: 'owner_server_only' }, reason: input.reason })
       throw new AppError('owner_server_only', 'Super Admin is granted and revoked only on the server (owner-setup)', HttpStatus.FORBIDDEN)
     }
-    const centerId = input.centerId === undefined ? user.centerId : input.centerId
     // Checked here for a quick answer and again under the row lock below (owner-setup may change the account meanwhile).
-    const planned = rolesToStore(input, user)
-    if (centerId && centerId !== user.centerId) {
-      const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { id: true } })
+    rolesToStore(input, user)
+    if (input.centerId && input.centerId !== user.centerId) {
+      const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: input.centerId }, select: { id: true } })
       if (!center) throw AppError.invalid('center_not_found', 'Center not found')
     }
-    // A center administrator without a center would see an empty workspace and could not be found on the center page.
-    if (planned.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
-    if (planned.includes('CENTER_MANAGER') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this manager works for')
 
     const { before, updated } = await this.prisma.client.$transaction(async (tx) => {
       // Lock the row and read it again: owner-setup changes isOwner and the privileged roles in its own transaction,
       // and what is kept here must follow what is in the row now, not what was read before.
       await tx.$queryRawUnsafe(`SELECT id FROM "User" WHERE id = $1 FOR UPDATE`, userId)
-      const cur = await tx.user.findFirst({ where: { tenantId, id: userId }, select: { roles: true, isOwner: true, isActive: true, centerId: true } })
+      const cur = await tx.user.findFirst({ where: { tenantId, id: userId }, select: { roles: true, isOwner: true, isActive: true, centerId: true, login: true, displayName: true, teacherProfile: { select: { id: true } } } })
       if (!cur) throw AppError.notFound('User')
       const roles = rolesToStore(input, cur)
+      const centerId = input.centerId === undefined ? cur.centerId : input.centerId
+      // A center administrator without a center would see an empty workspace and could not be found on the center page.
+      if (roles.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
+      if (roles.includes('CENTER_MANAGER') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this manager works for')
       const isActive = input.isActive ?? cur.isActive
       // Losing a role or being blocked ends the user's open sessions immediately.
       const lostAccess = (!isActive && cur.isActive) || cur.roles.some((r) => !roles.includes(r))
       // isOwner is deliberately not written: it belongs to owner-setup.
       const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive } })
       // The teacher studio works through the public teacher profile; grant one with the role so the studio is usable.
-      if (roles.includes('TEACHER') && !user.teacherProfile) {
+      if (roles.includes('TEACHER') && !cur.teacherProfile) {
         await tx.teacherProfile.create({
-          data: { tenantId, userId, slug: await this.uniqueSlug('teacher', tenantId, slugify(user.login || user.displayName)), name: user.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null } as Prisma.TeacherProfileUncheckedCreateInput,
+          data: { tenantId, userId, slug: await this.uniqueSlug('teacher', tenantId, slugify(cur.login || cur.displayName)), name: cur.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null } as Prisma.TeacherProfileUncheckedCreateInput,
         })
       }
       // Removed roles or a block must not survive in open sessions until their refresh token expires.

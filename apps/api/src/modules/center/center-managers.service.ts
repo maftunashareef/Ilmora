@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import argon2 from 'argon2'
 import { randomBytes } from 'node:crypto'
 import { AppError } from '../../common/errors'
+import { Role } from '../../generated/prisma/enums'
 import { forgetAccountState } from '../../common/request-context.middleware'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
@@ -12,11 +13,14 @@ import type { CenterManagerInput } from './center-managers.schemas'
 
 /** A center keeps a handful of managers; more is a sign of misuse, not of a big center. */
 export const CENTER_MANAGERS_MAX = 10
+/** The only roles a center's manager account may hold; an account with any other role is not the center's to manage. */
+const MANAGER_ROLES: Role[] = ['CENTER_MANAGER', 'TEACHER', 'STUDENT']
 /**
- * A center's manager accounts: CENTER_MANAGER, and never a privileged account that also carries it (an owner or a
- * finance admin) — otherwise the center admin could block it or reset its password.
+ * A center's manager accounts: CENTER_MANAGER and nothing beyond MANAGER_ROLES, never an owner. Otherwise the center admin
+ * could block or reset the password of an owner, a finance admin, a ministry, institution or company account that was
+ * also given the manager role.
  */
-const MANAGER_WHERE = { roles: { has: 'CENTER_MANAGER' as const }, isOwner: false, NOT: { roles: { hasSome: ['PLATFORM_ADMIN' as const, 'FINANCE_ADMIN' as const] } } }
+const MANAGER_WHERE = { roles: { has: 'CENTER_MANAGER' as const }, isOwner: false, NOT: { roles: { hasSome: Object.values(Role).filter((r) => !MANAGER_ROLES.includes(r)) } } }
 
 const SELECT = { id: true, login: true, displayName: true, isActive: true, passwordIssuedAt: true, lastLoginAt: true, createdAt: true } as const
 type Row = { id: string; login: string | null; displayName: string; isActive: boolean; passwordIssuedAt: Date | null; lastLoginAt: Date | null; createdAt: Date }
