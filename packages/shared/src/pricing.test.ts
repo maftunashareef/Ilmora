@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  activePercent, billedSom, calculatorSom, carouselCourses, checkCoursePrice, COMMISSION_DEFAULT_PERCENT, COMMISSION_MIN_PERCENT, MAX_CAROUSEL_COURSES, maxDiscountPercent, MIN_DISCOUNT_PERCENT, studentPriceSom, checkDiscount, DISCOUNT_TERMS, discountFromDraft, discountInForce, discountSom, discountTermEnd, discountTermOf, discountToDraft, emptyDiscountDraft, finalPriceMinor, finalPriceSom, isDiscountActive, isoToTashkentLocal, MAX_DISCOUNT_PERCENT, priceTotals, tashkentLocalToIso, tashkentNowLocal,
+  activePercent, billedSom, calculatorSom, carouselCourses, checkCoursePrice, COMMISSION_DEFAULT_PERCENT, COMMISSION_MIN_PERCENT, commissionPercentFor, HALF_SPLIT_MAX_DISCOUNT_PERCENT, HALF_SPLIT_MAX_TOTAL_PERCENT, HALF_SPLIT_MIN_TOTAL_PERCENT, halfSplitMinor, MAX_CAROUSEL_COURSES, maxDiscountPercent, maxDiscountPercentFor, priceSplitMinor, MIN_DISCOUNT_PERCENT, studentPriceSom, checkDiscount, DISCOUNT_TERMS, discountFromDraft, discountInForce, discountSom, discountTermEnd, discountTermOf, discountToDraft, emptyDiscountDraft, finalPriceMinor, finalPriceSom, isDiscountActive, isoToTashkentLocal, MAX_DISCOUNT_PERCENT, priceTotals, tashkentLocalToIso, tashkentNowLocal,
 } from './pricing.js'
 
 const d = (percent: number, startsAt: string, endsAt: string) => ({ percent, startsAt, endsAt })
@@ -46,25 +46,81 @@ describe('checkDiscount (ТЗ 18.11, 9.1: from 5% to 100% − commission)', () =
   })
 })
 
-describe('calculator (ТЗ 18.11, 9.1–9.2)', () => {
+describe('calculator of a course from before it (rule 0): ТЗ 18.11, 9.1–9.2 with the Super Admin\'s K', () => {
   it('example 1: 1 000 000 at 5%, commission 10% → 950 000 / 850 000 / 100 000', () => {
-    expect(calculatorSom(1_000_000, 5, 10)).toEqual({ student: 950_000, center: 850_000, platform: 100_000 })
+    expect(calculatorSom(1_000_000, 5, 10, 0)).toEqual({ student: 950_000, center: 850_000, platform: 100_000 })
+    expect(priceSplitMinor({ priceMinor: 100_000_000n, studentMinor: 95_000_000n, discountPercent: 5, commissionPercent: 10 })).toEqual({ centerMinor: 85_000_000n, platformMinor: 10_000_000n })
   })
-  it('example 2: 1 234 000 at 7% → 1 147 000 (rounded down), 1 024 220, 122 780', () => {
-    expect(calculatorSom(1_234_000, 7, 10)).toEqual({ student: 1_147_000, center: 1_024_220, platform: 122_780 })
-    expect(finalPriceMinor(123_400_000n, d(7, '2026-11-01T00:00:00Z', '2026-11-10T00:00:00Z'), new Date('2026-11-05T00:00:00Z'), 1)).toBe(114_700_000n)
+  it('1 234 000 at 7%, K 10% → 1 147 620 (whole so\'m, its old rounding), the center 1 024 220, ILMORA the rest', () => {
+    expect(calculatorSom(1_234_000, 7, 10, 0)).toEqual({ student: 1_147_620, center: 1_024_220, platform: 123_400 })
   })
-  it('the limit 90%: the center gets 0, ILMORA 10%, the student pays 10%; a free course has no commission', () => {
-    expect(calculatorSom(1_000_000, 90, 10)).toEqual({ student: 100_000, center: 0, platform: 100_000 })
-    expect(calculatorSom(0, 5, 10)).toEqual({ student: 0, center: 0, platform: 0 })
+  it('the limit 100% − K: the center gets 0; a free course has no commission', () => {
+    expect(calculatorSom(1_000_000, 90, 10, 0)).toEqual({ student: 100_000, center: 0, platform: 100_000 })
+    expect(calculatorSom(0, 5, 10, 0)).toEqual({ student: 0, center: 0, platform: 0 })
+    expect(maxDiscountPercentFor(0, 10)).toBe(90)
+    expect(maxDiscountPercentFor(0, 15)).toBe(85)
+    expect(commissionPercentFor(0, 20, 10)).toBe(10)
   })
   it('ILMORA never goes below 0 for a valid price (rounding loss ≤ 990 so\'m), whatever the discount', () => {
     for (const price of [50_000, 51_000, 99_000, 1_234_000, 9_999_000]) for (let s = 5; s <= 90; s++) {
-      const r = calculatorSom(price, s, COMMISSION_MIN_PERCENT)
+      const r = calculatorSom(price, s, COMMISSION_MIN_PERCENT, 0)
       expect(r.platform, `${price} ${s}`).toBeGreaterThanOrEqual(0)
       expect(r.student - r.center - r.platform).toBe(0)
     }
   })
+})
+
+describe('calculator of a new course (rule 1): equal halves (23.11)', () => {
+  it('a total of 20% on 500 000 → the student 450 000, ILMORA 50 000, the center 400 000 (S = 10)', () => {
+    expect(calculatorSom(500_000, 10, 10)).toEqual({ student: 450_000, center: 400_000, platform: 50_000 })
+    expect(calculatorSom(500_000, 10, 10, 1)).toEqual({ student: 450_000, center: 400_000, platform: 50_000 })
+  })
+  it('the sums are whole thousands: 1 234 000 at a total of 14% → 1 147 000 / ILMORA 87 000 / the center 1 060 000', () => {
+    expect(calculatorSom(1_234_000, 7, 10)).toEqual({ student: 1_147_000, center: 1_060_000, platform: 87_000 })
+    expect(finalPriceMinor(123_400_000n, d(7, '2026-11-01T00:00:00Z', '2026-11-10T00:00:00Z'), new Date('2026-11-05T00:00:00Z'), 1)).toBe(114_700_000n)
+    // 650 000 at a total of 10%: 32 500 saved, rounded up with the student's price (617 500 → 617 000).
+    expect(calculatorSom(650_000, 5, 10)).toEqual({ student: 617_000, center: 584_000, platform: 33_000 })
+  })
+  it('K does not enter it: the same split at any Super Admin commission', () => {
+    for (const k of [2, 10, 15, 50]) expect(calculatorSom(1_000_000, 5, k)).toEqual({ student: 950_000, center: 900_000, platform: 50_000 })
+    expect(commissionPercentFor(1, 7, 10)).toBe(7)
+  })
+  it('a total of 100% (S = 50): the center gets 0, never less; a free course has nothing', () => {
+    expect(calculatorSom(1_000_000, 50, 10)).toEqual({ student: 500_000, center: 0, platform: 500_000 })
+    // 51 000 at 50%: the student pays 25 000 (rounded down), saves 26 000 — ILMORA can only get what was paid.
+    expect(calculatorSom(51_000, 50, 10)).toEqual({ student: 25_000, center: 0, platform: 25_000 })
+    expect(calculatorSom(0, 5, 10)).toEqual({ student: 0, center: 0, platform: 0 })
+    expect(halfSplitMinor(0n, 0n)).toEqual({ centerMinor: 0n, platformMinor: 0n })
+  })
+  it('the limits: S from 5% to 50% (a total of 10% … 100%, even)', () => {
+    expect(HALF_SPLIT_MIN_TOTAL_PERCENT).toBe(10)
+    expect(HALF_SPLIT_MAX_TOTAL_PERCENT).toBe(100)
+    expect(HALF_SPLIT_MAX_DISCOUNT_PERCENT).toBe(50)
+    for (const k of [2, 10, 50]) expect(maxDiscountPercentFor(1, k)).toBe(50)
+    expect(checkDiscount(d(50, win.startsAt, win.endsAt), maxDiscountPercentFor(1, 10))).toEqual({ ok: true })
+    expect(checkDiscount(d(51, win.startsAt, win.endsAt), maxDiscountPercentFor(1, 10))).toEqual({ ok: false, reason: 'percent' })
+    // An odd total is a half percent: no check accepts it.
+    expect(checkDiscount(d(7.5, win.startsAt, win.endsAt), maxDiscountPercentFor(1, 10))).toEqual({ ok: false, reason: 'percent' })
+  })
+  it('ILMORA gets exactly what the student saves, and the three sums add up, for every price and percent', () => {
+    for (const price of [50_000, 51_000, 99_000, 650_000, 1_234_000, 9_999_000]) for (let s = 5; s <= 50; s++) {
+      const r = calculatorSom(price, s, 10)
+      expect(r.student % 1_000, `${price} ${s}`).toBe(0)
+      expect(r.student - r.center - r.platform).toBe(0)
+      expect(r.center).toBeGreaterThanOrEqual(0)
+      if (r.center > 0) expect(r.platform, `${price} ${s}`).toBe(price - r.student)
+    }
+  })
+  it('after a time-limited discount the minimum holds for both halves: 5% to the student, 5% to ILMORA', () => {
+    const course = { price: 1_000_000, priceRule: 1 as const, discount: { percent: 20, startsAt: '2026-11-01T00:00:00Z', endsAt: '2026-11-11T00:00:00Z' } }
+    const now = new Date('2026-11-12T00:00:00Z')
+    const s = activePercent(course, now)
+    expect(s).toBe(5)
+    expect(calculatorSom(course.price, s, 10)).toEqual({ student: 950_000, center: 900_000, platform: 50_000 })
+  })
+})
+
+describe('the price of a new course', () => {
   it('a course before the calculator keeps its old rounding (whole so\'m)', () => {
     expect(studentPriceSom(1_234_000, 7, 0)).toBe(1_147_620)
     expect(finalPriceSom({ price: 1_234_000, discount: { percent: 7, startsAt: '2026-11-01T00:00:00Z', endsAt: '2026-11-10T00:00:00Z' } }, new Date('2026-11-05T00:00:00Z'))).toBe(1_147_620)

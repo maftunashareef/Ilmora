@@ -12,6 +12,8 @@ import { notificationsStub } from './stubs'
  * a permanent or a time-limited discount, and after a time-limited one a paid new course keeps the minimum).
  * Every rule has a test that fails without its code (12.2): both examples of 9.2, the limits 5% and 90%, the price of a
  * new course, the snapshot in the payment, the commission only the Super Admin changes.
+ * 23.11 (the owner): a course of the calculator (priceRule 1) splits the center's total percent in equal halves — the
+ * student's discount S (5% … 50%) and ILMORA's commission S; the Super Admin's K stays for courses from before it.
  */
 describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
   const ctx = new TestContext()
@@ -52,14 +54,18 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     durationMonths: 3, price: 1_000_000, status: 'draft' as const, ...over,
   })
 
-  it('a new course: the price is whole thousands from 50 000 (or 0, free), the discount 5% … 100% − K', async () => {
+  it('a new course: the price is whole thousands from 50 000 (or 0, free), the student\'s half 5% … 50% (a total of 100%)', async () => {
     const s = await setup()
     const create = (over: Record<string, unknown>) => as(s, s.center, () => manage().createCourse(s.tenantId, s.center, body(s, over) as never))
     expect(await err(create({ price: 1_234_500 }))).toBe('course_price_invalid')
     expect(await err(create({ price: 40_000 }))).toBe('course_price_invalid')
-    expect(await err(create({ price: 1_000_000, discount: live(91) }))).toBe('discount_over_limit')
-    const ok = await create({ price: 1_234_000, discount: live(90) })
-    expect(ok).toMatchObject({ price: 1_234_000, priceRule: 1, discount: { percent: 90 } })
+    expect(await err(create({ price: 1_000_000, discount: live(51) }))).toBe('discount_over_limit')
+    expect(await err(create({ price: 1_000_000, discount: live(90) }))).toBe('discount_over_limit')
+    const ok = await create({ price: 1_234_000, discount: live(50) })
+    expect(ok).toMatchObject({ price: 1_234_000, priceRule: 1, discount: { percent: 50 } })
+    // Changing it later follows the same limit.
+    expect(await err(as(s, s.center, () => manage().setCourseDiscount(s.tenantId, s.center, ok.id, live(60))))).toBe('discount_over_limit')
+    expect(await err(as(s, s.center, () => manage().updateCourse(s.tenantId, s.center, ok.id, { discount: live(60) })))).toBe('discount_over_limit')
     expect(await err(create({ price: 0, discount: live(5) }))).toBe('free_course_no_discount')
     await expect(create({ price: 0, status: 'published' })).resolves.toMatchObject({ price: 0, status: 'published' })
   })
@@ -102,6 +108,8 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, null))).resolves.toBeTruthy()
     // A discount set now follows the new range on any course; its term — permanent or time-limited — is the center's choice.
     expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, windowed(91))))).toBe('discount_over_limit')
+    // Its limit is still 100% − K, not the 50% of the equal halves (23.11).
+    await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, live(90)))).resolves.toMatchObject({ discount: { percent: 90, endsAt: null } })
     await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, live(10)))).resolves.toMatchObject({ discount: { percent: 10, endsAt: null } })
     await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, windowed(10)))).resolves.toMatchObject({ discount: { percent: 10, endsAt: expect.any(String) } })
   })
@@ -113,18 +121,18 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     const course = await as(s, s.center, () => m.createCourse(s.tenantId, s.center, body(s, { price: 1_000_000, discount: windowed(20), status: 'published' }) as never))
     expect(course).toMatchObject({ discount: { percent: 20, endsAt: expect.any(String) } })
     const group = await TenantContext.forTenant(s.tenantId, () => db.group.create({ data: { tenantId: s.tenantId, courseId: course.id, name: 'T', days: [3], startTime: '10:00', endTime: '11:00', capacity: 5 } }))
-    // During the term: the center's 20%.
+    // During the term: the center's 20% for the student (a total of 40%): 800 000, ILMORA the same 200 000, the center 600 000.
     const during = await ctx.checkout(s.tenantId, (await ctx.makeStudent(s.tenantId)).id, null as never, [group.id])
-    await expect(TenantContext.forTenant(s.tenantId, () => db.paymentLine.findFirstOrThrow({ where: { paymentId: during.payment.id } }))).resolves.toMatchObject({ amountMinor: 80_000_000n, discountPercent: 20, centerShareMinor: 70_000_000n, platformShareMinor: 10_000_000n })
+    await expect(TenantContext.forTenant(s.tenantId, () => db.paymentLine.findFirstOrThrow({ where: { paymentId: during.payment.id } }))).resolves.toMatchObject({ amountMinor: 80_000_000n, discountPercent: 20, commissionPercent: 20, centerShareMinor: 60_000_000n, platformShareMinor: 20_000_000n })
     // The term ran out an hour ago.
     const ended = new Date(Date.now() - 3_600_000)
     await TenantContext.forTenant(s.tenantId, () => db.course.update({ where: { id: course.id }, data: { discountStartsAt: new Date(Date.now() - 11 * day), discountEndsAt: ended } }))
     // The center's list and the form: 5% from the end on, with no end of its own.
     const listed = await as(s, s.center, () => m.listCenterCourses(s.tenantId, s.center))
     expect(listed.courses.find((c) => c.id === course.id)).toMatchObject({ status: 'published', discount: { percent: 5, startsAt: ended.toISOString(), endsAt: null } })
-    // Checkout: 1 000 000 at 5% → 950 000; the center 850 000, ILMORA 100 000.
+    // Checkout: 1 000 000 at 5% + 5% → 950 000; ILMORA 50 000, the center 900 000.
     const after = await ctx.checkout(s.tenantId, (await ctx.makeStudent(s.tenantId)).id, null as never, [group.id])
-    await expect(TenantContext.forTenant(s.tenantId, () => db.paymentLine.findFirstOrThrow({ where: { paymentId: after.payment.id } }))).resolves.toMatchObject({ listPriceMinor: 100_000_000n, amountMinor: 95_000_000n, discountPercent: 5, commissionPercent: 10, centerShareMinor: 85_000_000n, platformShareMinor: 10_000_000n })
+    await expect(TenantContext.forTenant(s.tenantId, () => db.paymentLine.findFirstOrThrow({ where: { paymentId: after.payment.id } }))).resolves.toMatchObject({ listPriceMinor: 100_000_000n, amountMinor: 95_000_000n, discountPercent: 5, commissionPercent: 5, centerShareMinor: 90_000_000n, platformShareMinor: 5_000_000n })
     // The course still counts as discounted: its price can be changed while published, and a new term can be set.
     await expect(as(s, s.center, () => m.updateCourse(s.tenantId, s.center, course.id, { price: 1_200_000 }))).resolves.toMatchObject({ price: 1_200_000, status: 'published', discount: { percent: 5, endsAt: null } })
     await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, course.id, windowed(30)))).resolves.toMatchObject({ discount: { percent: 30, endsAt: expect.any(String) } })
@@ -134,7 +142,7 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     expect(again.courses.find((c) => c.id === s.t.course.id)?.discount ?? null).toBeNull()
   })
 
-  it('checkout: example 2 of 9.2 — 1 234 000 at 7% → 1 147 000; the payment keeps S, K and both shares; an older course keeps its rounding', async () => {
+  it('checkout: 1 234 000 at 7% + 7% → 1 147 000, ILMORA 87 000, the center 1 060 000; the payment keeps S, the commission and both shares; an older course keeps K and its rounding', async () => {
     const s = await setup()
     const db = ctx.prisma.client
     const course = await as(s, s.center, () => manage().createCourse(s.tenantId, s.center, body(s, { price: 1_234_000, discount: live(7), status: 'published' }) as never))
@@ -145,26 +153,27 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     const { payment } = await ctx.checkout(s.tenantId, student.id, s.t.pkg.id, [group.id, s.t.group.id])
     const lines = await TenantContext.forTenant(s.tenantId, () => db.paymentLine.findMany({ where: { paymentId: payment.id } }))
     const byCourse = Object.fromEntries(lines.map((l) => [l.courseId, l]))
-    expect(byCourse[course.id]).toMatchObject({ listPriceMinor: 123_400_000n, amountMinor: 114_700_000n, discountPercent: 7, commissionPercent: 10, centerShareMinor: 102_422_000n, platformShareMinor: 12_278_000n })
+    expect(byCourse[course.id]).toMatchObject({ listPriceMinor: 123_400_000n, amountMinor: 114_700_000n, discountPercent: 7, commissionPercent: 7, centerShareMinor: 106_000_000n, platformShareMinor: 8_700_000n })
     expect(byCourse[s.t.course.id]).toMatchObject({ listPriceMinor: 5_000_000n, amountMinor: 4_650_000n, discountPercent: 7, commissionPercent: 10, centerShareMinor: 4_150_000n, platformShareMinor: 500_000n })
     expect(payment.amountMinor).toBe(114_700_000n + 4_650_000n)
   })
 
-  it('example 1 and the limit: 1 000 000 at 5% → 950 000 / 850 000 / 100 000; at 90% the center gets 0', async () => {
+  it('equal halves: 500 000 at a total of 20% → 450 000 / 400 000 / 50 000; 1 000 000 at 5% + 5%; at 50% + 50% the center gets 0', async () => {
     const s = await setup()
     const db = ctx.prisma.client
-    const paid = async (percent: number) => {
-      const c = await as(s, s.center, () => manage().createCourse(s.tenantId, s.center, body(s, { price: 1_000_000, discount: live(percent), status: 'published' }) as never))
+    const paid = async (percent: number, price = 1_000_000) => {
+      const c = await as(s, s.center, () => manage().createCourse(s.tenantId, s.center, body(s, { price, discount: live(percent), status: 'published' }) as never))
       const g = await TenantContext.forTenant(s.tenantId, () => db.group.create({ data: { tenantId: s.tenantId, courseId: c.id, name: `G${percent}`, days: [5], startTime: '10:00', endTime: '11:00', capacity: 5 } }))
       const student = await ctx.makeStudent(s.tenantId)
       const { payment } = await ctx.checkout(s.tenantId, student.id, null as never, [g.id])
       return TenantContext.forTenant(s.tenantId, () => db.paymentLine.findFirstOrThrow({ where: { paymentId: payment.id } }))
     }
-    expect(await paid(5)).toMatchObject({ amountMinor: 95_000_000n, centerShareMinor: 85_000_000n, platformShareMinor: 10_000_000n })
-    expect(await paid(90)).toMatchObject({ amountMinor: 10_000_000n, centerShareMinor: 0n, platformShareMinor: 10_000_000n })
+    expect(await paid(10, 500_000)).toMatchObject({ amountMinor: 45_000_000n, discountPercent: 10, commissionPercent: 10, centerShareMinor: 40_000_000n, platformShareMinor: 5_000_000n })
+    expect(await paid(5)).toMatchObject({ amountMinor: 95_000_000n, commissionPercent: 5, centerShareMinor: 90_000_000n, platformShareMinor: 5_000_000n })
+    expect(await paid(50)).toMatchObject({ amountMinor: 50_000_000n, commissionPercent: 50, centerShareMinor: 0n, platformShareMinor: 50_000_000n })
   })
 
-  it('the commission: only the Super Admin, 2–50%, audited; new payments use the new one, a payment made keeps its own', async () => {
+  it('the commission: only the Super Admin, 2–50%, audited; new payments of older courses use the new one, a payment made keeps its own; a new course splits in halves whatever K is', async () => {
     const s = await setup()
     const db = ctx.prisma.client
     const m = manage()
@@ -172,18 +181,26 @@ describe.skipIf(!DB_AVAILABLE)('Price calculator (ТЗ 18.11, 9)', () => {
     expect(CommissionInput.safeParse({ commissionPercent: 51 }).success).toBe(false)
     expect(CommissionInput.safeParse({ commissionPercent: 15, extra: 1 }).success).toBe(false)
     expect(await err(as(s, s.center, () => m.setCommission(s.tenantId, s.center, 15)))).toBe('forbidden')
+    // A new course (rule 1) and the course from before the calculator (t.course: rule 0, 50 000 so'm), both at 5%.
     const course = await as(s, s.center, () => m.createCourse(s.tenantId, s.center, body(s, { price: 1_000_000, discount: live(5), status: 'published' }) as never))
     const group = await TenantContext.forTenant(s.tenantId, () => db.group.create({ data: { tenantId: s.tenantId, courseId: course.id, name: 'K', days: [6], startTime: '10:00', endTime: '11:00', capacity: 5 } }))
-    const before = await ctx.checkout(s.tenantId, (await ctx.makeStudent(s.tenantId)).id, null as never, [group.id])
+    await as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, live(5)))
+    const buy = async () => ctx.checkout(s.tenantId, (await ctx.makeStudent(s.tenantId)).id, s.t.pkg.id, [group.id, s.t.group.id])
+    const before = await buy()
     await expect(as(s, s.owner, () => m.setCommission(s.tenantId, s.owner, 15))).resolves.toMatchObject({ commissionPercent: 15, minDiscountPercent: 5, maxDiscountPercent: 85 })
     const audit = await TenantContext.forTenant(s.tenantId, () => db.auditEvent.findFirstOrThrow({ where: { action: 'pricing.commission', entityId: s.tenantId } }))
     expect(audit).toMatchObject({ actorId: s.owner.id, before: { commissionPercent: 10 }, after: { commissionPercent: 15 } })
-    const after = await ctx.checkout(s.tenantId, (await ctx.makeStudent(s.tenantId)).id, null as never, [group.id])
-    const line = (id: string) => TenantContext.forTenant(s.tenantId, () => db.paymentLine.findFirstOrThrow({ where: { paymentId: id } }))
-    expect(await line(before.payment.id)).toMatchObject({ commissionPercent: 10, centerShareMinor: 85_000_000n })
-    expect(await line(after.payment.id)).toMatchObject({ commissionPercent: 15, amountMinor: 95_000_000n, centerShareMinor: 80_000_000n, platformShareMinor: 15_000_000n })
-    // The limit moved with it: 86% is refused now.
-    expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, course.id, live(86))))).toBe('discount_over_limit')
+    const after = await buy()
+    const line = (paymentId: string, courseId: string) => TenantContext.forTenant(s.tenantId, () => db.paymentLine.findFirstOrThrow({ where: { paymentId, courseId } }))
+    // The older course: 50 000 at 5% → 47 500; K 10% → the center 42 500, then K 15% → 40 000.
+    expect(await line(before.payment.id, s.t.course.id)).toMatchObject({ commissionPercent: 10, amountMinor: 4_750_000n, centerShareMinor: 4_250_000n, platformShareMinor: 500_000n })
+    expect(await line(after.payment.id, s.t.course.id)).toMatchObject({ commissionPercent: 15, amountMinor: 4_750_000n, centerShareMinor: 4_000_000n, platformShareMinor: 750_000n })
+    // The new course: 5% + 5% both times — 950 000, ILMORA 50 000, the center 900 000.
+    for (const p of [before, after]) expect(await line(p.payment.id, course.id)).toMatchObject({ commissionPercent: 5, amountMinor: 95_000_000n, centerShareMinor: 90_000_000n, platformShareMinor: 5_000_000n })
+    // The limit of the older course moved with K: 86% is refused now; the new course's stays 50%.
+    expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, s.t.course.id, live(86))))).toBe('discount_over_limit')
+    expect(await err(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, course.id, live(51))))).toBe('discount_over_limit')
+    await expect(as(s, s.center, () => m.setCourseDiscount(s.tenantId, s.center, course.id, live(50)))).resolves.toMatchObject({ discount: { percent: 50 } })
     // The center sees it in its course list, and cannot change it.
     expect((await as(s, s.center, () => m.listCenterCourses(s.tenantId, s.center))).pricing).toEqual({ commissionPercent: 15, minDiscountPercent: 5, maxDiscountPercent: 85, minPriceSom: 50_000 })
   })

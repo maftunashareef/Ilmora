@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { discountFromDraft, discountToDraft, emptyDiscountDraft, type DiscountDraft, isDiscountActive, isoToTashkentLocal } from '@ilmora/shared'
+import { COMMISSION_DEFAULT_PERCENT, discountFromDraft, discountToDraft, emptyDiscountDraft, type DiscountDraft, isDiscountActive, isoToTashkentLocal, maxDiscountPercentFor } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { StatusBadge, VisibilityBadge } from '../../components/course/badges'
 import { PriceNow, ScheduleChips } from '../../components/course/CourseCard'
@@ -72,7 +72,8 @@ export function CenterCourses() {
   }
   const saveDiscount = async () => {
     if (!discounting) return
-    const parsed = discountFromDraft(draft, new Date(), data?.pricing?.maxDiscountPercent)
+    // A course of the calculator takes S up to 50% (a total of 100%, equal halves); an older one up to 100% − K.
+    const parsed = discountFromDraft(draft, new Date(), maxDiscountPercentFor(discounting.priceRule ?? 0, data?.pricing?.commissionPercent ?? COMMISSION_DEFAULT_PERCENT))
     if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
     setBusy(true)
     try {
