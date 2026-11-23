@@ -2433,6 +2433,7 @@ export const dict = {
   'admin.accounts.roleReason': d('Özgartiriş sababi (kamida 3 belgi)', 'Причина изменения (минимум 3 символа)', 'Reason for the change (at least 3 characters)'),
   'admin.accounts.rolesSaved': d('Rollar saqlandi. Rollar olib taşlansa, foydalanuvçi qayta kiradi.', 'Роли сохранены. Если роли сняты, пользователю нужно войти заново.', 'Roles saved. If roles were removed, the user has to sign in again.'),
   'admin.accounts.selfRoles': d('Özingizning rollaringizni özgartira olmaysiz', 'Свои роли менять нельзя', 'You cannot change your own roles'),
+  'admin.accounts.privilegedCenterRole': d('Super Admin yoki moliya administratori bir vaqtda markaz administratori yoki menejeri bölolmaydi.', 'Супер-админ или финансовый администратор не может одновременно быть администратором или менеджером центра.', 'A Super Admin or finance admin cannot also be a center administrator or manager.'),
   'admin.accounts.ownerServerOnly': d('Super Admin huquqi saytda berilmaydi va olinmaydi — faqat serverda owner-setup buyrugi bilan.', 'Права Супер-админа на сайте не выдаются и не снимаются — только командой owner-setup на сервере.', 'Super Admin rights are neither granted nor revoked on the site — only with the owner-setup command on the server.'),
   'admin.packages.accessKind': d('Kiriş turi', 'Тип доступа', 'Access type'),
   'admin.packages.periodDays': d('Davr (kun; böş = 1 oy)', 'Период (дней; пусто = 1 месяц)', 'Period (days; empty = 1 month)'),

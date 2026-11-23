@@ -201,7 +201,9 @@ export const PackagePatch = z.object({
 export const ASSIGNABLE_ROLES = ['FINANCE_ADMIN', 'CENTER_ADMIN', 'CENTER_MANAGER', 'TEACHER', 'STUDENT'] as const
 export const UserRolesInput = z.object({
   // CENTER_MANAGER (№15): the Super Admin's fallback; the center creates its managers itself (CenterManagersService).
-  roles: z.array(z.enum(ASSIGNABLE_ROLES, { message: 'Role cannot be granted here (Super Admin is granted only by owner-setup on the server)' })).min(1),
+  // May be empty when the account keeps a role this endpoint does not set (owner pair, ministry…); the service checks
+  // that the stored list is never empty.
+  roles: z.array(z.enum(ASSIGNABLE_ROLES, { message: 'Role cannot be granted here (Super Admin is granted only by owner-setup on the server)' })).max(ASSIGNABLE_ROLES.length),
   centerId: id.nullable().optional(),
   isActive: z.boolean().optional(),
   reason: z.string().min(3).max(300),

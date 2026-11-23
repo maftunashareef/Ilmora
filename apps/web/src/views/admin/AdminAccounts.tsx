@@ -4,19 +4,20 @@ import { Badge, Button, EmptyState, Field, Icon, Input, Modal, Notice, PageTitle
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
+import { hasServerKeptRole, siteRoles } from '../../lib/centerAdmins'
 import { formatDate } from '../../lib/format'
 import { TemporaryPasswordDialog } from '../../components/TemporaryPasswordDialog'
 import { ministryAccounts } from '../../services/ministryAccounts'
 import { useStore } from '../../store/useStore'
 
-type Account = { id: string; isOwner?: boolean; login: string | null; phoneMasked: string | null; displayName: string; roles: string[]; centerId: string | null; isActive: boolean; subscription: { status: string } | null; createdAt: string; lastLoginAt: string | null }
+type Account = { id: string; isOwner: boolean; login: string | null; phoneMasked: string | null; displayName: string; roles: string[]; centerId: string | null; isActive: boolean; subscription: { status: string } | null; createdAt: string; lastLoginAt: string | null }
 type Page = { page: number; pageSize: number; total: number; items: Account[] }
 const ROLES = ['', 'STUDENT', 'TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER', 'FINANCE_ADMIN'] as const
 /** Every role the Super Admin may grant here. Super Admin itself is not one: only owner-setup on the server grants or revokes it. */
 const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER', 'FINANCE_ADMIN'] as const
 /** Roles owner-setup keeps on a Super Admin; the site shows them but never sends them. */
 const OWNER_ROLES = ['PLATFORM_ADMIN', 'FINANCE_ADMIN']
-const isOwnerAccount = (a: Account) => a.isOwner ?? a.roles.includes('PLATFORM_ADMIN')
+const isOwnerAccount = (a: Account) => a.isOwner
 type AssignableRole = (typeof ASSIGNABLE)[number]
 
 /** Super Admin: every account on the platform with search, blocking and deletion (live API, not the demo people list). */
@@ -45,8 +46,10 @@ export function AdminAccounts() {
     try { await fn(); notify(done); await load(page?.page ?? 1); return true } catch (err) { notify(isApiError(err) ? apiErrorText(err, lang) : String(err), 'warn'); return false } finally { setBusy(null) }
   }
   const toggleActive = (a: Account) => {
-    const roles = a.roles.filter((r) => (ASSIGNABLE as readonly string[]).includes(r))
-    return act(a.id, () => api(`/admin/users/${a.id}/roles`, { method: 'PUT', body: { roles: roles.length ? roles : ['STUDENT'], isActive: !a.isActive, reason: a.isActive ? 'Blocked by the Super Admin' : 'Unblocked by the Super Admin' } }), t('common.saved'))
+    // Only the site roles go in the body: the API keeps the others (ministry, institution, company) as they are, so
+    // blocking never turns such an account into a student.
+    const roles = siteRoles(a.roles)
+    return act(a.id, () => api(`/admin/users/${a.id}/roles`, { method: 'PUT', body: { roles: roles.length || hasServerKeptRole(a.roles) ? roles : ['STUDENT'], isActive: !a.isActive, reason: a.isActive ? 'Blocked by the Super Admin' : 'Unblocked by the Super Admin' } }), t('common.saved'))
   }
   const remove = (a: Account) => {
     if (!confirm(t('admin.accounts.confirmDelete'))) return
@@ -141,20 +144,23 @@ function RolesEditor({ account, centers, roleLabel, onClose, onSave }: { account
   const { t } = useT()
   // A Super Admin keeps PLATFORM_ADMIN + FINANCE_ADMIN whatever is sent here (the API adds them back); show them read-only.
   const owner = isOwnerAccount(account)
-  const [roles, setRoles] = useState<AssignableRole[]>(() => account.roles.filter((r): r is AssignableRole => (ASSIGNABLE as readonly string[]).includes(r) && !(owner && OWNER_ROLES.includes(r))))
+  const [roles, setRoles] = useState<AssignableRole[]>(() => siteRoles(account.roles).filter((r) => !(owner && OWNER_ROLES.includes(r))))
+  // Roles the API keeps whatever is sent (an owner's pair, ministry, institution, company): with one, an empty list is fine.
+  const kept = owner || hasServerKeptRole(account.roles)
   const [centerId, setCenterId] = useState<string>(account.centerId ?? '')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const toggle = (r: AssignableRole) => setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]))
   const needsCenter = roles.includes('CENTER_ADMIN') || roles.includes('CENTER_MANAGER')
-  const problem = roles.length === 0 && !owner ? t('admin.accounts.noRoles') : needsCenter && !centerId ? t('admin.accounts.centerRequired') : null
+  const problem = roles.length === 0 && !kept ? t('admin.accounts.noRoles') : needsCenter && !centerId ? t('admin.accounts.centerRequired') : null
   const canSave = !problem && reason.trim().length >= 3 && !saving
   const save = async () => {
     if (!canSave) return
     setSaving(true)
     // Keep the order stable so the audit log shows the same list for the same set of roles.
-    // A Super Admin with no other role still needs one in the body; FINANCE_ADMIN is theirs anyway (owner-setup keeps it).
-    try { await onSave({ roles: roles.length ? ASSIGNABLE.filter((r) => roles.includes(r)) : ['FINANCE_ADMIN'], centerId: centerId || null, reason: reason.trim() }) } finally { setSaving(false) }
+    // An owner's PLATFORM_ADMIN + FINANCE_ADMIN are never sent: the API adds the pair back from the owner flag on every save
+    // (only owner-setup on the server changes it), so an owner with no other role sends an empty list.
+    try { await onSave({ roles: siteRoles(roles), centerId: centerId || null, reason: reason.trim() }) } finally { setSaving(false) }
   }
   return (
     <Modal

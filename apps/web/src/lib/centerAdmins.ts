@@ -1,12 +1,22 @@
 /** Roles the Super Admin may assign through the roles endpoint (the Super Admin role itself is never assignable). */
-const ASSIGNABLE = ['FINANCE_ADMIN', 'CENTER_ADMIN', 'TEACHER', 'STUDENT'] as const
+const ASSIGNABLE = ['FINANCE_ADMIN', 'CENTER_ADMIN', 'CENTER_MANAGER', 'TEACHER', 'STUDENT'] as const
 export type AssignableRole = (typeof ASSIGNABLE)[number]
+/**
+ * Roles the endpoint never sets and the API keeps as they are: an owner's pair (owner-setup on the server) and the roles
+ * given by their own flows (ministry accounts, institution and company claims). A body without them does not remove them.
+ */
+const SERVER_KEPT = ['PLATFORM_ADMIN', 'MINISTRY', 'INSTITUTION_ADMIN', 'COMPANY_ADMIN']
 
-/** The roles endpoint replaces the whole list, so adding center admin must keep everything else the person already has. */
+/** The part of an account's roles the roles endpoint takes, in a stable order. */
+export const siteRoles = (roles: string[]): AssignableRole[] => ASSIGNABLE.filter((r) => roles.includes(r))
+/** True when the account keeps a role the API preserves, so an empty list of site roles is still a valid body. */
+export const hasServerKeptRole = (roles: string[]): boolean => roles.some((r) => SERVER_KEPT.includes(r))
+
+/** The roles endpoint replaces the site roles, so adding center admin must keep everything else the person already has. */
 export const withCenterAdmin = (roles: string[]): AssignableRole[] => ASSIGNABLE.filter((r) => r === 'CENTER_ADMIN' || roles.includes(r))
 
-/** Removing center admin keeps the other roles; a person always keeps at least the student role. */
+/** Removing center admin keeps the other roles; a person with no other role at all keeps the student role. */
 export const withoutCenterAdmin = (roles: string[]): AssignableRole[] => {
   const rest = ASSIGNABLE.filter((r) => r !== 'CENTER_ADMIN' && roles.includes(r))
-  return rest.length > 0 ? rest : ['STUDENT']
+  return rest.length > 0 || hasServerKeptRole(roles) ? rest : ['STUDENT']
 }

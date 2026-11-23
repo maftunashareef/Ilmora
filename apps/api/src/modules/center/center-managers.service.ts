@@ -12,6 +12,11 @@ import type { CenterManagerInput } from './center-managers.schemas'
 
 /** A center keeps a handful of managers; more is a sign of misuse, not of a big center. */
 export const CENTER_MANAGERS_MAX = 10
+/**
+ * A center's manager accounts: CENTER_MANAGER, and never a privileged account that also carries it (an owner or a
+ * finance admin) — otherwise the center admin could block it or reset its password.
+ */
+const MANAGER_WHERE = { roles: { has: 'CENTER_MANAGER' as const }, isOwner: false, NOT: { roles: { hasSome: ['PLATFORM_ADMIN' as const, 'FINANCE_ADMIN' as const] } } }
 
 const SELECT = { id: true, login: true, displayName: true, isActive: true, passwordIssuedAt: true, lastLoginAt: true, createdAt: true } as const
 type Row = { id: string; login: string | null; displayName: string; isActive: boolean; passwordIssuedAt: Date | null; lastLoginAt: Date | null; createdAt: Date }
@@ -52,21 +57,21 @@ export class CenterManagersService {
   }
 
   private async manager(tenantId: string, centerId: string, id: string) {
-    const user = await this.prisma.client.user.findFirst({ where: { tenantId, id, centerId, roles: { has: 'CENTER_MANAGER' } }, select: SELECT })
+    const user = await this.prisma.client.user.findFirst({ where: { tenantId, id, centerId, ...MANAGER_WHERE }, select: SELECT })
     if (!user) throw AppError.notFound('Manager')
     return user
   }
 
   async list(tenantId: string, actor: RequestActor) {
     const center = await this.own(tenantId, actor)
-    const rows = await this.prisma.client.user.findMany({ where: { tenantId, centerId: center.id, roles: { has: 'CENTER_MANAGER' } }, orderBy: { createdAt: 'asc' }, select: SELECT })
+    const rows = await this.prisma.client.user.findMany({ where: { tenantId, centerId: center.id, ...MANAGER_WHERE }, orderBy: { createdAt: 'asc' }, select: SELECT })
     return { items: rows.map(toDto), max: CENTER_MANAGERS_MAX }
   }
 
   async create(tenantId: string, actor: RequestActor, input: CenterManagerInput) {
     const center = await this.own(tenantId, actor)
     this.assertApproved(center, actor)
-    const count = await this.prisma.client.user.count({ where: { tenantId, centerId: center.id, roles: { has: 'CENTER_MANAGER' } } })
+    const count = await this.prisma.client.user.count({ where: { tenantId, centerId: center.id, ...MANAGER_WHERE } })
     if (count >= CENTER_MANAGERS_MAX) throw AppError.invalid('center_managers_limit', `A center has at most ${CENTER_MANAGERS_MAX} managers`, { max: CENTER_MANAGERS_MAX })
     const login = this.accounts.normalizeLogin(input.login)
     const password = temporaryPassword()
