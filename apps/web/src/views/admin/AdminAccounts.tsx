@@ -77,8 +77,8 @@ export function AdminAccounts() {
         <ul className="space-y-2">
           {page.items.map((a) => (
             <li key={a.id} className="card flex flex-wrap items-center gap-3 p-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-sage text-forest"><Icon name="user" className="h-4 w-4" /></span>
-              <div className="min-w-0 flex-1">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sage text-forest"><Icon name="user" className="h-4 w-4" /></span>
+              <div className="min-w-[12rem] flex-1">
                 <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{a.displayName}</span>{a.roles.map((r) => <Badge key={r} tone={r === 'PLATFORM_ADMIN' ? 'champagne' : 'neutral'}>{roleLabel(r)}</Badge>)}{!a.isActive && <Badge tone="danger">{t('admin.accounts.blocked')}</Badge>}</div>
                 <div className="truncate text-xs text-charcoal/55">{[a.login ? `@${a.login}` : null, a.phoneMasked, a.centerId ? centers.find((c) => c.id === a.centerId)?.name ?? a.centerId : null, `${t('group.since')} ${formatDate(a.createdAt, lang)}`].filter(Boolean).join(' · ')}</div>
               </div>

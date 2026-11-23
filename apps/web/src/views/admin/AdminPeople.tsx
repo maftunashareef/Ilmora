@@ -68,7 +68,7 @@ export function AdminPeople() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.people')} subtitle={t('admin.people.privacy')} />
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         <section>
           <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('admin.people.teachers')} · {s.teachers.length}</Eyebrow><Button size="sm" onClick={() => setTeacher(newTeacher())}><Icon name="plus" className="h-3.5 w-3.5" />{t('admin.people.addTeacher')}</Button></div>
           <ul className="space-y-2">

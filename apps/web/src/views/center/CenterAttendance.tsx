@@ -61,10 +61,10 @@ export function CenterAttendance() {
         <ul className="space-y-2">
           {lessons.map((l) => (
             <li key={l.session.id}>
-              <button type="button" onClick={() => void open(l)} className="card flex w-full items-center gap-4 p-3 text-left transition hover:shadow-lift">
+              <button type="button" onClick={() => void open(l)} className="card flex w-full flex-wrap items-center gap-x-4 gap-y-2 p-3 text-left transition hover:shadow-lift">
                 <div className="w-16 shrink-0 text-center"><div className="font-display text-xl text-charcoal">{formatTime(l.session.startsAt ?? `${l.session.date}T${l.session.start}:00`, lang)}</div><div className="text-[10px] text-charcoal/45">{l.session.start}–{l.session.end}</div></div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-charcoal">{tr(l.courseTitle)} · {l.group.name}</div>
+                <div className="min-w-[11rem] flex-1">
+                  <div className="text-sm font-medium text-charcoal">{tr(l.courseTitle)} · {l.group.name}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-charcoal/55"><SessionStatus session={{ ...l.session, token: '' }} /><span>{l.teacherName} · {t('common.room')} {l.group.room}</span></div>
                   <div className="mt-1 text-xs text-charcoal/55">{t('center.lessonCounts', { present: l.present, absent: l.absent, roster: l.roster })}</div>
                 </div>

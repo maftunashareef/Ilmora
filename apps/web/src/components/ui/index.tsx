@@ -285,9 +285,10 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: { t
 
 export function Segmented<T extends string>({ options, value, onChange, size = 'md' }: { options: { id: T; label: ReactNode }[]; value: T; onChange: (v: T) => void; size?: 'sm' | 'md' }) {
   return (
-    <div className="inline-flex rounded-control border border-charcoal/12 bg-paper p-0.5">
+    // On a narrow phone the options scroll sideways inside the control instead of pushing the page wider.
+    <div className="no-scrollbar inline-flex max-w-full overflow-x-auto rounded-control border border-charcoal/12 bg-paper p-0.5">
       {options.map((o) => (
-        <button key={o.id} type="button" aria-pressed={value === o.id} onClick={() => onChange(o.id)} className={cx('rounded-[calc(var(--r-control)-2px)] font-medium transition', size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-1.5 text-sm', value === o.id ? 'bg-forest text-ivory' : 'text-charcoal/65 hover:text-charcoal')}>
+        <button key={o.id} type="button" aria-pressed={value === o.id} onClick={() => onChange(o.id)} className={cx('shrink-0 whitespace-nowrap rounded-[calc(var(--r-control)-2px)] font-medium transition', size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-1.5 text-sm', value === o.id ? 'bg-forest text-ivory' : 'text-charcoal/65 hover:text-charcoal')}>
           {o.label}
         </button>
       ))}

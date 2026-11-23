@@ -49,7 +49,7 @@ export function CenterOverview() {
         <Stat label={t('center.students')} value={data.counts.students} />
         <Stat label={t('center.todayLessons')} value={data.today.length} />
       </div>
-      <div className="mt-10 grid gap-8 lg:grid-cols-[1.3fr_1fr]">
+      <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-[1.3fr_1fr]">
         <section>
           <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('center.todayLessons')}</Eyebrow><Link to={scope.links('attendance')} className="text-xs font-medium text-forest underline">{t('center.attendance')}</Link></div>
           {data.today.length === 0 ? <EmptyState title={t('center.noLessonsToday')} /> : (
