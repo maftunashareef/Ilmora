@@ -26,7 +26,7 @@ export function StudioVideos() {
     <div>
       <PageTitle eyebrow={t('dash.teacherStudio')} title={t('studio.videos')} subtitle={t('channel.demoVideoNote')} action={<Button onClick={() => setEditing('new')}><Icon name="plus" className="h-4 w-4" />{t('studio.newVideo')}</Button>} />
       {videos.length === 0 ? <EmptyState title={t('common.empty')} action={<Button onClick={() => setEditing('new')}>{t('studio.newVideo')}</Button>} /> : (
-        <ul className="grid gap-3 md:grid-cols-2">
+        <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {videos.map((v) => (
             <li key={v.id} className="card flex gap-3 p-3">
               <Link to={`/videos/${v.id}`} className="relative shrink-0"><ArtCover seed={v.coverSeed} imageUrl={v.thumbnailUpload?.previewUrl || v.thumbnailUrl} className="h-20 w-32 rounded-control" /><span className="absolute bottom-1 right-1 rounded-sm bg-charcoal/80 px-1 text-[10px] text-ivory">{formatDuration(v.durationSec)}</span></Link>

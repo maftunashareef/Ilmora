@@ -16,7 +16,7 @@ export function AdminPackages() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.packages')} subtitle={t('admin.packages.hint')} action={<Button onClick={async () => { await addPackage(); notify(t('common.saved')) }}><Icon name="plus" className="h-4 w-4" />{t('admin.packages.add')}</Button>} />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {packages.map((p) => (
           <Card key={p.id} className={cx(!p.enabled && 'opacity-70')}>
             <div className="mb-4 flex items-center justify-between gap-3">

@@ -47,7 +47,7 @@ export function MinistryInstitution() {
       />
       {inst.pendingChanges && <Notice className="mb-5">{t('min.inst.pendingChanges')}</Notice>}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <Card padded={false}>
           <div className="flex items-center justify-between gap-3 border-b border-charcoal/10 px-5 py-3.5">
             <h2 className="font-display text-lg text-charcoal">{t('rev.directions')}</h2>

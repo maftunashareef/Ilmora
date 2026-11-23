@@ -15,7 +15,7 @@ export function AdminAnnouncements() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.announcements')} />
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         <section>
           <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('feature.announcements')}</Eyebrow><Button size="sm" onClick={() => setAnns([...anns, { id: uid('a'), title: emptyL(), body: emptyL(), audience: 'all', enabled: true }])}><Icon name="plus" className="h-3.5 w-3.5" />{t('admin.ann.add')}</Button></div>
           <div className="space-y-3">

@@ -18,7 +18,7 @@ export function AdminFeatures() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.features')} subtitle={t('admin.features.hint')} />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <Eyebrow className="mb-4">{t('admin.features')}</Eyebrow>
           <div className="divide-y divide-charcoal/10">

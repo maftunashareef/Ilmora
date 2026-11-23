@@ -71,12 +71,13 @@ export function DashboardShell({ title, subtitle, items, role, extra, notice }: 
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-40 flex h-[60px] items-center justify-between gap-3 border-b border-charcoal/10 bg-ivory/85 px-4 backdrop-blur-md md:px-8">
-          <div className="flex items-center gap-3 lg:hidden">
-            <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('nav.menu')} className="rounded-control p-2 text-charcoal"><Icon name={open ? 'x' : 'menu'} className="h-5 w-5" /></button>
-            <span className="font-display text-lg text-charcoal">{title}</span>
+          <div className="flex min-w-0 items-center gap-3 lg:hidden">
+            <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('nav.menu')} className="shrink-0 rounded-control p-2 text-charcoal"><Icon name={open ? 'x' : 'menu'} className="h-5 w-5" /></button>
+            {/* One line on phones: a long cabinet name is cut with «…» instead of doubling the header height */}
+            <span className="truncate font-display text-base text-charcoal sm:text-lg">{title}</span>
           </div>
           <div className="hidden text-sm text-charcoal/55 lg:block">{t('role.viewingAs')} <span className="font-medium text-charcoal">{t(`role.${role}`)}</span></div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <div className="hidden sm:block"><LangSwitcher compact /></div>
             <NotificationBell />
             <RoleSwitcher />

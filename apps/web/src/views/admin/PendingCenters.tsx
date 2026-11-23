@@ -27,7 +27,7 @@ export function PendingCentersPanel({ list, busy, setStatus, reviewName, linkToA
             <li key={c.id} className="card p-4">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: c.tone }} />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-[12rem] flex-1">
                   <Link to={`/admin/centers/${c.id}`} className="text-sm font-medium text-charcoal hover:text-forest">{c.name}</Link>
                   <div className="text-xs text-charcoal/55">{formatDate(c.createdAt, lang)}{tr(c.district) ? ` · ${tr(c.district)}` : ''}{c.owner ? ` · ${t('admin.centers.registeredBy', { name: c.owner.login ? `@${c.owner.login}` : c.owner.displayName })}` : ''}</div>
                 </div>
