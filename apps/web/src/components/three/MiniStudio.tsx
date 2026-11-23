@@ -3,6 +3,9 @@ import { ContactShadows, Float, RoundedBox } from '@react-three/drei'
 import { useRef } from 'react'
 import * as THREE from 'three'
 
+/** Phones and tablets: render at 1× without antialiasing — the scene stays the same, the GPU does far less work per frame. */
+const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+
 const IVORY = '#FBF3E3'
 const FOREST = '#0E5A44'
 const CHAMPAGNE = '#CA9A36'
@@ -92,7 +95,7 @@ function triangle() {
 
 export default function MiniStudio({ animate }: { animate: boolean }) {
   return (
-    <Canvas dpr={[1, 1.5]} frameloop={animate ? 'always' : 'demand'} camera={{ position: [2.6, 1.9, 3.1], fov: 34 }} gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }} style={{ background: 'transparent' }}>
+    <Canvas dpr={COARSE ? 1 : [1, 1.5]} frameloop={animate ? 'always' : 'demand'} camera={{ position: [2.6, 1.9, 3.1], fov: 34 }} gl={{ antialias: !COARSE, alpha: true, powerPreference: 'low-power' }} style={{ background: 'transparent' }}>
       <ambientLight intensity={0.85} />
       <directionalLight position={[3, 5, 2]} intensity={1.4} color="#FFF6E5" />
       <directionalLight position={[-3, 2, -2]} intensity={0.4} color={SAGE} />

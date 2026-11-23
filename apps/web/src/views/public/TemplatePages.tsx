@@ -23,6 +23,8 @@ import { CentersShowcase } from '../../components/center/CentersShowcase'
 import { DiscountShowcase } from '../../components/course/DiscountShowcase'
 import { JourneySection as Journey } from '../../components/JourneySteps'
 
+/** The hero film is short (about 10 s) and read as too fast when looped: play it at 0.6×. */
+const HERO_VIDEO_RATE = 0.6
 const Scene3D = dynamic(() => import('../../components/three/Scene3D').then((m) => m.Scene3D), { ssr: false })
 const ScrollVideo = dynamic(() => import('../../components/three/ScrollVideo').then((m) => m.ScrollVideo), { ssr: false })
 
@@ -74,7 +76,7 @@ function Hero() {
   const nCats = useStore((s) => s.categories.length)
   return (
     <section className="relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-charcoal text-ivory">
-      <BackgroundVideo src={withBase(media.heroVideoUrl)} poster={withBase(media.heroPosterUrl)} note={t('home.heroVideoNote')} />
+      <BackgroundVideo src={withBase(media.heroVideoUrl)} poster={withBase(media.heroPosterUrl)} note={t('home.heroVideoNote')} rate={HERO_VIDEO_RATE} />
       {/* Semi-transparent dark-green overlay over the film so the text and buttons stay readable, then a soft hand-off into the ivory page */}
       <div className="pointer-events-none absolute inset-0" style={{ background: 'rgba(0, 30, 20, 0.6)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-ivory via-ivory/40 to-transparent" aria-hidden="true" />
