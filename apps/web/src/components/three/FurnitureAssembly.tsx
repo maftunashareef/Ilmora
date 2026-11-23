@@ -3,6 +3,9 @@ import { ContactShadows, Grid, RoundedBox } from '@react-three/drei'
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 
+/** Phones and tablets: render at 1× without antialiasing — the scene stays the same, the GPU does far less work per frame. */
+const COARSE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+
 /**
  * Bazis "from sketch to object" sequence, driven by a 0→1 progress value.
  * Timeline (matches the course curriculum):
@@ -280,7 +283,7 @@ function Responsive({ animate, progressRef }: { animate: boolean; progressRef?: 
 
 export default function FurnitureAssembly({ animate, progressRef }: { animate: boolean; progressRef?: MutableRefObject<number> }) {
   return (
-    <Canvas dpr={[1, 1.5]} frameloop={animate || progressRef ? 'always' : 'demand'} camera={{ position: [2.4, 1.7, 2.8], fov: 34 }} gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }} style={{ background: 'transparent' }}>
+    <Canvas dpr={COARSE ? 1 : [1, 1.5]} frameloop={animate || progressRef ? 'always' : 'demand'} camera={{ position: [2.4, 1.7, 2.8], fov: 34 }} gl={{ antialias: !COARSE, alpha: true, powerPreference: 'low-power' }} style={{ background: 'transparent' }}>
       <ambientLight intensity={0.75} />
       <directionalLight position={[3, 5, 2]} intensity={1.1} color="#FFF6E5" />
       <directionalLight position={[-3, 2, -2]} intensity={0.35} />

@@ -87,7 +87,10 @@ type FilmState = 'loading' | 'frame' | 'ready' | 'error'
 const MEDIA_EVENTS = ['loadeddata', 'canplay', 'canplaythrough', 'playing', 'play', 'pause', 'emptied', 'error'] as const
 const GESTURES = ['pointerdown', 'touchstart', 'keydown', 'scroll'] as const
 
-export function BackgroundVideo({ src, poster, note }: { src: string; poster?: string; note?: string }) {
+/** Touch-first or narrow screens (phones): skip the scroll parallax there — it repaints the playing film on every scroll frame. */
+const isPhoneLike = () => typeof matchMedia !== 'undefined' && matchMedia('(hover: none), (max-width: 767px)').matches
+
+export function BackgroundVideo({ src, poster, note, rate = 1 }: { src: string; poster?: string; note?: string; rate?: number }) {
   const ref = useRef<HTMLVideoElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const reduced = useReducedMotion()
@@ -100,6 +103,8 @@ export function BackgroundVideo({ src, poster, note }: { src: string; poster?: s
     const v = ref.current
     if (!v || !src) return
     const sync = () => {
+      // Playback speed is reset by the browser when a new source loads, so keep it on every sync.
+      if (v.playbackRate !== rate) { v.defaultPlaybackRate = rate; v.playbackRate = rate }
       if (v.error) setState('error')
       else if (!v.paused || v.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) setState('ready')
       else if (v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) setState('frame')
@@ -108,7 +113,7 @@ export function BackgroundVideo({ src, poster, note }: { src: string; poster?: s
     sync()
     for (const e of MEDIA_EVENTS) v.addEventListener(e, sync)
     return () => { for (const e of MEDIA_EVENTS) v.removeEventListener(e, sync) }
-  }, [src])
+  }, [src, rate])
 
   useEffect(() => {
     const el = wrap.current
@@ -156,7 +161,7 @@ export function BackgroundVideo({ src, poster, note }: { src: string; poster?: s
   // Subtle parallax while the hero is on screen
   useEffect(() => {
     const v = ref.current
-    if (!v || reduced) return
+    if (!v || reduced || isPhoneLike()) return
     let raf = 0
     const onScroll = () => {
       if (!inView) return
@@ -172,7 +177,8 @@ export function BackgroundVideo({ src, poster, note }: { src: string; poster?: s
   return (
     <div ref={wrap} className="absolute inset-0 overflow-hidden">
       {/* Fallback: poster or the drifting brand-green gradient, kept underneath while loading / on error / with reduced motion */}
-      <div className={cx('absolute inset-0', poster ? 'bg-cover bg-center' : 'hero-fallback')} style={poster ? { backgroundImage: `url(${poster})` } : undefined} aria-hidden="true" />
+      {/* The drifting gradient repaints the whole hero every frame: it only moves while it is actually seen (film not shown yet, hero on screen). */}
+      <div className={cx('absolute inset-0', poster ? 'bg-cover bg-center' : 'hero-fallback')} style={poster ? { backgroundImage: `url(${poster})` } : { animationPlayState: showVideo || !inView ? 'paused' : 'running' }} aria-hidden="true" />
       {src && state !== 'error' && (
         <video
           ref={ref}

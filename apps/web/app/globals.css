@@ -305,6 +305,10 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
 @media (prefers-reduced-motion: reduce) {
   .shimmer-pill::after { animation: none; }
 }
+/* Phones: the endless light sweep on pills costs a repaint every frame; keep the pills, drop the sweep. */
+@media (hover: none) {
+  .shimmer-pill::after { animation: none; }
+}
 
 .step-line {
   position: relative;
