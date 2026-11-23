@@ -228,13 +228,30 @@ export function JourneySection({ title, subtitle }: { title?: string; subtitle?:
     io.observe(el)
     return () => io.disconnect()
   }, [])
+  // Time left on the current step. A pause (hover, focus, scrolled away) keeps it, so the step switches exactly when the
+  // timer bar — whose CSS animation pauses too — reaches the end, instead of restarting the full STEP_MS after every pause.
+  const remaining = useRef(STEP_MS)
   useEffect(() => {
     if (!playing) return
-    const timer = setTimeout(() => setStep((s) => (s + 1) % STEPS.length), STEP_MS)
-    return () => clearTimeout(timer)
+    const started = Date.now()
+    let fired = false
+    const timer = setTimeout(() => {
+      fired = true
+      remaining.current = STEP_MS
+      setStep((s) => (s + 1) % STEPS.length)
+    }, remaining.current)
+    return () => {
+      clearTimeout(timer)
+      if (!fired) remaining.current = Math.max(0, remaining.current - (Date.now() - started))
+    }
   }, [playing, step])
 
-  const go = (i: number) => setStep((i + STEPS.length) % STEPS.length)
+  const go = (i: number) => {
+    const next = (i + STEPS.length) % STEPS.length
+    if (next === step) return // same step: its timer bar keeps going, so keep its time too
+    remaining.current = STEP_MS
+    setStep(next)
+  }
 
   return (
     <section ref={root} className="relative overflow-hidden bg-paper py-20 lg:py-28">
