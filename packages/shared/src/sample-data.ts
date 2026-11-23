@@ -279,7 +279,7 @@ export const site: SiteConfig = {
   },
   theme: {
     colors: { ivory: '#FBF3E3', forest: '#0E5A44', charcoal: '#1D211C', champagne: '#CA9A36', sage: '#E3EDE6', white: '#FFFCF5' },
-    fonts: { display: 'Playfair Display', body: 'Manrope' },
+    fonts: { display: 'Prata', body: 'Manrope' },
     radius: 'soft',
   },
   nav: [

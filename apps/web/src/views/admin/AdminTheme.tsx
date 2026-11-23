@@ -39,7 +39,7 @@ export function AdminTheme() {
         <Card>
           <Eyebrow className="mb-4">{t('admin.theme.fonts')}</Eyebrow>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label={t('admin.theme.display')}><Select value={theme.fonts.display} onChange={(e) => setTheme({ fonts: { ...theme.fonts, display: e.target.value as DisplayFont } })}><option>Cormorant Garamond</option><option>Playfair Display</option></Select></Field>
+            <Field label={t('admin.theme.display')}><Select value={theme.fonts.display} onChange={(e) => setTheme({ fonts: { ...theme.fonts, display: e.target.value as DisplayFont } })}><option>Prata</option><option>Cormorant Garamond</option><option>Playfair Display</option></Select></Field>
             <Field label={t('admin.theme.bodyFont')}><Select value={theme.fonts.body} onChange={(e) => setTheme({ fonts: { ...theme.fonts, body: e.target.value as BodyFont } })}><option>Inter</option><option>Manrope</option></Select></Field>
           </div>
           <div className="mt-4">

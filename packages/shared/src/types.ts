@@ -504,7 +504,7 @@ export interface Theme {
   radius: 'sharp' | 'soft' | 'round'
 }
 
-export type DisplayFont = 'Cormorant Garamond' | 'Playfair Display'
+export type DisplayFont = 'Prata' | 'Cormorant Garamond' | 'Playfair Display'
 export type BodyFont = 'Inter' | 'Manrope'
 
 export interface Features {
