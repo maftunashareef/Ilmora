@@ -8,7 +8,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: L
   return pageMetadata({ locale, path: '/favorites', title: staticTitle(locale, '/favorites'), description: translate(locale, 'favorites.subtitle'), noindex: true })
 }
 
-import { FavoritesPage } from '@/views/next/clients'
+import { FavoritesPage } from '@/views/public/Favorites'
 
 export default function Page() {
   return <FavoritesPage />

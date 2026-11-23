@@ -1,5 +1,5 @@
 'use client'
-import { CenterSettings } from '@/views/next/clients'
+import { CenterSettings } from '@/views/center/CenterSettings'
 
 export default function Page() {
   return <CenterSettings />

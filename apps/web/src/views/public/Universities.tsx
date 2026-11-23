@@ -1,3 +1,4 @@
+'use client'
 import { isPreparationTrack, isUniversityListed, presetCourses, presetNeedsConfirmation, universityName, presetDurationMonths, presetsForDirection, presetTotal, priceTotals, universityDirections } from '@ilmora/shared'
 import Image from 'next/image'
 import { useCallback, useMemo, useState, type ReactNode } from 'react'

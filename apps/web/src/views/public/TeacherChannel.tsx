@@ -1,3 +1,4 @@
+'use client'
 import { foldForSearch, ilmoraUz } from '@ilmora/shared'
 import { useState } from 'react'
 import { Link } from '@/lib/router'

@@ -1,5 +1,5 @@
 'use client'
-import { CenterNotifications } from '@/views/next/clients'
+import { CenterNotifications } from '@/views/common/Notifications'
 
 export default function Page() {
   return <CenterNotifications />

@@ -1,5 +1,5 @@
 'use client'
-import { NotFound } from '@/views/next/clients'
+import { NotFound } from '@/components/AccessGate'
 
 export default function LocaleNotFound() {
   return <NotFound />

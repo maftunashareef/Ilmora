@@ -1,5 +1,5 @@
 'use client'
-import { AdminCenters } from '@/views/next/clients'
+import { AdminCenters } from '@/views/admin/AdminCenters'
 
 export default function Page() {
   return <AdminCenters />

@@ -32,12 +32,13 @@ export function ScrollVideo({ src, poster, heightVh = 280, stages = [], children
   // Lazy-load: only attach the src once the section is close to the viewport
   useEffect(() => { if (inView && src) setShouldLoad(true) }, [inView, src])
 
-  // Warm the 3D chunk during idle time so the sketch is ready the moment the section scrolls in
+  // Warm the 3D chunk once the section is about a screen and a half away, so the sketch is ready
+  // when it scrolls in — not during the first load, where 240 KB of three.js only slows a phone down.
+  const [nearRef, near] = useInView<HTMLDivElement>('150% 0px')
   useEffect(() => {
-    if (reduced || webgl === false || (src && videoState !== 'error')) return
-    const id = window.setTimeout(() => { void import('./FurnitureAssembly') }, 1200)
-    return () => window.clearTimeout(id)
-  }, [reduced, webgl, src, videoState])
+    if (!near || reduced || webgl === false || (src && videoState !== 'error')) return
+    void import('./FurnitureAssembly')
+  }, [near, reduced, webgl, src, videoState])
 
   // Scroll → progress
   useEffect(() => {
@@ -84,6 +85,7 @@ export function ScrollVideo({ src, poster, heightVh = 280, stages = [], children
 
   return (
     <section ref={wrapRef} className="relative" style={{ height: `${reduced ? 100 : heightVh}vh` }} aria-label="Bazis">
+      <div ref={nearRef} className="pointer-events-none absolute inset-x-0 top-0 h-px" aria-hidden="true" />
       <div className="sticky top-0 h-screen overflow-hidden bg-charcoal">
         {/* Media layer */}
         <div className="absolute inset-0">

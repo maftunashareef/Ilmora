@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { pickDisplay, type Lang } from '@ilmora/shared'
-import { CenterPage } from '@/views/next/clients'
+import { CenterPage } from '@/views/public/CenterDetail'
 import { pageMetadata } from '@/lib/seo'
 import { getCatalogOrThrow } from '@/lib/server-api'
 

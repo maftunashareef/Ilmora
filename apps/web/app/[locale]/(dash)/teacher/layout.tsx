@@ -1,6 +1,8 @@
 'use client'
 import type { ReactNode } from 'react'
-import { TeacherLayout, OutletProvider, RequireRole } from '@/views/next/clients'
+import { RequireRole } from '@/components/RequireRole'
+import { OutletProvider } from '@/lib/router'
+import { TeacherLayout } from '@/views/teacher/TeacherLayout'
 
 export default function Layout({ children }: { children: ReactNode }) {
   return (

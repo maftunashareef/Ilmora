@@ -1,5 +1,5 @@
 'use client'
-import { AdminFinance } from '@/views/next/clients'
+import { AdminFinance } from '@/views/admin/AdminFinance'
 
 export default function Page() {
   return <AdminFinance />

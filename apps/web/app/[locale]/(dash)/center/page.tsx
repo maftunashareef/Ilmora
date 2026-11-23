@@ -1,5 +1,5 @@
 'use client'
-import { CenterOverview } from '@/views/next/clients'
+import { CenterOverview } from '@/views/center/CenterOverview'
 
 export default function Page() {
   return <CenterOverview />
