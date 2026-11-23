@@ -45,7 +45,7 @@ function rule(holds: boolean, what: string) {
   else expect(holds, what).toBe(true)
 }
 
-const ROLES = ['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'CENTER_ADMIN', 'TEACHER', 'STUDENT', 'INSTITUTION_ADMIN', 'COMPANY_ADMIN', 'MINISTRY'] as const
+const ROLES = ['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'CENTER_ADMIN', 'CENTER_MANAGER', 'TEACHER', 'STUDENT', 'INSTITUTION_ADMIN', 'COMPANY_ADMIN', 'MINISTRY'] as const
 const JOURNAL_READERS = ['PLATFORM_ADMIN', 'FINANCE_ADMIN']
 const superAdmin: RequestActor = { id: 'sa', roles: ['PLATFORM_ADMIN', 'FINANCE_ADMIN'] }
 const finance: RequestActor = { id: 'fin', roles: ['FINANCE_ADMIN'] }
