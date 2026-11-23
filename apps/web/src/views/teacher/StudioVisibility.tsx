@@ -26,6 +26,8 @@ export function StudioVisibility() {
   ].filter((r) => filter === 'all' || r.kind === filter)
   const KIND_LABEL: Record<ContentKind, string> = { course: t('common.course'), video: t('common.video'), playlist: t('common.playlist'), resource: t('common.resource') }
   const setStatus = (r: Row, status: Status) => {
+    // Ж17: never decide «review instead of publish» on switches that have not arrived yet (they read «off» until then).
+    if (status === 'published' && s.permissionsStatus !== 'ready' && s.role !== 'admin') { s.notify(t('perm.notReady'), 'warn'); return }
     if (status === 'published' && !perms.publishDirectly) { s.setPublishable(r.kind, r.id, { status: 'draft', reviewRequested: true }); s.notify(t('studio.reviewPending'), 'warn'); return }
     s.setPublishable(r.kind, r.id, { status, reviewRequested: false })
   }

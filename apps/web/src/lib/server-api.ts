@@ -4,10 +4,13 @@ import type { Category, Center, Course, SiteConfig, Subject, Teacher } from '../
 import { api, isApiError } from './api'
 
 export type Catalog = { centers: Center[]; categories: Category[]; teachers: Teacher[]; subjects: Subject[]; courses: Course[] }
-export type SiteData = SiteConfig & { version: number }
+/** `GET /public/site`: the site template without the role-permission matrix (Ж17); signed-in accounts read their own. */
+export type SiteData = Omit<SiteConfig, 'permissions'> & { version: number }
 
+const { permissions: _samplePermissions, ...sampleSite } = sampleData.site as unknown as SiteConfig
+void _samplePermissions
 const fallbackSite: SiteData = {
-  ...(sampleData.site as unknown as SiteConfig),
+  ...sampleSite,
   version: 1,
 }
 

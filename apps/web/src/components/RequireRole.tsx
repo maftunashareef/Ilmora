@@ -7,7 +7,7 @@ import type { Role } from '@/types'
 import { ConsentGate } from './ConsentGate'
 import { needsConsent } from './consent'
 import { PasswordChangeGate } from './PasswordChange'
-import { Card, Icon, LinkButton } from './ui'
+import { Button, Card, Icon, LinkButton } from './ui'
 
 /**
  * Gate for private workspaces. Waits for the session bootstrap, sends anonymous visitors to the sign-in
@@ -20,6 +20,8 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
   const roles = useStore((s) => s.auth.user?.roles ?? [])
   const user = useStore((s) => s.auth.user)
   const ensureWorkspace = useStore((s) => s.ensureWorkspace)
+  const permissionsStatus = useStore((s) => s.permissionsStatus)
+  const loadMyPermissions = useStore((s) => s.loadMyPermissions)
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const wanted = useMemo(() => (Array.isArray(role) ? role : [role]), [role])
@@ -55,5 +57,27 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
   if (user?.passwordChangeRequired) return <PasswordChangeGate />
   // Every account confirms the current offer edition and personal-data consent before using a workspace.
   if (needsConsent(user)) return <ConsentGate />
+  // Ж17: the teacher's and the student's switches come after sign-in (GET /me/permissions). Until they are here every
+  // switch reads «off», so the studio would show everything locked and a «publish» would turn into a review request:
+  // wait for them. A failed load keeps the studio closed with a retry; the student cabinet opens with the switches off.
+  const teacherStudio = wanted.includes('teacher') && roles.includes('TEACHER') && current !== 'admin'
+  const studentCabinet = wanted.includes('student') && roles.includes('STUDENT') && current !== 'admin'
+  if ((teacherStudio || studentCabinet) && permissionsStatus === 'loading') {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center text-sm text-charcoal/55" role="status" aria-live="polite">
+        <Icon name="refresh" className="mr-2 h-4 w-4 animate-spin" /> {t('perm.loading')}
+      </div>
+    )
+  }
+  if (teacherStudio && permissionsStatus === 'error') {
+    return (
+      <div className="container-x py-16">
+        <Card className="mx-auto max-w-lg px-8 py-10 text-center">
+          <p className="text-sm text-charcoal/65" role="alert">{t('perm.loadFailed')}</p>
+          <div className="mt-6 flex justify-center gap-2"><Button onClick={() => void loadMyPermissions()}>{t('q.retry')}</Button></div>
+        </Card>
+      </div>
+    )
+  }
   return <>{children}</>
 }

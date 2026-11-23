@@ -70,7 +70,8 @@ const SIGNED_IN: Who[] = ['center', 'teacher', 'student', 'company']
 /** Order does not matter: a route must fit exactly one rule. */
 const RULES: Rule[] = [
   // Any signed-in account: its own session, notifications, payments and attendance (the services scope them by actor).
-  { name: 'own account', match: path(/^\/auth\/(me|consent|password)$/), allow: SIGNED_IN },
+  // `GET /me/permissions`: the switches of the caller's own role (Ж17), scoped by the actor's roles.
+  { name: 'own account', match: (r) => /^\/auth\/(me|consent|password)$/.test(r.path) || key(r) === 'GET /me/permissions', allow: SIGNED_IN },
   { name: 'notifications', match: path(/^\/notifications(\/|$)/), allow: SIGNED_IN },
   { name: 'payment status', match: exact('GET /payments/:id'), allow: SIGNED_IN },
   { name: 'check-in', match: exact('POST /attendance/check-in', 'GET /attendance/centers/:code/options', 'POST /attendance/centers/:code/check-in', 'GET /student/attendance'), allow: SIGNED_IN },

@@ -10,7 +10,7 @@ import { fetchStorageStatus, storableUrl } from '../services/uploads'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
 import type {
-  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student,
+  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Permissions, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student,
   StudentProfile, Subject, Teacher, Video,
 } from '../types'
 
@@ -90,7 +90,8 @@ export interface CenterCheckInOutcome {
 
 export interface InitialData {
   lang: Lang
-  site: SiteConfig & { version?: number }
+  /** The public read (`GET /public/site`): no role-permission matrix in it (Ж17), the store starts with NO_PERMISSIONS. */
+  site: Omit<SiteConfig, 'permissions'> & { permissions?: Permissions; version?: number }
   catalog: { centers: Center[]; categories: Category[]; teachers: Teacher[]; subjects: Subject[]; courses: Course[] }
 }
 
@@ -131,6 +132,8 @@ interface Actions {
   logout: () => Promise<void>
   ensureWorkspace: () => Promise<void>
   loadAdminPresets: () => Promise<void>
+  /** Loads the signed-in account's own switches again (the retry on the «could not load» screen). */
+  loadMyPermissions: () => Promise<void>
   /** Loads the visitor's saved cart and favorites from this device (called after mount, so server and first client render match). */
   hydrateGuest: () => void
   loadGroupDetail: (groupId: string) => Promise<void>
@@ -235,6 +238,13 @@ export interface StoreState extends DemoState, Actions {
   presetsLoaded: boolean
   /** Super Admin only: that load failed — the workspace asks to refresh the page (no site saves until then). */
   siteLoadFailed: boolean
+  /**
+   * Ж17: where `site.permissions` stands. `idle` — a visitor (every switch off); `loading` — signed in, the account's
+   * switches (`GET /me/permissions`, or the whole matrix from `GET /admin/site` for the Super Admin) are on their way;
+   * `ready` — loaded; `error` — the load failed (switches stay off). Workspaces wait for `ready` (RequireRole), so a
+   * teacher never acts on the all-off defaults.
+   */
+  permissionsStatus: 'idle' | 'loading' | 'ready' | 'error'
   myPayments: PaymentSummary[]
   /** Ready-made packages in the cart, read from this device after mount. */
   cartBundles: CartBundle[]
@@ -285,6 +295,21 @@ const emptyStudent = (u: AuthUser): Student => ({
 // ───────── payload mappers (web shape → API input) ─────────
 // The course, group and publish bodies come from @ilmora/shared (save-bodies.ts): the API checks the very same ones (Н1).
 const publishableInput = publishableSaveBody
+/**
+ * Ж17: the role-permission matrix is not public. A visitor (and every account until its own switches arrive from
+ * `GET /me/permissions`) has every switch off; the screens that read `site.permissions` need no other change.
+ */
+/** The pause before the one retry of `GET /me/permissions`. */
+const PERMISSIONS_RETRY_MS = 1500
+export const NO_PERMISSIONS: Permissions = {
+  teacher: { editCourses: false, editPrices: false, editSchedules: false, publishDirectly: false, customizeChannel: false, manageGroups: false, uploadResources: false },
+  student: { saveItems: false, switchGroups: false, downloadResources: false },
+}
+/** The account's own branches over the all-off defaults: a branch the API did not send (another role) stays off. */
+export const ownPermissions = (own: Partial<Permissions> | null | undefined): Permissions => ({
+  teacher: { ...NO_PERMISSIONS.teacher, ...own?.teacher },
+  student: { ...NO_PERMISSIONS.student, ...own?.student },
+})
 /** What a visitor may see of the packages: published ones, and the universities marked published or with one. */
 const publicSite = (site: SiteConfig): SiteConfig => {
   const presets = (site.presets ?? []).filter((p) => p.enabled)
@@ -332,7 +357,10 @@ type ApiOverview = {
 }
 
 export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
-  const { version: siteVersion = 1, ...site } = initial.site
+  const { version: siteVersion = 1, permissions: _publicPermissions, ...publicSiteData } = initial.site
+  void _publicPermissions
+  // Whatever the server render passed in, the visitor starts with every switch off (Ж17); applyAuth loads the account's own.
+  const site: SiteConfig = { ...publicSiteData, permissions: NO_PERMISSIONS }
   const catalogGroups = initial.catalog.courses.flatMap((c) => c.groups)
   publishSeatCounts(catalogGroups)
   const readDraft = (): Student['builder'] | null => {
@@ -396,6 +424,8 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
 
   // The workspace request in flight, shared by every RequireRole that asks while it loads.
   let workspaceLoading: Promise<unknown> | null = null
+  // The account's own switches on their way (Ж17); the workspace load waits for them.
+  let permissionsLoading: Promise<void> | null = null
   // The public content request in flight, keyed by who is asking; the answer for a newer account always wins over an older one.
   let contentLoading: { key: string; promise: Promise<void> } | null = null
   let contentSeq = 0
@@ -436,9 +466,9 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
             // Someone else saved the settings meanwhile: their version (and its number) is loaded and the admin is told
             // that the last change did not go through — otherwise every next save would fail the same way.
             try {
-              const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
-              set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true })
-              get().notify(translate(get().lang, 'admin.siteReloaded'), 'warn')
+              // The same load as the workspace's: an answer after a sign-out or a switch of account is dropped (Ж17).
+              await get().loadAdminPresets()
+              if (get().role === 'admin' && get().presetsLoaded) get().notify(translate(get().lang, 'admin.siteReloaded'), 'warn')
             } catch (reloadErr) {
               toast(reloadErr)
             }
@@ -477,8 +507,53 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         // Disabled presets are internal: drop them from memory on every sign-in/out; admins reload the full list.
         presetsLoaded: false,
         siteLoadFailed: false,
-        site: s.site.presets ? publicSite(s.site) : s.site,
+        // A visitor and the Super Admin stay `idle` here: the Super Admin's matrix comes with GET /admin/site
+        // (loadAdminPresets sets loading → ready/error). An account that must first change its temporary password stays
+        // `idle` too: the API answers it 403 password_change_required until then, and the new session loads the switches.
+        permissionsStatus: user && role !== 'admin' && !user.passwordChangeRequired ? 'loading' : 'idle',
+        // Ж17: the switches of the previous account (or the Super Admin's whole matrix) never outlive a sign-in/out.
+        site: { ...(s.site.presets ? publicSite(s.site) : s.site), permissions: NO_PERMISSIONS },
       }))
+      // The Super Admin gets the whole matrix with the full settings (loadAdminPresets); everyone else reads their own.
+      permissionsLoading = user && role !== 'admin' && !user.passwordChangeRequired ? loadOwnPermissions(user) : null
+    }
+    /**
+     * The signed-in account's own switches (`GET /me/permissions`). One retry after a short pause; if that fails too the
+     * switches stay off, the status is `error` and the account is told (the workspace offers to try again).
+     */
+    const loadOwnPermissions = async (user: AuthUser) => {
+      const stillSignedIn = () => get().auth.user?.id === user.id
+      let own: Partial<Permissions> | null = null
+      for (let attempt = 0; attempt < 2 && !own; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, PERMISSIONS_RETRY_MS))
+          if (!stillSignedIn()) return
+        }
+        try {
+          own = (await api<Partial<Permissions>>('/me/permissions')) ?? {}
+        } catch (err) {
+          // The temporary password must be changed first: not a failure to report — the change opens a new session,
+          // which loads the switches. No retry, no «could not load» notice over the password-change screen.
+          if (isApiError(err) && err.code === 'password_change_required') {
+            if (stillSignedIn()) set({ permissionsStatus: 'idle' })
+            return
+          }
+          // Offline demo accounts (no backend) use the sample switches of their own role.
+          if (DEMO_LOGIN_ENABLED && session.token?.startsWith('demo-token-')) {
+            const sample = (sampleData.site as unknown as SiteConfig).permissions
+            own = { ...(user.roles.includes('TEACHER') ? { teacher: sample.teacher } : {}), ...(user.roles.includes('STUDENT') ? { student: sample.student } : {}) }
+          }
+        }
+      }
+      // Only for the account still signed in: an answer that arrives after a sign-out or a switch of account is dropped.
+      if (!stillSignedIn()) return
+      if (!own) {
+        set({ permissionsStatus: 'error' })
+        get().notify(translate(get().lang, 'perm.loadFailed'), 'warn')
+        return
+      }
+      const loaded = own
+      set((s) => ({ site: { ...s.site, permissions: ownPermissions(loaded) }, permissionsStatus: 'ready' }))
     }
     // The API's 403 password_change_required: the account still has the temporary password. Mark it, so the sign-in
     // card, the workspace gate and PasswordChangeRedirect show the change screen (the same as for the flag).
@@ -502,7 +577,10 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       // The admin roster is no longer loaded here: the People screen fetches it paginated, overview totals come from /admin/stats.
       const minePromise = api<{ teacher: Teacher | null; courses: Course[]; videos: Video[]; playlists: Playlist[]; resources: Resource[]; subjects: Subject[] }>('/manage/mine')
       const presetsPromise = isAdmin ? get().loadAdminPresets().catch(() => undefined) : undefined
+      // The teacher's switches decide what the studio lets them change: the workspace is ready only with them (Ж17).
+      const ownPermissionsPromise = isAdmin ? undefined : permissionsLoading
       const mine = await minePromise
+      if (ownPermissionsPromise) await ownPermissionsPromise
       publishSeatCounts(mine.courses.flatMap((c) => c.groups))
       set((s) => ({
         teachers: mine.teacher ? upsertIn(s.teachers, mine.teacher) : s.teachers,
@@ -539,6 +617,7 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       guestHydrated: false,
       presetsLoaded: false,
       siteLoadFailed: false,
+      permissionsStatus: 'idle',
       myPayments: [],
       cartBundles: [],
       sessionQr: {},
@@ -675,13 +754,29 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
       loadAdminPresets: async () => {
         // The page was rendered from a cached public read (up to a minute old, without the disabled presets, universities and
         // packages). The admin works on the current settings: all of them and their version, both from this one answer.
+        // Ж17: the answer carries the whole matrix and the internal presets — only for the admin who asked: an answer that
+        // arrives after a sign-out (or a switch of account) is dropped, never written into a visitor's store.
+        const who = get().auth.user?.id
+        const asRole = get().role
+        const sameAdmin = () => get().role === asRole && get().auth.user?.id === who
+        if (asRole === 'admin') set({ permissionsStatus: 'loading' })
         try {
           const { version, ...fresh } = await api<SiteConfig & { version: number }>('/admin/site')
-          set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true, siteLoadFailed: false })
+          if (!sameAdmin()) return
+          set({ site: fresh as SiteConfig, siteVersion: version, presetsLoaded: true, siteLoadFailed: false, permissionsStatus: 'ready' })
         } catch (err) {
-          set({ presetsLoaded: false, siteLoadFailed: true })
+          if (!sameAdmin()) return
+          set({ presetsLoaded: false, siteLoadFailed: true, permissionsStatus: 'error' })
           throw err
         }
+      },
+      loadMyPermissions: async () => {
+        const user = get().auth.user
+        if (!user) return
+        if (get().role === 'admin') return get().loadAdminPresets().catch(() => undefined)
+        set({ permissionsStatus: 'loading' })
+        permissionsLoading = loadOwnPermissions(user)
+        await permissionsLoading
       },
       loadStudentOverview: async () => {
         const o = await api<ApiOverview>('/student/subscription')
