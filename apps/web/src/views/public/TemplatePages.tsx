@@ -23,8 +23,8 @@ import { CentersShowcase } from '../../components/center/CentersShowcase'
 import { DiscountShowcase } from '../../components/course/DiscountShowcase'
 import { JourneySection as Journey } from '../../components/JourneySteps'
 
-/** The hero film is short (about 10 s) and read as too fast when looped: play it at 0.6×. */
-const HERO_VIDEO_RATE = 0.6
+/** The hero film is short (about 10 s) and read as too fast when looped: play it at 0.75×. */
+const HERO_VIDEO_RATE = 0.75
 const Scene3D = dynamic(() => import('../../components/three/Scene3D').then((m) => m.Scene3D), { ssr: false })
 const ScrollVideo = dynamic(() => import('../../components/three/ScrollVideo').then((m) => m.ScrollVideo), { ssr: false })
 
