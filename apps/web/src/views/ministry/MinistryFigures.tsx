@@ -164,7 +164,7 @@ function FiguresTable({ table, busy, onDownload }: { table: StatsTableDto; busy:
           <p className="px-5 py-6 text-sm text-charcoal/55">{t('min.noRows')}</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[32rem] text-sm">
+            <table className="table-cards w-full min-w-[32rem] text-sm">
               <thead>
                 <tr className="bg-sage/30 text-left text-xs text-charcoal/60">
                   {table.columns.map((c) => <th key={c.key} scope="col" className={`px-4 py-2.5 font-medium ${c.numeric && c.key !== 'year' ? 'text-right' : ''}`}>{tr(c.label)}</th>)}

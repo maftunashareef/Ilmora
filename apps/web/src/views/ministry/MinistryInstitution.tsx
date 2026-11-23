@@ -55,7 +55,7 @@ export function MinistryInstitution() {
           </div>
           {inst.directions.length === 0 ? <p className="px-5 py-6 text-sm text-charcoal/55">{t('min.inst.noDirections')}</p> : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[30rem] text-sm">
+              <table className="table-cards w-full min-w-[30rem] text-sm">
                 <thead>
                   <tr className="bg-sage/30 text-left text-xs text-charcoal/60">
                     <th scope="col" className="px-4 py-2.5 font-medium">{t('min.inst.direction')}</th>

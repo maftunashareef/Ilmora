@@ -123,7 +123,7 @@ function RefundCard({ item: r, focused, onAction }: { item: AdminRefundDto; focu
 
         {r.lines.length > 0 && (
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[28rem] text-sm">
+            <table className="table-cards w-full min-w-[28rem] text-sm">
               <thead><tr className="text-left text-xs text-charcoal/55">
                 <th scope="col" className="pb-1.5 font-medium">{t('refund.course')}</th>
                 <th scope="col" className="pb-1.5 text-right font-medium">{t('refund.price')}</th>
