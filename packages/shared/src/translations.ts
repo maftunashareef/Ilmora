@@ -2819,6 +2819,8 @@ export const dict = {
   'calc.afterTermOld': d('Muddat tugagaç kurs öz narxiga qaytadi.', 'Когда срок закончится, курс вернётся к своей цене.', 'When the term ends, the course goes back to its own price.'),
   'session.qrLocked': d('QR — Super Admin tuzatadi', 'QR — правит Super Admin', 'QR — the Super Admin corrects'),
   'journal.err.qrReadOnly': d('QR böyiça qöyilgan belgini öqituvçi özgartira olmaydi: uni Super Admin tuzatadi.', 'Отметку по QR учитель не меняет: её правит Super Admin.', 'A teacher cannot change a QR check-in: the Super Admin corrects it.'),
+  'journal.err.markConflict': d('Bu belgini hozirgina boşqa kişi qöydi — jurnalni yangilang.', 'Эту отметку только что поставил другой человек — обновите журнал.', 'Someone has just set this mark — reload the journal.'),
+  'journal.err.studentLeft': d('Talaba markazdan ketgan: unga belgi qöyilmaydi.', 'Ученик ушёл из центра: отметки ему не ставятся.', 'The student has left the center: no marks for them.'),
   'hw.title': d('Uy vazifalari', 'Домашние задания', 'Homework'),
   'hw.new': d('Yangi vazifa', 'Новое задание', 'New homework'),
   'hw.edit': d('Vazifani tahrirlaş', 'Редактировать задание', 'Edit homework'),

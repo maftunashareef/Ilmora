@@ -108,7 +108,7 @@ export function CenterCourses() {
           {data.courses.map((c) => (
             <li key={c.id}>
               <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 p-4">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-[14rem] flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     {scope.admin ? <a href={siteHref(lang, `/courses/${c.id}`)} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</a> : <Link to={`/courses/${c.id}`} className="truncate font-medium text-charcoal hover:text-forest">{tr(c.title)}</Link>}
                     <StatusBadge status={c.status} />

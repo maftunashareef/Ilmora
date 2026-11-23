@@ -127,7 +127,7 @@ export function StudioChannel() {
         </Notice>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <fieldset disabled={locked} className="space-y-6 disabled:opacity-70">
           {/* Profile Photo and Banner Card */}
           <Card className="space-y-5">

@@ -45,15 +45,15 @@ export function AdminCenters() {
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.centers')} subtitle={t('centers.partnersNote')} />
       {pending > 0 && <Notice tone="warn" className="mb-4">{t('admin.centers.pendingCount', { n: pending })}</Notice>}
       <div className="mb-8"><PendingCentersPanel list={list} busy={busy} setStatus={setStatus} reviewName={reviewName} /></div>
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
         <section>
           <div className="mb-3 flex items-center justify-between"><Eyebrow>{t('common.centers')} · {list?.length ?? 0}</Eyebrow><Button size="sm" onClick={() => setCenter({ id: uid('ce'), name: '', district: emptyL(), description: emptyL(), tone: '#0E5A44' })}><Icon name="plus" className="h-3.5 w-3.5" />{t('admin.centers.addCenter')}</Button></div>
           <ul className="space-y-2">
             {(list ?? []).map((c) => (
               <li key={c.id} className="card p-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: c.tone }} />
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-[12rem] flex-1">
                     <div className="flex flex-wrap items-center gap-2"><Link to={`/admin/centers/${c.id}`} className="truncate text-sm font-medium text-charcoal hover:text-forest">{c.name}</Link><Badge tone={centerStatusTone(c.status)}>{t(`center.status.${c.status}`)}</Badge></div>
                     <div className="truncate text-xs text-charcoal/55">{t(`inst.type.${centerKindOf(c)}`)} · {tr(c.district)} · {countLabel(lang, c.counts.courses, NOUNS.course)} · {countLabel(lang, c.counts.teachers, NOUNS.teacher)}{c.owner ? ` · ${t('admin.centers.registeredBy', { name: c.owner.login ? `@${c.owner.login}` : c.owner.displayName })}` : ''}</div>
                     {c.blockReason && <div className="text-xs text-red-700">{c.blockReason}</div>}

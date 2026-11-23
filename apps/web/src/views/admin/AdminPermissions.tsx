@@ -27,7 +27,7 @@ export function AdminPermissions() {
   return (
     <div>
       <PageTitle eyebrow={t('dash.admin')} title={t('admin.permissions')} subtitle={t('admin.perm.hint')} />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <Eyebrow className="mb-4">{t('role.teacher')}</Eyebrow>
           <div className="divide-y divide-charcoal/10">{TEACHER.map((k) => <div key={k} className="py-3"><Toggle checked={perms.teacher[k]} onChange={(v) => setT(k, v)} label={t(`perm.teacher.${k}` as TKey)} /></div>)}</div>

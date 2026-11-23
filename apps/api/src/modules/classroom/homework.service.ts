@@ -110,7 +110,12 @@ export class HomeworkService {
     if (patch.description !== undefined) data.description = patch.description.trim()
     if (patch.links !== undefined) data.links = cleanLinks(patch.links)
     if (patch.submitModes !== undefined) data.submitModes = cleanModes(patch.submitModes)
-    if (patch.dueAt !== undefined) data.dueAt = new Date(patch.dueAt)
+    if (patch.dueAt !== undefined) {
+      // As on create (проверка 20.11, №10): a deadline already gone is refused, the old one stays.
+      const dueAt = new Date(patch.dueAt)
+      if (dueAt.getTime() <= Date.now()) throw AppError.invalid('homework_due_past', 'The deadline must be in the future')
+      data.dueAt = dueAt
+    }
     const updated = await this.prisma.tx(async (tx) => {
       const row = await tx.homework.update({ where: { id: hw.id }, data })
       await this.audit.record({ tx, action: 'homework.update', entityType: 'Homework', entityId: hw.id, before: { dueAt: hw.dueAt }, after: { dueAt: row.dueAt, fields: Object.keys(data) } })
