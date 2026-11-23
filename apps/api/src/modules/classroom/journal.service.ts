@@ -33,7 +33,9 @@ export class JournalService {
     assertManages(group, actor, { centerAdmin: true, centerManager: true })
     const today = todayLocal()
     const m = month ?? today.slice(0, 7)
-    if (!MONTH.test(m)) throw AppError.invalid('validation_failed', 'month must be YYYY-MM')
+    // A real calendar month only: «9999-12» would ask for «10000-01» and end as a 500 (проверка 20.11, №10).
+    const year = Number(m.slice(0, 4))
+    if (!MONTH.test(m) || year < 2000 || year > 2100) throw AppError.invalid('validation_failed', 'month must be YYYY-MM between 2000 and 2100')
     const now = new Date()
     const [sessions, enrollments, links, past] = await Promise.all([
       this.db.lessonSession.findMany({ where: { groupId, date: { gte: isoToDateColumn(`${m}-01`), lt: isoToDateColumn(`${nextMonth(m)}-01`) } }, orderBy: { startsAt: 'asc' }, select: { id: true, date: true, startsAt: true, endsAt: true, status: true } }),
@@ -114,23 +116,40 @@ export class JournalService {
     })
     if (!link) throw AppError.notFound('Student')
     const cs = link.centerStudent
+    // A student in the archive is not marked any more (№10, 20.11): the mark would count in a list he is no longer on.
+    if (cs.status === 'LEFT') throw AppError.invalid('student_left', 'This student has left the center')
     if (cs.userId && (await this.db.enrollment.count({ where: { groupId, studentId: cs.userId, status: { in: ['ACTIVE', 'COMPLETED'] } } })) > 0) {
       throw AppError.forbidden('This student is marked by QR', { code: 'qr_read_only' })
     }
     const key = { sessionId_centerStudentId: { sessionId: session.id, centerStudentId: cs.id } }
     const before = await this.db.centerAttendanceMark.findUnique({ where: key })
     if ((before?.status ?? null) === input.status) return { sessionId: session.id, centerStudentId: cs.id, status: input.status }
+    try {
+      await this.writeMark(group.tenantId, actor, key, before, session.id, cs.id, input.status)
+    } catch (err) {
+      // Two first marks of one cell at once (№10, 20.11): the second meets the unique key — a clear «reload», not a 500.
+      if ((err as { code?: string }).code === 'P2002') throw AppError.conflict('journal_mark_conflict', 'The mark was set meanwhile; reload the journal')
+      throw err
+    }
+    return { sessionId: session.id, centerStudentId: cs.id, status: input.status }
+  }
+
+  /** The write of one mark and its audit row, in one transaction. */
+  private async writeMark(
+    tenantId: string, actor: RequestActor,
+    key: { sessionId_centerStudentId: { sessionId: string; centerStudentId: string } },
+    before: { id: string; status: JournalMark } | null, sessionId: string, centerStudentId: string, status: JournalMark | null,
+  ) {
     await this.prisma.tx(async (tx) => {
       let entityId = before?.id
-      if (input.status === null) await tx.centerAttendanceMark.delete({ where: key })
-      else if (before) await tx.centerAttendanceMark.update({ where: key, data: { status: input.status, markedById: actor.id, version: { increment: 1 } } })
-      else entityId = (await tx.centerAttendanceMark.create({ data: { tenantId: group.tenantId, sessionId: session.id, centerStudentId: cs.id, status: input.status, markedById: actor.id } })).id
+      if (status === null) await tx.centerAttendanceMark.delete({ where: key })
+      else if (before) await tx.centerAttendanceMark.update({ where: key, data: { status, markedById: actor.id, version: { increment: 1 } } })
+      else entityId = (await tx.centerAttendanceMark.create({ data: { tenantId, sessionId, centerStudentId, status, markedById: actor.id } })).id
       await this.audit.record({
-        tx, action: before ? (input.status === null ? 'attendance.center_mark_clear' : 'attendance.center_mark_change') : 'attendance.center_mark',
-        entityType: 'CenterAttendanceMark', entityId: entityId ?? `${session.id}:${cs.id}`,
-        before: before ? { status: before.status } : undefined, after: { status: input.status, sessionId: session.id, centerStudentId: cs.id },
+        tx, action: before ? (status === null ? 'attendance.center_mark_clear' : 'attendance.center_mark_change') : 'attendance.center_mark',
+        entityType: 'CenterAttendanceMark', entityId: entityId ?? `${sessionId}:${centerStudentId}`,
+        before: before ? { status: before.status } : undefined, after: { status, sessionId, centerStudentId },
       })
     })
-    return { sessionId: session.id, centerStudentId: cs.id, status: input.status }
   }
 }
