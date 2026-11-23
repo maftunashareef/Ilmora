@@ -374,6 +374,13 @@ export class CenterStudentsService {
       }
       if (groupIds !== undefined) groups = await this.ownGroups(tenantId, center.id, groupIds)
     }
+    // A link sent to the old phone (the student's or the parent's), or to a student who has left, stops working
+    // (проверка безопасности 20.11, №4). The number of sends is kept: a new link still counts against the limit.
+    const phoneChanged = data.phoneE164 !== undefined && data.phoneE164 !== record.phoneE164
+    const parentPhoneChanged = data.parentPhoneE164 !== undefined && data.parentPhoneE164 !== record.parentPhoneE164
+    const leaving = data.status === 'LEFT'
+    const dropInvite = !!record.inviteTokenHash && (phoneChanged || parentPhoneChanged || leaving)
+    if (dropInvite) Object.assign(data, { inviteTokenHash: null, inviteExpiresAt: null })
     try {
       await this.prisma.tx(async (tx) => {
         await tx.centerStudent.update({ where: { id: record.id }, data })
@@ -381,7 +388,7 @@ export class CenterStudentsService {
           await tx.centerStudentGroup.deleteMany({ where: { centerStudentId: record.id, groupId: { notIn: groups } } })
           await tx.centerStudentGroup.createMany({ data: groups.map((groupId) => ({ tenantId, centerStudentId: record.id, groupId })), skipDuplicates: true })
         }
-        await this.audit.record({ tx, action: 'center.student_update', entityType: 'CenterStudent', entityId: record.id, before: { status: record.status }, after: { status: status ?? record.status, fields: changed } })
+        await this.audit.record({ tx, action: 'center.student_update', entityType: 'CenterStudent', entityId: record.id, before: { status: record.status }, after: { status: status ?? record.status, fields: changed, inviteCancelled: dropInvite } })
       })
     } catch (err) {
       this.phoneConflict(err)
@@ -433,7 +440,8 @@ export class CenterStudentsService {
       where: { inviteTokenHash: sha256(token) },
       include: { center: { select: { id: true, name: true, status: true, deletedAt: true } }, institution: { select: { id: true, name: true, type: true } }, groups: { where: { group: { deletedAt: null } }, include: { group: { select: { name: true, course: { select: { title: true } } } } } } },
     })
-    const ok = record && !record.inviteAcceptedAt && record.inviteExpiresAt && record.inviteExpiresAt.getTime() > Date.now() && record.center.status === 'ACTIVE' && !record.center.deletedAt
+    // A record in the archive (LEFT) is never taken by a link, even one still on it (№4).
+    const ok = record && record.status !== 'LEFT' && !record.inviteAcceptedAt && record.inviteExpiresAt && record.inviteExpiresAt.getTime() > Date.now() && record.center.status === 'ACTIVE' && !record.center.deletedAt
     if (!ok) throw AppError.invalid('invite_invalid', 'The invitation link does not work')
     return record
   }
@@ -469,7 +477,7 @@ export class CenterStudentsService {
     await this.prisma.tx(async (tx) => {
       if (existing) await tx.centerStudent.delete({ where: { id: existing.id } })
       const claimed = await tx.centerStudent.updateMany({
-        where: { id: record.id, inviteTokenHash: sha256(body.token), inviteAcceptedAt: null, inviteExpiresAt: { gt: now } },
+        where: { id: record.id, status: { not: 'LEFT' }, inviteTokenHash: sha256(body.token), inviteAcceptedAt: null, inviteExpiresAt: { gt: now } },
         data: { ...study, userId: actor.id, inviteAcceptedAt: now, inviteTokenHash: null },
       })
       if (claimed.count !== 1) throw AppError.invalid('invite_invalid', 'The invitation link does not work')

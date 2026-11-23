@@ -50,8 +50,7 @@ import { DB_AVAILABLE, TestContext } from './helpers'
 const KNOWN_GAP = new Set([
   // №2
   'n2-preview', 'n2-accept', 'n2-accept-minor',
-  // №4
-  'n4-phone-preview', 'n4-phone-accept', 'n4-parent-preview', 'n4-parent-accept', 'n4-left-preview', 'n4-left-accept', 'n4-left-direct-accept',
+  // №4 — closed 23.11 (Шерзод): a phone or parent phone change and the archive cancel the link; LEFT is never accepted.
   // №9
   'n9-BLOCKED-roster', 'n9-BLOCKED-detail', 'n9-BLOCKED-export', 'n9-REJECTED-roster', 'n9-REJECTED-detail', 'n9-REJECTED-export',
   'n9-import-parentname-check', 'n9-import-parentname-commit',
