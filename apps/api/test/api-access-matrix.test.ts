@@ -34,6 +34,7 @@ import { VacanciesService } from '../src/modules/vacancies/vacancies.service'
 import { DB_AVAILABLE, TestContext, testEnv } from './helpers'
 import { notificationsStub } from './stubs'
 import { type Route, routesOf } from './support/routes'
+import { logPath } from '../src/common/log-path'
 
 /**
  * Access matrix of the API for the five accounts people sign in with: a center, a teacher, a student, a company and
@@ -321,7 +322,9 @@ describe('New ТЗ areas: rules, somebody else\'s id, security', () => {
     // pino logs the path without the query and never the body; `req.body.token` is redacted besides.
     const core = readFileSync(join(__dirname, '../src/core.module.ts'), 'utf8')
     expect(core).toContain(`'req.body.token'`)
-    expect(core).toMatch(/url: \(req\.url \?\? ''\)\.split\('\?'\)\[0\]/)
+    // The path goes through logPath (src/common/log-path.ts, security review 19.11 №11): no query, QR code masked.
+    expect(core).toMatch(/url: logPath\(req\.url\)/)
+    expect(logPath('/students/me/center-invites/accept?token=SECRET')).toBe('/students/me/center-invites/accept')
   })
 
   // The minor's own mark of the parent's consent (questionnaire, PARENT_CONSENT kind) is self-attested by the student: known product gap, reported.

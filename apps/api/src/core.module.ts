@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common'
 import { ThrottlerModule } from '@nestjs/throttler'
 import { randomUUID } from 'node:crypto'
 import { LoggerModule } from 'nestjs-pino'
+import { logPath } from './common/log-path'
 import { throttlers } from './common/throttlers'
 import { AppConfigModule } from './config/config.module'
 import { ENV, type Env } from './config/env'
@@ -49,9 +50,10 @@ const REDACT_PATHS = [
           },
           autoLogging: { ignore: (req) => (req.url ?? '').startsWith('/health') },
           serializers: {
+            // The path without the query and with the center's QR code masked (security review 19.11, №11).
             // `ip` is the client's address as Express resolves it through the trusted proxy (TRUST_PROXY: Caddy's
             // X-Forwarded-For), not the proxy's own address — the log now shows who called (security review 10.11 №71).
-            req: (req: { id: string; method: string; url: string; remoteAddress?: string; raw?: { ip?: string } }) => ({ id: req.id, method: req.method, url: (req.url ?? '').split('?')[0], ip: req.raw?.ip ?? req.remoteAddress, peer: req.remoteAddress }),
+            req: (req: { id: string; method: string; url: string; remoteAddress?: string; raw?: { ip?: string } }) => ({ id: req.id, method: req.method, url: logPath(req.url), ip: req.raw?.ip ?? req.remoteAddress, peer: req.remoteAddress }),
             res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
           },
           customProps: (req) => {

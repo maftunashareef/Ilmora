@@ -2,6 +2,7 @@ import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpSta
 import type { Request, Response } from 'express'
 import { Prisma } from '../../generated/prisma/client'
 import { AppError } from '../errors'
+import { logPath } from '../log-path'
 
 interface ErrorBody {
   error: { code: string; message: string; details?: unknown; requestId?: string }
@@ -22,7 +23,8 @@ export class AppExceptionFilter implements ExceptionFilter {
     const requestId = req.id !== undefined ? String(req.id) : (req.headers['x-request-id'] as string | undefined)
     const { status, body } = this.describe(exception, requestId)
 
-    if (status >= 500) this.logger.error({ err: exception, requestId, path: req.originalUrl }, 'Unhandled error')
+    // The path as the request log has it: no query string, the center's QR code masked (security review 19.11, №8, №11).
+    if (status >= 500) this.logger.error({ err: exception, requestId, path: logPath(req.originalUrl) }, 'Unhandled error')
     else if (status === 429) {
       // The real wait: the error's own, or what the throttler already put on the response (its block, e.g. 5 minutes
       // after too many sign-ins — №75: the answer used to promise «60 s»); 60 only when nothing says.
