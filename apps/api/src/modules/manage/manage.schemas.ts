@@ -194,10 +194,16 @@ export const PackagePatch = z.object({
   periodDays: z.number().int().min(1).max(366).nullable().optional(),
   lessonCount: z.number().int().min(1).max(500).nullable().optional(),
 }).strict()
+/**
+ * Roles the Super Admin may grant on the site. PLATFORM_ADMIN is not among them: Super Admin is the owner flag (isOwner),
+ * granted and revoked only by the owner-setup command on the server (decision «2026-10 ILMORA — два Super Admin»).
+ */
+export const ASSIGNABLE_ROLES = ['FINANCE_ADMIN', 'CENTER_ADMIN', 'CENTER_MANAGER', 'TEACHER', 'STUDENT'] as const
 export const UserRolesInput = z.object({
-  /** PLATFORM_ADMIN (Super Admin) sets the owner flag; the route is open only to existing owners. */
   // CENTER_MANAGER (№15): the Super Admin's fallback; the center creates its managers itself (CenterManagersService).
-  roles: z.array(z.enum(['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'CENTER_ADMIN', 'CENTER_MANAGER', 'TEACHER', 'STUDENT'])).min(1),
+  // May be empty when the account keeps a role this endpoint does not set (owner pair, ministry…); the service checks
+  // that the stored list is never empty.
+  roles: z.array(z.enum(ASSIGNABLE_ROLES, { message: 'Role cannot be granted here (Super Admin is granted only by owner-setup on the server)' })).max(ASSIGNABLE_ROLES.length),
   centerId: id.nullable().optional(),
   isActive: z.boolean().optional(),
   reason: z.string().min(3).max(300),

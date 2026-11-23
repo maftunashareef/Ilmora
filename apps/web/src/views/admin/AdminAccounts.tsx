@@ -4,16 +4,20 @@ import { Badge, Button, EmptyState, Field, Icon, Input, Modal, Notice, PageTitle
 import { useT } from '../../i18n/useT'
 import { api, isApiError } from '../../lib/api'
 import { apiErrorText } from '../../lib/apiErrors'
+import { hasServerKeptRole, siteRoles } from '../../lib/centerAdmins'
 import { formatDate } from '../../lib/format'
 import { TemporaryPasswordDialog } from '../../components/TemporaryPasswordDialog'
 import { ministryAccounts } from '../../services/ministryAccounts'
 import { useStore } from '../../store/useStore'
 
-type Account = { id: string; login: string | null; phoneMasked: string | null; displayName: string; roles: string[]; centerId: string | null; isActive: boolean; subscription: { status: string } | null; createdAt: string; lastLoginAt: string | null }
+type Account = { id: string; isOwner: boolean; login: string | null; phoneMasked: string | null; displayName: string; roles: string[]; centerId: string | null; isActive: boolean; subscription: { status: string } | null; createdAt: string; lastLoginAt: string | null }
 type Page = { page: number; pageSize: number; total: number; items: Account[] }
 const ROLES = ['', 'STUDENT', 'TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER', 'FINANCE_ADMIN'] as const
-/** Every role the Super Admin may grant; PLATFORM_ADMIN is owner-only (owner-setup on the server). */
-const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER', 'FINANCE_ADMIN', 'PLATFORM_ADMIN'] as const
+/** Every role the Super Admin may grant here. Super Admin itself is not one: only owner-setup on the server grants or revokes it. */
+const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER', 'FINANCE_ADMIN'] as const
+/** Roles owner-setup keeps on a Super Admin; the site shows them but never sends them. */
+const OWNER_ROLES = ['PLATFORM_ADMIN', 'FINANCE_ADMIN']
+const isOwnerAccount = (a: Account) => a.isOwner
 type AssignableRole = (typeof ASSIGNABLE)[number]
 
 /** Super Admin: every account on the platform with search, blocking and deletion (live API, not the demo people list). */
@@ -42,8 +46,10 @@ export function AdminAccounts() {
     try { await fn(); notify(done); await load(page?.page ?? 1); return true } catch (err) { notify(isApiError(err) ? apiErrorText(err, lang) : String(err), 'warn'); return false } finally { setBusy(null) }
   }
   const toggleActive = (a: Account) => {
-    const roles = a.roles.filter((r) => r !== 'PLATFORM_ADMIN')
-    return act(a.id, () => api(`/admin/users/${a.id}/roles`, { method: 'PUT', body: { roles: roles.length ? roles : ['STUDENT'], isActive: !a.isActive, reason: a.isActive ? 'Blocked by the Super Admin' : 'Unblocked by the Super Admin' } }), t('common.saved'))
+    // Only the site roles go in the body: the API keeps the others (ministry, institution, company) as they are, so
+    // blocking never turns such an account into a student.
+    const roles = siteRoles(a.roles)
+    return act(a.id, () => api(`/admin/users/${a.id}/roles`, { method: 'PUT', body: { roles: roles.length || a.isOwner || hasServerKeptRole(a.roles) ? roles : ['STUDENT'], isActive: !a.isActive, reason: a.isActive ? 'Blocked by the Super Admin' : 'Unblocked by the Super Admin' } }), t('common.saved'))
   }
   const remove = (a: Account) => {
     if (!confirm(t('admin.accounts.confirmDelete'))) return
@@ -79,16 +85,16 @@ export function AdminAccounts() {
             <li key={a.id} className="card flex flex-wrap items-center gap-3 p-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sage text-forest"><Icon name="user" className="h-4 w-4" /></span>
               <div className="min-w-[12rem] flex-1">
-                <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{a.displayName}</span>{a.roles.map((r) => <Badge key={r} tone={r === 'PLATFORM_ADMIN' ? 'champagne' : 'neutral'}>{roleLabel(r)}</Badge>)}{!a.isActive && <Badge tone="danger">{t('admin.accounts.blocked')}</Badge>}</div>
+                <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-medium text-charcoal">{a.displayName}</span>{isOwnerAccount(a) && <Badge tone="champagne">{t('role.admin')}</Badge>}{a.roles.filter((r) => r !== 'PLATFORM_ADMIN').map((r) => <Badge key={r} tone="neutral">{roleLabel(r)}</Badge>)}{!a.isActive && <Badge tone="danger">{t('admin.accounts.blocked')}</Badge>}</div>
                 <div className="truncate text-xs text-charcoal/55">{[a.login ? `@${a.login}` : null, a.phoneMasked, a.centerId ? centers.find((c) => c.id === a.centerId)?.name ?? a.centerId : null, `${t('group.since')} ${formatDate(a.createdAt, lang)}`].filter(Boolean).join(' · ')}</div>
               </div>
               {a.id !== me && (
                 <>
                   <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => setEditing(a)}><Icon name="user" className="h-3.5 w-3.5" />{t('admin.accounts.roles')}</Button>
-                  {a.login && !a.roles.includes('PLATFORM_ADMIN') && <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void resetPassword(a)}><Icon name="lock" className="h-3.5 w-3.5" />{t('admin.accounts.resetPassword')}</Button>}
-                  {a.roles.includes('PLATFORM_ADMIN') && <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void resetApp(a)}><Icon name="refresh" className="h-3.5 w-3.5" />{t('admin.ministry.resetApp')}</Button>}
-                  {/* Block and delete stay off Super Admin accounts; change them through the Roles dialog instead. */}
-                  {!a.roles.includes('PLATFORM_ADMIN') && (
+                  {a.login && !isOwnerAccount(a) && <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void resetPassword(a)}><Icon name="lock" className="h-3.5 w-3.5" />{t('admin.accounts.resetPassword')}</Button>}
+                  {isOwnerAccount(a) && <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void resetApp(a)}><Icon name="refresh" className="h-3.5 w-3.5" />{t('admin.ministry.resetApp')}</Button>}
+                  {/* Block and delete stay off Super Admin accounts: only owner-setup on the server changes them. */}
+                  {!isOwnerAccount(a) && (
                     <>
                       <Button size="sm" variant="secondary" disabled={busy === a.id} onClick={() => void toggleActive(a)}><Icon name={a.isActive ? 'lock' : 'check'} className="h-3.5 w-3.5" />{a.isActive ? t('admin.accounts.block') : t('admin.accounts.unblock')}</Button>
                       <Button size="sm" variant="danger" disabled={busy === a.id} onClick={() => void remove(a)} aria-label={t('common.delete')}><Icon name="trash" className="h-3.5 w-3.5" /></Button>
@@ -136,19 +142,25 @@ type RolesBody = { roles: AssignableRole[]; centerId: string | null; reason: str
 /** Checkbox editor for one account's roles; a center administrator must be tied to a center. */
 function RolesEditor({ account, centers, roleLabel, onClose, onSave }: { account: Account; centers: { id: string; name: string }[]; roleLabel: (r: string) => string; onClose: () => void; onSave: (body: RolesBody) => Promise<void> }) {
   const { t } = useT()
-  const [roles, setRoles] = useState<AssignableRole[]>(() => account.roles.filter((r): r is AssignableRole => (ASSIGNABLE as readonly string[]).includes(r)))
+  // A Super Admin keeps PLATFORM_ADMIN + FINANCE_ADMIN whatever is sent here (the API adds them back); show them read-only.
+  const owner = isOwnerAccount(account)
+  const [roles, setRoles] = useState<AssignableRole[]>(() => siteRoles(account.roles).filter((r) => !(owner && OWNER_ROLES.includes(r))))
+  // Roles the API keeps whatever is sent (an owner's pair, ministry, institution, company): with one, an empty list is fine.
+  const kept = owner || hasServerKeptRole(account.roles)
   const [centerId, setCenterId] = useState<string>(account.centerId ?? '')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const toggle = (r: AssignableRole) => setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]))
   const needsCenter = roles.includes('CENTER_ADMIN') || roles.includes('CENTER_MANAGER')
-  const problem = roles.length === 0 ? t('admin.accounts.noRoles') : needsCenter && !centerId ? t('admin.accounts.centerRequired') : null
+  const problem = roles.length === 0 && !kept ? t('admin.accounts.noRoles') : needsCenter && !centerId ? t('admin.accounts.centerRequired') : null
   const canSave = !problem && reason.trim().length >= 3 && !saving
   const save = async () => {
     if (!canSave) return
     setSaving(true)
     // Keep the order stable so the audit log shows the same list for the same set of roles.
-    try { await onSave({ roles: ASSIGNABLE.filter((r) => roles.includes(r)), centerId: centerId || null, reason: reason.trim() }) } finally { setSaving(false) }
+    // An owner's PLATFORM_ADMIN + FINANCE_ADMIN are never sent: the API adds the pair back from the owner flag on every save
+    // (only owner-setup on the server changes it), so an owner with no other role sends an empty list.
+    try { await onSave({ roles: siteRoles(roles), centerId: centerId || null, reason: reason.trim() }) } finally { setSaving(false) }
   }
   return (
     <Modal
@@ -160,7 +172,16 @@ function RolesEditor({ account, centers, roleLabel, onClose, onSave }: { account
       <div className="space-y-4">
         <fieldset className="space-y-2">
           <legend className="mb-2 text-sm font-medium text-charcoal">{t('admin.accounts.roles')}</legend>
-          {ASSIGNABLE.map((r) => (
+          {owner && (
+            <div className="flex items-start gap-3 rounded-control border border-champagne/40 bg-paper px-3 py-2.5">
+              <Icon name="lock" className="mt-0.5 h-4 w-4 text-charcoal/55" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-charcoal">{t('role.admin')}</span>
+                <span className="block text-xs text-charcoal/55">{t('admin.accounts.ownerServerOnly')}</span>
+              </span>
+            </div>
+          )}
+          {ASSIGNABLE.filter((r) => !(owner && OWNER_ROLES.includes(r))).map((r) => (
             <label key={r} className="flex cursor-pointer items-start gap-3 rounded-control border border-charcoal/10 bg-paper px-3 py-2.5 hover:border-forest/40">
               <input type="checkbox" className="mt-0.5 h-4 w-4 accent-forest" checked={roles.includes(r)} onChange={() => toggle(r)} />
               <span className="min-w-0">
@@ -170,7 +191,6 @@ function RolesEditor({ account, centers, roleLabel, onClose, onSave }: { account
             </label>
           ))}
         </fieldset>
-        {roles.includes('PLATFORM_ADMIN') && <Notice tone="warn" className="text-xs">{t('admin.accounts.superAdminWarn')}</Notice>}
         {(needsCenter || centerId) && (
           <Field label={t('admin.accounts.center')} required={needsCenter}>
             <Select value={centerId} onChange={(e) => setCenterId(e.target.value)}>

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import type { z } from 'zod'
@@ -11,6 +11,7 @@ import { unclaimCompany } from '../companies/companies.service'
 import { unclaimInstitution } from '../institutions/institutions.service'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import type { RequestActor } from '../../infra/tenancy/tenant-context'
+import { forgetAccountState } from '../../common/request-context.middleware'
 import { AuditService } from '../audit/audit.service'
 import { discountNow, discountWindow, toCourse, toGroup, toPlaylist, toResource, toTeacher, toVideo } from '../catalog/catalog.service'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -23,6 +24,31 @@ import { Role } from '../../generated/prisma/enums'
 
 /** What a finance admin reads in the audit log: the money records only. */
 const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription', 'RefundRequest']
+/** The pair owner-setup stores for an owner; the site never adds or removes it. */
+const OWNER_ROLES: Role[] = ['PLATFORM_ADMIN', 'FINANCE_ADMIN']
+/** Roles given by their own flows (ministry accounts, institution and company claims), never through the roles endpoint: kept as they are. */
+const KEPT_ROLES: Role[] = ['MINISTRY', 'INSTITUTION_ADMIN', 'COMPANY_ADMIN']
+const CENTER_ROLES: Role[] = ['CENTER_ADMIN', 'CENTER_MANAGER']
+
+/**
+ * The roles column after PUT /admin/users/:id/roles. The request lists only the roles the site assigns; the roles it does
+ * not assign (KEPT_ROLES, an owner's pair) stay, and a stale PLATFORM_ADMIN on a non-owner goes. A privileged account
+ * (owner, finance admin, ministry, institution or company) is never also a center admin or manager: the center would
+ * manage it (block it, reset its password). The rule applies when a role is added; a request that only removes roles or
+ * only blocks / unblocks still goes through for an account made before the rule, so blocking always works.
+ * An owner cannot be blocked here: that would take Super Admin away too.
+ */
+function rolesToStore(input: { roles: readonly string[]; isActive?: boolean }, cur: { roles: Role[]; isOwner: boolean }): Role[] {
+  if (cur.isOwner && input.isActive === false) throw new AppError('owner_protected', 'The owner account cannot be blocked here', HttpStatus.FORBIDDEN)
+  const roles = [...new Set([...(input.roles as Role[]), ...cur.roles.filter((r) => KEPT_ROLES.includes(r)), ...(cur.isOwner ? OWNER_ROLES : [])])]
+  if (roles.length === 0) throw AppError.invalid('no_roles', 'An account needs at least one role')
+  const adds = roles.some((r) => !cur.roles.includes(r))
+  const privileged = cur.isOwner || roles.some((r) => r === 'FINANCE_ADMIN' || KEPT_ROLES.includes(r))
+  if (adds && privileged && roles.some((r) => CENTER_ROLES.includes(r))) {
+    throw AppError.invalid('privileged_center_role', 'A Super Admin, finance admin, ministry, institution or company account cannot also be a center administrator or manager')
+  }
+  return roles
+}
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
@@ -808,7 +834,7 @@ export class ManageService {
   async deleteUser(tenantId: string, actor: RequestActor, userId: string, reason: string) {
     const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId }, include: { teacherProfile: { select: { id: true } } } })
     if (!user) throw AppError.notFound('User')
-    if (user.isOwner) throw AppError.forbidden('The owner account cannot be deleted here', { code: 'owner_protected' })
+    if (user.isOwner) throw new AppError('owner_protected', 'The owner account cannot be deleted here', HttpStatus.FORBIDDEN)
     if (user.id === actor.id) throw AppError.forbidden('You cannot delete your own account', { code: 'self_delete' })
     const now = new Date()
     await this.prisma.tx(async (tx) => {
@@ -1048,7 +1074,7 @@ export class ManageService {
       this.prisma.client.user.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { teacherProfile: { select: { id: true } }, subscriptions: { where: { status: { in: ['ACTIVE', 'PENDING_PAYMENT', 'PAST_DUE'] } }, select: { id: true, status: true, packageId: true, startedAt: true, currentPeriodEnd: true }, take: 1 }, enrollments: { where: { status: 'ACTIVE' }, select: { groupId: true } } } }),
       this.prisma.client.user.count({ where }),
     ])
-    return { page, pageSize, total, items: rows.map((u) => ({ id: u.id, phoneMasked: u.phoneE164 ? u.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null, login: u.login, displayName: u.displayName, district: u.district, preferredLang: u.preferredLang, roles: u.roles, centerId: u.centerId, isActive: u.isActive, teacherProfileId: u.teacherProfile?.id ?? null, subscription: u.subscriptions[0] ?? null, groupIds: u.enrollments.map((e) => e.groupId), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt })) }
+    return { page, pageSize, total, items: rows.map((u) => ({ id: u.id, isOwner: u.isOwner, phoneMasked: u.phoneE164 ? u.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null, login: u.login, displayName: u.displayName, district: u.district, preferredLang: u.preferredLang, roles: u.roles, centerId: u.centerId, isActive: u.isActive, teacherProfileId: u.teacherProfile?.id ?? null, subscription: u.subscriptions[0] ?? null, groupIds: u.enrollments.map((e) => e.groupId), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt })) }
   }
 
   /** Counts for the admin overview. Computed in the database so they stay correct past the paginated user list. */
@@ -1065,43 +1091,50 @@ export class ManageService {
     const user = await this.prisma.client.user.findFirst({ where: { tenantId, id: userId }, include: { teacherProfile: { select: { id: true } } } })
     if (!user) throw AppError.notFound('User')
     // You cannot change your own account here: it prevents locking yourself out of Super Admin by mistake.
-    if (user.id === actor.id) throw AppError.forbidden('You cannot change your own roles', { code: 'self_roles' })
-    const selected = [...new Set(input.roles)]
-    // Super Admin is the owner flag (isOwner), from which the access token derives PLATFORM_ADMIN + FINANCE_ADMIN.
-    // Granting it stores the privileged pair like owner-setup; revoking it drops PLATFORM_ADMIN from the column.
-    const wantsOwner = selected.includes('PLATFORM_ADMIN')
-    const roles = (wantsOwner ? [...new Set([...selected, 'FINANCE_ADMIN' as const])] : selected.filter((r) => r !== 'PLATFORM_ADMIN')) as typeof selected
-    const centerId = input.centerId === undefined ? user.centerId : input.centerId
-    if (centerId && centerId !== user.centerId) {
-      const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { id: true } })
+    if (user.id === actor.id) throw new AppError('self_roles', 'You cannot change your own roles', HttpStatus.FORBIDDEN)
+    // Super Admin is the owner flag (isOwner), from which the access token derives PLATFORM_ADMIN + FINANCE_ADMIN. It is
+    // granted and revoked only by the owner-setup command on the server, never here: the schema does not accept
+    // PLATFORM_ADMIN, and this check keeps any other caller of the service from slipping it through.
+    if ((input.roles as string[]).includes('PLATFORM_ADMIN')) {
+      await this.audit.record({ action: 'user.roles.denied', entityType: 'User', entityId: userId, after: { roles: input.roles, code: 'owner_server_only' }, reason: input.reason })
+      throw new AppError('owner_server_only', 'Super Admin is granted and revoked only on the server (owner-setup)', HttpStatus.FORBIDDEN)
+    }
+    // Checked here for a quick answer and again under the row lock below (owner-setup may change the account meanwhile).
+    rolesToStore(input, user)
+    if (input.centerId && input.centerId !== user.centerId) {
+      const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: input.centerId }, select: { id: true } })
       if (!center) throw AppError.invalid('center_not_found', 'Center not found')
     }
-    // A center administrator without a center would see an empty workspace and could not be found on the center page.
-    if (roles.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
-    if (roles.includes('CENTER_MANAGER') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this manager works for')
-    const isActive = input.isActive ?? user.isActive
-    const isOwner = wantsOwner
-    // Losing the owner flag, a role, or being blocked ends the user's open sessions immediately.
-    const lostAccess = (!isActive && user.isActive) || (user.isOwner && !isOwner) || user.roles.some((r) => !roles.includes(r as (typeof roles)[number]))
 
-    const updated = await this.prisma.client.$transaction(async (tx) => {
-      // Never remove the last Super Admin: the platform would have no owner and no one could grant it again from here.
-      if (user.isOwner && !isOwner) {
-        const owners = await tx.user.count({ where: { tenantId, isOwner: true } })
-        if (owners <= 1) throw AppError.invalid('last_owner', 'At least one Super Admin must remain')
-      }
-      const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive, isOwner } })
+    const { before, updated } = await this.prisma.client.$transaction(async (tx) => {
+      // Lock the row and read it again: owner-setup changes isOwner and the privileged roles in its own transaction,
+      // and what is kept here must follow what is in the row now, not what was read before.
+      await tx.$queryRawUnsafe(`SELECT id FROM "User" WHERE id = $1 FOR UPDATE`, userId)
+      const cur = await tx.user.findFirst({ where: { tenantId, id: userId }, select: { roles: true, isOwner: true, isActive: true, centerId: true, login: true, displayName: true, teacherProfile: { select: { id: true } } } })
+      if (!cur) throw AppError.notFound('User')
+      const roles = rolesToStore(input, cur)
+      const centerId = input.centerId === undefined ? cur.centerId : input.centerId
+      // A center administrator without a center would see an empty workspace and could not be found on the center page.
+      if (roles.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
+      if (roles.includes('CENTER_MANAGER') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this manager works for')
+      const isActive = input.isActive ?? cur.isActive
+      // Losing a role or being blocked ends the user's open sessions immediately.
+      const lostAccess = (!isActive && cur.isActive) || cur.roles.some((r) => !roles.includes(r))
+      // isOwner is deliberately not written: it belongs to owner-setup.
+      const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive } })
       // The teacher studio works through the public teacher profile; grant one with the role so the studio is usable.
-      if (roles.includes('TEACHER') && !user.teacherProfile) {
+      if (roles.includes('TEACHER') && !cur.teacherProfile) {
         await tx.teacherProfile.create({
-          data: { tenantId, userId, slug: await this.uniqueSlug('teacher', tenantId, slugify(user.login || user.displayName)), name: user.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null } as Prisma.TeacherProfileUncheckedCreateInput,
+          data: { tenantId, userId, slug: await this.uniqueSlug('teacher', tenantId, slugify(cur.login || cur.displayName)), name: cur.displayName, title: {}, bio: {}, tagline: {}, expertise: [], centerId: null } as Prisma.TeacherProfileUncheckedCreateInput,
         })
       }
       // Removed roles or a block must not survive in open sessions until their refresh token expires.
       if (lostAccess) await tx.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: 'roles_changed' } })
-      return row
+      return { before: cur, updated: row }
     })
-    await this.audit.record({ action: 'user.roles', entityType: 'User', entityId: userId, before: { roles: user.roles, centerId: user.centerId, isActive: user.isActive, isOwner: user.isOwner }, after: { roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive, isOwner: updated.isOwner }, reason: input.reason })
+    // The request middleware caches roles and the active flag for a short while; the change applies to the next request.
+    forgetAccountState(userId)
+    await this.audit.record({ action: 'user.roles', entityType: 'User', entityId: userId, before: { roles: before.roles, centerId: before.centerId, isActive: before.isActive, isOwner: before.isOwner }, after: { roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive, isOwner: updated.isOwner }, reason: input.reason })
     return { id: updated.id, roles: updated.roles, centerId: updated.centerId, isActive: updated.isActive }
   }
 

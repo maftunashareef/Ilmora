@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { HttpStatus, Injectable } from '@nestjs/common'
 import type { MinistryAccountCreatedDto, MinistryAccountDto } from '@ilmora/shared'
 import argon2 from 'argon2'
 import { randomBytes } from 'node:crypto'
@@ -100,7 +100,7 @@ export class MinistryAccountsService {
     if (id === actor.id) throw AppError.forbidden('Change your own password in your profile')
     const user = await this.prisma.client.user.findFirst({ where: { id }, select: { id: true, isOwner: true, login: true } })
     if (!user) throw AppError.notFound('Account')
-    if (user.isOwner) throw AppError.forbidden('A Super Admin password is reset on the server')
+    if (user.isOwner) throw new AppError('owner_protected', 'A Super Admin password is reset on the server', HttpStatus.FORBIDDEN)
     if (!user.login) throw AppError.invalid('no_login', 'This account signs in by SMS only; it has no login to use a password with')
     const password = temporaryPassword()
     await this.prisma.client.user.update({ where: { id }, data: { passwordHash: await argon2.hash(password, PASSWORD_HASH), passwordIssuedAt: new Date() } })

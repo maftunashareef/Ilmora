@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { withCenterAdmin, withoutCenterAdmin } from './centerAdmins'
+import { hasServerKeptRole, siteRoles, withCenterAdmin, withoutCenterAdmin } from './centerAdmins'
 
 describe('center admin role changes keep the rest of the roles', () => {
   it('adds the role without dropping teacher, student or finance roles, in a stable order', () => {
@@ -17,5 +17,16 @@ describe('center admin role changes keep the rest of the roles', () => {
     expect(withoutCenterAdmin(['CENTER_ADMIN', 'TEACHER'])).toEqual(['TEACHER'])
     expect(withoutCenterAdmin(['CENTER_ADMIN'])).toEqual(['STUDENT'])
     expect(withoutCenterAdmin([])).toEqual(['STUDENT'])
+  })
+
+  it('keeps the center manager role and never invents a student role for a ministry or company account', () => {
+    expect(withCenterAdmin(['CENTER_MANAGER', 'STUDENT'])).toEqual(['CENTER_ADMIN', 'CENTER_MANAGER', 'STUDENT'])
+    expect(withoutCenterAdmin(['CENTER_ADMIN', 'CENTER_MANAGER'])).toEqual(['CENTER_MANAGER'])
+    expect(withoutCenterAdmin(['CENTER_ADMIN', 'COMPANY_ADMIN'])).toEqual([])
+    expect(siteRoles(['MINISTRY'])).toEqual([])
+    expect(hasServerKeptRole(['MINISTRY'])).toBe(true)
+    expect(hasServerKeptRole(['STUDENT'])).toBe(false)
+    // An owner is told by isOwner, not by the roles column.
+    expect(hasServerKeptRole(['PLATFORM_ADMIN'])).toBe(false)
   })
 })

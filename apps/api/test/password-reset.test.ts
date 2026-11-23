@@ -90,7 +90,7 @@ describe.skipIf(!DB_AVAILABLE)('Forgotten passwords', () => {
 
       await expect(admins.resetAccountPassword(s.tenantId, sa, owner.id)).rejects.toMatchObject({ code: 'forbidden' })
       const other = await s.account(`own2${Math.floor(Math.random() * 1e6)}`, { isOwner: true })
-      await expect(admins.resetAccountPassword(s.tenantId, sa, other.id)).rejects.toMatchObject({ code: 'forbidden' })
+      await expect(admins.resetAccountPassword(s.tenantId, sa, other.id)).rejects.toMatchObject({ code: 'owner_protected' })
       const smsOnly = await ctx.makeStudent(s.tenantId)
       await expect(admins.resetAccountPassword(s.tenantId, sa, smsOnly.id)).rejects.toMatchObject({ code: 'no_login' })
       await expect(admins.resetAccountPassword(s.tenantId, sa, 'nobody')).rejects.toMatchObject({ code: 'not_found' })

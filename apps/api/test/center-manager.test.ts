@@ -138,4 +138,21 @@ describe.skipIf(!DB_AVAILABLE)('Center manager on the database', () => {
     expect(await err(inTenant(b.t.tenantId, other, () => manage.groupDetail(b.t.tenantId, other, b.t.group.id)))).toMatch(/forbidden|own content/i)
     expect(await err(inTenant(b.t.tenantId, other, () => journal.journal(b.t.group.id, other, '2026-11')))).toMatch(/forbidden|manage/i)
   })
+
+  it('a privileged account that also has CENTER_MANAGER is not the center\'s to block, reset or list', async () => {
+    const s = await setup('mgr-priv')
+    const mk = (login: string, data: { roles: ('CENTER_MANAGER' | 'FINANCE_ADMIN' | 'PLATFORM_ADMIN' | 'MINISTRY' | 'COMPANY_ADMIN' | 'INSTITUTION_ADMIN')[]; isOwner?: boolean }) =>
+      TenantContext.system(() => ctx.prisma.client.user.create({ data: { tenantId: s.t.tenantId, login: `${login}-${s.t.tenantId}`.slice(0, 32), displayName: login, centerId: s.t.center.id, ...data } }))
+    const owner = await mk('own', { roles: ['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'CENTER_MANAGER'], isOwner: true })
+    const finance = await mk('fin', { roles: ['FINANCE_ADMIN', 'CENTER_MANAGER'] })
+    const ministry = await mk('min', { roles: ['MINISTRY', 'CENTER_MANAGER'] })
+    const company = await mk('com', { roles: ['COMPANY_ADMIN', 'CENTER_MANAGER'] })
+    const institution = await mk('ins', { roles: ['INSTITUTION_ADMIN', 'CENTER_MANAGER'] })
+    for (const u of [owner, finance, ministry, company, institution]) {
+      expect(await err(inTenant(s.t.tenantId, s.admin, () => managers.setActive(s.t.tenantId, s.admin, u.id, false)))).toBe('not_found')
+      expect(await err(inTenant(s.t.tenantId, s.admin, () => managers.resetPassword(s.t.tenantId, s.admin, u.id)))).toBe('not_found')
+      expect(await TenantContext.system(() => ctx.prisma.client.user.findUniqueOrThrow({ where: { id: u.id } }))).toMatchObject({ isActive: true, passwordHash: null })
+    }
+    expect((await inTenant(s.t.tenantId, s.admin, () => managers.list(s.t.tenantId, s.admin))).items).toEqual([])
+  })
 })
