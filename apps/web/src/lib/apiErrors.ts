@@ -197,7 +197,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   // Super Admin
   owner_protected: 'admin.accounts.ownerProtected',
   self_roles: 'admin.accounts.selfRoles',
-  last_owner: 'admin.accounts.lastOwner',
+  owner_server_only: 'admin.accounts.ownerServerOnly',
   center_admin_needs_center: 'admin.accounts.centerRequired',
   center_not_found: 'admin.accounts.centerNotFound',
   self_delete: 'apiError.forbidden',

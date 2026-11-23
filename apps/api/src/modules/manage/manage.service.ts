@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { HttpStatus, Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import type { z } from 'zod'
@@ -23,6 +23,8 @@ import { Role } from '../../generated/prisma/enums'
 
 /** What a finance admin reads in the audit log: the money records only. */
 const FINANCE_AUDIT_ENTITIES = ['Payment', 'Subscription', 'RefundRequest']
+/** The pair owner-setup stores for an owner; the site never adds or removes it. */
+const OWNER_ROLES: Role[] = ['PLATFORM_ADMIN', 'FINANCE_ADMIN']
 
 type Json = Prisma.InputJsonValue
 const up = <T extends string>(v: T) => v.toUpperCase()
@@ -1048,7 +1050,7 @@ export class ManageService {
       this.prisma.client.user.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, include: { teacherProfile: { select: { id: true } }, subscriptions: { where: { status: { in: ['ACTIVE', 'PENDING_PAYMENT', 'PAST_DUE'] } }, select: { id: true, status: true, packageId: true, startedAt: true, currentPeriodEnd: true }, take: 1 }, enrollments: { where: { status: 'ACTIVE' }, select: { groupId: true } } } }),
       this.prisma.client.user.count({ where }),
     ])
-    return { page, pageSize, total, items: rows.map((u) => ({ id: u.id, phoneMasked: u.phoneE164 ? u.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null, login: u.login, displayName: u.displayName, district: u.district, preferredLang: u.preferredLang, roles: u.roles, centerId: u.centerId, isActive: u.isActive, teacherProfileId: u.teacherProfile?.id ?? null, subscription: u.subscriptions[0] ?? null, groupIds: u.enrollments.map((e) => e.groupId), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt })) }
+    return { page, pageSize, total, items: rows.map((u) => ({ id: u.id, isOwner: u.isOwner, phoneMasked: u.phoneE164 ? u.phoneE164.replace(/(\+998\d{2})\d{5}(\d{2})/, '$1*****$2') : null, login: u.login, displayName: u.displayName, district: u.district, preferredLang: u.preferredLang, roles: u.roles, centerId: u.centerId, isActive: u.isActive, teacherProfileId: u.teacherProfile?.id ?? null, subscription: u.subscriptions[0] ?? null, groupIds: u.enrollments.map((e) => e.groupId), createdAt: u.createdAt, lastLoginAt: u.lastLoginAt })) }
   }
 
   /** Counts for the admin overview. Computed in the database so they stay correct past the paginated user list. */
@@ -1066,11 +1068,14 @@ export class ManageService {
     if (!user) throw AppError.notFound('User')
     // You cannot change your own account here: it prevents locking yourself out of Super Admin by mistake.
     if (user.id === actor.id) throw AppError.forbidden('You cannot change your own roles', { code: 'self_roles' })
-    const selected = [...new Set(input.roles)]
-    // Super Admin is the owner flag (isOwner), from which the access token derives PLATFORM_ADMIN + FINANCE_ADMIN.
-    // Granting it stores the privileged pair like owner-setup; revoking it drops PLATFORM_ADMIN from the column.
-    const wantsOwner = selected.includes('PLATFORM_ADMIN')
-    const roles = (wantsOwner ? [...new Set([...selected, 'FINANCE_ADMIN' as const])] : selected.filter((r) => r !== 'PLATFORM_ADMIN')) as typeof selected
+    // Super Admin is the owner flag (isOwner), from which the access token derives PLATFORM_ADMIN + FINANCE_ADMIN. It is
+    // granted and revoked only by the owner-setup command on the server, never here: the schema does not accept
+    // PLATFORM_ADMIN, and this check keeps any other caller of the service from slipping it through.
+    if ((input.roles as string[]).includes('PLATFORM_ADMIN')) throw new AppError('owner_server_only', 'Super Admin is granted and revoked only on the server (owner-setup)', HttpStatus.FORBIDDEN)
+    // An owner keeps the privileged pair whatever the request says, and cannot be blocked here: either would take
+    // Super Admin away. Their other roles (teacher, center…) may still be changed.
+    if (user.isOwner && input.isActive === false) throw new AppError('owner_protected', 'The owner account cannot be blocked here', HttpStatus.FORBIDDEN)
+    const roles = [...new Set([...input.roles, ...(user.isOwner ? OWNER_ROLES : [])])] as Role[]
     const centerId = input.centerId === undefined ? user.centerId : input.centerId
     if (centerId && centerId !== user.centerId) {
       const center = await this.prisma.client.center.findFirst({ where: { tenantId, id: centerId }, select: { id: true } })
@@ -1080,17 +1085,12 @@ export class ManageService {
     if (roles.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
     if (roles.includes('CENTER_MANAGER') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this manager works for')
     const isActive = input.isActive ?? user.isActive
-    const isOwner = wantsOwner
-    // Losing the owner flag, a role, or being blocked ends the user's open sessions immediately.
-    const lostAccess = (!isActive && user.isActive) || (user.isOwner && !isOwner) || user.roles.some((r) => !roles.includes(r as (typeof roles)[number]))
+    // Losing a role or being blocked ends the user's open sessions immediately.
+    const lostAccess = (!isActive && user.isActive) || user.roles.some((r) => !roles.includes(r))
 
     const updated = await this.prisma.client.$transaction(async (tx) => {
-      // Never remove the last Super Admin: the platform would have no owner and no one could grant it again from here.
-      if (user.isOwner && !isOwner) {
-        const owners = await tx.user.count({ where: { tenantId, isOwner: true } })
-        if (owners <= 1) throw AppError.invalid('last_owner', 'At least one Super Admin must remain')
-      }
-      const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive, isOwner } })
+      // isOwner is deliberately not written: it belongs to owner-setup.
+      const row = await tx.user.update({ where: { id: userId }, data: { roles, centerId, isActive } })
       // The teacher studio works through the public teacher profile; grant one with the role so the studio is usable.
       if (roles.includes('TEACHER') && !user.teacherProfile) {
         await tx.teacherProfile.create({

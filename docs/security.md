@@ -73,7 +73,7 @@
 | БЗ-3.6 | **Матрица прав (кто что может в админке) не должна отдаваться неавторизованным посетителям** | ❌ | Ж17 (часть 2): вынести права в отдельный эндпоинт только для вошедших пользователей |
 | БЗ-3.7 | Админ-API (`/v1/admin/*`) недоступно с публичного домена | ✅ | `infra/uzcloud/web/caddy/Caddyfile` — `respond 404` |
 | БЗ-3.8 | Админ-домен открыт только для IP-адресов офиса/владельца | ⚠️ 🔧 [до запуска] | `ADMIN_ALLOW_IPS` в `infra/uzcloud/web/.env`. Значение `0.0.0.0/0 ::/0` = открыт всем — заменить на реальные адреса |
-| БЗ-3.9 | Права Super Admin выдаёт только владелец; все изменения ролей пишутся в журнал аудита | ✅ | `manage.service.ts: setRoles`, `audit.service.ts` |
+| БЗ-3.9 | Права Super Admin (флаг владельца `isOwner` → PLATFORM_ADMIN + FINANCE_ADMIN) выдаются и снимаются **только на сервере** командой `owner-setup` (`--add`, `--remove`, `--replace`); через сайт и API их не выдать и не снять: `PUT /admin/users/:id/roles` не принимает PLATFORM_ADMIN, у владельца не снимает его пару ролей и не блокирует его. Все изменения ролей пишутся в журнал аудита | ✅ | `owner-setup.ts`, `manage.schemas.ts: UserRolesInput`, `manage.service.ts: setRoles`, `audit.service.ts`; тест `super-admin-server-only.test.ts` |
 | БЗ-3.10 | Регулярная проверка IDOR: для каждого эндпоинта с `:id` есть тест «чужой пользователь получает 404/403» | ⚠️ | Тесты есть для части модулей; дописать для attendance, notifications, payments (`GET /payments/:id`), uploads |
 
 ## 4. Платежи (Payme)
