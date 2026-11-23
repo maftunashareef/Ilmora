@@ -24,6 +24,13 @@ enum Role {
   PLATFORM_ADMIN
   FINANCE_ADMIN
   CENTER_ADMIN
+  /**
+   * Center manager (ТЗ 18.11, 4.2; security review 19.11 №15; Тимур, 23.11): the center's students, invitations, Excel
+   * export and import, reading groups and the journal — not courses and prices, money, staff or the center's settings.
+   * Appointed by the center's administrator; the Super Admin can too, as the support fallback. Belongs to one center
+   * (User.centerId), like CENTER_ADMIN.
+   */
+  CENTER_MANAGER
   TEACHER
   STUDENT
   /** Representative of a registry institution (User.institutionId). */
