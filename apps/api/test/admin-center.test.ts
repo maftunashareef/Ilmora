@@ -4,6 +4,7 @@ import { ROLES_KEY } from '../src/common/decorators'
 import type { RequestActor } from '../src/infra/tenancy/tenant-context'
 import { AttendanceController } from '../src/modules/attendance/attendance.controller'
 import { AdminCenterController, asCenter } from '../src/modules/center/admin-center.controller'
+import type { CenterManagersService } from '../src/modules/center/center-managers.service'
 import type { CenterStudentsService } from '../src/modules/center/center-students.service'
 import { CenterController } from '../src/modules/center/center.controller'
 import type { CenterService } from '../src/modules/center/center.service'
@@ -35,7 +36,9 @@ describe('Super Admin oversight of centers', () => {
     const manage = Object.fromEntries(['listCenterCourses', 'createCourse', 'updateCourse', 'deleteCourse', 'createGroup', 'myGroups', 'groupDetail', 'updateGroup', 'deleteGroup', 'generateGroupSessions'].map((n) => [n, spy(n)])) as unknown as ManageService
     // The center's table of students (ТЗ 2026-11-18): the same scoping, so its twin routes reach only the named center.
     const table = Object.fromEntries(['roster', 'exportFile', 'importCheck', 'importCommit', 'create', 'detail', 'update', 'invite'].map((n) => [n, spy(n)])) as unknown as CenterStudentsService
-    const ctl = new AdminCenterController(center, manage, table)
+    // Managers of the center (№15): the same scoping — the Super Admin's fallback reaches only the named center.
+    const managers = Object.fromEntries(['list', 'create', 'setActive', 'resetPassword'].map((n) => [n, spy(n)])) as unknown as CenterManagersService
+    const ctl = new AdminCenterController(center, manage, table, managers)
     await ctl.overview('t1', owner, 'ce-1')
     await ctl.attendance('t1', owner, 'ce-1', '2026-11-03')
     await ctl.students('t1', owner, 'ce-1')
@@ -46,7 +49,9 @@ describe('Super Admin oversight of centers', () => {
     await ctl.student('t1', owner, 'ce-1', 'cs-1')
     await ctl.inviteStudent('t1', owner, 'ce-1', 'cs-1')
     await ctl.importCheck('t1', owner, 'ce-1', { file: 'AA==' })
-    expect(calls.map((c) => c.name)).toEqual(['overview', 'attendanceDay', 'students', 'listCenterCourses', 'createCourse', 'generateGroupSessions', 'roster', 'detail', 'invite', 'importCheck'])
+    await ctl.createManager('t1', owner, 'ce-1', { login: 'manager1', name: 'Dilnoza' })
+    await ctl.disableManager('t1', owner, 'ce-1', 'u-m1')
+    expect(calls.map((c) => c.name)).toEqual(['overview', 'attendanceDay', 'students', 'listCenterCourses', 'createCourse', 'generateGroupSessions', 'roster', 'detail', 'invite', 'importCheck', 'create', 'setActive'])
     for (const { args } of calls) {
       expect(args[0]).toBe('t1')
       expect(args[1]).toEqual({ ...owner, centerId: 'ce-1' })

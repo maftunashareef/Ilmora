@@ -8,6 +8,8 @@ import type { RequestActor } from '../../infra/tenancy/tenant-context'
 import { CenterProfileInput, CenterTeacherInput, CenterTeacherPatch, CourseInput, CoursePatch, GroupInput, GroupPatch } from '../manage/manage.schemas'
 import { ManageService } from '../manage/manage.service'
 import { CenterStudentInput, CenterStudentPatch, RosterExportQuery, RosterImportBody, RosterQuery } from './center-students.schemas'
+import { CenterManagerInput } from './center-managers.schemas'
+import { CenterManagersService } from './center-managers.service'
 import { CenterStudentsService } from './center-students.service'
 import { GenerateDto, sendXlsx } from './center.controller'
 import { CenterService } from './center.service'
@@ -24,7 +26,7 @@ export const asCenter = (actor: RequestActor, centerId: string): RequestActor =>
 @Controller('admin/centers/:centerId')
 @Roles('PLATFORM_ADMIN')
 export class AdminCenterController {
-  constructor(private readonly center: CenterService, private readonly manage: ManageService, private readonly table: CenterStudentsService) {}
+  constructor(private readonly center: CenterService, private readonly manage: ManageService, private readonly table: CenterStudentsService, private readonly managersSvc: CenterManagersService) {}
 
   @Get('overview') overview(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string) { return this.center.overview(t, asCenter(a, c)) }
   @Patch('profile') profile(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Body(body(CenterProfileInput)) dto: CenterProfileInput) { return this.center.updateProfile(t, asCenter(a, c), dto) }
@@ -37,6 +39,17 @@ export class AdminCenterController {
   @Post('teachers') addTeacher(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Body(body(CenterTeacherInput)) dto: CenterTeacherInput) { return this.center.addTeacher(t, asCenter(a, c), dto) }
   @Patch('teachers/:id') updateTeacher(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string, @Body(body(CenterTeacherPatch)) dto: CenterTeacherPatch) { return this.center.updateTeacher(t, asCenter(a, c), id, dto) }
   @Delete('teachers/:id') removeTeacher(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string) { return this.center.removeTeacher(t, asCenter(a, c), id) }
+
+  // managers (№15): the support fallback — the same as the center's administrator does
+  @Get('managers') managers(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string) { return this.managersSvc.list(t, asCenter(a, c)) }
+  @Post('managers')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  createManager(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Body(body(CenterManagerInput)) dto: CenterManagerInput) { return this.managersSvc.create(t, asCenter(a, c), dto) }
+  @Post('managers/:id/disable') disableManager(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string) { return this.managersSvc.setActive(t, asCenter(a, c), id, false) }
+  @Post('managers/:id/enable') enableManager(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string) { return this.managersSvc.setActive(t, asCenter(a, c), id, true) }
+  @Post('managers/:id/reset-password')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  resetManagerPassword(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string, @Param('id') id: string) { return this.managersSvc.resetPassword(t, asCenter(a, c), id) }
 
   // students
   @Get('students') students(@CurrentTenantId() t: string, @CurrentActor() a: RequestActor, @Param('centerId') c: string) { return this.center.students(t, asCenter(a, c)) }

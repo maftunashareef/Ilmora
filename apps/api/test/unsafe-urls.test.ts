@@ -3,6 +3,7 @@ import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ZodType } from 'zod'
 import { ZodValidationPipe } from '../src/common/zod.pipe'
+import * as centerManagersSchemas from '../src/modules/center/center-managers.schemas'
 import * as centerStudentsSchemas from '../src/modules/center/center-students.schemas'
 import * as classroomSchemas from '../src/modules/classroom/classroom.schemas'
 import * as companiesSchemas from '../src/modules/companies/companies.schemas'
@@ -202,12 +203,12 @@ const OUT_OF_SCOPE: Record<string, string> = {
 }
 
 const MODULES: Record<string, Record<string, unknown>> = {
-  'center-students': centerStudentsSchemas, classroom: classroomSchemas, companies: companiesSchemas, 'contract-help': contractHelpSchemas, graduates: graduatesSchemas, institutions: institutionsSchemas, manage: manageSchemas,
+  'center-managers': centerManagersSchemas, 'center-students': centerStudentsSchemas, classroom: classroomSchemas, companies: companiesSchemas, 'contract-help': contractHelpSchemas, graduates: graduatesSchemas, institutions: institutionsSchemas, manage: manageSchemas,
   ministry: ministrySchemas, 'registry-admin': registryAdminSchemas, registry: registrySchemas, certificates: certificatesSchemas, students: studentsSchemas,
   training: trainingSchemas, vacancies: vacanciesSchemas, site: { SiteConfigSchema },
 }
 /** The schema files on disk, so a new `*.schemas.ts` must be imported above. */
-const SCHEMA_FILES = ['center-students', 'classroom', 'companies', 'contract-help', 'graduates', 'institutions', 'manage', 'ministry', 'registry-admin', 'registry', 'certificates', 'students', 'training', 'vacancies']
+const SCHEMA_FILES = ['center-managers', 'center-students', 'classroom', 'companies', 'contract-help', 'graduates', 'institutions', 'manage', 'ministry', 'registry-admin', 'registry', 'certificates', 'students', 'training', 'vacancies']
 
 type Def = Record<string, unknown> & { type: string }
 const defOf = (s: unknown): Def | undefined => (s as { _zod?: { def?: Def } } | null)?._zod?.def

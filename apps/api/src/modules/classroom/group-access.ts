@@ -16,10 +16,12 @@ export type GroupWithCourse = Awaited<ReturnType<typeof loadGroup>>
 /**
  * Who manages a group, the same rule as lessons and QR (AttendanceService): the teacher of the course, the center's own
  * administrator, the Super Admin. Another teacher of the same center is refused — the center is not enough.
+ * `centerManager`: a read the center's manager may do too (№15, 19.11: groups and the journal — to look at, not to mark).
  */
-export function assertManages(group: GroupWithCourse, actor: RequestActor, opts: { centerAdmin: boolean }) {
+export function assertManages(group: GroupWithCourse, actor: RequestActor, opts: { centerAdmin: boolean; centerManager?: boolean }) {
   if (actor.roles.includes('PLATFORM_ADMIN')) return
   if (opts.centerAdmin && actor.roles.includes('CENTER_ADMIN') && actor.centerId === group.course.centerId) return
+  if (opts.centerManager && actor.roles.includes('CENTER_MANAGER') && actor.centerId === group.course.centerId) return
   if (actor.teacherProfileId && actor.teacherProfileId === group.course.teacherId) return
   throw AppError.forbidden('You do not manage this group')
 }

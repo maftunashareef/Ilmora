@@ -28,8 +28,8 @@ import { unzip } from './support/xlsx'
  *     the real role guard lets in and the audit action it writes. A new one fails here until it is listed on purpose.
  *  2. Center exports (the center's students table, ТЗ 2026-11-18, 4.2): the center passes, the teacher, student and
  *     company get 403. No export/import route lets a teacher in, anywhere.
- *     There is no «center manager» role: Role has CENTER_ADMIN only and the owner is Center.ownerUserId. If a manager
- *     role appears, add it to CENTER_EXPORTERS below.
+ *     The center's manager (CENTER_MANAGER, №15 of 19.11; Тимур, 23.11) exports and imports the students table too —
+ *     listed in CENTER_EXPORTERS and on the /center/students routes below.
  *  3. Audit: each listed handler writes its action (structural check of the source text) and, with PostgreSQL, the
  *     ministry download leaves one row with the actor and the number of data rows.
  *  4. Formula safety of the writer for the remaining formula prefixes (@, -).
@@ -56,11 +56,11 @@ const CENTER_STUDENTS = ['modules/center/center-students.service.ts']
 const EXPORTS: Record<string, Export> = {
   'GET /ministry/export': { scope: 'ministry', allow: ['MINISTRY', 'PLATFORM_ADMIN'], audit: 'ministry.export' },
   // The center's students table (ТЗ 2026-11-18, 4.2): download (or the empty template), check of a file, writing a file.
-  'GET /center/students/export': { scope: 'center', allow: ['CENTER_ADMIN', 'PLATFORM_ADMIN'], audit: 'center.students_export', auditIn: CENTER_STUDENTS },
+  'GET /center/students/export': { scope: 'center', allow: ['CENTER_ADMIN', 'CENTER_MANAGER', 'PLATFORM_ADMIN'], audit: 'center.students_export', auditIn: CENTER_STUDENTS },
   'GET /admin/centers/:centerId/students/export': { scope: 'center', allow: ['PLATFORM_ADMIN'], audit: 'center.students_export', auditIn: CENTER_STUDENTS },
-  'POST /center/students/import/check': { scope: 'center', allow: ['CENTER_ADMIN', 'PLATFORM_ADMIN'], audit: 'center.students_import_check', auditIn: CENTER_STUDENTS },
+  'POST /center/students/import/check': { scope: 'center', allow: ['CENTER_ADMIN', 'CENTER_MANAGER', 'PLATFORM_ADMIN'], audit: 'center.students_import_check', auditIn: CENTER_STUDENTS },
   'POST /admin/centers/:centerId/students/import/check': { scope: 'center', allow: ['PLATFORM_ADMIN'], audit: 'center.students_import_check', auditIn: CENTER_STUDENTS },
-  'POST /center/students/import': { scope: 'center', allow: ['CENTER_ADMIN', 'PLATFORM_ADMIN'], audit: 'center.students_import', auditIn: CENTER_STUDENTS },
+  'POST /center/students/import': { scope: 'center', allow: ['CENTER_ADMIN', 'CENTER_MANAGER', 'PLATFORM_ADMIN'], audit: 'center.students_import', auditIn: CENTER_STUDENTS },
   'POST /admin/centers/:centerId/students/import': { scope: 'center', allow: ['PLATFORM_ADMIN'], audit: 'center.students_import', auditIn: CENTER_STUDENTS },
 }
 /** Routes the classifier catches that are not exports, with the reason. Empty today. */
@@ -75,7 +75,7 @@ const XLSX_WRITERS: Record<string, string[]> = {
   ],
 }
 
-const CENTER_EXPORTERS: Role[] = ['CENTER_ADMIN', 'PLATFORM_ADMIN']
+const CENTER_EXPORTERS: Role[] = ['CENTER_ADMIN', 'CENTER_MANAGER', 'PLATFORM_ADMIN']
 const NOT_CENTER: Role[] = ['TEACHER', 'STUDENT', 'COMPANY_ADMIN']
 const CENTER_CONTROLLERS = ['CenterController', 'AdminCenterController']
 

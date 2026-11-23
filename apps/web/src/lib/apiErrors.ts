@@ -34,6 +34,7 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   weak_password: 'auth.err.password',
   invalid_login: 'auth.err.login',
   login_taken: 'auth.err.loginTaken',
+  center_managers_limit: 'mgr.err.limit',
   phone_taken: 'auth.err.phoneTaken',
   invalid_role: 'auth.err.role',
   // The API's Google sign-in is still on the server until the API team removes it; the web signs in with a login and password only.

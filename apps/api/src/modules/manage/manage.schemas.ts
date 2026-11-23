@@ -196,7 +196,8 @@ export const PackagePatch = z.object({
 }).strict()
 export const UserRolesInput = z.object({
   /** PLATFORM_ADMIN (Super Admin) sets the owner flag; the route is open only to existing owners. */
-  roles: z.array(z.enum(['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'CENTER_ADMIN', 'TEACHER', 'STUDENT'])).min(1),
+  // CENTER_MANAGER (№15): the Super Admin's fallback; the center creates its managers itself (CenterManagersService).
+  roles: z.array(z.enum(['PLATFORM_ADMIN', 'FINANCE_ADMIN', 'CENTER_ADMIN', 'CENTER_MANAGER', 'TEACHER', 'STUDENT'])).min(1),
   centerId: id.nullable().optional(),
   isActive: z.boolean().optional(),
   reason: z.string().min(3).max(300),

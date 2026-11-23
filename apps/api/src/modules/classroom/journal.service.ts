@@ -30,7 +30,7 @@ export class JournalService {
 
   async journal(groupId: string, actor: RequestActor, month?: string) {
     const group = await loadGroup(this.prisma, groupId)
-    assertManages(group, actor, { centerAdmin: true })
+    assertManages(group, actor, { centerAdmin: true, centerManager: true })
     const today = todayLocal()
     const m = month ?? today.slice(0, 7)
     if (!MONTH.test(m)) throw AppError.invalid('validation_failed', 'month must be YYYY-MM')
