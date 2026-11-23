@@ -32,11 +32,7 @@ const KNOWN_GAP = new Set([
   'n6-my-detail', // №6: the student's detail returns every own hand-in
   'n7', // №7: grade() takes the latest hand-in at the moment of grading, not the one the teacher read
   'n7-schema', // №7: GradeInput (strict) cannot name the hand-in being graded
-  'n10-month', // №10: month 9999-12 → nextMonth «10000-01» → Invalid Date → PrismaClientValidationError → 500
-  'n10-mark-race', // №10: the second of two concurrent first marks of a cell throws raw P2002 from the service
-  'n10-left-mark', // №10: setMark does not look at the record's status: a LEFT student can be marked
-  'n10-patch-due', // №10: update() takes a past dueAt, create() refuses it
-  'n10-accept-race', // №10: acceptInvite racing on unique [centerId, userId] throws raw P2002 from the service
+  // №10 — closed 23.11 (Шерзод): a real month only, a clear 409 for the mark and acceptance races, no marks after LEFT, no past deadline on edit.
 ])
 /** Keys whose test needs no database (the others are checked in CI only). */
 const NO_DB_KEYS = ['n7-schema']

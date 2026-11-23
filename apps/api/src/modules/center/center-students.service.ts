@@ -486,16 +486,30 @@ export class CenterStudentsService {
     }
     if (body.studyYear !== undefined) study.studyYear = body.studyYear
     const now = new Date()
+    // The same account linked to this center meanwhile (another acceptance, the ILMORA list): a clear 409, not a 500 (№10).
+    try {
+      await this.claimInvite(tenantId, actor, record, existing, study, body.token, now)
+    } catch (err) {
+      if ((err as { code?: string }).code === 'P2002') throw AppError.conflict('invite_already_member', 'You are already on this center’s list')
+      throw err
+    }
+    return { ok: true as const, centerName: record.center.name }
+  }
+
+  /** The record is linked to the account and the link stops working, with the audit row, in one transaction. */
+  private async claimInvite(
+    tenantId: string, actor: RequestActor, record: { id: string; centerId: string }, existing: { id: string } | null,
+    study: Prisma.CenterStudentUncheckedUpdateInput, token: string, now: Date,
+  ) {
     await this.prisma.tx(async (tx) => {
       if (existing) await tx.centerStudent.delete({ where: { id: existing.id } })
       const claimed = await tx.centerStudent.updateMany({
-        where: { id: record.id, status: { not: 'LEFT' }, inviteTokenHash: sha256(body.token), inviteAcceptedAt: null, inviteExpiresAt: { gt: now } },
+        where: { id: record.id, status: { not: 'LEFT' }, inviteTokenHash: sha256(token), inviteAcceptedAt: null, inviteExpiresAt: { gt: now } },
         data: { ...study, userId: actor.id, inviteAcceptedAt: now, inviteTokenHash: null },
       })
       if (claimed.count !== 1) throw AppError.invalid('invite_invalid', 'The invitation link does not work')
       await this.audit.record({ tx, action: 'center.student_invite_accept', entityType: 'CenterStudent', entityId: record.id, after: { centerId: record.centerId, userId: actor.id, replaced: existing?.id ?? null } })
     })
-    return { ok: true as const, centerName: record.center.name }
   }
 
   /** The student's own records at centers (their cabinet): where they study, the groups, and «leave». */

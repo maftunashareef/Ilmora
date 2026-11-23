@@ -216,6 +216,8 @@ export const API_ERROR_KEYS: Record<string, TKey> = {
   import_too_many_rows: 'cs.err.tooManyRows',
   import_has_errors: 'cs.err.importHasErrors',
   session_not_yet: 'journal.notYet',
+  journal_mark_conflict: 'journal.err.markConflict',
+  student_left: 'journal.err.studentLeft',
   qr_read_only: 'journal.err.qrReadOnly',
   // the price calculator (ТЗ 2026-11-18, 9)
   course_price_invalid: 'calc.err.price',
