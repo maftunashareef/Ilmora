@@ -149,7 +149,8 @@ export const teacherHomeworkApi = {
   remove: (id: string) => api(`/teacher/homework/${id}`, { method: 'DELETE' }),
   detail: (id: string) => api<TeacherHomeworkDetail>(`/teacher/homework/${id}`),
   extend: (id: string, studentId: string, dueAt: string) => api(`/teacher/homework/${id}/extensions`, { method: 'POST', body: { studentId, dueAt } }),
-  grade: (id: string, studentId: string, grade: number, comment: string | null) => api<Submission>(`/teacher/homework/${id}/grades`, { method: 'POST', body: { studentId, grade, comment } }),
+  /** submissionId: the hand-in the teacher has on screen — the grade goes to it, not to a newer one (проверка 20.11, №7). */
+  grade: (id: string, studentId: string, submissionId: string, grade: number, comment: string | null) => api<Submission>(`/teacher/homework/${id}/grades`, { method: 'POST', body: { studentId, submissionId, grade, comment } }),
 }
 export const studentHomeworkApi = {
   list: () => api<StudentHomework[]>('/students/me/homework'),

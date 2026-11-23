@@ -136,7 +136,7 @@ function HomeworkReview({ id, onClose }: { id: string; onClose: () => void }) {
                   <div className="mt-3 grid gap-3 sm:grid-cols-[8rem_1fr_auto]">
                     <select aria-label={t('hw.grade')} disabled={!st.last} value={g.grade} onChange={(e) => setGrade({ ...grade, [st.id]: { ...g, grade: Number(e.target.value) } })} className="rounded-control border border-charcoal/15 px-3 py-2 text-sm">{HOMEWORK_GRADES.map((n) => <option key={n} value={n}>{n}</option>)}</select>
                     <Input aria-label={t('hw.comment')} placeholder={t('hw.comment')} disabled={!st.last} maxLength={2000} value={g.comment} onChange={(e) => setGrade({ ...grade, [st.id]: { ...g, comment: e.target.value } })} />
-                    <Button size="sm" disabled={!st.last} onClick={() => void act(() => teacherHomeworkApi.grade(id, st.id, g.grade, g.comment.trim() || null))}>{t('hw.saveGrade')}</Button>
+                    <Button size="sm" disabled={!st.last} onClick={() => { if (st.last) void act(() => teacherHomeworkApi.grade(id, st.id, st.last!.id, g.grade, g.comment.trim() || null)) }}>{t('hw.saveGrade')}</Button>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Input type="datetime-local" aria-label={t('hw.extend')} value={extend[st.id] ?? ''} onChange={(e) => setExtend({ ...extend, [st.id]: e.target.value })} className="w-56" />

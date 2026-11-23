@@ -190,7 +190,11 @@ export class HomeworkService {
     const { hw, group } = await this.ownHomework(id, actor)
     assertGroupWritable(group, actor)
     await this.assertInRoster(group.id, group.course.centerId, input.studentId)
-    const last = await this.db.homeworkSubmission.findFirst({ where: { homeworkId: hw.id, studentId: input.studentId }, orderBy: { submittedAt: 'desc' } })
+    // The hand-in the teacher read (№7); without it — the latest, as before. Another student's or homework's id is not found.
+    const last = input.submissionId
+      ? await this.db.homeworkSubmission.findFirst({ where: { id: input.submissionId, homeworkId: hw.id, studentId: input.studentId } })
+      : await this.db.homeworkSubmission.findFirst({ where: { homeworkId: hw.id, studentId: input.studentId }, orderBy: { submittedAt: 'desc' } })
+    if (!last && input.submissionId) throw AppError.notFound('Submission')
     if (!last) throw AppError.invalid('homework_nothing_to_grade', 'The student has not handed it in yet')
     const updated = await this.prisma.tx(async (tx) => {
       const row = await tx.homeworkSubmission.update({ where: { id: last.id }, data: { grade: input.grade, comment: input.comment?.trim() || null, gradedAt: new Date(), gradedById: actor.id } })

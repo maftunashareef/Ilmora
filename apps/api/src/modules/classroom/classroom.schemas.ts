@@ -32,7 +32,8 @@ export const HomeworkListQuery = z.object({ groupId: id }).strict()
 
 export const ExtensionInput = z.object({ studentId: id, dueAt: instant }).strict()
 export type ExtensionInput = z.infer<typeof ExtensionInput>
-export const GradeInput = z.object({ studentId: id, grade: z.number().int().min(1).max(5), comment: z.string().trim().max(HOMEWORK_COMMENT_MAX).nullable().optional() }).strict()
+// submissionId: the hand-in the teacher read (проверка 20.11, №7) — the grade lands on it, not on one handed in meanwhile.
+export const GradeInput = z.object({ studentId: id, submissionId: id.optional(), grade: z.number().int().min(1).max(5), comment: z.string().trim().max(HOMEWORK_COMMENT_MAX).nullable().optional() }).strict()
 export type GradeInput = z.infer<typeof GradeInput>
 export const SubmissionInput = z.object({ text: z.string().max(HOMEWORK_TEXT_MAX).nullable().optional(), link: link.nullable().optional() }).strict()
 export type SubmissionInput = z.infer<typeof SubmissionInput>

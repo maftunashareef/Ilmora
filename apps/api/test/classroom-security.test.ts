@@ -30,8 +30,7 @@ const KNOWN_GAP = new Set([
   'n6-cap', // №6: every hand-in is a new row, no cap per homework (homework.service submit)
   'n6-detail', // №6: the teacher's detail returns every hand-in of every student
   'n6-my-detail', // №6: the student's detail returns every own hand-in
-  'n7', // №7: grade() takes the latest hand-in at the moment of grading, not the one the teacher read
-  'n7-schema', // №7: GradeInput (strict) cannot name the hand-in being graded
+  // №7 — closed 23.11 (Шерзод): the grade names the hand-in (submissionId), the service grades that one.
   'n10-month', // №10: month 9999-12 → nextMonth «10000-01» → Invalid Date → PrismaClientValidationError → 500
   'n10-mark-race', // №10: the second of two concurrent first marks of a cell throws raw P2002 from the service
   'n10-left-mark', // №10: setMark does not look at the record's status: a LEFT student can be marked
