@@ -93,7 +93,7 @@ function FinancePayments() {
       <Notice tone="info" className="mt-3 text-xs">{t('finance.note')}</Notice>
       {rows.length === 0 ? <div className="mt-4"><EmptyState title={t('finance.empty')} /></div> : (
         <div className="card mt-4 overflow-x-auto p-0">
-          <table className="w-full min-w-[960px] text-sm">
+          <table className="table-cards w-full min-w-[960px] text-sm">
             <thead className="bg-ivory/70 text-left text-[11px] uppercase tracking-wider text-charcoal/50">
               <tr><th className="px-4 py-3">{t('finance.provider')}</th><th className="px-3 py-3">{t('finance.providerId')}</th><th className="px-3 py-3">{t('finance.internalId')}</th><th className="px-3 py-3">{t('finance.providerState')}</th><th className="px-3 py-3">{t('finance.paymentState')}</th><th className="px-3 py-3">{t('finance.ledger')}</th><th className="px-3 py-3 text-right">{t('finance.amount')}</th><th className="px-3 py-3">{t('finance.time')}</th><th className="px-3 py-3">{t('finance.discrepancy')}</th><th className="px-3 py-3"></th></tr>
             </thead>

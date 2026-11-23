@@ -373,7 +373,7 @@ function InstitutionFacts({ review }: { review: InstitutionReviewDto }) {
         <section className="mt-6">
           <h3 className="mb-2 font-body text-xs font-semibold uppercase tracking-wider text-charcoal/50">{t('rev.directions')} · {p.totals.directions} · {t('rev.students')}: {p.totals.students}</h3>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[32rem] text-left text-sm">
+            <table className="table-cards w-full min-w-[32rem] text-left text-sm">
               <thead className="text-xs text-charcoal/50"><tr><th className="py-1.5 pr-3 font-medium">{t('q.direction')}</th><th className="py-1.5 pr-3 font-medium">{t('dir.industry')}</th><th className="py-1.5 pr-3 font-medium">{t('rev.department')}</th><th className="py-1.5 text-right font-medium">{t('rev.students')}</th></tr></thead>
               <tbody>
                 {p.directions.map((d) => (
@@ -444,7 +444,7 @@ function ChangesTable({ rows }: { rows: { key: ChangeKey; was: ReactNode; become
       <h3 className="mb-1 flex items-center gap-1.5 font-body text-sm font-semibold text-charcoal"><Icon name="edit" className="h-4 w-4" />{t('rev.changes')}</h3>
       <p className="mb-2 text-xs leading-relaxed text-charcoal/65">{t('rev.changesNote')}</p>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[28rem] text-left text-sm">
+        <table className="table-cards w-full min-w-[28rem] text-left text-sm">
           <thead className="text-xs text-charcoal/50"><tr><th className="py-1 pr-3 font-medium">{t('rev.field')}</th><th className="py-1 pr-3 font-medium">{t('rev.was')}</th><th className="py-1 font-medium">{t('rev.becomes')}</th></tr></thead>
           <tbody>
             {rows.map((r) => (

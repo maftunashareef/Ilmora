@@ -48,7 +48,7 @@ export function AdminContent() {
         <span className="text-xs text-charcoal/50">{list.length}</span>
       </div>
       <div className="card overflow-x-auto p-0">
-        <table className="w-full text-sm">
+        <table className="table-cards w-full text-sm">
           <thead className="bg-ivory/70 text-left text-[11px] uppercase tracking-wider text-charcoal/50">
             <tr><th className="px-4 py-3">{t('common.title')}</th><th className="px-3 py-3">{t('common.type')}</th><th className="px-3 py-3">{t('admin.content.owner')}</th><th className="px-3 py-3">{t('common.status')}</th><th className="px-3 py-3">{t('common.visibility')}</th><th className="px-3 py-3">{t('vis.audience')}</th><th className="px-3 py-3">{t('common.featured')}</th></tr>
           </thead>

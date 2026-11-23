@@ -326,3 +326,40 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
     z-index: 10;
   }
 }
+
+/* Tables marked `table-cards`: on phones every row is a card, every cell a "column title — value" line.
+   Labels come from the table head (TableCardLabels). The first cell is the card's title. */
+@media (max-width: 767px) {
+  table.table-cards { display: block; width: 100%; min-width: 0 !important; }
+  table.table-cards thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  table.table-cards tbody, table.table-cards tfoot { display: block; }
+  table.table-cards tbody + tbody, table.table-cards tfoot { margin-top: 0.75rem; }
+  table.table-cards tr {
+    display: block;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--c-charcoal) 10%, transparent);
+    border-radius: 0.875rem;
+    background: var(--c-white, #fff);
+  }
+  table.table-cards tr:last-child { margin-bottom: 0; }
+  table.table-cards td, table.table-cards th {
+    display: flow-root;
+    min-width: 0 !important; padding: 0.3rem 0 !important; border: 0; text-align: right; white-space: normal;
+  }
+  /* The label floats left; the value keeps its own inline layout and sits on the right. */
+  table.table-cards td::before, table.table-cards th::before {
+    content: attr(data-label);
+    float: left; max-width: 45%; margin-right: 0.75rem; padding-top: 0.15em;
+    text-align: left; font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
+    color: color-mix(in srgb, var(--c-charcoal) 55%, transparent);
+  }
+  table.table-cards td[data-label='']::before, table.table-cards th[data-label='']::before,
+  table.table-cards td:not([data-label])::before { content: none; }
+  /* The first cell names the row: full width, no label. */
+  table.table-cards tr > :first-child { display: block; padding-top: 0 !important; text-align: left; font-weight: 600; }
+  table.table-cards tr > :first-child::before { content: none; }
+}
+

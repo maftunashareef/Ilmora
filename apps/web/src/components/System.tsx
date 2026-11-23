@@ -79,6 +79,38 @@ export function RevealManager() {
   return null
 }
 
+/**
+ * Tables marked `table-cards` turn into one card per row on phones (CSS in globals.css). Each cell gets its
+ * column title from the table head as `data-label`, so the card can show "Title: value" — kept in sync as rows change.
+ */
+export function TableCardLabels() {
+  useEffect(() => {
+    const label = (table: HTMLTableElement) => {
+      const head = table.tHead?.rows[table.tHead.rows.length - 1]
+      if (!head) return
+      const titles: string[] = []
+      for (const th of Array.from(head.cells)) for (let i = 0; i < th.colSpan; i++) titles.push((th.textContent ?? '').trim())
+      for (const body of [...Array.from(table.tBodies), table.tFoot].filter(Boolean) as HTMLTableSectionElement[]) {
+        for (const row of Array.from(body.rows)) {
+          let col = 0
+          for (const cell of Array.from(row.cells)) {
+            const title = titles[col] ?? ''
+            if (cell.getAttribute('data-label') !== title) cell.setAttribute('data-label', title)
+            col += cell.colSpan
+          }
+        }
+      }
+    }
+    const all = () => document.querySelectorAll<HTMLTableElement>('table.table-cards').forEach(label)
+    all()
+    let raf = 0
+    const mo = new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; all() }) })
+    mo.observe(document.body, { childList: true, subtree: true, characterData: true })
+    return () => { mo.disconnect(); cancelAnimationFrame(raf) }
+  }, [])
+  return null
+}
+
 export function Toasts() {
   const toasts = useStore((s) => s.toasts)
   const dismiss = useStore((s) => s.dismissToast)

@@ -135,7 +135,7 @@ export function RefundDialog({ kind, onClose, onFiled }: { kind: 'PERIOD' | 'LES
             <>
               {current.q.requests.length > 0 && (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[28rem] text-sm">
+                  <table className="table-cards w-full min-w-[28rem] text-sm">
                     <thead><tr className="text-left text-xs text-charcoal/55">
                       <th scope="col" className="pb-2 font-medium">{t('refund.course')}</th>
                       <th scope="col" className="pb-2 text-right font-medium">{t('refund.price')}</th>
