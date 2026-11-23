@@ -7,7 +7,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: L
   return pageMetadata({ locale, path: '/faq', title: staticTitle(locale, '/faq'), description: translate(locale, 'meta.description') })
 }
 
-import { FaqPage } from '@/views/next/clients'
+import { FaqPage } from '@/views/public/Faq'
 
 export default function Page() {
   return <FaqPage  />

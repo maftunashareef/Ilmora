@@ -327,6 +327,12 @@ html.reveal-on .reveal-stagger > .reveal:nth-child(n + 9) { --reveal-delay: 0.64
   }
 }
 
+/* Long template pages: sections below the first screen are styled and laid out only when they come near. */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
+}
+
 /* Tables marked `table-cards`: on phones every row is a card, every cell a "column title — value" line.
    Labels come from the table head (TableCardLabels). The first cell is the card's title. */
 @media (max-width: 767px) {

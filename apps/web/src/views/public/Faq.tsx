@@ -1,3 +1,4 @@
+'use client'
 import { Notice, PageTitle } from '../../components/ui'
 import { useT } from '../../i18n/useT'
 import { useStore } from '../../store/useStore'

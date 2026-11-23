@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { pickDisplay, type Lang } from '@ilmora/shared'
 import { JsonLd } from '@/components/JsonLd'
-import { CourseDetailPage } from '@/views/next/clients'
+import { CourseDetailPage } from '@/views/public/CourseDetail'
 import { courseJsonLd, pageMetadata } from '@/lib/seo'
 import { getCatalog, getCourse } from '@/lib/server-api'
 

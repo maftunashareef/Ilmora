@@ -1,3 +1,4 @@
+'use client'
 import { isOnlineCourse, isSafeExternalUrl, MAX_CART_COURSES } from '@ilmora/shared'
 import { Link } from '@/lib/router'
 import { useNavigate, useParams } from '@/lib/routerHooks'

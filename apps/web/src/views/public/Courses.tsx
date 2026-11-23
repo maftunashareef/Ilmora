@@ -1,3 +1,4 @@
+'use client'
 import { activePercent, filterCourses, finalPriceSom, formatCounts, formatFilterFromParam, formatFilterToParam, ONLINE_PROVIDER_SLUG, type FormatFilter } from '@ilmora/shared'
 import { useMemo, useState } from 'react'
 import { Link } from '@/lib/router'

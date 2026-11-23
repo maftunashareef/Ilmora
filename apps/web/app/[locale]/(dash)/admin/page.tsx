@@ -1,5 +1,5 @@
 'use client'
-import { AdminOverview } from '@/views/next/clients'
+import { AdminOverview } from '@/views/admin/AdminOverview'
 
 export default function Page() {
   return <AdminOverview />

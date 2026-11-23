@@ -1,5 +1,5 @@
 'use client'
-import { CompanyStudents } from '@/views/next/clients'
+import { CompanyStudents } from '@/views/company/CompanyStudents'
 
 export default function Page() {
   return <CompanyStudents />

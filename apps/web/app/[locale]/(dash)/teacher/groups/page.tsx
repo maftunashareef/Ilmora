@@ -1,5 +1,5 @@
 'use client'
-import { StudioGroups } from '@/views/next/clients'
+import { StudioGroups } from '@/views/teacher/StudioGroups'
 
 export default function Page() {
   return <StudioGroups />

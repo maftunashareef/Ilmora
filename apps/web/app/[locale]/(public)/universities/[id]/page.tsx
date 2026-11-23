@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   return pageMetadata({ locale, path: `/universities/${university.id}`, title: `${universityName(university, locale)} — ${translate(locale, 'uni.page.title')}`, description: translate(locale, 'uni.page.meta') })
 }
 
-import { UniversityPage } from '@/views/next/clients'
+import { UniversityPage } from '@/views/public/Universities'
 
 export default async function Page({ params }: { params: Params }) {
   const { id } = await params

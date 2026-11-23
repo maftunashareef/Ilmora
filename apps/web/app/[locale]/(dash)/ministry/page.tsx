@@ -1,5 +1,5 @@
 'use client'
-import { MinistryFigures } from '@/views/next/clients'
+import { MinistryFigures } from '@/views/ministry/MinistryFigures'
 
 export default function Page() {
   return <MinistryFigures />

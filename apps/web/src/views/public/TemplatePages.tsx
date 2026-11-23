@@ -1,3 +1,4 @@
+'use client'
 import { useState } from 'react'
 import { Link } from '@/lib/router'
 import { useSearchParams } from '@/lib/routerHooks'
@@ -33,7 +34,13 @@ export function TemplatePage({ page }: { page: PageKey }) {
   const sections = useStore((s) => s.site.pages[page])
   return (
     <div>
-      {sections.filter((s) => s.enabled).map((s) => <SectionRenderer key={s.id} section={s} />)}
+      {sections.filter((s) => s.enabled).map((s, i) =>
+        // Below the first screen the browser skips styling and layout of a section until it nears the viewport —
+        // on a phone that is most of the first-load work of a long page. Not for the sticky scroll-video story.
+        i === 0 || s.type === 'hero' || s.type === 'furnitureStory'
+          ? <SectionRenderer key={s.id} section={s} />
+          : <div key={s.id} className="cv-auto"><SectionRenderer section={s} /></div>,
+      )}
     </div>
   )
 }

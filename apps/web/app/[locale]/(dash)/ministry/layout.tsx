@@ -1,6 +1,8 @@
 'use client'
 import type { ReactNode } from 'react'
-import { MinistryLayout, OutletProvider, RequireRole } from '@/views/next/clients'
+import { RequireRole } from '@/components/RequireRole'
+import { OutletProvider } from '@/lib/router'
+import { MinistryLayout } from '@/views/ministry/MinistryLayout'
 
 export default function Layout({ children }: { children: ReactNode }) {
   return (

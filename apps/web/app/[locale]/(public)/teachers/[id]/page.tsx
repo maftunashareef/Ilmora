@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { pickDisplay, type Lang } from '@ilmora/shared'
 import { JsonLd } from '@/components/JsonLd'
-import { TeacherChannelPage } from '@/views/next/clients'
+import { TeacherChannelPage } from '@/views/public/TeacherChannel'
 import { pageMetadata, teacherJsonLd } from '@/lib/seo'
 import { getCatalog, getTeacher } from '@/lib/server-api'
 

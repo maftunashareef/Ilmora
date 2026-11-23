@@ -1,5 +1,5 @@
 'use client'
-import { StudentCenters } from '@/views/next/clients'
+import { StudentCenters } from '@/views/student/StudentCenters'
 
 export default function Page() {
   return <StudentCenters />

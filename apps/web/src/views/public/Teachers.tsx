@@ -1,3 +1,4 @@
+'use client'
 import { countLabel, foldForSearch, ilmoraUz, NOUNS } from '@ilmora/shared'
 import { useMemo, useState } from 'react'
 import { Link } from '@/lib/router'
