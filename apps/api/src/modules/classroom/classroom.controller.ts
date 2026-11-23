@@ -19,7 +19,8 @@ const body = <T>(schema: z.ZodType<T>) => new ZodValidationPipe(schema)
 export class JournalController {
   constructor(private readonly journal: JournalService) {}
 
-  @Get() get(@Param('id') id: string, @CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(JournalQuery)) q: z.infer<typeof JournalQuery>) { return this.journal.journal(id, a, q.month) }
+  // The center's manager reads the journal; marks stay with the teacher and the center's administrator (№15, 19.11).
+  @Get() @Roles('TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER') get(@Param('id') id: string, @CurrentActor() a: RequestActor, @Query(new ZodValidationPipe(JournalQuery)) q: z.infer<typeof JournalQuery>) { return this.journal.journal(id, a, q.month) }
 
   @Put('marks')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })

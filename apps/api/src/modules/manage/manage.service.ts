@@ -48,6 +48,8 @@ export class ManageService {
 
   private isAdmin(actor: RequestActor) { return actor.roles.includes('PLATFORM_ADMIN') }
   private isCenterAdmin(actor: RequestActor) { return actor.roles.includes('CENTER_ADMIN') }
+  /** The center's manager (№15, 19.11): reads the center's groups — never courses, prices, staff or settings. */
+  private isCenterManager(actor: RequestActor) { return actor.roles.includes('CENTER_MANAGER') && !!actor.centerId }
   /** A center administrator acting on their own center's course. */
   private isCenterOwner(actor: RequestActor, centerId: string | null | undefined) { return this.isCenterAdmin(actor) && !!actor.centerId && actor.centerId === centerId }
   /** Permission switches that apply to this actor for a course of `centerId`: Super Admin and the course's center bypass the teacher switches. */
@@ -551,7 +553,7 @@ export class ManageService {
   }
 
   async myGroups(tenantId: string, actor: RequestActor) {
-    const where = this.isAdmin(actor) ? { tenantId } : this.isCenterAdmin(actor) ? { tenantId, course: { centerId: actor.centerId ?? '__none__' } } : { tenantId, course: { teacherId: actor.teacherProfileId ?? '__none__' } }
+    const where = this.isAdmin(actor) ? { tenantId } : this.isCenterAdmin(actor) || this.isCenterManager(actor) ? { tenantId, course: { centerId: actor.centerId ?? '__none__' } } : { tenantId, course: { teacherId: actor.teacherProfileId ?? '__none__' } }
     const groups = await this.prisma.client.group.findMany({ where, include: { course: { select: { id: true, title: true, teacherId: true, centerId: true } } }, orderBy: { createdAt: 'asc' } })
     const counts = await this.prisma.client.enrollment.groupBy({ by: ['groupId'], where: { tenantId, groupId: { in: groups.map((g) => g.id) }, status: 'ACTIVE' }, _count: { _all: true } })
     const map = new Map(counts.map((c) => [c.groupId, c._count._all]))
@@ -561,7 +563,8 @@ export class ManageService {
   async groupDetail(tenantId: string, actor: RequestActor, id: string) {
     const group = await this.prisma.client.group.findFirst({ where: { tenantId, id }, include: { course: { include: { center: { select: { id: true, name: true } }, teacher: { select: { id: true, name: true } } } } } })
     if (!group) throw AppError.notFound('Group')
-    this.assertTeacherScope(actor, group.course)
+    // Read only: the center's manager sees the center's own groups (№15); everyone else as for writes.
+    if (!(this.isCenterManager(actor) && group.course.centerId === actor.centerId)) this.assertTeacherScope(actor, group.course)
     const [roster, sessions] = await Promise.all([
       this.prisma.client.enrollment.findMany({ where: { tenantId, groupId: id, status: 'ACTIVE' }, include: { student: { select: { id: true, displayName: true, district: true } }, subscription: { select: { packageId: true, startedAt: true, package: { select: { name: true } } } } }, orderBy: { enrolledAt: 'asc' } }),
       this.prisma.client.lessonSession.findMany({ where: { tenantId, groupId: id }, orderBy: { startsAt: 'asc' }, include: { attendance: { select: { studentId: true, status: true, checkedInAt: true, method: true } } } }),
@@ -1075,6 +1078,7 @@ export class ManageService {
     }
     // A center administrator without a center would see an empty workspace and could not be found on the center page.
     if (roles.includes('CENTER_ADMIN') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this administrator manages')
+    if (roles.includes('CENTER_MANAGER') && !centerId) throw AppError.invalid('center_admin_needs_center', 'Choose the center this manager works for')
     const isActive = input.isActive ?? user.isActive
     const isOwner = wantsOwner
     // Losing the owner flag, a role, or being blocked ends the user's open sessions immediately.

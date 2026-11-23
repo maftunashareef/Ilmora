@@ -10,6 +10,7 @@ import { apiErrorText } from '../../lib/apiErrors'
 import { formatDate } from '../../lib/format'
 import { useStore } from '../../store/useStore'
 import { useCenterScope, type CenterOverview, type CenterProfile, type CenterQr } from './centerApi'
+import { CenterManagersCard } from './CenterManagers'
 import { CenterStatusNotice } from './CenterOverview'
 
 type Draft = { name: string; kind: CenterKind; district: CenterProfile['district']; description: CenterProfile['description']; address: string; phone: string; lat: string; lng: string; geoRadiusM: string; checkInBeforeMin: string; absenceAfterMin: string }
@@ -100,6 +101,8 @@ export function CenterSettings() {
             <Notice tone="info" className="text-[12px]">{t('attend.honest')}</Notice>
             <div className="flex justify-end"><Button disabled={busy || locked} onClick={() => void save()}><Icon name="check" className="h-4 w-4" />{t('common.save')}</Button></div>
           </Card>
+          {/* Managers of the center (№15): new accounts made here; the Super Admin sees this card on the center's page. */}
+          <CenterManagersCard disabled={locked} />
           {/* The center administrator's own account password (not the center's). */}
           <PasswordCard />
         </div>

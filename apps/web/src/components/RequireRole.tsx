@@ -23,7 +23,7 @@ export function RequireRole({ role, children }: { role: Role | Role[]; children:
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const wanted = useMemo(() => (Array.isArray(role) ? role : [role]), [role])
-  const allowed = wanted.includes(current) || roles.includes('PLATFORM_ADMIN') || (wanted.includes('teacher') && roles.includes('TEACHER')) || (wanted.includes('student') && roles.includes('STUDENT')) || (wanted.includes('center') && roles.includes('CENTER_ADMIN')) || (wanted.includes('admin') && roles.includes('FINANCE_ADMIN')) || (wanted.includes('ministry') && roles.includes('MINISTRY')) || (wanted.includes('institution') && roles.includes('INSTITUTION_ADMIN')) || (wanted.includes('company') && roles.includes('COMPANY_ADMIN'))
+  const allowed = wanted.includes(current) || roles.includes('PLATFORM_ADMIN') || (wanted.includes('teacher') && roles.includes('TEACHER')) || (wanted.includes('student') && roles.includes('STUDENT')) || (wanted.includes('center') && (roles.includes('CENTER_ADMIN') || roles.includes('CENTER_MANAGER'))) || (wanted.includes('admin') && roles.includes('FINANCE_ADMIN')) || (wanted.includes('ministry') && roles.includes('MINISTRY')) || (wanted.includes('institution') && roles.includes('INSTITUTION_ADMIN')) || (wanted.includes('company') && roles.includes('COMPANY_ADMIN'))
 
   useEffect(() => {
     if (status === 'anonymous') navigate(`/login?next=${encodeURIComponent(pathname)}`, { replace: true })

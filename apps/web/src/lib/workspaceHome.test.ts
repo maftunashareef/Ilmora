@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canOpen, homeFor, workspaceOf } from './workspaceHome'
+import { canOpen, homeFor, isCenterManagerOnly, managerOpens, workspaceOf } from './workspaceHome'
 
 describe('homeFor', () => {
   it('sends every role to its own workspace', () => {
@@ -55,5 +55,20 @@ describe('canOpen', () => {
     expect(canOpen(['FINANCE_ADMIN'], '/admin/finance?tab=refunds&request=r1')).toBe(true)
     expect(canOpen(['FINANCE_ADMIN'], '/admin?x=/admin/finance')).toBe(false)
     expect(canOpen(['PLATFORM_ADMIN'], '/admin')).toBe(true)
+  })
+})
+
+describe('the center manager (№15, 19.11): students and the journal only', () => {
+  it('lands on the students table, opens students, journal and notifications, nothing else of the center', () => {
+    expect(homeFor(['CENTER_MANAGER'])).toBe('/center/students')
+    for (const p of ['/center/students', '/center/students?archive=1', '/center/journal', '/center/notifications']) expect(canOpen(['CENTER_MANAGER'], p), p).toBe(true)
+    for (const p of ['/center', '/center/courses', '/center/teachers', '/center/settings', '/center/attendance', '/admin', '/teacher']) expect(canOpen(['CENTER_MANAGER'], p), p).toBe(false)
+    expect(managerOpens('/center/studentsX')).toBe(false)
+  })
+  it('the administrator keeps the whole workspace; only a manager with nothing above is narrowed', () => {
+    expect(canOpen(['CENTER_ADMIN', 'CENTER_MANAGER'], '/center/settings')).toBe(true)
+    expect(isCenterManagerOnly(['CENTER_MANAGER'])).toBe(true)
+    expect(isCenterManagerOnly(['CENTER_MANAGER', 'CENTER_ADMIN'])).toBe(false)
+    expect(isCenterManagerOnly(['CENTER_MANAGER', 'PLATFORM_ADMIN'])).toBe(false)
   })
 })

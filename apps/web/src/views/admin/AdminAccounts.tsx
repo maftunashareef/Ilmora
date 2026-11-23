@@ -11,9 +11,9 @@ import { useStore } from '../../store/useStore'
 
 type Account = { id: string; login: string | null; phoneMasked: string | null; displayName: string; roles: string[]; centerId: string | null; isActive: boolean; subscription: { status: string } | null; createdAt: string; lastLoginAt: string | null }
 type Page = { page: number; pageSize: number; total: number; items: Account[] }
-const ROLES = ['', 'STUDENT', 'TEACHER', 'CENTER_ADMIN', 'FINANCE_ADMIN'] as const
+const ROLES = ['', 'STUDENT', 'TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER', 'FINANCE_ADMIN'] as const
 /** Every role the Super Admin may grant; PLATFORM_ADMIN is owner-only (owner-setup on the server). */
-const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'FINANCE_ADMIN', 'PLATFORM_ADMIN'] as const
+const ASSIGNABLE = ['STUDENT', 'TEACHER', 'CENTER_ADMIN', 'CENTER_MANAGER', 'FINANCE_ADMIN', 'PLATFORM_ADMIN'] as const
 type AssignableRole = (typeof ASSIGNABLE)[number]
 
 /** Super Admin: every account on the platform with search, blocking and deletion (live API, not the demo people list). */
@@ -62,7 +62,7 @@ export function AdminAccounts() {
     if (!confirm(t('admin.ministry.resetAppConfirm', { name: a.displayName }))) return
     return act(a.id, () => ministryAccounts.resetApp(a.id), t('admin.ministry.appReset'))
   }
-  const roleLabel = (r: string) => (r === 'STUDENT' ? t('role.student') : r === 'TEACHER' ? t('role.teacher') : r === 'CENTER_ADMIN' ? t('role.center') : r === 'FINANCE_ADMIN' ? t('finance.title') : r === 'PLATFORM_ADMIN' ? t('role.admin') : r)
+  const roleLabel = (r: string) => (r === 'STUDENT' ? t('role.student') : r === 'TEACHER' ? t('role.teacher') : r === 'CENTER_ADMIN' ? t('role.center') : r === 'CENTER_MANAGER' ? t('role.centerManager') : r === 'FINANCE_ADMIN' ? t('finance.title') : r === 'PLATFORM_ADMIN' ? t('role.admin') : r)
 
   return (
     <div>
@@ -141,7 +141,7 @@ function RolesEditor({ account, centers, roleLabel, onClose, onSave }: { account
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const toggle = (r: AssignableRole) => setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]))
-  const needsCenter = roles.includes('CENTER_ADMIN')
+  const needsCenter = roles.includes('CENTER_ADMIN') || roles.includes('CENTER_MANAGER')
   const problem = roles.length === 0 ? t('admin.accounts.noRoles') : needsCenter && !centerId ? t('admin.accounts.centerRequired') : null
   const canSave = !problem && reason.trim().length >= 3 && !saving
   const save = async () => {
