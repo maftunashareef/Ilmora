@@ -32,7 +32,8 @@ export function AdminCourses() {
   // Publish / unpublish from the list; the full editor (visibility, audience) stays in the form.
   const togglePublished = (c: Course) => { void upsertCourse({ ...c, status: c.status === 'published' ? 'draft' : 'published' }).then(() => notify(t('common.saved'))).catch(() => undefined) }
   const setTpl = (patch: Partial<CourseCardTemplate>) => patchSite((s) => ({ ...s, courseCard: { ...s.courseCard, ...patch } }))
-  // ILMORA's commission (ТЗ 18.11, 9.5): one for every center, set here by the Super Admin only.
+  // ILMORA's commission (ТЗ 18.11, 9.5): one for every center, set here by the Super Admin only. Since 23.11 it applies to
+  // courses from before the calculator; a course of the calculator splits the center's percent in equal halves.
   const [pricing, setPricing] = useState<Pricing | undefined>()
   const [commission, setCommission] = useState('')
   useEffect(() => {
@@ -66,7 +67,7 @@ export function AdminCourses() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="w-28"><Input aria-label={t('calc.adminTitle')} type="number" min={COMMISSION_MIN_PERCENT} max={COMMISSION_MAX_PERCENT} step={1} value={commission} disabled={!pricing} onChange={(e) => setCommission(e.target.value)} /></div>
           <Button size="sm" disabled={!pricing || commission === String(pricing.commissionPercent)} onClick={() => void saveCommission()}>{t('common.save')}</Button>
-          {pricing && <span className="text-xs text-charcoal/55">{t('calc.discountRange', { min: pricing.minDiscountPercent, max: pricing.maxDiscountPercent })}</span>}
+          {pricing && <span className="text-xs text-charcoal/55">{t('calc.discountRangeOld', { min: pricing.minDiscountPercent, max: pricing.maxDiscountPercent })}</span>}
         </div>
       </Card>
       <div className="mb-3">

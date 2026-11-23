@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CERTIFICATE_KINDS, checkCoursePrice, courseFormat, discountFromDraft, discountToDraft, emptyDiscountDraft, isOnlineCourse, isSafeExternalUrl, ONLINE_PROVIDER_SLUG, type LearningFormat } from '@ilmora/shared'
+import { CERTIFICATE_KINDS, checkCoursePrice, COMMISSION_DEFAULT_PERCENT, courseFormat, discountFromDraft, discountToDraft, emptyDiscountDraft, isOnlineCourse, isSafeExternalUrl, maxDiscountPercentFor, ONLINE_PROVIDER_SLUG, type LearningFormat } from '@ilmora/shared'
 import { useT } from '../../i18n/useT'
 import { emptyL } from '../../i18n/useT'
 import { uid, useStore } from '../../store/useStore'
@@ -118,7 +118,8 @@ export function CourseForm({ initial, teacherId, mode, teachers: teachersProp, c
     if (!online && !lockPrice && priceRule === 1 && !checkCoursePrice(draft.price).ok) { notify(t('calc.err.price'), 'warn'); return }
     let discount: Course['discount'] = draft.discount ?? null
     if (mode === 'admin' || isCenter) {
-      const parsed = discountFromDraft(disc, new Date(), pricing?.maxDiscountPercent)
+      // A course of the calculator takes S up to 50% (a total of 100%, equal halves); an older one up to 100% − K.
+      const parsed = discountFromDraft(disc, new Date(), maxDiscountPercentFor(priceRule, pricing?.commissionPercent ?? COMMISSION_DEFAULT_PERCENT))
       if (!parsed.ok) { notify(t('discount.invalid'), 'warn'); return }
       discount = parsed.discount
     }

@@ -30,7 +30,8 @@ export type GroupInput = z.infer<typeof GroupInput>
 
 /**
  * A course discount window (instants as UTC ISO strings): the student discount S of ТЗ 18.11, 9.1 — at least 5%; the upper
- * limit 100% − K depends on the commission and is checked by ManageService (`discount_over_limit`).
+ * limit depends on the course and is checked by ManageService (`discount_over_limit`): 50% on a course of the calculator
+ * (equal halves, 23.11), 100% − K on a course from before it.
  */
 export const DiscountInput = z
   // endsAt null: a permanent discount; a date: a time-limited one — the center chooses (22.11).

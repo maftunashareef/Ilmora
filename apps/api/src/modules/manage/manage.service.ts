@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { presignPut, s3ClientConfig } from '../../infra/storage/s3-client'
 import type { z } from 'zod'
-import { checkCoursePrice, COMMISSION_DEFAULT_PERCENT, isDiscountActive, isSafeExternalUrl, maxDiscountPercent, MIN_COURSE_PRICE_SOM, MIN_DISCOUNT_PERCENT, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
+import { checkCoursePrice, COMMISSION_DEFAULT_PERCENT, isDiscountActive, isSafeExternalUrl, maxDiscountPercent, maxDiscountPercentFor, MIN_COURSE_PRICE_SOM, MIN_DISCOUNT_PERCENT, normalizeUzPhone, somToTiyin, validateCapacity, DEFAULT_COURSE_PRICE_SOM } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addDays } from '../../common/time'
 import { ENV, type Env, s3Configured } from '../../config/env'
@@ -82,12 +82,18 @@ export class ManageService {
   // ───── the price calculator (ТЗ 2026-11-18, 9; Шерзод, 20.11: the 5% minimum is for new courses; 22.11: the center chooses a
   // permanent or a time-limited discount, and after a time-limited one the minimum holds) ─────
 
-  /** ILMORA's commission K: one for every center, set by the Super Admin only. */
+  // 23.11 (the owner): on a course of the calculator (priceRule 1) the center enters a total percent, split in equal halves —
+  // the student's discount S and ILMORA's commission S (S from 5% to 50%); K below applies to the courses from before it.
+
+  /** ILMORA's commission K: one for every center, set by the Super Admin only; since 23.11 for courses from before the calculator. */
   async commissionPercent(tenantId: string): Promise<number> {
     const tenant = await this.prisma.client.tenant.findUnique({ where: { id: tenantId }, select: { commissionPercent: true } })
     return tenant?.commissionPercent ?? COMMISSION_DEFAULT_PERCENT
   }
-  /** What the center's course form needs to show the calculator: K and the discount range 5% … 100% − K. */
+  /**
+   * What the center's course form needs to show the calculator: K and the discount range 5% … 100% − K of a course from
+   * before the calculator. A course of the calculator splits in equal halves, S from 5% to 50% (HALF_SPLIT_* in the shared package).
+   */
   async pricing(tenantId: string) {
     const commissionPercent = await this.commissionPercent(tenantId)
     return { commissionPercent, minDiscountPercent: MIN_DISCOUNT_PERCENT, maxDiscountPercent: maxDiscountPercent(commissionPercent), minPriceSom: MIN_COURSE_PRICE_SOM }
@@ -105,10 +111,13 @@ export class ManageService {
     }
     return this.pricing(tenantId)
   }
-  /** A discount set now is from 5% (the request schema) to 100% − K: at the limit the center gets 0, never less. */
-  private async assertDiscountLimit(tenantId: string, d: { percent: number } | null | undefined) {
+  /**
+   * A discount set now is from 5% (the request schema) up to: on a course of the calculator (rule 1) 50% — the total 100%,
+   * split in equal halves (23.11); on a course from before it, 100% − K. At the limit the center gets 0, never less.
+   */
+  private async assertDiscountLimit(tenantId: string, d: { percent: number } | null | undefined, rule: number) {
     if (!d) return
-    const max = maxDiscountPercent(await this.commissionPercent(tenantId))
+    const max = maxDiscountPercentFor(rule === 1 ? 1 : 0, await this.commissionPercent(tenantId))
     if (d.percent > max) throw AppError.invalid('discount_over_limit', `The student discount can be at most ${max}%`, { max })
   }
   /** The price of a course created with the calculator: whole thousands from 50 000 so'm, or 0 for a free course. */
@@ -315,7 +324,7 @@ export class ManageService {
     await this.assertCanPublish(tenantId, actor, centerId, input.status)
     // Every course created from now on follows the calculator (priceRule 1).
     if (!online) this.assertCoursePrice(price)
-    await this.assertDiscountLimit(tenantId, input.discount)
+    await this.assertDiscountLimit(tenantId, input.discount, 1)
     const publishable = this.publishableData(input, actor, !!perms.publishDirectly)
     const discount = this.discountColumns(input.discount ?? null)
     this.assertStudentDiscount({ priceRule: 1, learningFormat: online ? 'ONLINE' : 'OFFLINE', priceMinor: somToTiyin(price), status: (publishable.status as string | undefined) ?? 'DRAFT', discountPercent: discount.discountPercent, discountStartsAt: discount.discountStartsAt, discountEndsAt: discount.discountEndsAt })
@@ -356,7 +365,7 @@ export class ManageService {
     await this.assertCenterWritable(tenantId, actor, course.centerId)
     if (course.learningFormat === 'ONLINE') this.assertOnlineIsFree(undefined, discount)
     if (this.sameDiscount(discount, course)) return toCourse(course)
-    await this.assertDiscountLimit(tenantId, discount)
+    await this.assertDiscountLimit(tenantId, discount, course.priceRule)
     const next = this.discountColumns(discount)
     this.assertStudentDiscount({ ...course, ...next })
     const updated = await this.prisma.client.course.update({ where: { id }, data: { ...this.discountColumns(discount), updatedById: actor.id }, include: { groups: { where: { deletedAt: null } } } })
@@ -430,7 +439,7 @@ export class ManageService {
       // A discount is changed only by the Super Admin or the course's own center admin; resending the stored one is not a change.
       if (input.discount !== undefined && !this.sameDiscount(input.discount, course)) {
         if (!this.canSetDiscount(actor, course.centerId)) throw AppError.forbidden('Only the Super Admin or the course center can change discounts')
-        await this.assertDiscountLimit(tenantId, input.discount)
+        await this.assertDiscountLimit(tenantId, input.discount, course.priceRule)
         Object.assign(data, this.discountColumns(input.discount))
       }
       // Becoming published, or a new price or discount while published: a paid course of the calculator needs its discount.

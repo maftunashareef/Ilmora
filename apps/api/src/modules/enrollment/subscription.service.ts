@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
-import { COMMISSION_DEFAULT_PERCENT, dueReminder, finalPriceMinor, isDiscountActive, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, priceSplitMinor, subscriptionAccess, type PriceRule, type SubscriptionAccess } from '@ilmora/shared'
+import { COMMISSION_DEFAULT_PERCENT, commissionPercentFor, dueReminder, finalPriceMinor, isDiscountActive, MAX_CART_COURSES, nextLifecycleStep, OFFER_VERSION, overlaps, priceSplitMinor, subscriptionAccess, type PriceRule, type SubscriptionAccess } from '@ilmora/shared'
 import { AppError } from '../../common/errors'
 import { addMonthsInZone, localDay, todayLocal } from '../../common/time'
 import { ENV, type Env, paymeConfigured } from '../../config/env'
@@ -20,8 +20,9 @@ type PricedCourse = { priceMinor: bigint; priceRule?: number; discountPercent: n
 
 /**
  * What one course costs in a payment made now (ТЗ 2026-11-18, 9): the student's price by the course's rule, and the snapshot
- * of the calculation — the discount S that applied, ILMORA's commission K, the center's and ILMORA's shares. A later change
- * of K or of the discount does not touch a payment already made (9.2).
+ * of the calculation — the discount S that applied, ILMORA's commission, the center's and ILMORA's shares. A later change
+ * of K or of the discount does not touch a payment already made (9.2). The commission of a course of the calculator is
+ * its S — equal halves (23.11); of a course from before it, the Super Admin's K (`commissionPercent`).
  */
 export function priceLine(course: PricedCourse, commissionPercent: number, now: Date) {
   // The window in force: after a time-limited discount of a calculator course ends, the minimum holds (22.11).
@@ -30,8 +31,8 @@ export function priceLine(course: PricedCourse, commissionPercent: number, now: 
   const amountMinor = finalPriceMinor(course.priceMinor, window, now, rule)
   const discountPercent = isDiscountActive(window, now) ? window!.percent : 0
   // A free course carries no commission.
-  const commission = course.priceMinor === 0n ? 0 : commissionPercent
-  const { centerMinor, platformMinor } = priceSplitMinor({ priceMinor: course.priceMinor, studentMinor: amountMinor, discountPercent, commissionPercent: commission })
+  const commission = course.priceMinor === 0n ? 0 : commissionPercentFor(rule, discountPercent, commissionPercent)
+  const { centerMinor, platformMinor } = priceSplitMinor({ priceMinor: course.priceMinor, studentMinor: amountMinor, discountPercent, commissionPercent: commission, rule })
   return { listPriceMinor: course.priceMinor, amountMinor, discountPercent, commissionPercent: commission, centerShareMinor: centerMinor, platformShareMinor: platformMinor }
 }
 type PackageAccess = { accessKind: 'PERIOD' | 'LESSONS'; periodDays: number | null; lessonCount: number | null } | null
@@ -243,7 +244,7 @@ export class SubscriptionService {
    * confirm, so the payment is recorded as paid without a provider and the subscription starts on the spot.
    * `lines`: what it pays for each course (PaymentLine), adding up to the amount; a course's refund is counted from them.
    */
-  /** ILMORA's commission K now (the Super Admin's setting, one for every center). */
+  /** ILMORA's commission K now (the Super Admin's setting, one for every center; since 23.11 for courses from before the calculator). */
   private async commissionPercent(db: Pick<TransactionClient, 'tenant'>, tenantId: string): Promise<number> {
     const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { commissionPercent: true } })
     return tenant?.commissionPercent ?? COMMISSION_DEFAULT_PERCENT

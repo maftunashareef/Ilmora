@@ -14,6 +14,14 @@ import type { CourseDiscount, Publishable } from './types.js'
  * The term of a discount (22.11): the center chooses «permanent» (no end) or «time-limited» (an end: 10 days, 1–3 months or
  * its own date). A paid course of the calculator never stays without a student discount: when a time-limited one ends,
  * the minimum (5%) holds from that moment on — see discountInForce.
+ *
+ * Equal halves (decision of 2026-11-23, the owner, in Uzbek: whatever percent is entered, half is ILMORA's commission and
+ * half the student's discount, the sums rounded). On a course of the calculator (rule 1) the center enters one total
+ * percent X — an even number from 10 to 100 — and it is split in two: S = X / 2 is the student's discount, and ILMORA's
+ * commission is the same S. Only S is stored (the course's discount percent, as before), so no data changes. In so'm:
+ * the student pays P − S rounded down to 1 000 (as before), ILMORA gets exactly the sum the student saves (P minus the
+ * student's price), the center the rest — never below 0. This replaces the Super Admin's K of ТЗ 9 on rule-1 courses;
+ * K stays for the courses from before the calculator (rule 0). See halfSplitMinor.
  */
 export const COMMISSION_DEFAULT_PERCENT = 10
 /** The range the Super Admin may set K in: at least 2% keeps ILMORA's share above the rounding loss (≤ 990 so'm) at P ≥ 50 000. */
@@ -23,8 +31,19 @@ export const COMMISSION_MAX_PERCENT = 50
 export const MIN_DISCOUNT_PERCENT = 5
 /** The largest discount any course can carry: 100% minus the smallest commission. The real limit is maxDiscountPercent(K). */
 export const MAX_DISCOUNT_PERCENT = 100 - COMMISSION_MIN_PERCENT
-/** S may go up to 100% − K: at that point the center gets 0 and the student pays K. */
+/** On a course from before the calculator (rule 0) S may go up to 100% − K: at that point the center gets 0 and the student pays K. */
 export const maxDiscountPercent = (commissionPercent: number): number => 100 - commissionPercent
+/** Equal halves (rule 1, 23.11): the total X the center enters — even, from 10% (the student's 5% minimum, twice) to 100%. */
+export const HALF_SPLIT_MIN_TOTAL_PERCENT = 2 * MIN_DISCOUNT_PERCENT
+export const HALF_SPLIT_MAX_TOTAL_PERCENT = 100
+/** …so the student's half S of a rule-1 course is at most 50% (and ILMORA's the same 50%: the center gets 0). */
+export const HALF_SPLIT_MAX_DISCOUNT_PERCENT = HALF_SPLIT_MAX_TOTAL_PERCENT / 2
+/** The largest student discount a course may be given now: rule 1 — 50% (a total of 100%); rule 0 — 100% − K. */
+export const maxDiscountPercentFor = (rule: PriceRule, commissionPercent: number): number =>
+  rule === 1 ? HALF_SPLIT_MAX_DISCOUNT_PERCENT : maxDiscountPercent(commissionPercent)
+/** ILMORA's commission on a paid course, in %: rule 1 — the student's discount S (equal halves, 23.11); rule 0 — the Super Admin's K. */
+export const commissionPercentFor = (rule: PriceRule, discountPercent: number, commissionPercent: number): number =>
+  rule === 1 ? discountPercent : commissionPercent
 /** Courses created from the calculator on (priceRule 1): the price is whole thousands from 50 000 so'm, or 0 for a free course. */
 export const MIN_COURSE_PRICE_SOM = 50_000
 export const COURSE_PRICE_STEP_SOM = 1_000
@@ -118,11 +137,26 @@ export function finalPriceMinor(priceMinor: bigint, discount: DiscountWindow | n
 }
 
 /**
- * Who gets what of one course's payment (ТЗ 9.1–9.2), in tiyin: the student's price, the center's share
- * P × (100 − K − S) / 100 in whole so'm (never below 0 nor above the price paid), and ILMORA's — the rest, which carries
- * the rounding loss. A free course has no commission: everything is 0.
+ * Equal halves of a rule-1 course (23.11), in tiyin: ILMORA gets exactly what the student saves (the list price less the
+ * student's price, so whole thousands of so'm for a price of whole thousands), the center the rest of what the student
+ * paid — never below 0. 500 000 at a total of 20% → the student 450 000, ILMORA 50 000, the center 400 000. A free course,
+ * or a payment of nothing, has no commission: everything is 0.
  */
-export function priceSplitMinor(input: { priceMinor: bigint; studentMinor: bigint; discountPercent: number; commissionPercent: number }): { centerMinor: bigint; platformMinor: bigint } {
+export function halfSplitMinor(priceMinor: bigint, studentMinor: bigint): { centerMinor: bigint; platformMinor: bigint } {
+  if (studentMinor <= 0n) return { centerMinor: 0n, platformMinor: 0n }
+  const saved = priceMinor > studentMinor ? priceMinor - studentMinor : 0n
+  const centerMinor = studentMinor > saved ? studentMinor - saved : 0n
+  return { centerMinor, platformMinor: studentMinor - centerMinor }
+}
+
+/**
+ * Who gets what of one course's payment, in tiyin. A course of the calculator (`rule` 1): equal halves — halfSplitMinor
+ * (23.11). A course from before it (rule 0, the default): ТЗ 9.1–9.2 — the center's share P × (100 − K − S) / 100 in whole
+ * so'm (never below 0 nor above the price paid), and ILMORA's the rest, which carries the rounding loss. A free course has
+ * no commission: everything is 0.
+ */
+export function priceSplitMinor(input: { priceMinor: bigint; studentMinor: bigint; discountPercent: number; commissionPercent: number; rule?: PriceRule }): { centerMinor: bigint; platformMinor: bigint } {
+  if (input.rule === 1) return halfSplitMinor(input.priceMinor, input.studentMinor)
   if (input.studentMinor <= 0n) return { centerMinor: 0n, platformMinor: 0n }
   const share = BigInt(Math.max(0, 100 - input.commissionPercent - input.discountPercent))
   let centerMinor = ((input.priceMinor * share) / 100n / 100n) * 100n
@@ -130,11 +164,15 @@ export function priceSplitMinor(input: { priceMinor: bigint; studentMinor: bigin
   return { centerMinor, platformMinor: input.studentMinor - centerMinor }
 }
 
-/** The calculator in the course form (ТЗ 9.3), in so'm: the student's price, what the center gets, what ILMORA gets. */
-export function calculatorSom(priceSom: number, discountPercent: number, commissionPercent: number): { student: number; center: number; platform: number } {
+/**
+ * The calculator in the course form (ТЗ 9.3), in so'm: the student's price, what the center gets, what ILMORA gets — by
+ * the course's rule: 1 (a course of the calculator, the default) splits in equal halves and ignores `commissionPercent`;
+ * 0 (a course from before) uses K and its old rounding.
+ */
+export function calculatorSom(priceSom: number, discountPercent: number, commissionPercent: number, rule: PriceRule = 1): { student: number; center: number; platform: number } {
   if (!priceSom) return { student: 0, center: 0, platform: 0 }
-  const student = studentPriceSom(priceSom, discountPercent, 1)
-  const { centerMinor, platformMinor } = priceSplitMinor({ priceMinor: BigInt(priceSom) * 100n, studentMinor: BigInt(student) * 100n, discountPercent, commissionPercent })
+  const student = studentPriceSom(priceSom, discountPercent, rule)
+  const { centerMinor, platformMinor } = priceSplitMinor({ priceMinor: BigInt(priceSom) * 100n, studentMinor: BigInt(student) * 100n, discountPercent, commissionPercent, rule })
   return { student, center: Number(centerMinor / 100n), platform: Number(platformMinor / 100n) }
 }
 
