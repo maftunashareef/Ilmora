@@ -139,6 +139,7 @@ export class SiteService {
    */
   async permissionsFor(tenantId: string, roles: readonly string[]): Promise<OwnPermissions> {
     const { permissions } = await this.get(tenantId)
+    // API contract: the Super Admin gets both branches (the same matrix GET /admin/site answers them in full).
     const admin = roles.includes('PLATFORM_ADMIN')
     const out: OwnPermissions = {}
     if (admin || roles.includes('TEACHER')) out.teacher = { ...(permissions?.teacher ?? {}) }

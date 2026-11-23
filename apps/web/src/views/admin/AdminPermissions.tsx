@@ -11,6 +11,8 @@ export function AdminPermissions() {
   const { t } = useT()
   const perms = useStore((s) => s.site.permissions)
   const patchSite = useStore((s) => s.patchSite)
+  const presetsLoaded = useStore((s) => s.presetsLoaded)
+  const siteLoadFailed = useStore((s) => s.siteLoadFailed)
   const setT = (k: keyof Permissions['teacher'], v: boolean) => patchSite((s) => ({ ...s, permissions: { ...s.permissions, teacher: { ...s.permissions.teacher, [k]: v } } }))
   const setS = (k: keyof Permissions['student'], v: boolean) => patchSite((s) => ({ ...s, permissions: { ...s.permissions, student: { ...s.permissions.student, [k]: v } } }))
   const matrix: { area: string; admin: boolean; teacher: boolean | 'own'; student: boolean | 'own' }[] = [
@@ -23,6 +25,17 @@ export function AdminPermissions() {
     { area: t('student.subscription') + ' / ' + t('student.profile'), admin: true, teacher: false, student: 'own' },
     { area: t('admin.permissions'), admin: true, teacher: false, student: false },
   ]
+  // The matrix is not in the public settings (Ж17): until GET /admin/site answers, the toggles would all read «off».
+  if (!presetsLoaded) {
+    return (
+      <div>
+        <PageTitle eyebrow={t('dash.admin')} title={t('admin.permissions')} subtitle={t('admin.perm.hint')} />
+        {siteLoadFailed
+          ? <Notice tone="warn">{t('admin.siteNotLoaded')}</Notice>
+          : <div className="flex items-center text-sm text-charcoal/55" role="status" aria-live="polite"><Icon name="refresh" className="mr-2 h-4 w-4 animate-spin" />{t('perm.adminLoading')}</div>}
+      </div>
+    )
+  }
   const cell = (v: boolean | 'own') => v === true ? <Icon name="check" className="mx-auto h-4 w-4 text-forest" /> : v === 'own' ? <span className="text-[11px] text-champagne">{t('access.ownerBadge')}</span> : <span className="text-charcoal/25">—</span>
   return (
     <div>

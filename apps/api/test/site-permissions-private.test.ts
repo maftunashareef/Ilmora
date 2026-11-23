@@ -48,6 +48,12 @@ describe('Ж17: GET /me/permissions — only the caller\'s own role', () => {
     expect(await ctl.permissions('t1', actor('STUDENT'))).toEqual({ student: PERMISSIONS.student })
   })
 
+  it('an account with two roles gets the branch of each role it has, and only those', async () => {
+    expect(await ctl.permissions('t1', actor('TEACHER', 'STUDENT'))).toEqual(PERMISSIONS)
+    expect(await ctl.permissions('t1', actor('CENTER_ADMIN', 'STUDENT'))).toEqual({ student: PERMISSIONS.student })
+    expect(await ctl.permissions('t1', actor('COMPANY_ADMIN', 'TEACHER'))).toEqual({ teacher: PERMISSIONS.teacher })
+  })
+
   it('a center, a company, an institution and the ministry get none', async () => {
     for (const role of ['CENTER_ADMIN', 'CENTER_MANAGER', 'COMPANY_ADMIN', 'INSTITUTION_ADMIN', 'MINISTRY']) expect(await ctl.permissions('t1', actor(role)), role).toEqual({})
   })
