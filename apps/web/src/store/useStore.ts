@@ -10,7 +10,7 @@ import { fetchStorageStatus, storableUrl } from '../services/uploads'
 import { DEMO_LOGIN_ENABLED } from '../lib/demoMode'
 import { enrolledCount, publishSeatCounts } from '../lib/enrollment'
 import type {
-  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student,
+  AttendanceRecord, Category, Center, Course, DemoState, Lang, LessonSession, Package, Permissions, Playlist, Preset, Publishable, Resource, Role, Section, SectionType, SiteConfig, Student,
   StudentProfile, Subject, Teacher, Video,
 } from '../types'
 
@@ -90,7 +90,8 @@ export interface CenterCheckInOutcome {
 
 export interface InitialData {
   lang: Lang
-  site: SiteConfig & { version?: number }
+  /** The public read (`GET /public/site`): no role-permission matrix in it (Ж17), the store starts with NO_PERMISSIONS. */
+  site: Omit<SiteConfig, 'permissions'> & { permissions?: Permissions; version?: number }
   catalog: { centers: Center[]; categories: Category[]; teachers: Teacher[]; subjects: Subject[]; courses: Course[] }
 }
 
@@ -285,6 +286,19 @@ const emptyStudent = (u: AuthUser): Student => ({
 // ───────── payload mappers (web shape → API input) ─────────
 // The course, group and publish bodies come from @ilmora/shared (save-bodies.ts): the API checks the very same ones (Н1).
 const publishableInput = publishableSaveBody
+/**
+ * Ж17: the role-permission matrix is not public. A visitor (and every account until its own switches arrive from
+ * `GET /me/permissions`) has every switch off; the screens that read `site.permissions` need no other change.
+ */
+export const NO_PERMISSIONS: Permissions = {
+  teacher: { editCourses: false, editPrices: false, editSchedules: false, publishDirectly: false, customizeChannel: false, manageGroups: false, uploadResources: false },
+  student: { saveItems: false, switchGroups: false, downloadResources: false },
+}
+/** The account's own branches over the all-off defaults: a branch the API did not send (another role) stays off. */
+export const ownPermissions = (own: Partial<Permissions> | null | undefined): Permissions => ({
+  teacher: { ...NO_PERMISSIONS.teacher, ...own?.teacher },
+  student: { ...NO_PERMISSIONS.student, ...own?.student },
+})
 /** What a visitor may see of the packages: published ones, and the universities marked published or with one. */
 const publicSite = (site: SiteConfig): SiteConfig => {
   const presets = (site.presets ?? []).filter((p) => p.enabled)
@@ -332,7 +346,10 @@ type ApiOverview = {
 }
 
 export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
-  const { version: siteVersion = 1, ...site } = initial.site
+  const { version: siteVersion = 1, permissions: _publicPermissions, ...publicSiteData } = initial.site
+  void _publicPermissions
+  // Whatever the server render passed in, the visitor starts with every switch off (Ж17); applyAuth loads the account's own.
+  const site: SiteConfig = { ...publicSiteData, permissions: NO_PERMISSIONS }
   const catalogGroups = initial.catalog.courses.flatMap((c) => c.groups)
   publishSeatCounts(catalogGroups)
   const readDraft = (): Student['builder'] | null => {
@@ -477,8 +494,27 @@ export function createIlmoraStore(initial: InitialData): StoreApi<StoreState> {
         // Disabled presets are internal: drop them from memory on every sign-in/out; admins reload the full list.
         presetsLoaded: false,
         siteLoadFailed: false,
-        site: s.site.presets ? publicSite(s.site) : s.site,
+        // Ж17: the switches of the previous account (or the Super Admin's whole matrix) never outlive a sign-in/out.
+        site: { ...(s.site.presets ? publicSite(s.site) : s.site), permissions: NO_PERMISSIONS },
       }))
+      // The Super Admin gets the whole matrix with the full settings (loadAdminPresets); everyone else reads their own.
+      if (user && role !== 'admin') void loadOwnPermissions(user)
+    }
+    /** The signed-in account's own switches (`GET /me/permissions`); on failure they stay off. */
+    const loadOwnPermissions = async (user: AuthUser) => {
+      let own: Partial<Permissions> | null = null
+      try {
+        own = await api<Partial<Permissions>>('/me/permissions')
+      } catch {
+        // Offline demo accounts (no backend) use the sample switches of their own role.
+        if (DEMO_LOGIN_ENABLED && session.token?.startsWith('demo-token-')) {
+          const sample = (sampleData.site as unknown as SiteConfig).permissions
+          own = { ...(user.roles.includes('TEACHER') ? { teacher: sample.teacher } : {}), ...(user.roles.includes('STUDENT') ? { student: sample.student } : {}) }
+        }
+      }
+      // Only for the account still signed in: an answer that arrives after a sign-out or a switch of account is dropped.
+      if (!own || get().auth.user?.id !== user.id) return
+      set((s) => ({ site: { ...s.site, permissions: ownPermissions(own) } }))
     }
     // The API's 403 password_change_required: the account still has the temporary password. Mark it, so the sign-in
     // card, the workspace gate and PasswordChangeRedirect show the change screen (the same as for the flag).

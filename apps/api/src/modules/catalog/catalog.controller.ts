@@ -31,9 +31,10 @@ export class InquiryDto {
 export class CatalogController {
   constructor(private readonly catalog: CatalogService, private readonly site: SiteService, private readonly prisma: PrismaService) {}
 
+  /** The site template for everyone; the role-permission matrix is not part of it (Ж17, see MyPermissionsController). */
   @Get('site')
   site_(@CurrentTenantId() tenantId: string) {
-    return this.site.get(tenantId)
+    return this.site.getPublic(tenantId)
   }
 
   @Get('catalog')

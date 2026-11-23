@@ -91,14 +91,20 @@ export const SiteConfigSchema = z.object({
   dashboards: z.object({ student: z.array(z.object({ id: z.string(), enabled: z.boolean() })), teacher: z.array(z.object({ id: z.string(), enabled: z.boolean() })) }),
 })
 export type SiteConfigData = z.infer<typeof SiteConfigSchema>
+/** The public read: the site template without the role-permission matrix (Ж17). */
+export type PublicSiteConfigData = Omit<SiteConfigData, 'permissions'> & { version: number; packages: PackageDto[] }
+/** The caller's own branches of the role-permission matrix (`GET /me/permissions`). */
+export type OwnPermissions = Partial<SiteConfigData['permissions']>
 
 @Injectable()
 export class SiteService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
   /**
-   * The public site configuration. Presets that are not enabled are internal (their names, such as university
-   * names, may not be approved for public use yet), so only the Super Admin read (`includeDisabledPresets`) sees them.
+   * The site configuration for the server's own use and the Super Admin read: the whole role-permission matrix
+   * included (the teacher switches gate saves and uploads). Never answer it to an anonymous visitor: `GET /public/site`
+   * goes through getPublic. Presets that are not enabled are internal (their names, such as university names, may not
+   * be approved for public use yet), so only the Super Admin read (`includeDisabledPresets`) sees them.
    */
   async get(tenantId: string, includeDisabledPresets = false): Promise<SiteConfigData & { version: number; packages: PackageDto[] }> {
     const [row, packages] = await Promise.all([
@@ -114,6 +120,30 @@ export class SiteService {
     // (includeDisabledPresets) returns them — the same rule already applied to presets and universities above (Ж17).
     const visiblePackages = includeDisabledPresets ? packages : packages.filter((p) => p.enabled)
     return { ...data, presets, universities, version: row.version, packages: visiblePackages.map(toPackageDto) }
+  }
+
+  /**
+   * What `GET /public/site` answers: get() without the role-permission matrix (Ж17). How the workspace is locked down
+   * for teachers and students is internal; a signed-in account reads its own branch from permissionsFor.
+   */
+  async getPublic(tenantId: string): Promise<PublicSiteConfigData> {
+    const { permissions: _permissions, ...site } = await this.get(tenantId)
+    void _permissions
+    return site
+  }
+
+  /**
+   * The switches of the caller's own role only: a teacher gets the teacher branch, a student the student branch, an
+   * account with both roles both; every other account (center, company, institution, ministry) gets none. The Super
+   * Admin, who edits the whole matrix, gets both.
+   */
+  async permissionsFor(tenantId: string, roles: readonly string[]): Promise<OwnPermissions> {
+    const { permissions } = await this.get(tenantId)
+    const admin = roles.includes('PLATFORM_ADMIN')
+    const out: OwnPermissions = {}
+    if (admin || roles.includes('TEACHER')) out.teacher = { ...(permissions?.teacher ?? {}) }
+    if (admin || roles.includes('STUDENT')) out.student = { ...(permissions?.student ?? {}) }
+    return out
   }
 
   async update(tenantId: string, input: unknown, expectedVersion?: number): Promise<{ version: number }> {
